@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SEOHead } from "@/components/SEOHead";
 import { useNavigate } from "react-router-dom";
 import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
@@ -65,6 +66,7 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
+      <SEOHead title="Dashboard — Menerio" noIndex />
       {/* Welcome */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>

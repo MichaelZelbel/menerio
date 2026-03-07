@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
+import { SEOHead } from "@/components/SEOHead";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ export default function Docs() {
 
   return (
     <div className="container py-8 lg:py-12">
+      <SEOHead title="Documentation — Menerio" description="Learn how to use Menerio with guides, API reference, and tutorials." />
       {/* Search bar */}
       <div className="mb-6 flex items-center gap-3">
         <Button
