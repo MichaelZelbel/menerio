@@ -14,6 +14,108 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_allowance_periods: {
+        Row: {
+          created_at: string
+          id: string
+          metadata: Json | null
+          period_end: string
+          period_start: string
+          source: string
+          tokens_granted: number
+          tokens_used: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          period_end?: string
+          period_start?: string
+          source?: string
+          tokens_granted?: number
+          tokens_used?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          period_end?: string
+          period_start?: string
+          source?: string
+          tokens_granted?: number
+          tokens_used?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ai_credit_settings: {
+        Row: {
+          description: string | null
+          key: string
+          value_int: number
+        }
+        Insert: {
+          description?: string | null
+          key: string
+          value_int: number
+        }
+        Update: {
+          description?: string | null
+          key?: string
+          value_int?: number
+        }
+        Relationships: []
+      }
+      llm_usage_events: {
+        Row: {
+          completion_tokens: number
+          created_at: string
+          credits_charged: number
+          feature: string
+          id: string
+          idempotency_key: string | null
+          metadata: Json | null
+          model: string | null
+          prompt_tokens: number
+          provider: string | null
+          total_tokens: number
+          user_id: string
+        }
+        Insert: {
+          completion_tokens?: number
+          created_at?: string
+          credits_charged?: number
+          feature: string
+          id?: string
+          idempotency_key?: string | null
+          metadata?: Json | null
+          model?: string | null
+          prompt_tokens?: number
+          provider?: string | null
+          total_tokens?: number
+          user_id: string
+        }
+        Update: {
+          completion_tokens?: number
+          created_at?: string
+          credits_charged?: number
+          feature?: string
+          id?: string
+          idempotency_key?: string | null
+          metadata?: Json | null
+          model?: string | null
+          prompt_tokens?: number
+          provider?: string | null
+          total_tokens?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -67,7 +169,23 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_ai_allowance_current: {
+        Row: {
+          credits_granted: number | null
+          credits_used: number | null
+          id: string | null
+          metadata: Json | null
+          period_end: string | null
+          period_start: string | null
+          remaining_credits: number | null
+          remaining_tokens: number | null
+          source: string | null
+          tokens_granted: number | null
+          tokens_used: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_user_role: {
