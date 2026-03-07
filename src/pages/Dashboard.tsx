@@ -160,19 +160,10 @@ const Dashboard = () => {
                 </Button>
               </CardContent>
             </Card>
-          ) : (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-base">Recent Activity</CardTitle>
-                <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                  View All <ArrowRight className="h-3 w-3" />
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">No recent activity to display.</p>
-              </CardContent>
-            </Card>
-          )}
+          ) : null}
+
+          {/* Activity Feed */}
+          <ActivityFeed limit={5} showViewAll />
 
           {/* Quick Actions */}
           <Card>
