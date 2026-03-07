@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard } from "lucide-react";
+import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard, Shield, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -24,8 +26,9 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const navigate = useNavigate();
-  const { session, profile, signOut } = useAuth();
+  const { session, profile, role, signOut } = useAuth();
   const isLoggedIn = !!session;
+  const isPremiumOrAdmin = role === "premium" || role === "premium_gift" || role === "admin";
   const userName = profile?.display_name || session?.user?.email || "User";
 
   useEffect(() => {
@@ -90,7 +93,17 @@ export function Header() {
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="flex items-center gap-2 font-normal">
+                  <span className="text-sm font-medium truncate">{userName}</span>
+                  {isPremiumOrAdmin && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 shrink-0">
+                      {role === "admin" ? <Shield className="h-2.5 w-2.5" /> : <Crown className="h-2.5 w-2.5" />}
+                      {role === "admin" ? "Admin" : "Premium"}
+                    </Badge>
+                  )}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                   <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
                 </DropdownMenuItem>

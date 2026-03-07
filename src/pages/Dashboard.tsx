@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, type AppRole } from "@/contexts/AuthContext";
+import { useAICredits } from "@/hooks/useAICredits";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
 import {
   Package,
   Sparkles,
@@ -31,6 +31,7 @@ const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "succes
 
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
+  const { credits, isLoading: creditsLoading } = useAICredits();
   const navigate = useNavigate();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "there";
@@ -99,9 +100,11 @@ const Dashboard = () => {
             <Sparkles className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold font-display">{isPremium ? "∞" : "50"}</p>
+            <p className="text-3xl font-bold font-display">
+              {creditsLoading ? "…" : credits ? credits.remainingCredits : "—"}
+            </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {isPremium ? "Unlimited on your plan" : "50 free credits / month"}
+              {credits ? `of ${credits.creditsGranted} this period` : "No allowance yet"}
             </p>
           </CardContent>
         </Card>
@@ -130,7 +133,7 @@ const Dashboard = () => {
             </Badge>
             {role === "free" && (
               <p className="text-xs text-muted-foreground mt-2">
-                <button onClick={() => navigate("/dashboard/settings")} className="text-primary hover:underline">Upgrade</button> for more features
+                Contact an administrator for premium access.
               </p>
             )}
           </CardContent>
@@ -240,20 +243,17 @@ const Dashboard = () => {
             </Card>
           )}
 
-          {/* Upgrade card for free users */}
+          {/* Info card for free users */}
           {role === "free" && (
-            <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+            <Card className="bg-muted/30 border-border">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <Crown className="h-5 w-5 text-primary" />
-                  <h4 className="font-semibold font-display text-sm">Upgrade to Premium</h4>
+                  <Shield className="h-5 w-5 text-muted-foreground" />
+                  <h4 className="font-semibold font-display text-sm">Free Plan</h4>
                 </div>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Unlock unlimited AI credits, team collaboration, and advanced analytics.
+                <p className="text-xs text-muted-foreground">
+                  Some features require a premium role. Contact an administrator to request access.
                 </p>
-                <Button size="sm" className="w-full gap-1.5">
-                  <Crown className="h-3.5 w-3.5" /> Upgrade Now
-                </Button>
               </CardContent>
             </Card>
           )}
