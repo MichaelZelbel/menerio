@@ -47,7 +47,7 @@ const App = () => (
               }
             >
               <Route index element={<Dashboard />} />
-              <Route path="settings" element={<DashboardSettings />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />
