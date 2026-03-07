@@ -100,9 +100,11 @@ const Dashboard = () => {
             <Sparkles className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold font-display">{isPremium ? "∞" : "50"}</p>
+            <p className="text-3xl font-bold font-display">
+              {creditsLoading ? "…" : credits ? credits.remainingCredits : "—"}
+            </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {isPremium ? "Unlimited on your plan" : "50 free credits / month"}
+              {credits ? `of ${credits.creditsGranted} this period` : "No allowance yet"}
             </p>
           </CardContent>
         </Card>
