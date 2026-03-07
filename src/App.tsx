@@ -20,6 +20,7 @@ import Terms from "./pages/Terms";
 import Cookies from "./pages/Cookies";
 import Impressum from "./pages/Impressum";
 import NotFound from "./pages/NotFound";
+import Wizard from "./pages/Wizard";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,14 @@ const App = () => (
 
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route
+              path="/wizard"
+              element={
+                <ProtectedRoute>
+                  <Wizard />
+                </ProtectedRoute>
+              }
+            />
 
             <Route
               path="/dashboard"
