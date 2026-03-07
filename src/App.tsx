@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { AdminRoute } from "@/components/auth/AdminRoute";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
@@ -22,6 +23,7 @@ import Cookies from "./pages/Cookies";
 import Impressum from "./pages/Impressum";
 import NotFound from "./pages/NotFound";
 import Wizard from "./pages/Wizard";
+import Admin from "./pages/Admin";
 
 const queryClient = new QueryClient();
 
@@ -65,6 +67,7 @@ const App = () => (
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<Settings />} />
               <Route path="library" element={<Library />} />
+              <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
             </Route>
 
             <Route path="*" element={<NotFound />} />
