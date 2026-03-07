@@ -12,6 +12,7 @@ import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
+import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import {
   Sidebar,
   SidebarContent,
@@ -126,7 +127,11 @@ export function DashboardSidebar() {
 
       <SidebarFooter>
         {!collapsed && (
-          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
+          <>
+            <SidebarSeparator />
+            <CreditsDisplay compact />
+            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
+          </>
         )}
       </SidebarFooter>
     </Sidebar>

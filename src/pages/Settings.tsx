@@ -23,7 +23,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles } from "lucide-react";
+import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -202,10 +203,11 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="profile" className="gap-1.5 text-xs"><User className="h-3.5 w-3.5 hidden sm:block" /> Profile</TabsTrigger>
           <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Avatar</TabsTrigger>
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
+          <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
         </TabsList>
@@ -333,6 +335,11 @@ export default function Settings() {
               </form>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── AI Credits Tab ── */}
+        <TabsContent value="credits">
+          <CreditsDisplay />
         </TabsContent>
 
         {/* ── Subscription Tab ── */}
