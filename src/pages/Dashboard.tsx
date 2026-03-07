@@ -133,7 +133,7 @@ const Dashboard = () => {
             </Badge>
             {role === "free" && (
               <p className="text-xs text-muted-foreground mt-2">
-                <button onClick={() => navigate("/dashboard/settings")} className="text-primary hover:underline">Upgrade</button> for more features
+                Contact an administrator for premium access.
               </p>
             )}
           </CardContent>
