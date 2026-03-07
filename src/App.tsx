@@ -24,6 +24,7 @@ import Impressum from "./pages/Impressum";
 import NotFound from "./pages/NotFound";
 import Wizard from "./pages/Wizard";
 import Admin from "./pages/Admin";
+import ActivityPage from "./pages/ActivityPage";
 
 const queryClient = new QueryClient();
 
