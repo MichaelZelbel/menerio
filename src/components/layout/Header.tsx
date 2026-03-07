@@ -140,6 +140,10 @@ export function Header() {
               </NavLink>
             ))}
             <div className="mt-3 flex flex-col gap-2 border-t pt-4">
+              <div className="flex items-center justify-between px-3 py-1">
+                <span className="text-sm text-muted-foreground">Theme</span>
+                <ThemeToggle />
+              </div>
               {isLoggedIn ? (
                 <>
                   <Button variant="ghost" className="justify-start" onClick={() => { navigate("/dashboard"); setMobileOpen(false); }}>
