@@ -2,21 +2,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { useNavigate } from "react-router-dom";
 
 const Index = () => {
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container flex h-16 items-center justify-between">
-          <h1 className="text-2xl font-bold font-display text-primary">Menerio</h1>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm">Sign In</Button>
-            <Button size="sm">Get Started</Button>
-          </div>
-        </div>
-      </header>
+  const navigate = useNavigate();
 
+  return (
+    <div className="bg-background">
       {/* Hero */}
       <section className="container py-24 text-center">
         <Badge variant="info" className="mb-4">Now in Beta</Badge>
@@ -28,8 +20,8 @@ const Index = () => {
           Menerio is your modern platform for managing projects, teams, and workflows — all in one place.
         </p>
         <div className="mt-10 flex items-center justify-center gap-4">
-          <Button size="xl">Start Free Trial</Button>
-          <Button variant="outline" size="lg">Learn More</Button>
+          <Button size="xl" onClick={() => navigate("/get-started")}>Start Free Trial</Button>
+          <Button variant="outline" size="lg" onClick={() => navigate("/features")}>Learn More</Button>
         </div>
       </section>
 
@@ -74,29 +66,6 @@ const Index = () => {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </section>
-
-      {/* Buttons showcase */}
-      <section className="container pb-24">
-        <h3 className="mb-6 font-display">Component Variants</h3>
-        <div className="flex flex-wrap gap-3">
-          <Button>Primary</Button>
-          <Button variant="secondary">Secondary</Button>
-          <Button variant="outline">Outline</Button>
-          <Button variant="ghost">Ghost</Button>
-          <Button variant="destructive">Destructive</Button>
-          <Button variant="success">Success</Button>
-          <Button variant="link">Link</Button>
-        </div>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Badge>Default</Badge>
-          <Badge variant="secondary">Secondary</Badge>
-          <Badge variant="success">Success</Badge>
-          <Badge variant="warning">Warning</Badge>
-          <Badge variant="error">Error</Badge>
-          <Badge variant="info">Info</Badge>
-          <Badge variant="outline">Outline</Badge>
         </div>
       </section>
     </div>
