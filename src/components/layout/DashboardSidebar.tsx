@@ -116,6 +116,21 @@ export function DashboardSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {role === "admin" && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/dashboard/admin")} tooltip="Admin">
+                    <NavLink to="/dashboard/admin">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Admin</span>
+                      {!collapsed && (
+                        <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0 border-warning/30 text-warning">
+                          Admin
+                        </Badge>
+                      )}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
