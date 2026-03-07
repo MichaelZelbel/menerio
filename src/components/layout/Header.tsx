@@ -26,8 +26,9 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const navigate = useNavigate();
-  const { session, profile, signOut } = useAuth();
+  const { session, profile, role, signOut } = useAuth();
   const isLoggedIn = !!session;
+  const isPremiumOrAdmin = role === "premium" || role === "premium_gift" || role === "admin";
   const userName = profile?.display_name || session?.user?.email || "User";
 
   useEffect(() => {
