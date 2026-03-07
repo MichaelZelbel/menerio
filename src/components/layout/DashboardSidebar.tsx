@@ -1,13 +1,17 @@
 import {
   LayoutDashboard,
-  FolderKanban,
-  BarChart3,
-  Settings,
+  FolderOpen,
+  Search,
+  Bookmark,
   Users,
+  Settings,
   Bell,
+  Crown,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -23,26 +27,33 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const mainItems = [
-  { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Projects", url: "/dashboard/projects", icon: FolderKanban },
-  { title: "Analytics", url: "/dashboard/analytics", icon: BarChart3 },
-  { title: "Team", url: "/dashboard/team", icon: Users },
-];
-
-const secondaryItems = [
-  { title: "Notifications", url: "/dashboard/notifications", icon: Bell },
-  { title: "Settings", url: "/dashboard/settings", icon: Settings },
-];
-
 export function DashboardSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const { role } = useAuth();
+  const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
+
   const isActive = (path: string) =>
     path === "/dashboard"
       ? location.pathname === "/dashboard"
       : location.pathname.startsWith(path);
+
+  const mainItems = [
+    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+    { title: "Library", url: "/dashboard/library", icon: FolderOpen },
+    { title: "Discover", url: "/dashboard/discover", icon: Search },
+    { title: "Collections", url: "/dashboard/collections", icon: Bookmark },
+  ];
+
+  const premiumItems = [
+    { title: "Team", url: "/dashboard/team", icon: Users },
+  ];
+
+  const systemItems = [
+    { title: "Notifications", url: "/dashboard/notifications", icon: Bell },
+    { title: "Settings", url: "/dashboard/settings", icon: Settings },
+  ];
 
   return (
     <Sidebar collapsible="icon">
@@ -52,9 +63,7 @@ export function DashboardSidebar() {
             <span className="text-xs font-bold text-primary-foreground">M</span>
           </div>
           {!collapsed && (
-            <span className="text-sm font-semibold font-display text-foreground">
-              Menerio
-            </span>
+            <span className="text-sm font-semibold font-display text-foreground">Menerio</span>
           )}
         </div>
       </SidebarHeader>
@@ -74,6 +83,22 @@ export function DashboardSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {isPremium &&
+                premiumItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <NavLink to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                        {!collapsed && (
+                          <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
+                            <Crown className="h-2.5 w-2.5 mr-0.5" /> Pro
+                          </Badge>
+                        )}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -84,7 +109,7 @@ export function DashboardSidebar() {
           <SidebarGroupLabel>System</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {secondaryItems.map((item) => (
+              {systemItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <NavLink to={item.url}>
