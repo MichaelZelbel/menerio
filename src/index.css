@@ -126,11 +126,20 @@
 
   html {
     transition: color 0.2s ease, background-color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    overflow-x: hidden;
+  }
+
+  /* Touch-friendly: ensure buttons have adequate tap targets on touch devices */
+  @media (pointer: coarse) {
+    .touch-target {
+      min-height: 44px;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {
