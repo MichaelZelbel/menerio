@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminRoute } from "@/components/auth/AdminRoute";
 import { PageLayout } from "@/components/layout/PageLayout";
@@ -37,6 +38,7 @@ const App = () => (
         <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <ErrorBoundary>
           <Routes>
             <Route element={<PageLayout />}>
               <Route path="/" element={<Index />} />
@@ -77,6 +79,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
           <CookieConsentBanner />
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
       </TooltipProvider>
