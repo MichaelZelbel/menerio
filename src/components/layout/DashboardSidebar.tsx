@@ -127,7 +127,11 @@ export function DashboardSidebar() {
 
       <SidebarFooter>
         {!collapsed && (
-          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
+          <>
+            <SidebarSeparator />
+            <CreditsDisplay compact />
+            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
+          </>
         )}
       </SidebarFooter>
     </Sidebar>

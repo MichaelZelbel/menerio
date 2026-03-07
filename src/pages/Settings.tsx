@@ -337,6 +337,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        {/* ── AI Credits Tab ── */}
+        <TabsContent value="credits">
+          <CreditsDisplay />
+        </TabsContent>
+
         {/* ── Subscription Tab ── */}
         <TabsContent value="subscription">
           <Card>
