@@ -135,22 +135,12 @@
     overflow-x: hidden;
   }
 
-  /* Touch-friendly tap targets */
-  button,
-  a,
-  [role="button"],
-  input[type="checkbox"],
-  input[type="radio"] {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  /* Exceptions for inline/icon elements that handle their own sizing */
-  .min-h-auto,
-  [data-sidebar] button,
-  [data-sidebar] a {
-    min-height: unset;
-    min-width: unset;
+  /* Touch-friendly tap targets on mobile */
+  @media (pointer: coarse) {
+    button:not([data-sidebar] *):not(.min-h-auto),
+    [role="button"]:not([data-sidebar] *):not(.min-h-auto) {
+      min-height: 44px;
+    }
   }
   }
 
