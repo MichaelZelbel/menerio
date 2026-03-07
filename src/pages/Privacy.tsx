@@ -14,6 +14,7 @@ const sections = [
 export default function Privacy() {
   return (
     <LegalLayout title="Privacy Policy" lastUpdated="March 7, 2026" sections={sections}>
+      <SEOHead title="Privacy Policy — Menerio" description="Learn how Menerio collects, uses, and protects your personal data." />
       <h2 id="collect">Information We Collect</h2>
       <p>We collect information you provide directly when you create an account, update your profile, or contact us. This includes:</p>
       <ul>
