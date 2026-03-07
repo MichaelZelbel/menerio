@@ -12,6 +12,7 @@ import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
+import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import {
   Sidebar,
   SidebarContent,
