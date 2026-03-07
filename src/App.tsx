@@ -13,7 +13,7 @@ import Docs from "./pages/Docs";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
-import DashboardSettings from "./pages/DashboardSettings";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -47,7 +47,7 @@ const App = () => (
               }
             >
               <Route index element={<Dashboard />} />
-              <Route path="settings" element={<DashboardSettings />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

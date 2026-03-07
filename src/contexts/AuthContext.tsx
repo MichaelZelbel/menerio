@@ -3,9 +3,9 @@ import { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-type AppRole = "free" | "premium" | "premium_gift" | "admin";
+export type AppRole = "free" | "premium" | "premium_gift" | "admin";
 
-interface Profile {
+export interface Profile {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
@@ -25,6 +25,7 @@ interface AuthContextType {
   signInWithOAuth: (provider: "google" | "github") => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -55,15 +56,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!error && data) setRole(data.role as AppRole);
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    if (user) {
+      await fetchProfile(user.id);
+      await fetchRole(user.id);
+    }
+  }, [user, fetchProfile, fetchRole]);
+
   useEffect(() => {
-    // Set up listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // Use setTimeout to avoid Supabase deadlock
           setTimeout(() => {
             fetchProfile(newSession.user.id);
             fetchRole(newSession.user.id);
@@ -82,7 +88,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
-    // THEN check existing session
     supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
       setSession(existingSession);
       setUser(existingSession?.user ?? null);
@@ -116,18 +121,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName: string) => {
     const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { full_name: displayName },
-      },
+      email, password,
+      options: { emailRedirectTo: window.location.origin, data: { full_name: displayName } },
     });
     if (error) { handleAuthError(error); throw error; }
-    toast({
-      title: "Account created!",
-      description: "Please check your email to confirm your account.",
-    });
+    toast({ title: "Account created!", description: "Please check your email to confirm your account." });
   };
 
   const signOut = async () => {
@@ -137,8 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithOAuth = async (provider: "google" | "github") => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      provider, options: { redirectTo: `${window.location.origin}/dashboard` },
     });
     if (error) { handleAuthError(error); throw error; }
   };
@@ -148,10 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) { handleAuthError(error); throw error; }
-    toast({
-      title: "Password reset email sent",
-      description: "Check your email for the reset link.",
-    });
+    toast({ title: "Password reset email sent", description: "Check your email for the reset link." });
   };
 
   const updatePassword = async (password: string) => {
@@ -162,7 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, session, profile, role, loading, signIn, signUp, signOut, signInWithOAuth, resetPassword, updatePassword }}
+      value={{ user, session, profile, role, loading, signIn, signUp, signOut, signInWithOAuth, resetPassword, updatePassword, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>
