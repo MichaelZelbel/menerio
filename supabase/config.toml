@@ -2,3 +2,6 @@ project_id = "tjeapelvjlmbxafsmjef"
 
 [functions.delete-my-account]
 verify_jwt = false
+
+[functions.ensure-token-allowance]
+verify_jwt = false
