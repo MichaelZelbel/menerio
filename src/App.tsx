@@ -79,8 +79,9 @@ const App = () => (
           <CookieConsentBanner />
         </AuthProvider>
       </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

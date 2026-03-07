@@ -81,7 +81,8 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="hidden md:flex items-center gap-3">
+        <div className="hidden md:flex items-center gap-2">
+          <ThemeToggle />
           {isLoggedIn ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
