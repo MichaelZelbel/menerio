@@ -64,6 +64,7 @@ const App = () => (
             >
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="library" element={<Library />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />
