@@ -31,6 +31,7 @@ const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "succes
 
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
+  const { credits, isLoading: creditsLoading } = useAICredits();
   const navigate = useNavigate();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "there";
