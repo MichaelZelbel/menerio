@@ -346,8 +346,8 @@ export default function Settings() {
         <TabsContent value="subscription">
           <Card>
             <CardHeader>
-              <CardTitle>Subscription</CardTitle>
-              <CardDescription>Your current plan and billing details.</CardDescription>
+              <CardTitle>Your Plan</CardTitle>
+              <CardDescription>Your current role and access level.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
@@ -356,9 +356,24 @@ export default function Settings() {
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">{roleInfo.description}</p>
-              {role === "free" && (
-                <Button className="mt-2">Upgrade to Premium</Button>
+              {(role === "premium" || role === "premium_gift" || role === "admin") && (
+                <p className="text-sm text-muted-foreground">
+                  Your plan is active and managed by an administrator.
+                </p>
               )}
+              {role === "free" && (
+                <p className="text-sm text-muted-foreground">
+                  Premium access can be granted by an administrator. Contact your admin to request access.
+                </p>
+              )}
+              <Separator />
+              <div>
+                <p className="text-sm font-medium mb-1">AI Credits</p>
+                <p className="text-xs text-muted-foreground">
+                  View your detailed AI credit usage in the{" "}
+                  <button onClick={() => {}} className="text-primary hover:underline">Credits tab</button>.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
