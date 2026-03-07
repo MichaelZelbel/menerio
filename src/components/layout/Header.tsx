@@ -93,7 +93,17 @@ export function Header() {
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="flex items-center gap-2 font-normal">
+                  <span className="text-sm font-medium truncate">{userName}</span>
+                  {isPremiumOrAdmin && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 shrink-0">
+                      {role === "admin" ? <Shield className="h-2.5 w-2.5" /> : <Crown className="h-2.5 w-2.5" />}
+                      {role === "admin" ? "Admin" : "Premium"}
+                    </Badge>
+                  )}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                   <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
                 </DropdownMenuItem>

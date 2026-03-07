@@ -84,18 +84,13 @@ export function DashboardSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {isPremium &&
-                premiumItems.map((item) => (
+              {premiumItems.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <NavLink to={item.url}>
+                      <NavLink to={isPremium ? item.url : "#"}>
                         <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>
-                        {!collapsed && (
-                          <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
-                            <Crown className="h-2.5 w-2.5 mr-0.5" /> Pro
-                          </Badge>
-                        )}
+                        {!collapsed && <PremiumBadge className="ml-auto" />}
                       </NavLink>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
