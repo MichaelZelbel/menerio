@@ -105,6 +105,7 @@ export default function Settings() {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });
     } else {
       await refreshProfile();
+      logActivity("profile_update", "profile", user.id, { fields: ["display_name", "bio", "website"] });
       toast({ title: "Profile updated", description: "Your changes have been saved." });
     }
     setProfileLoading(false);
