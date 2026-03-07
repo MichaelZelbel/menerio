@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, X, ChevronDown, User, Settings, LogOut, LayoutDashboard } from "lucide-react";
+import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navLinks = [
   { label: "Home", to: "/" },
@@ -19,16 +20,13 @@ const navLinks = [
   { label: "Docs", to: "/docs" },
 ];
 
-interface HeaderProps {
-  isLoggedIn?: boolean;
-  userName?: string;
-  onSignOut?: () => void;
-}
-
-export function Header({ isLoggedIn = false, userName = "User", onSignOut }: HeaderProps) {
+export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const navigate = useNavigate();
+  const { session, profile, signOut } = useAuth();
+  const isLoggedIn = !!session;
+  const userName = profile?.display_name || session?.user?.email || "User";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -43,6 +41,11 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
     .toUpperCase()
     .slice(0, 2);
 
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
+
   return (
     <header
       className={cn(
@@ -53,7 +56,6 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
       )}
     >
       <div className="container flex h-16 items-center justify-between">
-        {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <span className="text-sm font-bold text-primary-foreground">M</span>
@@ -61,7 +63,6 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
           <span className="text-xl font-bold font-display text-foreground">Menerio</span>
         </Link>
 
-        {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-1">
           {navLinks.map((link) => (
             <NavLink
@@ -76,7 +77,6 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
           ))}
         </nav>
 
-        {/* Desktop Right */}
         <div className="hidden md:flex items-center gap-3">
           {isLoggedIn ? (
             <DropdownMenu>
@@ -92,57 +92,35 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem onClick={() => navigate("/dashboard")}>
-                  <LayoutDashboard className="mr-2 h-4 w-4" />
-                  Dashboard
+                  <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate("/dashboard/settings")}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
+                  <Settings className="mr-2 h-4 w-4" /> Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign Out
+                <DropdownMenuItem onClick={handleSignOut}>
+                  <LogOut className="mr-2 h-4 w-4" /> Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
             <>
-              <Button variant="ghost" size="sm" onClick={() => navigate("/signin")}>
-                Sign In
-              </Button>
-              <Button size="sm" onClick={() => navigate("/get-started")}>
-                Get Started
-              </Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/auth")}>Sign In</Button>
+              <Button size="sm" onClick={() => navigate("/auth")}>Get Started</Button>
             </>
           )}
         </div>
 
-        {/* Mobile Toggle */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="md:hidden"
-          onClick={() => setMobileOpen(!mobileOpen)}
-          aria-label="Toggle menu"
-        >
+        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
       </div>
 
-      {/* Mobile Menu */}
       {mobileOpen && (
         <div className="md:hidden border-t bg-background animate-fade-in">
           <nav className="container flex flex-col gap-1 py-4">
             {navLinks.map((link) => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                end={link.to === "/"}
-                className="px-3 py-2.5 text-sm font-medium text-muted-foreground rounded-md transition-colors hover:text-foreground hover:bg-accent"
-                activeClassName="text-foreground bg-accent"
-                onClick={() => setMobileOpen(false)}
-              >
+              <NavLink key={link.to} to={link.to} end={link.to === "/"} className="px-3 py-2.5 text-sm font-medium text-muted-foreground rounded-md transition-colors hover:text-foreground hover:bg-accent" activeClassName="text-foreground bg-accent" onClick={() => setMobileOpen(false)}>
                 {link.label}
               </NavLink>
             ))}
@@ -155,18 +133,14 @@ export function Header({ isLoggedIn = false, userName = "User", onSignOut }: Hea
                   <Button variant="ghost" className="justify-start" onClick={() => { navigate("/dashboard/settings"); setMobileOpen(false); }}>
                     <Settings className="mr-2 h-4 w-4" /> Settings
                   </Button>
-                  <Button variant="ghost" className="justify-start text-destructive" onClick={onSignOut}>
+                  <Button variant="ghost" className="justify-start text-destructive" onClick={handleSignOut}>
                     <LogOut className="mr-2 h-4 w-4" /> Sign Out
                   </Button>
                 </>
               ) : (
                 <>
-                  <Button variant="ghost" onClick={() => { navigate("/signin"); setMobileOpen(false); }}>
-                    Sign In
-                  </Button>
-                  <Button onClick={() => { navigate("/get-started"); setMobileOpen(false); }}>
-                    Get Started
-                  </Button>
+                  <Button variant="ghost" onClick={() => { navigate("/auth"); setMobileOpen(false); }}>Sign In</Button>
+                  <Button onClick={() => { navigate("/auth"); setMobileOpen(false); }}>Get Started</Button>
                 </>
               )}
             </div>
