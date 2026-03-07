@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,24 +12,36 @@ import { AdminRoute } from "@/components/auth/AdminRoute";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
-import Index from "./pages/Index";
-import Features from "./pages/Features";
-import Docs from "./pages/Docs";
-import Auth from "./pages/Auth";
-import ResetPassword from "./pages/ResetPassword";
-import Dashboard from "./pages/Dashboard";
-import Settings from "./pages/Settings";
-import Library from "./pages/Library";
-import Privacy from "./pages/Privacy";
-import Terms from "./pages/Terms";
-import Cookies from "./pages/Cookies";
-import Impressum from "./pages/Impressum";
-import NotFound from "./pages/NotFound";
-import Wizard from "./pages/Wizard";
-import Admin from "./pages/Admin";
-import ActivityPage from "./pages/ActivityPage";
+import { PageLoader } from "@/components/LoadingStates";
 
-const queryClient = new QueryClient();
+// Lazy-loaded routes
+const Index = lazy(() => import("./pages/Index"));
+const Features = lazy(() => import("./pages/Features"));
+const Docs = lazy(() => import("./pages/Docs"));
+const Auth = lazy(() => import("./pages/Auth"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Library = lazy(() => import("./pages/Library"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Cookies = lazy(() => import("./pages/Cookies"));
+const Impressum = lazy(() => import("./pages/Impressum"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Wizard = lazy(() => import("./pages/Wizard"));
+const Admin = lazy(() => import("./pages/Admin"));
+const ActivityPage = lazy(() => import("./pages/ActivityPage"));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,       // 5 min stale-while-revalidate
+      gcTime: 10 * 60 * 1000,          // 10 min garbage collection
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange={false}>
@@ -36,52 +49,54 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <ErrorBoundary>
-          <Routes>
-            <Route element={<PageLayout />}>
-              <Route path="/" element={<Index />} />
-              <Route path="/features" element={<Features />} />
-              <Route path="/docs" element={<Docs />} />
-              <Route path="/privacy" element={<Privacy />} />
-              <Route path="/terms" element={<Terms />} />
-              <Route path="/cookies" element={<Cookies />} />
-              <Route path="/impressum" element={<Impressum />} />
-            </Route>
+        <BrowserRouter>
+          <AuthProvider>
+            <ErrorBoundary>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route element={<PageLayout />}>
+                    <Route path="/" element={<Index />} />
+                    <Route path="/features" element={<Features />} />
+                    <Route path="/docs" element={<Docs />} />
+                    <Route path="/privacy" element={<Privacy />} />
+                    <Route path="/terms" element={<Terms />} />
+                    <Route path="/cookies" element={<Cookies />} />
+                    <Route path="/impressum" element={<Impressum />} />
+                  </Route>
 
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route
-              path="/wizard"
-              element={
-                <ProtectedRoute>
-                  <Wizard />
-                </ProtectedRoute>
-              }
-            />
+                  <Route path="/auth" element={<Auth />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route
+                    path="/wizard"
+                    element={
+                      <ProtectedRoute>
+                        <Wizard />
+                      </ProtectedRoute>
+                    }
+                  />
 
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Dashboard />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="library" element={<Library />} />
-              <Route path="activity" element={<ActivityPage />} />
-              <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
-            </Route>
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <DashboardLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Dashboard />} />
+                    <Route path="settings" element={<Settings />} />
+                    <Route path="library" element={<Library />} />
+                    <Route path="activity" element={<ActivityPage />} />
+                    <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                  </Route>
 
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-          <CookieConsentBanner />
-          </ErrorBoundary>
-        </AuthProvider>
-      </BrowserRouter>
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+              <CookieConsentBanner />
+            </ErrorBoundary>
+          </AuthProvider>
+        </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
   </ThemeProvider>
