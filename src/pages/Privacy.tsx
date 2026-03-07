@@ -1,3 +1,4 @@
+import { SEOHead } from "@/components/SEOHead";
 import { LegalLayout } from "@/components/legal/LegalLayout";
 
 const sections = [

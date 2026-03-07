@@ -71,6 +71,17 @@ const Index = () => {
 
   return (
     <div className="overflow-hidden">
+      <SEOHead
+        title="Menerio — AI-Powered Project Management"
+        description="Organize smarter, ship faster with Menerio's AI-powered project management platform for modern teams."
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          name: "Menerio",
+          description: "AI-Powered Project Management",
+          applicationCategory: "ProjectManagement",
+        }}
+      />
       {/* ── Hero ── */}
       <section className="relative">
         {/* Animated gradient background */}

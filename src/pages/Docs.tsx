@@ -79,6 +79,7 @@ export default function Docs() {
 
   return (
     <div className="container py-8 lg:py-12">
+      <SEOHead title="Documentation — Menerio" description="Learn how to use Menerio with guides, API reference, and tutorials." />
       {/* Search bar */}
       <div className="mb-6 flex items-center gap-3">
         <Button
