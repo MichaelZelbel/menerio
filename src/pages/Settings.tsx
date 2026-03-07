@@ -61,6 +61,7 @@ const ROLE_LABELS: Record<string, { label: string; description: string }> = {
 export default function Settings() {
   const { user, profile, role, updatePassword, refreshProfile, signOut } = useAuth();
   const { toast } = useToast();
+  const { logActivity } = useLogActivity();
   const navigate = useNavigate();
 
   // Profile state
