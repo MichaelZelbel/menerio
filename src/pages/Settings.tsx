@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLogActivity } from "@/hooks/useLogActivity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +61,7 @@ const ROLE_LABELS: Record<string, { label: string; description: string }> = {
 export default function Settings() {
   const { user, profile, role, updatePassword, refreshProfile, signOut } = useAuth();
   const { toast } = useToast();
+  const { logActivity } = useLogActivity();
   const navigate = useNavigate();
 
   // Profile state
@@ -103,6 +105,7 @@ export default function Settings() {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });
     } else {
       await refreshProfile();
+      logActivity("profile_update", "profile", user.id, { fields: ["display_name", "bio", "website"] });
       toast({ title: "Profile updated", description: "Your changes have been saved." });
     }
     setProfileLoading(false);
