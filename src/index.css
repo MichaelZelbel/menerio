@@ -126,11 +126,32 @@
 
   html {
     transition: color 0.2s ease, background-color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    overflow-x: hidden;
+  }
+
+  /* Touch-friendly tap targets */
+  button,
+  a,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Exceptions for inline/icon elements that handle their own sizing */
+  .min-h-auto,
+  [data-sidebar] button,
+  [data-sidebar] a {
+    min-height: unset;
+    min-width: unset;
+  }
   }
 
   h1, h2, h3, h4, h5, h6 {
