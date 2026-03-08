@@ -154,6 +154,54 @@ export type Database = {
         }
         Relationships: []
       }
+      notes: {
+        Row: {
+          content: string
+          created_at: string | null
+          embedding: string | null
+          id: string
+          is_favorite: boolean | null
+          is_pinned: boolean | null
+          is_trashed: boolean | null
+          metadata: Json | null
+          tags: string[] | null
+          title: string
+          trashed_at: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string | null
+          embedding?: string | null
+          id?: string
+          is_favorite?: boolean | null
+          is_pinned?: boolean | null
+          is_trashed?: boolean | null
+          metadata?: Json | null
+          tags?: string[] | null
+          title?: string
+          trashed_at?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          embedding?: string | null
+          id?: string
+          is_favorite?: boolean | null
+          is_pinned?: boolean | null
+          is_trashed?: boolean | null
+          metadata?: Json | null
+          tags?: string[] | null
+          title?: string
+          trashed_at?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -239,6 +287,23 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_premium_user: { Args: { _user_id: string }; Returns: boolean }
+      match_notes: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_user_id?: string
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          created_at: string
+          id: string
+          metadata: Json
+          similarity: number
+          tags: string[]
+          title: string
+        }[]
+      }
     }
     Enums: {
       app_role: "free" | "premium" | "premium_gift" | "admin"
