@@ -326,6 +326,7 @@ server.registerTool(
       const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
       const { error } = await supabase.from("notes").insert({
+        user_id: BRAIN_OWNER_USER_ID,
         content,
         title,
         embedding,
