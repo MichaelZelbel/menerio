@@ -93,6 +93,7 @@ server.registerTool(
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: limit,
+        p_user_id: BRAIN_OWNER_USER_ID,
       });
 
       if (error) {
