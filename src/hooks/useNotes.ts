@@ -1,0 +1,164 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { showToast } from "@/lib/toast";
+
+export interface Note {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  tags: string[];
+  is_favorite: boolean;
+  is_pinned: boolean;
+  is_trashed: boolean;
+  trashed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type NoteInsert = {
+  title?: string;
+  content?: string;
+  tags?: string[];
+};
+
+type NoteUpdate = {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  is_favorite?: boolean;
+  is_pinned?: boolean;
+  is_trashed?: boolean;
+  trashed_at?: string | null;
+};
+
+export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
+  const { user } = useAuth();
+
+  return useQuery<Note[]>({
+    queryKey: ["notes", filter, user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      let query = supabase
+        .from("notes" as any)
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, created_at, updated_at")
+        .eq("user_id", user!.id)
+        .order("is_pinned", { ascending: false })
+        .order("updated_at", { ascending: false });
+
+      if (filter === "trash") {
+        query = query.eq("is_trashed", true);
+      } else if (filter === "favorites") {
+        query = query.eq("is_trashed", false).eq("is_favorite", true);
+      } else {
+        query = query.eq("is_trashed", false);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data as unknown as Note[]) || [];
+    },
+  });
+}
+
+export function useCreateNote() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (input: NoteInsert = {}) => {
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .insert({ ...input, user_id: user!.id })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as unknown as Note;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notes"] });
+    },
+    onError: () => {
+      showToast.error("Failed to create note");
+    },
+  });
+}
+
+export function useUpdateNote() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: NoteUpdate & { id: string }) => {
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as unknown as Note;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notes"] });
+    },
+  });
+}
+
+export function useDeleteNote() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("notes" as any)
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notes"] });
+      showToast.success("Note permanently deleted");
+    },
+    onError: () => {
+      showToast.error("Failed to delete note");
+    },
+  });
+}
+
+export function useProcessNote() {
+  return useMutation({
+    mutationFn: async (noteId: string) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const res = await supabase.functions.invoke("process-note", {
+        body: { note_id: noteId },
+      });
+      if (res.error) throw res.error;
+      return res.data;
+    },
+  });
+}
+
+export function useSearchNotes() {
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (query: string) => {
+      // Text-based search fallback (no embedding needed)
+      const q = query.toLowerCase();
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, created_at, updated_at")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false)
+        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data as unknown as Note[]) || [];
+    },
+  });
+}
