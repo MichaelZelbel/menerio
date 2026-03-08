@@ -13,12 +13,11 @@ import {
   Shield,
   ArrowRight,
   CheckCircle2,
-  Star,
-  Quote,
   FileText,
   Sparkles,
+  MessageSquare,
+  Layers,
 } from "lucide-react";
-import { useState, useEffect } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -64,8 +63,9 @@ const Index = () => {
           applicationCategory: "ProductivityApplication",
         }}
       />
+
       {/* ── Hero ── */}
-      <section className="relative">
+      <section className="relative min-h-[90vh] flex items-center">
         <div className="absolute inset-0 -z-10 overflow-hidden">
           <div className="absolute -top-1/2 -left-1/4 h-[800px] w-[800px] rounded-full bg-primary/8 blur-[120px] animate-[pulse_8s_ease-in-out_infinite]" />
           <div className="absolute -bottom-1/2 -right-1/4 h-[600px] w-[600px] rounded-full bg-info/8 blur-[120px] animate-[pulse_10s_ease-in-out_infinite_1s]" />
@@ -88,11 +88,11 @@ const Index = () => {
             <motion.h1
               variants={fadeUp}
               custom={1}
-              className="text-4xl font-extrabold font-display tracking-tight sm:text-5xl lg:text-7xl"
+              className="text-5xl font-extrabold font-display tracking-tight sm:text-6xl lg:text-8xl"
             >
               One Brain.
               <br />
-              <span className="bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-primary via-info to-primary bg-[length:200%_auto] animate-[gradient-shift_6s_ease_infinite] bg-clip-text text-transparent">
                 Every AI.
               </span>
             </motion.h1>
@@ -100,7 +100,7 @@ const Index = () => {
             <motion.p
               variants={fadeUp}
               custom={2}
-              className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground sm:text-xl"
+              className="mx-auto mt-8 max-w-2xl text-lg text-muted-foreground sm:text-xl leading-relaxed"
             >
               Menerio is your personal knowledge system where every thought is embedded,
               classified, and searchable by meaning — accessible from any AI tool you use.
@@ -109,9 +109,9 @@ const Index = () => {
             <motion.div
               variants={fadeUp}
               custom={3}
-              className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
+              className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row"
             >
-              <Button size="xl" onClick={() => navigate("/auth")} className="gap-2 text-base px-8">
+              <Button size="xl" onClick={() => navigate("/auth")} className="gap-2 text-base px-8 shadow-lg shadow-primary/25">
                 Start Your Brain <ArrowRight className="h-4 w-4" />
               </Button>
               <Button variant="outline" size="lg" onClick={() => navigate("/features")} className="gap-2 text-base">
@@ -130,23 +130,37 @@ const Index = () => {
             </motion.div>
           </motion.div>
 
-          {/* Hero visual */}
+          {/* Floating capability cards instead of dead box */}
           <motion.div
-            initial={{ opacity: 0, y: 40 }}
+            initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            className="mx-auto mt-16 max-w-5xl"
+            transition={{ delay: 0.6, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-auto mt-20 max-w-4xl"
           >
-            <div className="rounded-2xl border bg-card/50 backdrop-blur-sm p-2 shadow-xl">
-              <div className="rounded-xl bg-gradient-to-br from-muted/50 to-muted aspect-[16/9] flex items-center justify-center">
-                <div className="text-center">
-                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                    <Brain className="h-8 w-8 text-primary" />
-                  </div>
-                  <p className="text-sm font-medium text-muted-foreground">Your Knowledge Dashboard</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Capture → Embed → Search → Connect</p>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { icon: MessageSquare, label: "Capture from Slack", desc: "Auto-save thoughts from chat" },
+                { icon: Sparkles, label: "AI Embeddings", desc: "Semantic understanding built-in" },
+                { icon: Layers, label: "Connect Any Tool", desc: "MCP protocol for all AIs" },
+              ].map((item, i) => (
+                <motion.div
+                  key={item.label}
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.8 + i * 0.15, duration: 0.5 }}
+                >
+                  <Card className="group relative overflow-hidden p-5 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30 bg-card/80 backdrop-blur-sm">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="relative">
+                      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                        <item.icon className="h-5 w-5" />
+                      </div>
+                      <p className="font-semibold font-display text-sm">{item.label}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
+                    </div>
+                  </Card>
+                </motion.div>
+              ))}
             </div>
           </motion.div>
         </div>
@@ -182,12 +196,15 @@ const Index = () => {
           >
             {features.map((f, i) => (
               <motion.div key={f.title} variants={fadeUp} custom={i}>
-                <Card className="group relative h-full p-6 transition-all duration-300 hover:shadow-lg hover:border-primary/20 hover:-translate-y-1">
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                    <f.icon className="h-6 w-6" />
+                <Card className="group relative h-full overflow-hidden p-6 transition-all duration-300 hover:shadow-lg hover:border-primary/20 hover:-translate-y-1">
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="relative">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                      <f.icon className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-lg font-semibold font-display mb-2">{f.title}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{f.description}</p>
                   </div>
-                  <h3 className="text-lg font-semibold font-display mb-2">{f.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{f.description}</p>
                 </Card>
               </motion.div>
             ))}
