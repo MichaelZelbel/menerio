@@ -9,6 +9,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY")!;
+const BRAIN_OWNER_USER_ID = Deno.env.get("BRAIN_OWNER_USER_ID")!;
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -92,6 +93,7 @@ server.registerTool(
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: limit,
+        p_user_id: BRAIN_OWNER_USER_ID,
       });
 
       if (error) {
@@ -172,6 +174,7 @@ server.registerTool(
         .from("notes")
         .select("content, metadata, created_at")
         .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID)
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -238,12 +241,14 @@ server.registerTool(
       const { count } = await supabase
         .from("notes")
         .select("*", { count: "exact", head: true })
-        .eq("is_trashed", false);
+        .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID);
 
       const { data } = await supabase
         .from("notes")
         .select("metadata, created_at")
         .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID)
         .order("created_at", { ascending: false });
 
       const types: Record<string, number> = {};
@@ -321,6 +326,7 @@ server.registerTool(
       const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
       const { error } = await supabase.from("notes").insert({
+        user_id: BRAIN_OWNER_USER_ID,
         content,
         title,
         embedding,
