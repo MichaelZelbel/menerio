@@ -54,12 +54,12 @@ const Index = () => {
   return (
     <div className="overflow-hidden">
       <SEOHead
-        title="OpenBrain — AI-Powered Knowledge System"
+        title="Menerio — AI-Powered Knowledge System"
         description="One brain, every AI. Capture, embed, and search your thoughts with semantic AI. Your personal knowledge system that any AI tool can plug into."
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "WebApplication",
-          name: "OpenBrain",
+          name: "Menerio",
           description: "AI-Powered Knowledge System",
           applicationCategory: "ProductivityApplication",
         }}
