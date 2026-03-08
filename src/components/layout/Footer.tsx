@@ -39,12 +39,12 @@ export function Footer() {
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-4">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                <span className="text-sm font-bold text-primary-foreground">M</span>
+                <span className="text-sm font-bold text-primary-foreground">🧠</span>
               </div>
-              <span className="text-xl font-bold font-display text-foreground">Menerio</span>
+              <span className="text-xl font-bold font-display text-foreground">OpenBrain</span>
             </Link>
             <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-              The modern platform for managing projects, teams, and workflows — all in one place.
+              Your AI-powered knowledge system. One brain, every AI. Capture, search, and connect your thoughts.
             </p>
             <div className="flex gap-2">
               <Input
@@ -113,7 +113,7 @@ export function Footer() {
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 sm:flex-row">
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} Menerio. All rights reserved.
+            © {new Date().getFullYear()} OpenBrain. All rights reserved.
           </p>
           <div className="flex items-center gap-3">
             {socialLinks.map((social) => (
