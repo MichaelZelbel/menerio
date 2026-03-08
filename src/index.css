@@ -154,3 +154,159 @@
   h5 { @apply text-lg leading-normal; }
   h6 { @apply text-base leading-normal font-semibold; }
 }
+
+/* TipTap Editor Styles */
+.tiptap-editor .tiptap {
+  outline: none;
+  min-height: calc(100vh - 400px);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: hsl(var(--foreground));
+}
+
+.tiptap-editor .tiptap p {
+  margin-bottom: 0.5em;
+}
+
+.tiptap-editor .tiptap h1 {
+  font-size: 1.75rem;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.tiptap-editor .tiptap h2 {
+  font-size: 1.35rem;
+  margin-top: 1.25em;
+  margin-bottom: 0.4em;
+}
+
+.tiptap-editor .tiptap h3 {
+  font-size: 1.1rem;
+  margin-top: 1em;
+  margin-bottom: 0.3em;
+}
+
+.tiptap-editor .tiptap ul,
+.tiptap-editor .tiptap ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.tiptap-editor .tiptap ul {
+  list-style: disc;
+}
+
+.tiptap-editor .tiptap ol {
+  list-style: decimal;
+}
+
+.tiptap-editor .tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tiptap-editor .tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.tiptap-editor .tiptap ul[data-type="taskList"] li label {
+  margin-top: 0.15em;
+}
+
+.tiptap-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"] {
+  accent-color: hsl(var(--primary));
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.tiptap-editor .tiptap blockquote {
+  border-left: 3px solid hsl(var(--primary) / 0.4);
+  padding-left: 1em;
+  margin-left: 0;
+  margin-bottom: 0.5em;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.tiptap-editor .tiptap code {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+  font-size: 0.85em;
+  font-family: ui-monospace, monospace;
+}
+
+.tiptap-editor .tiptap pre {
+  background: hsl(var(--muted));
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  margin-bottom: 0.5em;
+  overflow-x: auto;
+}
+
+.tiptap-editor .tiptap pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.8em;
+}
+
+.tiptap-editor .tiptap hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 1.5em 0;
+}
+
+.tiptap-editor .tiptap a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tiptap-editor .tiptap mark {
+  background-color: hsl(45, 93%, 75%);
+  border-radius: 2px;
+  padding: 0.1em 0.15em;
+}
+
+.tiptap-editor .tiptap img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0.5em 0;
+}
+
+.tiptap-editor .tiptap table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1em;
+}
+
+.tiptap-editor .tiptap table td,
+.tiptap-editor .tiptap table th {
+  border: 1px solid hsl(var(--border));
+  padding: 0.4em 0.6em;
+  min-width: 80px;
+  vertical-align: top;
+}
+
+.tiptap-editor .tiptap table th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}
+
+.tiptap-editor .tiptap .is-empty::before {
+  content: attr(data-placeholder);
+  color: hsl(var(--muted-foreground) / 0.4);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.dark .tiptap-editor .tiptap mark {
+  background-color: hsl(45, 80%, 35%);
+  color: hsl(var(--foreground));
+}

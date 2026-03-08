@@ -1,14 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import UnderlineExt from "@tiptap/extension-underline";
+import LinkExt from "@tiptap/extension-link";
+import TextAlign from "@tiptap/extension-text-align";
+import Highlight from "@tiptap/extension-highlight";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Placeholder from "@tiptap/extension-placeholder";
+import { TextStyle } from "@tiptap/extension-text-style";
+import Color from "@tiptap/extension-color";
+import ImageExt from "@tiptap/extension-image";
+import SuperscriptExt from "@tiptap/extension-superscript";
+import SubscriptExt from "@tiptap/extension-subscript";
+import { Table as TableExt } from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableCell from "@tiptap/extension-table-cell";
+import TableHeader from "@tiptap/extension-table-header";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -28,7 +45,6 @@ import {
   MoreHorizontal,
   Copy,
   RotateCcw,
-  Sparkles,
   Tag,
   X,
   Info,
@@ -48,39 +64,65 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
   const [title, setTitle] = useState(note.title);
-  const [content, setContent] = useState(note.content);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync state when note changes
-  useEffect(() => {
-    setTitle(note.title);
-    setContent(note.content);
-    setShowTagInput(false);
-    setShowInfo(false);
-  }, [note.id]);
-
-  const save = useCallback(
-    (updates: { title?: string; content?: string }) => {
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        codeBlock: false,
+      }),
+      UnderlineExt,
+      LinkExt.configure({ openOnClick: false }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Highlight.configure({ multicolor: true }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Placeholder.configure({ placeholder: "Start writing…" }),
+      TextStyle,
+      Color,
+      ImageExt,
+      SuperscriptExt,
+      SubscriptExt,
+      TableExt.configure({ resizable: true }),
+      TableRow,
+      TableCell,
+      TableHeader,
+    ],
+    content: note.content || "",
+    editable: !note.is_trashed,
+    onUpdate: ({ editor: e }) => {
+      const html = e.getHTML();
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, ...updates });
+        updateNote.mutate({ id: note.id, content: html });
       }, 800);
     },
-    [note.id, updateNote]
-  );
+  });
+
+  // Sync when note changes
+  useEffect(() => {
+    setTitle(note.title);
+    setShowTagInput(false);
+    setShowInfo(false);
+    if (editor && note.content !== editor.getHTML()) {
+      editor.commands.setContent(note.content || "");
+    }
+    if (editor) {
+      editor.setEditable(!note.is_trashed);
+    }
+  }, [note.id]);
 
   const handleTitleChange = (val: string) => {
     setTitle(val);
-    save({ title: val });
-  };
-
-  const handleContentChange = (val: string) => {
-    setContent(val);
-    save({ content: val });
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      updateNote.mutate({ id: note.id, title: val });
+    }, 800);
   };
 
   const toggleFavorite = () => {
@@ -115,11 +157,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     onNoteDeleted?.();
   };
 
-  const duplicateNote = () => {
-    // This is handled at the parent level — we just show a toast
-    showToast.info("Use the create button to duplicate");
-  };
-
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
     if (!tag || note.tags?.includes(tag)) {
@@ -147,13 +184,14 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     });
   };
 
-  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
-  const charCount = content.length;
+  const plainText = editor?.getText() || "";
+  const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
+  const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
+      {/* Action toolbar */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
         <Button
           variant="ghost"
@@ -237,7 +275,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
-                  navigator.clipboard.writeText(`${title}\n\n${content}`);
+                  navigator.clipboard.writeText(`${title}\n\n${plainText}`);
                   showToast.success("Copied to clipboard");
                 }}
               >
@@ -295,6 +333,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         </div>
       )}
 
+      {/* Rich text formatting toolbar */}
+      {!note.is_trashed && <EditorToolbar editor={editor} />}
+
       {/* Editor */}
       <div className="flex-1 overflow-y-auto p-4">
         <input
@@ -304,13 +345,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           className="w-full text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40 mb-4"
           disabled={note.is_trashed}
         />
-        <textarea
-          value={content}
-          onChange={(e) => handleContentChange(e.target.value)}
-          placeholder="Start writing…"
-          className="w-full min-h-[calc(100vh-300px)] bg-transparent border-none outline-none resize-none text-sm leading-relaxed placeholder:text-muted-foreground/40"
-          disabled={note.is_trashed}
-        />
+        <EditorContent editor={editor} className="tiptap-editor" />
       </div>
 
       {/* Status bar */}
