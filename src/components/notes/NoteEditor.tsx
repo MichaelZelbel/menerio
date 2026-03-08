@@ -13,7 +13,7 @@ import Color from "@tiptap/extension-color";
 import ImageExt from "@tiptap/extension-image";
 import SuperscriptExt from "@tiptap/extension-superscript";
 import SubscriptExt from "@tiptap/extension-subscript";
-import TableExt from "@tiptap/extension-table";
+import { Table as TableExt } from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
