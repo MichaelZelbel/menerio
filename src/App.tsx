@@ -21,6 +21,7 @@ const Docs = lazy(() => import("./pages/Docs"));
 const Auth = lazy(() => import("./pages/Auth"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Notes = lazy(() => import("./pages/Notes"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Library = lazy(() => import("./pages/Library"));
 const Privacy = lazy(() => import("./pages/Privacy"));
@@ -35,8 +36,8 @@ const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,       // 5 min stale-while-revalidate
-      gcTime: 10 * 60 * 1000,          // 10 min garbage collection
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
       refetchOnWindowFocus: false,
       retry: 1,
     },
@@ -84,6 +85,7 @@ const App = () => (
                     }
                   >
                     <Route index element={<Dashboard />} />
+                    <Route path="notes" element={<Notes />} />
                     <Route path="settings" element={<Settings />} />
                     <Route path="library" element={<Library />} />
                     <Route path="activity" element={<ActivityPage />} />
