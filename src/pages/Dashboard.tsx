@@ -38,11 +38,11 @@ const Dashboard = () => {
   const roleConfig = ROLE_CONFIG[role || "free"];
 
   const [showChecklist, setShowChecklist] = useState(() => {
-    return localStorage.getItem("openbrain-checklist-dismissed") !== "true";
+    return localStorage.getItem("menerio-checklist-dismissed") !== "true";
   });
 
   const dismissChecklist = () => {
-    localStorage.setItem("openbrain-checklist-dismissed", "true");
+    localStorage.setItem("menerio-checklist-dismissed", "true");
     setShowChecklist(false);
   };
 
