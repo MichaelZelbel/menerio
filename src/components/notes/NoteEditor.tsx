@@ -102,7 +102,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     content: note.content || "",
     editable: !note.is_trashed,
     onUpdate: ({ editor: e }) => {
-      const md = e.storage.markdown.getMarkdown();
+      const md = (e.storage as any).markdown.getMarkdown();
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: md });
