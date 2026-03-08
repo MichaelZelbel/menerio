@@ -113,7 +113,7 @@ export function Footer() {
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 sm:flex-row">
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} OpenBrain. All rights reserved.
+            © {new Date().getFullYear()} Menerio. All rights reserved.
           </p>
           <div className="flex items-center gap-3">
             {socialLinks.map((social) => (

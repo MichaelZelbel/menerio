@@ -102,7 +102,7 @@ const Index = () => {
               custom={2}
               className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground sm:text-xl"
             >
-              OpenBrain is your personal knowledge system where every thought is embedded,
+              Menerio is your personal knowledge system where every thought is embedded,
               classified, and searchable by meaning — accessible from any AI tool you use.
             </motion.p>
 

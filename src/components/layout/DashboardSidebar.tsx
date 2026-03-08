@@ -142,7 +142,7 @@ export function DashboardSidebar() {
           <>
             <SidebarSeparator />
             <CreditsDisplay compact />
-            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} OpenBrain</p>
+            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
           </>
         )}
       </SidebarFooter>
