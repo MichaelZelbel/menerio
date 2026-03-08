@@ -310,3 +310,8 @@
   background-color: hsl(45, 80%, 35%);
   color: hsl(var(--foreground));
 }
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
