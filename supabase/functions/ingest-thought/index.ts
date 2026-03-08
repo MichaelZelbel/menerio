@@ -89,6 +89,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Insert into notes table (adapted from guide's "thoughts" table)
     const { error } = await supabase.from("notes").insert({
+      user_id: BRAIN_OWNER_USER_ID,
       content: messageText,
       title,
       embedding,
