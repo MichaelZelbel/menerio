@@ -93,14 +93,19 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       TableRow,
       TableCell,
       TableHeader,
+      Markdown.configure({
+        html: false,
+        transformPastedText: true,
+        transformCopiedText: true,
+      }),
     ],
     content: note.content || "",
     editable: !note.is_trashed,
     onUpdate: ({ editor: e }) => {
-      const html = e.getHTML();
+      const md = e.storage.markdown.getMarkdown();
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, content: html });
+        updateNote.mutate({ id: note.id, content: md });
       }, 800);
     },
   });
