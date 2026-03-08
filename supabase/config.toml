@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.ensure-token-allowance]
 verify_jwt = false
+
+[functions.ingest-thought]
+verify_jwt = false
+
+[functions.open-brain-mcp]
+verify_jwt = false
