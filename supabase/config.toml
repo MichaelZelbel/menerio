@@ -11,6 +11,3 @@ verify_jwt = false
 
 [functions.open-brain-mcp]
 verify_jwt = false
-
-[functions.slack-capture]
-verify_jwt = false
