@@ -174,6 +174,7 @@ server.registerTool(
         .from("notes")
         .select("content, metadata, created_at")
         .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID)
         .order("created_at", { ascending: false })
         .limit(limit);
 
