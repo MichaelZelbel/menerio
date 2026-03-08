@@ -3,24 +3,22 @@ import { SEOHead } from "@/components/SEOHead";
 import { useNavigate } from "react-router-dom";
 import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
+import { useNotes } from "@/hooks/useNotes";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Package,
+  FileText,
   Sparkles,
   Activity,
   Shield,
   Plus,
-  Import,
-  FolderOpen,
+  Brain,
   CheckCircle2,
   Circle,
   X,
   Crown,
-  Rocket,
-  Users,
   ArrowRight,
 } from "lucide-react";
 
@@ -34,39 +32,34 @@ const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "succes
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
   const { credits, isLoading: creditsLoading } = useAICredits();
+  const { data: notes = [] } = useNotes("all");
   const navigate = useNavigate();
-  const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "there";
   const roleConfig = ROLE_CONFIG[role || "free"];
 
-  // Checklist state
   const [showChecklist, setShowChecklist] = useState(() => {
-    return localStorage.getItem("menerio-checklist-dismissed") !== "true";
+    return localStorage.getItem("openbrain-checklist-dismissed") !== "true";
   });
 
   const dismissChecklist = () => {
-    localStorage.setItem("menerio-checklist-dismissed", "true");
+    localStorage.setItem("openbrain-checklist-dismissed", "true");
     setShowChecklist(false);
   };
 
   const hasProfile = !!(profile?.display_name && profile?.bio);
-  const hasAvatar = !!profile?.avatar_url;
+  const hasNotes = notes.length > 0;
 
   const checklistItems = [
     { label: "Complete your profile", done: hasProfile, action: () => navigate("/dashboard/settings") },
-    { label: "Upload an avatar", done: hasAvatar, action: () => navigate("/dashboard/settings") },
-    { label: "Create your first item", done: false, action: () => {} },
+    { label: "Create your first note", done: hasNotes, action: () => navigate("/dashboard/notes") },
+    { label: "Process a note with AI", done: false, action: () => navigate("/dashboard/notes") },
     { label: "Explore features", done: false, action: () => navigate("/features") },
-    ...(isPremium ? [{ label: "Invite team members", done: false, action: () => navigate("/dashboard/team") }] : []),
   ];
   const completedCount = checklistItems.filter((i) => i.done).length;
 
-  // Placeholder data
-  const hasItems = false;
-
   return (
     <div className="space-y-6">
-      <SEOHead title="Dashboard — Menerio" noIndex />
+      <SEOHead title="Dashboard — OpenBrain" noIndex />
       {/* Welcome */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -74,26 +67,26 @@ const Dashboard = () => {
             Welcome back, {displayName} 👋
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Here's what's happening with your workspace.
+            Your personal knowledge system at a glance.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => {}} className="gap-2">
-            <Plus className="h-4 w-4" /> New Item
-          </Button>
-        </div>
+        <Button onClick={() => navigate("/dashboard/notes")} className="gap-2">
+          <Plus className="h-4 w-4" /> New Note
+        </Button>
       </div>
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardDescription className="text-sm font-medium">Total Items</CardDescription>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <CardDescription className="text-sm font-medium">Total Notes</CardDescription>
+            <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold font-display">0</p>
-            <p className="text-xs text-muted-foreground mt-1">Create your first item to get started</p>
+            <p className="text-3xl font-bold font-display">{notes.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {notes.length === 0 ? "Create your first note" : "in your brain"}
+            </p>
           </CardContent>
         </Card>
 
@@ -114,12 +107,14 @@ const Dashboard = () => {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardDescription className="text-sm font-medium">Recent Activity</CardDescription>
-            <Activity className="h-4 w-4 text-muted-foreground" />
+            <CardDescription className="text-sm font-medium">AI-Processed</CardDescription>
+            <Brain className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold font-display">0</p>
-            <p className="text-xs text-muted-foreground mt-1">No activity yet</p>
+            <p className="text-3xl font-bold font-display">
+              {notes.filter((n) => n.metadata && Object.keys(n.metadata).length > 0).length}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">notes with embeddings</p>
           </CardContent>
         </Card>
 
@@ -134,64 +129,63 @@ const Dashboard = () => {
               {(role === "premium" || role === "premium_gift") && <Crown className="h-3 w-3 mr-1" />}
               {roleConfig.label}
             </Badge>
-            {role === "free" && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Contact an administrator for premium access.
-              </p>
-            )}
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Main content area — 2 cols */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Empty state or Recent Activity */}
-          {!hasItems ? (
+          {/* Quick start */}
+          {!hasNotes && (
             <Card className="border-dashed">
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                  <Rocket className="h-8 w-8 text-primary" />
+                  <Brain className="h-8 w-8 text-primary" />
                 </div>
-                <h3 className="text-lg font-semibold font-display mb-2">Get started with Menerio</h3>
+                <h3 className="text-lg font-semibold font-display mb-2">Start building your brain</h3>
                 <p className="text-sm text-muted-foreground max-w-sm mb-6">
-                  Create your first item to unlock the full power of AI-driven project management.
+                  Create your first note and let AI embed and classify it automatically.
                 </p>
-                <Button className="gap-2">
-                  <Plus className="h-4 w-4" /> Create Your First Item
+                <Button onClick={() => navigate("/dashboard/notes")} className="gap-2">
+                  <Plus className="h-4 w-4" /> Create Your First Note
                 </Button>
               </CardContent>
             </Card>
-          ) : null}
+          )}
 
-          {/* Activity Feed */}
+          {/* Recent notes */}
+          {hasNotes && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">Recent Notes</CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/notes")} className="gap-1 text-xs">
+                  View All <ArrowRight className="h-3 w-3" />
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {notes.slice(0, 5).map((note) => (
+                    <button
+                      key={note.id}
+                      onClick={() => navigate("/dashboard/notes")}
+                      className="w-full text-left flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
+                    >
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="truncate font-medium">{note.title || "Untitled"}</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground whitespace-nowrap">
+                        {new Date(note.updated_at).toLocaleDateString()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <ActivityFeed limit={5} showViewAll />
-
-          {/* Quick Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Button variant="outline" className="h-auto flex-col gap-2 py-4">
-                  <Plus className="h-5 w-5 text-primary" />
-                  <span className="text-sm">Create New Item</span>
-                </Button>
-                <Button variant="outline" className="h-auto flex-col gap-2 py-4">
-                  <Import className="h-5 w-5 text-primary" />
-                  <span className="text-sm">Import</span>
-                </Button>
-                <Button variant="outline" className="h-auto flex-col gap-2 py-4" onClick={() => navigate("/dashboard/library")}>
-                  <FolderOpen className="h-5 w-5 text-primary" />
-                  <span className="text-sm">View Library</span>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Right sidebar — checklist */}
+        {/* Right sidebar */}
         <div className="space-y-6">
           {showChecklist && (
             <Card>
@@ -207,7 +201,6 @@ const Dashboard = () => {
                 </Button>
               </CardHeader>
               <CardContent>
-                {/* Progress bar */}
                 <div className="mb-4 h-1.5 rounded-full bg-muted overflow-hidden">
                   <div
                     className="h-full rounded-full bg-primary transition-all duration-500"
@@ -233,38 +226,6 @@ const Dashboard = () => {
                     </li>
                   ))}
                 </ul>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Info card for free users */}
-          {role === "free" && (
-            <Card className="bg-muted/30 border-border">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <Shield className="h-5 w-5 text-muted-foreground" />
-                  <h4 className="font-semibold font-display text-sm">Free Plan</h4>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Some features require a premium role. Contact an administrator to request access.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Team card for premium */}
-          {isPremium && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Users className="h-4 w-4" /> Team
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-3">Invite team members to collaborate.</p>
-                <Button variant="outline" size="sm" className="w-full" onClick={() => navigate("/dashboard/team")}>
-                  Manage Team
-                </Button>
               </CardContent>
             </Card>
           )}
