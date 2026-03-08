@@ -241,7 +241,8 @@ server.registerTool(
       const { count } = await supabase
         .from("notes")
         .select("*", { count: "exact", head: true })
-        .eq("is_trashed", false);
+        .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID);
 
       const { data } = await supabase
         .from("notes")
