@@ -38,7 +38,7 @@ export function NoteSidebar({
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <Brain className="h-4 w-4 text-primary-foreground" />
           </div>
-          <span className="text-base font-bold font-display">OpenBrain</span>
+          <span className="text-base font-bold font-display">Menerio</span>
         </div>
       </div>
 
