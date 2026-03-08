@@ -39,9 +39,9 @@ export function Footer() {
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-4">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                <span className="text-sm font-bold text-primary-foreground">🧠</span>
+                <span className="text-sm font-bold text-primary-foreground">M</span>
               </div>
-              <span className="text-xl font-bold font-display text-foreground">OpenBrain</span>
+              <span className="text-xl font-bold font-display text-foreground">Menerio</span>
             </Link>
             <p className="text-sm text-muted-foreground mb-6 max-w-xs">
               Your AI-powered knowledge system. One brain, every AI. Capture, search, and connect your thoughts.
@@ -113,7 +113,7 @@ export function Footer() {
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 sm:flex-row">
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} OpenBrain. All rights reserved.
+            © {new Date().getFullYear()} Menerio. All rights reserved.
           </p>
           <div className="flex items-center gap-3">
             {socialLinks.map((social) => (

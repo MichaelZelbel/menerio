@@ -9,7 +9,7 @@ import {
   Bell,
   Crown,
   ShieldCheck,
-  Brain,
+  
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -63,10 +63,10 @@ export function DashboardSidebar() {
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-            <Brain className="h-4 w-4 text-primary-foreground" />
+            <span className="text-xs font-bold text-primary-foreground">M</span>
           </div>
           {!collapsed && (
-            <span className="text-sm font-semibold font-display text-foreground">OpenBrain</span>
+            <span className="text-sm font-semibold font-display text-foreground">Menerio</span>
           )}
         </div>
       </SidebarHeader>
@@ -142,7 +142,7 @@ export function DashboardSidebar() {
           <>
             <SidebarSeparator />
             <CreditsDisplay compact />
-            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} OpenBrain</p>
+            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
           </>
         )}
       </SidebarFooter>

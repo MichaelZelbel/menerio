@@ -54,12 +54,12 @@ const Index = () => {
   return (
     <div className="overflow-hidden">
       <SEOHead
-        title="OpenBrain — AI-Powered Knowledge System"
+        title="Menerio — AI-Powered Knowledge System"
         description="One brain, every AI. Capture, embed, and search your thoughts with semantic AI. Your personal knowledge system that any AI tool can plug into."
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "WebApplication",
-          name: "OpenBrain",
+          name: "Menerio",
           description: "AI-Powered Knowledge System",
           applicationCategory: "ProductivityApplication",
         }}
@@ -102,7 +102,7 @@ const Index = () => {
               custom={2}
               className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground sm:text-xl"
             >
-              OpenBrain is your personal knowledge system where every thought is embedded,
+              Menerio is your personal knowledge system where every thought is embedded,
               classified, and searchable by meaning — accessible from any AI tool you use.
             </motion.p>
 

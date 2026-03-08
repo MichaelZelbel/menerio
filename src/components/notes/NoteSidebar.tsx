@@ -38,7 +38,7 @@ export function NoteSidebar({
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <Brain className="h-4 w-4 text-primary-foreground" />
           </div>
-          <span className="text-base font-bold font-display">OpenBrain</span>
+          <span className="text-base font-bold font-display">Menerio</span>
         </div>
       </div>
 
@@ -81,7 +81,7 @@ export function NoteSidebar({
       {/* Footer */}
       <div className="px-4 py-3 border-t border-sidebar-border">
         <p className="text-[10px] text-muted-foreground">
-          © {new Date().getFullYear()} OpenBrain
+          © {new Date().getFullYear()} Menerio
         </p>
       </div>
     </div>

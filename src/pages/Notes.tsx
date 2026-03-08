@@ -61,7 +61,7 @@ export default function Notes() {
 
   return (
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
-      <SEOHead title="Notes — OpenBrain" noIndex />
+      <SEOHead title="Notes — Menerio" noIndex />
 
       {/* Left sidebar — filters */}
       {sidebarOpen && (
