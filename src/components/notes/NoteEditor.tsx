@@ -351,7 +351,28 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       {!note.is_trashed && <EditorToolbar editor={editor} />}
 
       {/* Editor */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div
+        className={cn(
+          "flex-1 overflow-y-auto p-4 relative transition-colors",
+          isDragOver && "bg-primary/5 ring-2 ring-primary/30 ring-inset"
+        )}
+        onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
+        onDrop={() => setIsDragOver(false)}
+      >
+        {isDragOver && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="bg-background/90 border-2 border-dashed border-primary rounded-lg px-6 py-4 text-sm font-medium text-primary">
+              Drop file to embed
+            </div>
+          </div>
+        )}
+        {isUploading && (
+          <div className="absolute top-2 right-2 z-10 bg-background border border-border rounded-md px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
+            Uploading…
+          </div>
+        )}
         <input
           value={title}
           onChange={(e) => handleTitleChange(e.target.value)}
