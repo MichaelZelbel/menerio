@@ -1,5 +1,6 @@
 import { Editor } from "@tiptap/react";
 import { Button } from "@/components/ui/button";
+import { EmbedToolbar } from "./EmbedToolbar";
 import {
   DropdownMenu,
   DropdownMenuContent,
