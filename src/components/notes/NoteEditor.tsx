@@ -111,6 +111,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: md });
       }, 800);
+
+      // Schedule auto AI processing
+      if (processTimer.current) clearTimeout(processTimer.current);
+      processTimer.current = setTimeout(() => {
+        const text = e.getText();
+        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+        if (words >= MIN_WORDS_FOR_PROCESSING && !note.is_trashed && checkCredits()) {
+          processNote.mutate(note.id);
+        }
+      }, AUTO_PROCESS_DELAY);
     },
   });
 
