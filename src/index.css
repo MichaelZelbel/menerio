@@ -279,6 +279,52 @@
   margin: 0.5em 0;
 }
 
+/* Embedded media — video, PDF, audio */
+.tiptap-editor .tiptap .embed-video-wrapper {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 */
+  margin: 0.75em 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: hsl(var(--muted));
+}
+
+.tiptap-editor .tiptap .embed-video-wrapper iframe,
+.tiptap-editor .tiptap .embed-video-wrapper video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 8px;
+}
+
+.tiptap-editor .tiptap .embed-pdf-wrapper {
+  width: 100%;
+  margin: 0.75em 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+}
+
+.tiptap-editor .tiptap .embed-pdf-wrapper iframe {
+  width: 100%;
+  height: 500px;
+  border: none;
+}
+
+.tiptap-editor .tiptap .embed-audio-wrapper {
+  width: 100%;
+  margin: 0.75em 0;
+}
+
+.tiptap-editor .tiptap .embed-audio-wrapper audio {
+  width: 100%;
+  border-radius: 8px;
+}
+
 .tiptap-editor .tiptap table {
   border-collapse: collapse;
   width: 100%;
