@@ -129,6 +129,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
+    if (processTimer.current) clearTimeout(processTimer.current);
     if (editor && note.content !== editor.getHTML()) {
       editor.commands.setContent(note.content || "");
     }
