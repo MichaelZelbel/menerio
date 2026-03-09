@@ -108,6 +108,12 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       VideoEmbed,
       PdfEmbed,
       AudioEmbed,
+      FileUploadHandler.configure({
+        userId: user?.id || "",
+        onUploadStart: () => setIsUploading(true),
+        onUploadEnd: () => setIsUploading(false),
+        onUploadError: (msg: string) => showToast.error(msg),
+      }),
       Markdown.configure({
         html: false,
         transformPastedText: true,
