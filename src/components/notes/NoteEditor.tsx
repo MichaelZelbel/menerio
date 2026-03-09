@@ -72,11 +72,14 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
   const { checkCredits } = useAICreditsGate();
+  const { user } = useAuth();
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
