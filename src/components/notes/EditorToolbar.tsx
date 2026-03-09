@@ -1,5 +1,6 @@
 import { Editor } from "@tiptap/react";
 import { Button } from "@/components/ui/button";
+import { EmbedToolbar } from "./EmbedToolbar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -287,6 +288,9 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
       >
         <Table className="h-3.5 w-3.5" />
       </ToolbarButton>
+
+      {/* Media embeds */}
+      <EmbedToolbar editor={editor} />
 
       <Separator orientation="vertical" className="h-5 mx-1" />
 
