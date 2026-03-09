@@ -19,6 +19,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,11 +50,12 @@ import {
   Tag,
   X,
   Info,
-  Loader2,
-  Brain,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
+
+const AUTO_PROCESS_DELAY = 10_000; // 10s after last edit
+const MIN_WORDS_FOR_PROCESSING = 50;
 
 interface NoteEditorProps {
   note: Note;
