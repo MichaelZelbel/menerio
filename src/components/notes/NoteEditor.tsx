@@ -193,16 +193,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     updateNote.mutate({ id: note.id, tags: newTags });
   };
 
-  const handleProcessAI = () => {
-    processNote.mutate(note.id, {
-      onSuccess: () => {
-        showToast.success("AI processing complete — metadata updated");
-      },
-      onError: () => {
-        showToast.error("AI processing failed. Check your OpenRouter API key.");
-      },
-    });
-  };
 
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
