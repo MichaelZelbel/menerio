@@ -246,20 +246,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           variant="ghost"
           size="icon"
           className="h-8 w-8"
-          onClick={handleProcessAI}
-          disabled={processNote.isPending}
-          title="Process with AI (generate embeddings & metadata)"
-        >
-          {processNote.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Brain className="h-4 w-4" />
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
           onClick={() => setShowInfo(!showInfo)}
           title="Note info"
         >
