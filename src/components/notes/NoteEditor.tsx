@@ -100,6 +100,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       TableRow,
       TableCell,
       TableHeader,
+      VideoEmbed,
+      PdfEmbed,
+      AudioEmbed,
       Markdown.configure({
         html: false,
         transformPastedText: true,
