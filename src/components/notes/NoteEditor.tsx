@@ -19,6 +19,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,11 +50,12 @@ import {
   Tag,
   X,
   Info,
-  Loader2,
-  Brain,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
+
+const AUTO_PROCESS_DELAY = 10_000; // 10s after last edit
+const MIN_WORDS_FOR_PROCESSING = 50;
 
 interface NoteEditorProps {
   note: Note;
@@ -64,12 +66,14 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
+  const { checkCredits } = useAICreditsGate();
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -107,6 +111,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: md });
       }, 800);
+
+      // Schedule auto AI processing
+      if (processTimer.current) clearTimeout(processTimer.current);
+      processTimer.current = setTimeout(() => {
+        const text = e.getText();
+        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+        if (words >= MIN_WORDS_FOR_PROCESSING && !note.is_trashed && checkCredits()) {
+          processNote.mutate(note.id);
+        }
+      }, AUTO_PROCESS_DELAY);
     },
   });
 
@@ -115,6 +129,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
+    if (processTimer.current) clearTimeout(processTimer.current);
     if (editor && note.content !== editor.getHTML()) {
       editor.commands.setContent(note.content || "");
     }
@@ -179,16 +194,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     updateNote.mutate({ id: note.id, tags: newTags });
   };
 
-  const handleProcessAI = () => {
-    processNote.mutate(note.id, {
-      onSuccess: () => {
-        showToast.success("AI processing complete — metadata updated");
-      },
-      onError: () => {
-        showToast.error("AI processing failed. Check your OpenRouter API key.");
-      },
-    });
-  };
 
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
@@ -227,20 +232,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           title="Add tag"
         >
           <Tag className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={handleProcessAI}
-          disabled={processNote.isPending}
-          title="Process with AI (generate embeddings & metadata)"
-        >
-          {processNote.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Brain className="h-4 w-4" />
-          )}
         </Button>
         <Button
           variant="ghost"
