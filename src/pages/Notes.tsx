@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { SEOHead } from "@/components/SEOHead";
 import { useNotes, useCreateNote, useSearchNotes, Note } from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Search, X, Brain, PanelLeftClose, PanelLeft } from "lucide-react";
-
+import { useSearchParams } from "react-router-dom";
 export default function Notes() {
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
