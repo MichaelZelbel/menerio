@@ -47,7 +47,6 @@ export function DashboardSidebar() {
   const mainItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
-    { title: "Library", url: "/dashboard/library", icon: FolderOpen },
   ];
 
   const premiumItems = [
