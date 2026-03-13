@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { SEOHead } from "@/components/SEOHead";
 import { useNotes, useCreateNote, useSearchNotes, Note } from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Search, X, Brain, PanelLeftClose, PanelLeft } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 export default function Notes() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState(false);
@@ -21,6 +23,22 @@ export default function Notes() {
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
   const searchNotes = useSearchNotes();
+
+  const handleCreate = useCallback(async () => {
+    const note = await createNote.mutateAsync({ title: "", content: "" });
+    setFilter("all");
+    setSearchMode(false);
+    setSelectedId(note.id);
+  }, [createNote]);
+
+  // Handle "action=create" from query params to auto-create a note
+  useEffect(() => {
+    if (searchParams.get("action") === "create" && !createNote.isPending) {
+      // Remove the query param immediately to prevent multiple triggers
+      setSearchParams({}, { replace: true });
+      handleCreate();
+    }
+  }, [searchParams, createNote.isPending, handleCreate, setSearchParams]);
 
   const currentNotes = useMemo(() => {
     if (searchMode && searchNotes.data) return searchNotes.data;
@@ -39,13 +57,6 @@ export default function Notes() {
       null
     );
   }, [selectedId, allNotes, trashNotes, favNotes]);
-
-  const handleCreate = async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "" });
-    setFilter("all");
-    setSearchMode(false);
-    setSelectedId(note.id);
-  };
 
   const handleSearch = (q: string) => {
     setSearchQuery(q);
