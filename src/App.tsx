@@ -23,7 +23,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Notes = lazy(() => import("./pages/Notes"));
 const Settings = lazy(() => import("./pages/Settings"));
-const Library = lazy(() => import("./pages/Library"));
+
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Cookies = lazy(() => import("./pages/Cookies"));
@@ -87,7 +87,7 @@ const App = () => (
                     <Route index element={<Dashboard />} />
                     <Route path="notes" element={<Notes />} />
                     <Route path="settings" element={<Settings />} />
-                    <Route path="library" element={<Library />} />
+                    
                     <Route path="activity" element={<ActivityPage />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
                   </Route>
