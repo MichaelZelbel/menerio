@@ -3,12 +3,33 @@ import { SEOHead } from "@/components/SEOHead";
 import { useNotes, useCreateNote, useSearchNotes, Note } from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { NoteSidebar, NoteFilter } from "@/components/notes/NoteSidebar";
+import { NoteFilter } from "@/components/notes/NoteSidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Search, X, Brain, PanelLeftClose, PanelLeft } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Plus,
+  Search,
+  X,
+  Brain,
+  FileText,
+  Star,
+  Trash2,
+  ChevronDown,
+} from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+
+const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
+  { key: "all", label: "All Notes", icon: FileText },
+  { key: "favorites", label: "Favorites", icon: Star },
+  { key: "trash", label: "Trash", icon: Trash2 },
+];
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -16,7 +37,6 @@ export default function Notes() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -31,14 +51,18 @@ export default function Notes() {
     setSelectedId(note.id);
   }, [createNote]);
 
-  // Handle "action=create" from query params to auto-create a note
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
-      // Remove the query param immediately to prevent multiple triggers
       setSearchParams({}, { replace: true });
       handleCreate();
     }
   }, [searchParams, createNote.isPending, handleCreate, setSearchParams]);
+
+  const counts = {
+    all: allNotes.length,
+    favorites: favNotes.length,
+    trash: trashNotes.length,
+  };
 
   const currentNotes = useMemo(() => {
     if (searchMode && searchNotes.data) return searchNotes.data;
@@ -49,7 +73,6 @@ export default function Notes() {
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
-    // Search across all lists
     return (
       allNotes.find((n) => n.id === selectedId) ||
       trashNotes.find((n) => n.id === selectedId) ||
@@ -57,6 +80,8 @@ export default function Notes() {
       null
     );
   }, [selectedId, allNotes, trashNotes, favNotes]);
+
+  const activeFilter = filterConfig.find((f) => f.key === filter)!;
 
   const handleSearch = (q: string) => {
     setSearchQuery(q);
@@ -74,45 +99,50 @@ export default function Notes() {
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
-      {/* Left sidebar — filters */}
-      {sidebarOpen && (
-        <div className="w-56 shrink-0 border-r border-border hidden md:block">
-          <NoteSidebar
-            filter={filter}
-            onFilterChange={(f) => {
-              setFilter(f);
-              setSearchMode(false);
-            }}
-            counts={{
-              all: allNotes.length,
-              favorites: favNotes.length,
-              trash: trashNotes.length,
-            }}
-            onSearchToggle={() => setSearchMode(!searchMode)}
-            searchActive={searchMode}
-          />
-        </div>
-      )}
-
-      {/* Middle panel — note list */}
+      {/* Note list panel — with integrated filters */}
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+        {/* Header with filter dropdown */}
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="gap-1.5 text-sm font-semibold h-8 px-2">
+                <activeFilter.icon className="h-4 w-4" />
+                {searchMode ? "Search" : activeFilter.label}
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  {!searchMode && counts[filter]}
+                </span>
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              {filterConfig.map((f) => (
+                <DropdownMenuItem
+                  key={f.key}
+                  onClick={() => {
+                    setFilter(f.key);
+                    setSearchMode(false);
+                  }}
+                  className="gap-2"
+                >
+                  <f.icon className="h-4 w-4" />
+                  <span className="flex-1">{f.label}</span>
+                  <span className="text-[10px] text-muted-foreground">{counts[f.key]}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div className="flex-1" />
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 hidden md:flex"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="h-8 w-8"
+            onClick={() => setSearchMode(!searchMode)}
+            title="Search"
           >
-            {sidebarOpen ? (
-              <PanelLeftClose className="h-4 w-4" />
-            ) : (
-              <PanelLeft className="h-4 w-4" />
-            )}
+            <Search className="h-4 w-4" />
           </Button>
-          <h3 className="text-sm font-semibold flex-1">
-            {searchMode ? "Search Results" : filter === "all" ? "All Notes" : filter === "favorites" ? "Favorites" : "Trash"}
-          </h3>
           <Button
             variant="ghost"
             size="icon"
@@ -167,7 +197,7 @@ export default function Notes() {
         )}
       </div>
 
-      {/* Right panel — editor */}
+      {/* Right panel — editor (now gets much more space) */}
       <div className="flex-1 min-w-0">
         {selectedNote ? (
           <NoteEditor
