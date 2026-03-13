@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Search, X, Brain, PanelLeftClose, PanelLeft } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 export default function Notes() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState(false);
@@ -21,6 +22,15 @@ export default function Notes() {
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
   const searchNotes = useSearchNotes();
+
+  // Handle "action=create" from query params to auto-create a note
+  useEffect(() => {
+    if (searchParams.get("action") === "create") {
+      handleCreate();
+      // Remove the query param after triggering
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams]);
 
   const currentNotes = useMemo(() => {
     if (searchMode && searchNotes.data) return searchNotes.data;
