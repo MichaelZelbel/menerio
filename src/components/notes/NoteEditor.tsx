@@ -55,7 +55,10 @@ import {
   Tag,
   X,
   Info,
+  CalendarPlus,
+  Loader2,
 } from "lucide-react";
+import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 
