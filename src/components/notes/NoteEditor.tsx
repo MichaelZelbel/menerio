@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -55,7 +56,10 @@ import {
   Tag,
   X,
   Info,
+  CalendarPlus,
+  Loader2,
 } from "lucide-react";
+import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 
@@ -80,6 +84,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
+  const [showEventDialog, setShowEventDialog] = useState(false);
+  const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -211,6 +218,28 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     updateNote.mutate({ id: note.id, tags: newTags });
   };
 
+  const extractEvent = async () => {
+    const text = `${title}\n\n${editor?.getText() || ""}`.trim();
+    if (!text || text.length < 10) {
+      showToast.error("Note is too short to extract an event");
+      return;
+    }
+    setIsExtractingEvent(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("extract-event", {
+        body: { content: text },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setEventDraft(data.event as EventDraft);
+      setShowEventDialog(true);
+    } catch (err: any) {
+      console.error("Event extraction failed:", err);
+      showToast.error(err.message || "Failed to extract event from note");
+    } finally {
+      setIsExtractingEvent(false);
+    }
+  };
 
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
@@ -259,6 +288,22 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         >
           <Info className="h-4 w-4" />
         </Button>
+        {!note.is_trashed && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={extractEvent}
+            disabled={isExtractingEvent}
+            title="Create event in Temerio"
+          >
+            {isExtractingEvent ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CalendarPlus className="h-4 w-4" />
+            )}
+          </Button>
+        )}
 
         <div className="flex-1" />
 
@@ -411,6 +456,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Create Event in Temerio */}
+      <CreateEventDialog
+        open={showEventDialog}
+        onOpenChange={setShowEventDialog}
+        draft={eventDraft}
+      />
     </div>
   );
 }
