@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { EditorToolbar } from "./EditorToolbar";
