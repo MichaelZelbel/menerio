@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.open-brain-mcp]
 verify_jwt = false
+
+[functions.extract-event]
+verify_jwt = false
+
+[functions.send-to-temerio]
+verify_jwt = false

@@ -456,6 +456,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Create Event in Temerio */}
+      <CreateEventDialog
+        open={showEventDialog}
+        onOpenChange={setShowEventDialog}
+        draft={eventDraft}
+      />
     </div>
   );
 }
