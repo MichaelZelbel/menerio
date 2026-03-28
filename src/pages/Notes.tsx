@@ -38,6 +38,7 @@ export default function Notes() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [entityFilter, setEntityFilter] = useState<string | null>(null);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
