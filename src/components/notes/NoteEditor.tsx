@@ -90,6 +90,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
+  const [showForwardDialog, setShowForwardDialog] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
