@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { ExternalNotePanel } from "./ExternalNotePanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -128,7 +129,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       }),
     ],
     content: note.content || "",
-    editable: !note.is_trashed,
+    editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = (e.storage as any).markdown.getMarkdown();
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -158,7 +159,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       editor.commands.setContent(note.content || "");
     }
     if (editor) {
-      editor.setEditable(!note.is_trashed);
+      editor.setEditable(!note.is_trashed && !note.is_external);
     }
   }, [note.id]);
 
@@ -418,15 +419,34 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
             Uploading…
           </div>
         )}
-        <input
-          value={title}
-          onChange={(e) => handleTitleChange(e.target.value)}
-          placeholder="Untitled"
-          className="w-full text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40 mb-4"
-          disabled={note.is_trashed}
-        />
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            value={title}
+            onChange={(e) => handleTitleChange(e.target.value)}
+            placeholder="Untitled"
+            className="flex-1 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
+            disabled={note.is_trashed || note.is_external}
+          />
+          {note.entity_type && (
+            <Badge variant="secondary" className="text-[10px] shrink-0">
+              {note.entity_type}
+            </Badge>
+          )}
+          {note.is_external && note.source_app && (
+            <Badge variant="outline" className="text-[10px] shrink-0 bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30">
+              {note.source_app}
+            </Badge>
+          )}
+        </div>
         <EditorContent editor={editor} className="tiptap-editor" />
       </div>
+
+      {/* External note panel */}
+      {note.is_external && (
+        <div className="shrink-0 border-t border-border px-4 py-4 overflow-y-auto max-h-[40%] bg-muted/20">
+          <ExternalNotePanel note={note} />
+        </div>
+      )}
 
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">

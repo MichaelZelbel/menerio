@@ -22,6 +22,8 @@ import {
   Star,
   Trash2,
   ChevronDown,
+  Filter,
+  Check,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -37,6 +39,7 @@ export default function Notes() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [entityFilter, setEntityFilter] = useState<string | null>(null);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -65,11 +68,17 @@ export default function Notes() {
   };
 
   const currentNotes = useMemo(() => {
-    if (searchMode && searchNotes.data) return searchNotes.data;
-    if (filter === "favorites") return favNotes;
-    if (filter === "trash") return trashNotes;
-    return allNotes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchNotes.data]);
+    let notes: Note[];
+    if (searchMode && searchNotes.data) notes = searchNotes.data;
+    else if (filter === "favorites") notes = favNotes;
+    else if (filter === "trash") notes = trashNotes;
+    else notes = allNotes;
+
+    if (entityFilter) {
+      notes = notes.filter((n) => n.entity_type === entityFilter);
+    }
+    return notes;
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchNotes.data, entityFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -127,6 +136,32 @@ export default function Notes() {
                   <f.icon className="h-4 w-4" />
                   <span className="flex-1">{f.label}</span>
                   <span className="text-[10px] text-muted-foreground">{counts[f.key]}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Entity type filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={entityFilter ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                title="Filter by type"
+              >
+                <Filter className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-40">
+              <DropdownMenuItem onClick={() => setEntityFilter(null)} className="gap-2">
+                <span className="flex-1">All Types</span>
+                {!entityFilter && <Check className="h-3 w-3" />}
+              </DropdownMenuItem>
+              {["person", "event", "idea", "prompt", "document", "note"].map((t) => (
+                <DropdownMenuItem key={t} onClick={() => setEntityFilter(t)} className="gap-2">
+                  <span className="flex-1 capitalize">{t}</span>
+                  {entityFilter === t && <Check className="h-3 w-3" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

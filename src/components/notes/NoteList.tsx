@@ -1,6 +1,7 @@
 import { Note } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2 } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { formatDistanceToNow } from "date-fns";
 
 interface NoteListProps {
@@ -8,6 +9,15 @@ interface NoteListProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
 }
+
+const ENTITY_COLORS: Record<string, string> = {
+  person: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  event: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+  prompt: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  document: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
+  note: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+};
 
 function getPreview(content: string, maxLen = 80): string {
   const text = content.replace(/\n/g, " ").trim();
@@ -42,15 +52,29 @@ export function NoteList({ notes, selectedId, onSelect }: NoteListProps) {
               {note.title || "Untitled"}
             </h4>
           </div>
-          <p className="text-xs text-muted-foreground truncate mb-1">
+          <p className="text-xs text-muted-foreground truncate mb-1.5">
             {getPreview(note.content)}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[10px] text-muted-foreground/70">
               {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
             </span>
+            {note.entity_type && (
+              <span className={cn(
+                "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
+                ENTITY_COLORS[note.entity_type] || "bg-muted text-muted-foreground"
+              )}>
+                {note.entity_type}
+              </span>
+            )}
+            {note.is_external && note.source_app && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-700 dark:text-orange-400 font-medium">
+                <ExternalLink className="h-2.5 w-2.5" />
+                {note.source_app}
+              </span>
+            )}
             {note.tags?.length > 0 && (
-              <div className="flex gap-1">
+              <>
                 {note.tags.slice(0, 2).map((tag) => (
                   <span
                     key={tag}
@@ -59,7 +83,7 @@ export function NoteList({ notes, selectedId, onSelect }: NoteListProps) {
                     {tag}
                   </span>
                 ))}
-              </div>
+              </>
             )}
           </div>
         </button>

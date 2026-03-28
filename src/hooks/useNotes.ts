@@ -3,6 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 
+export interface RelatedItem {
+  type: string;
+  name: string;
+  date?: string;
+  source_app?: string;
+  source_id?: string;
+  source_url?: string;
+}
+
 export interface Note {
   id: string;
   user_id: string;
@@ -14,6 +23,14 @@ export interface Note {
   is_pinned: boolean;
   is_trashed: boolean;
   trashed_at: string | null;
+  entity_type: string | null;
+  source_app: string | null;
+  source_id: string | null;
+  source_url: string | null;
+  is_external: boolean;
+  sync_status: string;
+  structured_fields: Record<string, unknown>;
+  related: RelatedItem[];
   created_at: string;
   updated_at: string;
 }
@@ -43,7 +60,7 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
     queryFn: async () => {
       let query = supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .order("is_pinned", { ascending: false })
         .order("updated_at", { ascending: false });
@@ -151,7 +168,7 @@ export function useSearchNotes() {
       const q = query.toLowerCase();
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
