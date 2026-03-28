@@ -4,16 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Github, Twitter, Linkedin, Mail } from "lucide-react";
 
 const productLinks = [
-  { label: "Features", to: "/features" },
   { label: "Docs", to: "/docs" },
-  { label: "Pricing", to: "/pricing" },
   { label: "Changelog", to: "/changelog" },
 ];
 
 const companyLinks = [
   { label: "About", to: "/about" },
   { label: "Blog", to: "/blog" },
-  { label: "Careers", to: "/careers" },
   { label: "Contact", to: "/contact" },
 ];
 
