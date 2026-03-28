@@ -159,7 +159,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       editor.commands.setContent(note.content || "");
     }
     if (editor) {
-      editor.setEditable(!note.is_trashed);
+      editor.setEditable(!note.is_trashed && !note.is_external);
     }
   }, [note.id]);
 
