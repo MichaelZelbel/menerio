@@ -140,6 +140,32 @@ export default function Notes() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Entity type filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={entityFilter ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                title="Filter by type"
+              >
+                <Filter className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-40">
+              <DropdownMenuItem onClick={() => setEntityFilter(null)} className="gap-2">
+                <span className="flex-1">All Types</span>
+                {!entityFilter && <Check className="h-3 w-3" />}
+              </DropdownMenuItem>
+              {["person", "event", "idea", "prompt", "document", "note"].map((t) => (
+                <DropdownMenuItem key={t} onClick={() => setEntityFilter(t)} className="gap-2">
+                  <span className="flex-1 capitalize">{t}</span>
+                  {entityFilter === t && <Check className="h-3 w-3" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <div className="flex-1" />
 
           <Button
