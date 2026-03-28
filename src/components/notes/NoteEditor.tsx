@@ -60,6 +60,7 @@ import {
   Info,
   CalendarPlus,
   Loader2,
+  Send,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
