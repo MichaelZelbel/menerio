@@ -109,6 +109,42 @@ export type Database = {
         }
         Relationships: []
       }
+      connected_apps: {
+        Row: {
+          api_key: string
+          app_name: string
+          created_at: string | null
+          display_name: string
+          id: string
+          is_active: boolean | null
+          updated_at: string | null
+          user_id: string
+          webhook_url: string | null
+        }
+        Insert: {
+          api_key: string
+          app_name: string
+          created_at?: string | null
+          display_name: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          webhook_url?: string | null
+        }
+        Update: {
+          api_key?: string
+          app_name?: string
+          created_at?: string | null
+          display_name?: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          webhook_url?: string | null
+        }
+        Relationships: []
+      }
       llm_usage_events: {
         Row: {
           completion_tokens: number
