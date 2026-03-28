@@ -129,7 +129,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       }),
     ],
     content: note.content || "",
-    editable: !note.is_trashed,
+    editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = (e.storage as any).markdown.getMarkdown();
       if (saveTimer.current) clearTimeout(saveTimer.current);
