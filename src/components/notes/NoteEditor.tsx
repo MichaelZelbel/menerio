@@ -429,6 +429,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         <EditorContent editor={editor} className="tiptap-editor" />
       </div>
 
+      {/* External note panel */}
+      {note.is_external && (
+        <div className="shrink-0 border-t border-border px-4 py-4 overflow-y-auto max-h-[40%] bg-muted/20">
+          <ExternalNotePanel note={note} />
+        </div>
+      )}
+
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
         <span>
