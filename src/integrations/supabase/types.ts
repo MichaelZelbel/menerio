@@ -117,6 +117,7 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean | null
+          permissions: Json | null
           updated_at: string | null
           user_id: string
           webhook_url: string | null
@@ -128,6 +129,7 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean | null
+          permissions?: Json | null
           updated_at?: string | null
           user_id?: string
           webhook_url?: string | null
@@ -139,6 +141,7 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean | null
+          permissions?: Json | null
           updated_at?: string | null
           user_id?: string
           webhook_url?: string | null
