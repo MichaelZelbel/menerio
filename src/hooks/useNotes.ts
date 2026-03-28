@@ -168,7 +168,7 @@ export function useSearchNotes() {
       const q = query.toLowerCase();
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
