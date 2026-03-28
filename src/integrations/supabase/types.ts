@@ -159,11 +159,19 @@ export type Database = {
           content: string
           created_at: string | null
           embedding: string | null
+          entity_type: string | null
           id: string
+          is_external: boolean | null
           is_favorite: boolean | null
           is_pinned: boolean | null
           is_trashed: boolean | null
           metadata: Json | null
+          related: Json | null
+          source_app: string | null
+          source_id: string | null
+          source_url: string | null
+          structured_fields: Json | null
+          sync_status: string | null
           tags: string[] | null
           title: string
           trashed_at: string | null
@@ -174,11 +182,19 @@ export type Database = {
           content?: string
           created_at?: string | null
           embedding?: string | null
+          entity_type?: string | null
           id?: string
+          is_external?: boolean | null
           is_favorite?: boolean | null
           is_pinned?: boolean | null
           is_trashed?: boolean | null
           metadata?: Json | null
+          related?: Json | null
+          source_app?: string | null
+          source_id?: string | null
+          source_url?: string | null
+          structured_fields?: Json | null
+          sync_status?: string | null
           tags?: string[] | null
           title?: string
           trashed_at?: string | null
@@ -189,11 +205,19 @@ export type Database = {
           content?: string
           created_at?: string | null
           embedding?: string | null
+          entity_type?: string | null
           id?: string
+          is_external?: boolean | null
           is_favorite?: boolean | null
           is_pinned?: boolean | null
           is_trashed?: boolean | null
           metadata?: Json | null
+          related?: Json | null
+          source_app?: string | null
+          source_id?: string | null
+          source_url?: string | null
+          structured_fields?: Json | null
+          sync_status?: string | null
           tags?: string[] | null
           title?: string
           trashed_at?: string | null
