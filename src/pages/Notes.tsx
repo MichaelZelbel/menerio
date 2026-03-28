@@ -67,11 +67,17 @@ export default function Notes() {
   };
 
   const currentNotes = useMemo(() => {
-    if (searchMode && searchNotes.data) return searchNotes.data;
-    if (filter === "favorites") return favNotes;
-    if (filter === "trash") return trashNotes;
-    return allNotes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchNotes.data]);
+    let notes: Note[];
+    if (searchMode && searchNotes.data) notes = searchNotes.data;
+    else if (filter === "favorites") notes = favNotes;
+    else if (filter === "trash") notes = trashNotes;
+    else notes = allNotes;
+
+    if (entityFilter) {
+      notes = notes.filter((n) => n.entity_type === entityFilter);
+    }
+    return notes;
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchNotes.data, entityFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
