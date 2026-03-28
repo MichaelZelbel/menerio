@@ -24,6 +24,7 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
 import { ExternalNotePanel } from "./ExternalNotePanel";
+import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -59,6 +60,7 @@ import {
   Info,
   CalendarPlus,
   Loader2,
+  Send,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
@@ -88,6 +90,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
+  const [showForwardDialog, setShowForwardDialog] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -305,6 +308,17 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
             )}
           </Button>
         )}
+        {!note.is_trashed && !note.is_external && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowForwardDialog(true)}
+            title="An App senden"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
 
         <div className="flex-1" />
 
@@ -482,6 +496,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         open={showEventDialog}
         onOpenChange={setShowEventDialog}
         draft={eventDraft}
+      />
+
+      {/* Forward to App */}
+      <ForwardToAppDialog
+        open={showForwardDialog}
+        onOpenChange={setShowForwardDialog}
+        note={note}
       />
     </div>
   );
