@@ -419,13 +419,25 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
             Uploading…
           </div>
         )}
-        <input
-          value={title}
-          onChange={(e) => handleTitleChange(e.target.value)}
-          placeholder="Untitled"
-          className="w-full text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40 mb-4"
-          disabled={note.is_trashed}
-        />
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            value={title}
+            onChange={(e) => handleTitleChange(e.target.value)}
+            placeholder="Untitled"
+            className="flex-1 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
+            disabled={note.is_trashed || note.is_external}
+          />
+          {note.entity_type && (
+            <Badge variant="secondary" className="text-[10px] shrink-0">
+              {note.entity_type}
+            </Badge>
+          )}
+          {note.is_external && note.source_app && (
+            <Badge variant="outline" className="text-[10px] shrink-0 bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30">
+              {note.source_app}
+            </Badge>
+          )}
+        </div>
         <EditorContent editor={editor} className="tiptap-editor" />
       </div>
 
