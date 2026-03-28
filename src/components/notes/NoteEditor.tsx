@@ -497,6 +497,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         onOpenChange={setShowEventDialog}
         draft={eventDraft}
       />
+
+      {/* Forward to App */}
+      <ForwardToAppDialog
+        open={showForwardDialog}
+        onOpenChange={setShowForwardDialog}
+        note={note}
+      />
     </div>
   );
 }
