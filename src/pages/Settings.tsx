@@ -385,6 +385,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        {/* ── Connections Tab ── */}
+        <TabsContent value="connections">
+          <ConnectionsManager />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
