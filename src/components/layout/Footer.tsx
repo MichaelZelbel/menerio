@@ -41,14 +41,6 @@ export function Footer() {
             <p className="text-sm text-muted-foreground mb-6 max-w-xs">
               Your AI-powered knowledge system. One brain, every AI. Capture, search, and connect your thoughts.
             </p>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Enter your email"
-                type="email"
-                className="max-w-[220px]"
-              />
-              <Button size="sm">Subscribe</Button>
-            </div>
           </div>
 
           {/* Product */}
