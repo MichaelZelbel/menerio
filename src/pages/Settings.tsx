@@ -359,7 +359,12 @@ export default function Settings() {
           <ImportMigrate />
         </TabsContent>
 
-        {/* ── AI Credits Tab ── */}
+        {/* ── Notifications Tab ── */}
+        <TabsContent value="notifications">
+          <NotificationPreferences />
+        </TabsContent>
+
+
         <TabsContent value="credits">
           <CreditsDisplay />
         </TabsContent>
