@@ -320,6 +320,28 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
             <Send className="h-4 w-4" />
           </Button>
         )}
+        {/* Classify button — shown when no metadata extracted yet */}
+        {!note.is_trashed && !metadata?.type && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => {
+              if (checkCredits()) {
+                processNote.mutate(note.id);
+              }
+            }}
+            disabled={processNote.isPending}
+            title="Extract metadata with AI"
+          >
+            {processNote.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            Classify
+          </Button>
+        )}
 
         <div className="flex-1" />
 
