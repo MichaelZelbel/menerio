@@ -481,6 +481,21 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         <EditorContent editor={editor} className="tiptap-editor" />
       </div>
 
+      {/* Connections panel */}
+      {showConnections && (
+        <div className="shrink-0 border-t border-border px-4 py-3 overflow-y-auto max-h-[40%] bg-muted/10">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Link2 className="h-3.5 w-3.5 text-primary" /> Connections
+            </h4>
+            <button onClick={() => setShowConnections(false)} className="text-muted-foreground hover:text-foreground">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <ConnectionsPanel noteId={note.id} />
+        </div>
+      )}
+
       {/* External note panel */}
       {note.is_external && (
         <div className="shrink-0 border-t border-border px-4 py-4 overflow-y-auto max-h-[40%] bg-muted/20">
