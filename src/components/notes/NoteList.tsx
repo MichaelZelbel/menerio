@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface NoteListProps {
@@ -8,6 +8,7 @@ interface NoteListProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   showSimilarity?: boolean;
+  onTopicClick?: (topic: string) => void;
 }
 
 const ENTITY_COLORS: Record<string, string> = {
@@ -17,6 +18,17 @@ const ENTITY_COLORS: Record<string, string> = {
   prompt: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   document: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
   note: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  observation: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
+  task: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+  reference: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+  person_note: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  meeting_note: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+  decision: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  project: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
 };
 
 function getSimilarityColor(score: number): string {
@@ -31,7 +43,7 @@ function getPreview(content: string, maxLen = 80): string {
   return text.length > maxLen ? text.slice(0, maxLen) + "…" : text || "No content";
 }
 
-export function NoteList({ notes, selectedId, onSelect, showSimilarity }: NoteListProps) {
+export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicClick }: NoteListProps) {
   if (notes.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-6 text-center">
@@ -44,6 +56,13 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity }: NoteLi
     <div className="flex-1 overflow-y-auto">
       {notes.map((note) => {
         const similarity = "similarity" in note ? (note as SemanticSearchResult).similarity : null;
+        const meta = note.metadata as Record<string, unknown> | null;
+        const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
+        const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
+        const actionItems = Array.isArray(meta?.action_items) ? (meta.action_items as string[]) : [];
+        const metaType = typeof meta?.type === "string" ? meta.type : null;
+        const hasMetadata = topics.length > 0 || people.length > 0 || actionItems.length > 0 || metaType;
+
         return (
           <button
             key={note.id}
@@ -60,7 +79,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity }: NoteLi
               <h4 className="text-sm font-medium truncate flex-1">
                 {note.title || "Untitled"}
               </h4>
-              {/* Similarity indicator */}
               {showSimilarity && similarity !== null && similarity !== undefined && (
                 <span className="flex items-center gap-1 shrink-0" title={`${Math.round(similarity * 100)}% match`}>
                   <span className={cn("h-1.5 w-1.5 rounded-full", getSimilarityColor(similarity))} />
@@ -73,6 +91,49 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity }: NoteLi
             <p className="text-xs text-muted-foreground truncate mb-1.5">
               {getPreview(note.content)}
             </p>
+
+            {/* Metadata pills */}
+            {hasMetadata && (
+              <div className="flex items-center gap-1 flex-wrap mb-1.5">
+                {metaType && (
+                  <span className={cn(
+                    "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
+                    TYPE_COLORS[metaType] || "bg-muted text-muted-foreground"
+                  )}>
+                    {metaType.replace("_", " ")}
+                  </span>
+                )}
+                {topics.slice(0, 3).map((topic) => (
+                  <span
+                    key={topic}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTopicClick?.(topic);
+                    }}
+                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium cursor-pointer hover:bg-primary/20 inline-flex items-center gap-0.5"
+                  >
+                    <Hash className="h-2 w-2" />
+                    {topic}
+                  </span>
+                ))}
+                {people.slice(0, 2).map((person) => (
+                  <span
+                    key={person}
+                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-400 font-medium inline-flex items-center gap-0.5"
+                  >
+                    <User className="h-2 w-2" />
+                    {person}
+                  </span>
+                ))}
+                {actionItems.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium inline-flex items-center gap-0.5">
+                    <CheckSquare className="h-2 w-2" />
+                    {actionItems.length} to-do{actionItems.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] text-muted-foreground/70">
                 {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
