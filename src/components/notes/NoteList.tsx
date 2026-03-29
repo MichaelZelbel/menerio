@@ -40,11 +40,6 @@ function getSimilarityColor(score: number): string {
   return "bg-muted-foreground";
 }
 
-function getPreview(content: string, maxLen = 80): string {
-  const text = content.replace(/\n/g, " ").trim();
-  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text || "No content";
-}
-
 export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicClick }: NoteListProps) {
   if (notes.length === 0) {
     return (
