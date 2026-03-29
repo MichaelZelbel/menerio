@@ -41,8 +41,9 @@ import {
   Type,
   Tags,
 } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { showToast } from "@/lib/toast";
 
 const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
   { key: "all", label: "All Notes", icon: FileText },
