@@ -1,6 +1,13 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { SEOHead } from "@/components/SEOHead";
-import { useNotes, useCreateNote, useSearchNotes, Note } from "@/hooks/useNotes";
+import {
+  useNotes,
+  useCreateNote,
+  useIlikeSearch,
+  useSemanticSearch,
+  Note,
+  SemanticSearchResult,
+} from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
@@ -14,6 +21,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Plus,
   Search,
   X,
@@ -24,14 +36,19 @@ import {
   ChevronDown,
   Filter,
   Check,
+  Sparkles,
+  Type,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
   { key: "all", label: "All Notes", icon: FileText },
   { key: "favorites", label: "Favorites", icon: Star },
   { key: "trash", label: "Trash", icon: Trash2 },
 ];
+
+type SearchMode = "semantic" | "exact";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -40,12 +57,16 @@ export default function Notes() {
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
+  const [searchType, setSearchType] = useState<SearchMode>("semantic");
+  const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
-  const searchNotes = useSearchNotes();
+  const ilikeSearch = useIlikeSearch();
+  const semanticSearch = useSemanticSearch();
 
   const handleCreate = useCallback(async () => {
     const note = await createNote.mutateAsync({ title: "", content: "" });
@@ -67,9 +88,55 @@ export default function Notes() {
     trash: trashNotes.length,
   };
 
+  // Fire ILIKE immediately, debounce semantic
+  const handleSearch = useCallback(
+    (q: string) => {
+      setSearchQuery(q);
+      setSemanticResults(null);
+
+      if (!q.trim()) return;
+
+      // Instant ILIKE
+      ilikeSearch.mutate(q);
+
+      // Debounced semantic (only in semantic mode)
+      if (searchType === "semantic") {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          semanticSearch.mutate(
+            { query: q },
+            {
+              onSuccess: (data) => {
+                setSemanticResults(data.results as SemanticSearchResult[]);
+              },
+            }
+          );
+        }, 300);
+      }
+    },
+    [ilikeSearch, semanticSearch, searchType]
+  );
+
+  // Clean up debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  // Determine which search results to show
+  const searchResults: SemanticSearchResult[] | null = useMemo(() => {
+    if (!searchMode || !searchQuery.trim()) return null;
+    if (searchType === "exact") {
+      return ilikeSearch.data || null;
+    }
+    // Semantic mode: show semantic results if available, otherwise ILIKE as fallback
+    return semanticResults || ilikeSearch.data || null;
+  }, [searchMode, searchQuery, searchType, semanticResults, ilikeSearch.data]);
+
   const currentNotes = useMemo(() => {
-    let notes: Note[];
-    if (searchMode && searchNotes.data) notes = searchNotes.data;
+    let notes: (Note | SemanticSearchResult)[];
+    if (searchMode && searchResults) notes = searchResults;
     else if (filter === "favorites") notes = favNotes;
     else if (filter === "trash") notes = trashNotes;
     else notes = allNotes;
@@ -78,7 +145,7 @@ export default function Notes() {
       notes = notes.filter((n) => n.entity_type === entityFilter);
     }
     return notes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchNotes.data, entityFilter]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -92,23 +159,20 @@ export default function Notes() {
 
   const activeFilter = filterConfig.find((f) => f.key === filter)!;
 
-  const handleSearch = (q: string) => {
-    setSearchQuery(q);
-    if (q.trim()) {
-      searchNotes.mutate(q);
-    }
-  };
-
   const exitSearch = () => {
     setSearchMode(false);
     setSearchQuery("");
+    setSemanticResults(null);
   };
+
+  const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
+  const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
   return (
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
-      {/* Note list panel — with integrated filters */}
+      {/* Note list panel */}
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
         {/* Header with filter dropdown */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
@@ -192,13 +256,13 @@ export default function Notes() {
 
         {/* Search bar */}
         {searchMode && (
-          <div className="px-3 py-2 border-b border-border shrink-0">
+          <div className="px-3 py-2 border-b border-border shrink-0 space-y-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search notes…"
+                placeholder={searchType === "semantic" ? "Smart search…" : "Exact search…"}
                 className="pl-8 pr-8 h-8 text-sm"
                 autoFocus
               />
@@ -208,6 +272,63 @@ export default function Notes() {
               >
                 <X className="h-3.5 w-3.5" />
               </button>
+            </div>
+            {/* Search mode toggle + status */}
+            <div className="flex items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={searchType === "semantic" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                      "h-6 px-2 text-[10px] gap-1",
+                      searchType === "semantic" && "bg-primary/10 text-primary hover:bg-primary/15"
+                    )}
+                    onClick={() => {
+                      setSearchType("semantic");
+                      setSemanticResults(null);
+                      if (searchQuery.trim()) handleSearch(searchQuery);
+                    }}
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Smart
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  AI-powered semantic search — finds related concepts
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={searchType === "exact" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-[10px] gap-1"
+                    onClick={() => {
+                      setSearchType("exact");
+                      setSemanticResults(null);
+                      if (searchQuery.trim()) ilikeSearch.mutate(searchQuery);
+                    }}
+                  >
+                    <Type className="h-3 w-3" />
+                    Exact
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Keyword matching — finds exact text
+                </TooltipContent>
+              </Tooltip>
+              <div className="flex-1" />
+              {isSemanticLoading && (
+                <span className="text-[10px] text-muted-foreground animate-pulse flex items-center gap-1">
+                  <Sparkles className="h-2.5 w-2.5" /> Thinking…
+                </span>
+              )}
+              {showingSemanticResults && !isSemanticLoading && (
+                <span className="text-[10px] text-primary flex items-center gap-1">
+                  <Sparkles className="h-2.5 w-2.5" /> AI results
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -228,11 +349,12 @@ export default function Notes() {
             notes={currentNotes}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            showSimilarity={searchMode && showingSemanticResults}
           />
         )}
       </div>
 
-      {/* Right panel — editor (now gets much more space) */}
+      {/* Right panel — editor */}
       <div className="flex-1 min-w-0">
         {selectedNote ? (
           <NoteEditor
