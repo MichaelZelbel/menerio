@@ -431,7 +431,7 @@ export default function Notes() {
           <NoteList
             notes={currentNotes}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={selectNote}
             showSimilarity={searchMode && showingSemanticResults}
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
           />
