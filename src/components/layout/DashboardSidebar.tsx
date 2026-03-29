@@ -54,6 +54,7 @@ export function DashboardSidebar() {
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     { title: "Actions", url: "/dashboard/actions", icon: ListChecks },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
+    { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
   ];
 
   const premiumItems = [
