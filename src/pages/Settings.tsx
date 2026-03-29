@@ -25,11 +25,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
 import { MCPConnectionManager } from "@/components/settings/MCPConnectionManager";
+import { ImportMigrate } from "@/components/settings/ImportMigrate";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -213,10 +214,11 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue={defaultTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-9">
+        <TabsList className="flex flex-wrap gap-1 h-auto p-1">
           <TabsTrigger value="profile" className="gap-1.5 text-xs"><User className="h-3.5 w-3.5 hidden sm:block" /> Profile</TabsTrigger>
           <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Avatar</TabsTrigger>
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
+          <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="connections" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Apps</TabsTrigger>
           <TabsTrigger value="mcp" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> MCP</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
@@ -348,6 +350,11 @@ export default function Settings() {
               </form>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Import Tab ── */}
+        <TabsContent value="import">
+          <ImportMigrate />
         </TabsContent>
 
         {/* ── AI Credits Tab ── */}

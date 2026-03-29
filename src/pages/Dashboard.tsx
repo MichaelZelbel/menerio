@@ -5,6 +5,7 @@ import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
 import { useNotes } from "@/hooks/useNotes";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import { FirstCapturesWizard, useShowFirstCaptures } from "@/components/onboarding/FirstCapturesWizard";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "succes
 
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
+  const firstCaptures = useShowFirstCaptures();
   const { credits, isLoading: creditsLoading } = useAICredits();
   const { data: notes = [] } = useNotes("all");
   const navigate = useNavigate();
@@ -184,6 +186,13 @@ const Dashboard = () => {
 
           <ActivityFeed limit={5} showViewAll />
         </div>
+
+        {/* Right sidebar continued - First Captures */}
+        {firstCaptures.show && (
+          <div className="lg:col-span-3">
+            <FirstCapturesWizard onComplete={firstCaptures.dismiss} />
+          </div>
+        )}
 
         {/* Right sidebar */}
         <div className="space-y-6">
