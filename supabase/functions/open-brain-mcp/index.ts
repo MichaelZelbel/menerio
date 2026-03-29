@@ -67,6 +67,31 @@ Only extract what's explicitly there.`,
   }
 }
 
+function formatNote(
+  t: { content: string; title?: string; metadata: Record<string, unknown>; created_at: string; id?: string },
+  i: number,
+  showSimilarity?: number
+): string {
+  const m = t.metadata || {};
+  const parts: string[] = [];
+  if (showSimilarity !== undefined) {
+    parts.push(`--- Result ${i + 1} (${(showSimilarity * 100).toFixed(1)}% match) ---`);
+  } else {
+    parts.push(`--- ${i + 1} ---`);
+  }
+  if (t.title) parts.push(`Title: ${t.title}`);
+  parts.push(`Captured: ${new Date(t.created_at).toLocaleDateString()}`);
+  parts.push(`Type: ${m.type || "unknown"}`);
+  if (Array.isArray(m.topics) && m.topics.length)
+    parts.push(`Topics: ${(m.topics as string[]).join(", ")}`);
+  if (Array.isArray(m.people) && m.people.length)
+    parts.push(`People: ${(m.people as string[]).join(", ")}`);
+  if (Array.isArray(m.action_items) && m.action_items.length)
+    parts.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
+  parts.push(`\n${t.content}`);
+  return parts.join("\n");
+}
+
 // --- MCP Server Setup ---
 const server = new McpServer({
   name: "open-brain",
@@ -97,72 +122,34 @@ server.registerTool(
       });
 
       if (error) {
-        return {
-          content: [{ type: "text" as const, text: `Search error: ${error.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text" as const, text: `Search error: ${error.message}` }], isError: true };
       }
 
       if (!data || data.length === 0) {
-        return {
-          content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }],
-        };
+        return { content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }] };
       }
 
-      const results = data.map(
-        (
-          t: {
-            content: string;
-            metadata: Record<string, unknown>;
-            similarity: number;
-            created_at: string;
-          },
-          i: number
-        ) => {
-          const m = t.metadata || {};
-          const parts = [
-            `--- Result ${i + 1} (${(t.similarity * 100).toFixed(1)}% match) ---`,
-            `Captured: ${new Date(t.created_at).toLocaleDateString()}`,
-            `Type: ${m.type || "unknown"}`,
-          ];
-          if (Array.isArray(m.topics) && m.topics.length)
-            parts.push(`Topics: ${(m.topics as string[]).join(", ")}`);
-          if (Array.isArray(m.people) && m.people.length)
-            parts.push(`People: ${(m.people as string[]).join(", ")}`);
-          if (Array.isArray(m.action_items) && m.action_items.length)
-            parts.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
-          parts.push(`\n${t.content}`);
-          return parts.join("\n");
-        }
-      );
+      const results = data.map((t: any, i: number) => formatNote(t, i, t.similarity));
 
       return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Found ${data.length} thought(s):\n\n${results.join("\n\n")}`,
-          },
-        ],
+        content: [{ type: "text" as const, text: `Found ${data.length} thought(s):\n\n${results.join("\n\n")}` }],
       };
     } catch (err: unknown) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
 
 // Tool 2: List Recent
 server.registerTool(
-  "list_thoughts",
+  "list_recent",
   {
     title: "List Recent Thoughts",
     description:
       "List recently captured thoughts with optional filters by type, topic, person, or time range.",
     inputSchema: {
       limit: z.number().optional().default(10),
-      type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note"),
+      type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
       days: z.number().optional().describe("Only thoughts from the last N days"),
@@ -172,7 +159,7 @@ server.registerTool(
     try {
       let q = supabase
         .from("notes")
-        .select("content, metadata, created_at")
+        .select("id, title, content, metadata, created_at")
         .eq("is_trashed", false)
         .eq("user_id", BRAIN_OWNER_USER_ID)
         .order("created_at", { ascending: false })
@@ -190,50 +177,80 @@ server.registerTool(
       const { data, error } = await q;
 
       if (error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${error.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       }
 
       if (!data || !data.length) {
         return { content: [{ type: "text" as const, text: "No thoughts found." }] };
       }
 
-      const results = data.map(
-        (
-          t: { content: string; metadata: Record<string, unknown>; created_at: string },
-          i: number
-        ) => {
-          const m = t.metadata || {};
-          const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
-          return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}] (${m.type || "??"}${tags ? " - " + tags : ""})\n   ${t.content}`;
-        }
-      );
+      const results = data.map((t: any, i: number) => formatNote(t, i));
 
       return {
-        content: [
-          {
-            type: "text" as const,
-            text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}`,
-          },
-        ],
+        content: [{ type: "text" as const, text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}` }],
       };
     } catch (err: unknown) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
 
-// Tool 3: Stats
+// Tool 3: Capture Thought
 server.registerTool(
-  "thought_stats",
+  "capture_thought",
   {
-    title: "Thought Statistics",
-    description: "Get a summary of all captured thoughts: totals, types, top topics, and people.",
+    title: "Capture Thought",
+    description:
+      "Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something to their brain directly from any AI client.",
+    inputSchema: {
+      content: z.string().describe("The thought to capture"),
+    },
+  },
+  async ({ content }) => {
+    try {
+      const [embedding, metadata] = await Promise.all([
+        getEmbedding(content),
+        extractMetadata(content),
+      ]);
+
+      const firstLine = content.split("\n")[0];
+      const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
+
+      const { error } = await supabase.from("notes").insert({
+        user_id: BRAIN_OWNER_USER_ID,
+        content,
+        title,
+        embedding,
+        metadata: { ...metadata, source: "mcp" },
+        tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
+      });
+
+      if (error) {
+        return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
+      }
+
+      const meta = metadata as Record<string, unknown>;
+      let confirmation = `Captured as ${meta.type || "thought"}`;
+      if (Array.isArray(meta.topics) && meta.topics.length)
+        confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
+      if (Array.isArray(meta.people) && meta.people.length)
+        confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
+      if (Array.isArray(meta.action_items) && meta.action_items.length)
+        confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+
+      return { content: [{ type: "text" as const, text: confirmation }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 4: Get Stats
+server.registerTool(
+  "get_stats",
+  {
+    title: "Brain Statistics",
+    description: "Get a summary of all captured thoughts: totals, types, top topics, people, and recent activity.",
     inputSchema: {},
   },
   async () => {
@@ -254,6 +271,9 @@ server.registerTool(
       const types: Record<string, number> = {};
       const topics: Record<string, number> = {};
       const people: Record<string, number> = {};
+      let thisWeek = 0;
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
 
       for (const r of data || []) {
         const m = (r.metadata || {}) as Record<string, unknown>;
@@ -262,15 +282,15 @@ server.registerTool(
           for (const t of m.topics) topics[t as string] = (topics[t as string] || 0) + 1;
         if (Array.isArray(m.people))
           for (const p of m.people) people[p as string] = (people[p as string] || 0) + 1;
+        if (new Date(r.created_at) > weekAgo) thisWeek++;
       }
 
       const sort = (o: Record<string, number>): [string, number][] =>
-        Object.entries(o)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 10);
+        Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
       const lines: string[] = [
         `Total thoughts: ${count}`,
+        `This week: ${thisWeek}`,
         `Date range: ${
           data?.length
             ? new Date(data[data.length - 1].created_at).toLocaleDateString() +
@@ -295,69 +315,145 @@ server.registerTool(
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     } catch (err: unknown) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
 
-// Tool 4: Capture Thought
+// Tool 5: Get Action Items
 server.registerTool(
-  "capture_thought",
+  "get_action_items",
   {
-    title: "Capture Thought",
-    description:
-      "Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something to their brain directly from any AI client — notes, insights, decisions, or migrated content from other systems.",
+    title: "Get Action Items",
+    description: "Return all open action items extracted from notes. Shows which note each action came from and when it was captured.",
     inputSchema: {
-      content: z.string().describe("The thought to capture — a clear, standalone statement that will make sense when retrieved later by any AI"),
+      include_completed: z.boolean().optional().default(false).describe("Include completed action items"),
     },
   },
-  async ({ content }) => {
+  async ({ include_completed }) => {
     try {
-      const [embedding, metadata] = await Promise.all([
-        getEmbedding(content),
-        extractMetadata(content),
-      ]);
-
-      // Extract title from first line
-      const firstLine = content.split("\n")[0];
-      const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-
-      const { error } = await supabase.from("notes").insert({
-        user_id: BRAIN_OWNER_USER_ID,
-        content,
-        title,
-        embedding,
-        metadata: { ...metadata, source: "mcp" },
-        tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-      });
+      const { data, error } = await supabase
+        .from("notes")
+        .select("id, title, content, metadata, created_at")
+        .eq("is_trashed", false)
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .order("created_at", { ascending: false });
 
       if (error) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       }
 
-      const meta = metadata as Record<string, unknown>;
-      let confirmation = `Captured as ${meta.type || "thought"}`;
-      if (Array.isArray(meta.topics) && meta.topics.length)
-        confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
-      if (Array.isArray(meta.people) && meta.people.length)
-        confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
-      if (Array.isArray(meta.action_items) && meta.action_items.length)
-        confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+      const items: { action: string; noteTitle: string; date: string; completed: boolean }[] = [];
+
+      for (const note of data || []) {
+        const m = (note.metadata || {}) as Record<string, unknown>;
+        const completedActions = Array.isArray(m.completed_actions) ? m.completed_actions as string[] : [];
+
+        if (Array.isArray(m.action_items)) {
+          for (const action of m.action_items as string[]) {
+            const isCompleted = completedActions.includes(action);
+            if (!include_completed && isCompleted) continue;
+            items.push({
+              action,
+              noteTitle: note.title || note.content.substring(0, 50),
+              date: new Date(note.created_at).toLocaleDateString(),
+              completed: isCompleted,
+            });
+          }
+        }
+      }
+
+      if (items.length === 0) {
+        return { content: [{ type: "text" as const, text: "No open action items found." }] };
+      }
+
+      const lines = items.map((item, i) => {
+        const check = item.completed ? "✅" : "⬜";
+        return `${check} ${i + 1}. ${item.action}\n   From: "${item.noteTitle}" (${item.date})`;
+      });
 
       return {
-        content: [{ type: "text" as const, text: confirmation }],
+        content: [{ type: "text" as const, text: `${items.length} action item(s):\n\n${lines.join("\n\n")}` }],
       };
     } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 6: Get Person Notes
+server.registerTool(
+  "get_person_notes",
+  {
+    title: "Get Person Notes",
+    description: "Given a person's name, return all notes mentioning them. Combines metadata filter with semantic search for comprehensive results.",
+    inputSchema: {
+      name: z.string().describe("The person's name to search for"),
+      limit: z.number().optional().default(20),
+    },
+  },
+  async ({ name, limit }) => {
+    try {
+      // Two-pronged search: metadata filter + semantic
+      const [metadataResult, semanticResult] = await Promise.all([
+        supabase
+          .from("notes")
+          .select("id, title, content, metadata, created_at")
+          .eq("is_trashed", false)
+          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .contains("metadata", { people: [name] })
+          .order("created_at", { ascending: false })
+          .limit(limit),
+        (async () => {
+          const emb = await getEmbedding(`notes about ${name}`);
+          return supabase.rpc("match_notes", {
+            query_embedding: emb,
+            match_threshold: 0.5,
+            match_count: limit,
+            p_user_id: BRAIN_OWNER_USER_ID,
+          });
+        })(),
+      ]);
+
+      // Merge and deduplicate
+      const seen = new Set<string>();
+      const allNotes: any[] = [];
+
+      for (const note of metadataResult.data || []) {
+        if (!seen.has(note.id)) {
+          seen.add(note.id);
+          allNotes.push({ ...note, source: "metadata" });
+        }
+      }
+
+      for (const note of semanticResult.data || []) {
+        if (!seen.has(note.id)) {
+          // Only include semantic results that actually mention the person
+          const m = (note.metadata || {}) as Record<string, unknown>;
+          const mentionsPerson =
+            (Array.isArray(m.people) && (m.people as string[]).some(p => p.toLowerCase().includes(name.toLowerCase()))) ||
+            note.content?.toLowerCase().includes(name.toLowerCase());
+          if (mentionsPerson) {
+            seen.add(note.id);
+            allNotes.push({ ...note, source: "semantic" });
+          }
+        }
+      }
+
+      if (allNotes.length === 0) {
+        return { content: [{ type: "text" as const, text: `No notes found mentioning "${name}".` }] };
+      }
+
+      const results = allNotes.slice(0, limit).map((t, i) => formatNote(t, i));
+
       return {
-        content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-        isError: true,
+        content: [{
+          type: "text" as const,
+          text: `Found ${allNotes.length} note(s) mentioning "${name}":\n\n${results.join("\n\n")}`,
+        }],
       };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
@@ -366,7 +462,6 @@ server.registerTool(
 const app = new Hono();
 
 app.all("*", async (c) => {
-  // Accept access key via header OR URL query parameter
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
 
   if (!provided || provided !== MCP_ACCESS_KEY) {

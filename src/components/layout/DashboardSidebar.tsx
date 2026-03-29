@@ -9,7 +9,7 @@ import {
   Bell,
   Crown,
   ShieldCheck,
-  
+  Plug,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -55,6 +55,7 @@ export function DashboardSidebar() {
 
   const systemItems = [
     { title: "Settings", url: "/dashboard/settings", icon: Settings },
+    { title: "Connect AI", url: "/dashboard/settings?tab=mcp", icon: Plug },
   ];
 
   return (

@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -25,10 +25,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
+import { MCPConnectionManager } from "@/components/settings/MCPConnectionManager";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -66,6 +67,8 @@ export default function Settings() {
   const { toast } = useToast();
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get("tab") || "profile";
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
@@ -209,12 +212,13 @@ export default function Settings() {
         <p className="text-sm text-muted-foreground mt-1">Manage your account and preferences</p>
       </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-8">
+      <Tabs defaultValue={defaultTab} className="space-y-6">
+        <TabsList className="grid w-full grid-cols-9">
           <TabsTrigger value="profile" className="gap-1.5 text-xs"><User className="h-3.5 w-3.5 hidden sm:block" /> Profile</TabsTrigger>
           <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Avatar</TabsTrigger>
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
           <TabsTrigger value="connections" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Apps</TabsTrigger>
+          <TabsTrigger value="mcp" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> MCP</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
@@ -390,6 +394,11 @@ export default function Settings() {
         {/* ── Connections Tab ── */}
         <TabsContent value="connections">
           <ConnectionsManager />
+        </TabsContent>
+
+        {/* ── MCP Tab ── */}
+        <TabsContent value="mcp">
+          <MCPConnectionManager />
         </TabsContent>
 
         {/* ── Slack Integration Tab ── */}
