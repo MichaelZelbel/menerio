@@ -32,6 +32,7 @@ const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "succes
 
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
+  const firstCaptures = useShowFirstCaptures();
   const { credits, isLoading: creditsLoading } = useAICredits();
   const { data: notes = [] } = useNotes("all");
   const navigate = useNavigate();
