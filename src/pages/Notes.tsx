@@ -444,7 +444,7 @@ export default function Notes() {
           <NoteEditor
             key={selectedNote.id}
             note={selectedNote}
-            onNoteDeleted={() => setSelectedId(null)}
+            onNoteDeleted={() => selectNote(null)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
