@@ -145,8 +145,15 @@ export default function Notes() {
     if (entityFilter) {
       notes = notes.filter((n) => n.entity_type === entityFilter);
     }
+    if (topicFilter) {
+      notes = notes.filter((n) => {
+        const meta = n.metadata as Record<string, unknown> | null;
+        const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
+        return topics.includes(topicFilter);
+      });
+    }
     return notes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
