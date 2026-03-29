@@ -430,6 +430,84 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          daily_digest_enabled: boolean
+          digest_email: string | null
+          digest_time: string
+          id: string
+          notify_contact_followup: boolean
+          notify_patterns: boolean
+          notify_stale_actions: boolean
+          notify_weekly_review: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_digest_enabled?: boolean
+          digest_email?: string | null
+          digest_time?: string
+          id?: string
+          notify_contact_followup?: boolean
+          notify_patterns?: boolean
+          notify_stale_actions?: boolean
+          notify_weekly_review?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          daily_digest_enabled?: boolean
+          digest_email?: string | null
+          digest_time?: string
+          id?: string
+          notify_contact_followup?: boolean
+          notify_patterns?: boolean
+          notify_stale_actions?: boolean
+          notify_weekly_review?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          is_read: boolean
+          link: string | null
+          metadata: Json | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          metadata?: Json | null
+          title: string
+          type: string
+          user_id?: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          metadata?: Json | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
