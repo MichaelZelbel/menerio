@@ -1,75 +1,37 @@
 
 
-# Plan: Make Menerio Release-Ready Open Source Project
+## Direct Note Links
 
-## Overview
+Currently, the Notes page lives at `/dashboard/notes` with note selection managed entirely via React state (`selectedId`). There are no URL-based note links — refreshing the page or sharing a URL loses the selected note.
 
-Clean up Menerio for a proper open-source release under AGPL-3.0 (same as Querino). Fix all broken links, remove false claims, replace placeholder text, create a proper README and LICENSE file, and ensure the public-facing pages accurately describe what Menerio actually is.
+### Approach
 
-## Issues Found
+Use the URL to encode the selected note, so every note gets a stable, copyable link like:
 
-1. **No LICENSE file** -- needs AGPL-3.0
-2. **README.md** is the default Lovable boilerplate
-3. **Footer** links to non-existent pages: `/changelog`, `/about`, `/blog`, `/contact`
-4. **Footer** social links all point to `#`
-5. **Legal pages** (Privacy, Terms, Cookies, Impressum) contain `[Project Name]`, `[projectname]`, `[Your Jurisdiction]`, `[Your Company Address]` placeholders
-6. **Impressum** has placeholder company data (address, phone, registration number)
-7. **Docs registry** describes Menerio as "project management, team collaboration, and workflow automation" -- false. It's a knowledge/notes system
-8. **Docs** reference non-existent features: Projects, Tasks, Analytics, Team Members, 200+ integrations, OAuth 2.0, REST API endpoints (`api.menerio.com`), Enterprise plan
-9. **Sidebar** has "Team" link to `/dashboard/team` which doesn't exist
-10. **Features page** is a stub with almost no content
-11. **package.json** `name` is `vite_react_shadcn_ts`
-12. **Copyright footer** says "All rights reserved" -- contradicts AGPL
+```
+/dashboard/notes/abc-123-uuid
+```
 
-## Changes
+### Changes
 
-### 1. Create LICENSE file
-- Full AGPL-3.0 text with `Copyright (C) 2026 Michael Zelbel` (matching Querino)
+**1. Add a route for individual notes** (`App.tsx`)
+- Add `<Route path="notes/:noteId" element={<Notes />} />` alongside the existing `notes` route.
 
-### 2. Rewrite README.md
-- Follow Querino's structure: description, features list, tech stack, getting started, project structure, "Why AGPL?" section, license section
-- Accurately describe Menerio as an AI-powered personal knowledge system with note-taking, semantic search, MCP integration, and cross-app sync
+**2. Sync `selectedId` with URL** (`Notes.tsx`)
+- Read `noteId` from `useParams()` on mount and set it as the selected note.
+- When the user selects a note, call `navigate(`/dashboard/notes/${id}`, { replace: true })` instead of just `setSelectedId`.
+- When deselecting (e.g., note deleted), navigate back to `/dashboard/notes`.
 
-### 3. Fix package.json
-- Change `name` to `menerio`
+**3. Add a "Copy link" button** (`NoteEditor.tsx`)
+- Add a small link/copy icon in the note editor toolbar.
+- On click, copy the full URL (`window.location.origin + /dashboard/notes/${note.id}`) to clipboard with a toast confirmation.
 
-### 4. Clean up Footer
-- Remove "Company" column entirely (About, Blog, Contact don't exist)
-- Remove "Changelog" from Product links (doesn't exist)
-- Keep: Docs (Product), Privacy/Terms/Cookies (Legal)
-- Add GitHub link pointing to the actual repo (or remove social links if no URLs yet)
-- Change "All rights reserved" to "Licensed under AGPL-3.0"
+**4. Copy link in note list context menu** (`NoteList.tsx`)
+- Add a "Copy link" option to the right-click or overflow menu on each note item in the list.
 
-### 5. Fix legal pages -- replace all placeholders with "Menerio"
-- **Privacy.tsx**: Replace `[Project Name]` with "Menerio", `[projectname]` with "menerio", `[Your Company Address]` with "See Impressum"
-- **Terms.tsx**: Replace `[Project Name]` with "Menerio", `[Your Jurisdiction]` with "Germany", fix description from "project management" to accurate description
-- **Cookies.tsx**: Replace `[Project Name]` with "Menerio"
-- **Impressum.tsx**: Replace placeholders with "Menerio" and mark company details as TBD or use Michael Zelbel's name as responsible person
-
-### 6. Rewrite docs registry to match actual features
-- Remove fake pages: collaboration, integrations (200+ tools), api-endpoints (projects/tasks CRUD), api-rate-limits (Enterprise plan), team-members
-- Rewrite existing pages to describe actual Menerio functionality:
-  - Quick Start: notes, AI processing, MCP
-  - Dashboard Overview: actual sidebar items (Dashboard, Notes, Settings)
-  - AI Insights → AI Processing: embeddings, classification, semantic search
-  - Profile Settings: keep as-is (mostly accurate)
-  - API Auth → MCP & Edge Functions: describe actual edge functions (receive-note, send-patch, etc.)
-- Update FAQ to reflect reality (no project management, no Enterprise plan)
-
-### 7. Remove "Team" from sidebar
-- Remove `premiumItems` array with `/dashboard/team` from `DashboardSidebar.tsx`
-
-### 8. Flesh out Features page
-- Replace stub with actual feature descriptions matching the homepage (AI embeddings, semantic search, MCP, cross-app sync, rich notes)
-
-### 9. Update robots.txt and sitemap.xml
-- Remove `/features` from sitemap if still a stub, or keep if we flesh it out (we will flesh it out)
-- Ensure no references to removed pages
-
-## Technical Details
-
-- **Files to create**: `LICENSE`
-- **Files to rewrite**: `README.md`, `src/content/docs/registry.tsx`, `src/pages/Features.tsx`
-- **Files to edit**: `src/components/layout/Footer.tsx`, `src/components/layout/DashboardSidebar.tsx`, `src/pages/Privacy.tsx`, `src/pages/Terms.tsx`, `src/pages/Cookies.tsx`, `src/pages/Impressum.tsx`, `package.json`
-- **No database or edge function changes needed**
+### Result
+- Every note has a stable, bookmarkable URL.
+- Users can copy and paste note links in Slack, emails, docs, etc.
+- Refreshing the page preserves the selected note.
+- Deep links from notifications, weekly reviews, and action items will also work naturally.
 
