@@ -6,6 +6,7 @@ import { useAICredits } from "@/hooks/useAICredits";
 import { useNotes } from "@/hooks/useNotes";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { FirstCapturesWizard, useShowFirstCaptures } from "@/components/onboarding/FirstCapturesWizard";
+import { TodaysConnections } from "@/components/dashboard/TodaysConnections";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -196,6 +197,7 @@ const Dashboard = () => {
 
         {/* Right sidebar */}
         <div className="space-y-6">
+          <TodaysConnections />
           {showChecklist && (
             <Card>
               <CardHeader className="flex flex-row items-start justify-between pb-3">

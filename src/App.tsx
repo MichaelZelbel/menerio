@@ -35,6 +35,7 @@ const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
 const People = lazy(() => import("./pages/People"));
 const Actions = lazy(() => import("./pages/Actions"));
+const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -95,6 +96,7 @@ const App = () => (
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="people" element={<People />} />
                     <Route path="actions" element={<Actions />} />
+                    <Route path="graph" element={<KnowledgeGraph />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
                   </Route>
 
