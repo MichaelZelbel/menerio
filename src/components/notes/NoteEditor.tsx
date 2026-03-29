@@ -130,9 +130,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         onUploadError: (msg: string) => showToast.error(msg),
       }),
       Markdown.configure({
-        html: false,
+        html: true,
         transformPastedText: true,
-        transformCopiedText: true,
+        transformCopiedText: false,
       }),
     ],
     content: note.content || "",
