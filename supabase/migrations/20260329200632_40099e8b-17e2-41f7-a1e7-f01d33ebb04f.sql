@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_notes_metadata ON public.notes USING gin (metadata);

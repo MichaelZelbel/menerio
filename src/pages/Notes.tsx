@@ -60,6 +60,7 @@ export default function Notes() {
   const [searchType, setSearchType] = useState<SearchMode>("semantic");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [topicFilter, setTopicFilter] = useState<string | null>(null);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -144,8 +145,15 @@ export default function Notes() {
     if (entityFilter) {
       notes = notes.filter((n) => n.entity_type === entityFilter);
     }
+    if (topicFilter) {
+      notes = notes.filter((n) => {
+        const meta = n.metadata as Record<string, unknown> | null;
+        const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
+        return topics.includes(topicFilter);
+      });
+    }
     return notes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -333,6 +341,22 @@ export default function Notes() {
           </div>
         )}
 
+        {/* Topic filter indicator */}
+        {topicFilter && (
+          <div className="px-3 py-1.5 border-b border-border shrink-0 flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground">Topic:</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+              {topicFilter}
+            </span>
+            <button
+              onClick={() => setTopicFilter(null)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
         {/* Note list */}
         {loadingAll ? (
           <div className="p-4 space-y-3">
@@ -350,6 +374,7 @@ export default function Notes() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             showSimilarity={searchMode && showingSemanticResults}
+            onTopicClick={(topic) => setTopicFilter(topic)}
           />
         )}
       </div>
