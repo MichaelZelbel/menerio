@@ -32,6 +32,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const Wizard = lazy(() => import("./pages/Wizard"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
+const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
