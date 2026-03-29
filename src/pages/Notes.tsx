@@ -216,7 +216,7 @@ export default function Notes() {
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
             onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
             onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
-            onNoteSelect={setSelectedId}
+            onNoteSelect={selectNote}
             activeTopicFilter={topicFilter}
             activeTypeFilter={metaTypeFilter}
           />

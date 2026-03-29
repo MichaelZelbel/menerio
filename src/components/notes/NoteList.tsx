@@ -69,7 +69,7 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
             key={note.id}
             onClick={() => onSelect(note.id)}
             className={cn(
-              "w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
+              "group w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
               selectedId === note.id && "bg-accent"
             )}
           >
