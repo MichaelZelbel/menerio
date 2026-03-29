@@ -163,8 +163,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     setShowTagInput(false);
     setShowInfo(false);
     if (processTimer.current) clearTimeout(processTimer.current);
-    if (editor && note.content !== editor.getHTML()) {
-      editor.commands.setContent(note.content || "");
+    const normalizedContent = normalizeNoteContent(note.content);
+    if (editor && normalizedContent !== editor.getHTML()) {
+      editor.commands.setContent(normalizedContent);
     }
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);

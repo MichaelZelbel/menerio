@@ -86,7 +86,7 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
               )}
             </div>
             <p className="text-xs text-muted-foreground truncate mb-1.5">
-              {getPreview(note.content)}
+              {getNotePreviewText(note.content)}
             </p>
 
             {/* Metadata pills */}
