@@ -63,6 +63,7 @@ import {
   Loader2,
   Send,
   Sparkles,
+  Link2,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
