@@ -35,6 +35,10 @@ export interface Note {
   updated_at: string;
 }
 
+export interface SemanticSearchResult extends Note {
+  similarity: number | null;
+}
+
 type NoteInsert = {
   title?: string;
   content?: string;
@@ -159,12 +163,54 @@ export function useProcessNote() {
   });
 }
 
+/** ILIKE-based instant search (no AI cost) */
+export function useIlikeSearch() {
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (query: string): Promise<SemanticSearchResult[]> => {
+      const q = query.toLowerCase();
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false)
+        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return ((data as unknown as Note[]) || []).map((n) => ({ ...n, similarity: null }));
+    },
+  });
+}
+
+/** Semantic vector search via edge function */
+export function useSemanticSearch() {
+  return useMutation({
+    mutationFn: async ({
+      query,
+      threshold = 0.5,
+      limit = 20,
+    }: {
+      query: string;
+      threshold?: number;
+      limit?: number;
+    }): Promise<{ results: SemanticSearchResult[]; mode: string }> => {
+      const res = await supabase.functions.invoke("search-notes-semantic", {
+        body: { query, threshold, limit },
+      });
+      if (res.error) throw res.error;
+      return res.data as { results: SemanticSearchResult[]; mode: string };
+    },
+  });
+}
+
+/** Combined search: ILIKE fires instantly, semantic replaces when ready */
 export function useSearchNotes() {
   const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (query: string) => {
-      // Text-based search fallback (no embedding needed)
       const q = query.toLowerCase();
       const { data, error } = await supabase
         .from("notes" as any)
