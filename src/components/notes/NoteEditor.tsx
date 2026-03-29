@@ -390,6 +390,15 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
               >
                 <Copy className="mr-2 h-4 w-4" /> Copy to Clipboard
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  const url = `${window.location.origin}/dashboard/notes/${note.id}`;
+                  navigator.clipboard.writeText(url);
+                  showToast.copied();
+                }}
+              >
+                <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}

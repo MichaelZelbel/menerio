@@ -41,8 +41,9 @@ import {
   Type,
   Tags,
 } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { showToast } from "@/lib/toast";
 
 const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
   { key: "all", label: "All Notes", icon: FileText },
@@ -54,8 +55,10 @@ type SearchMode = "semantic" | "exact";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<NoteFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
@@ -74,12 +77,21 @@ export default function Notes() {
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
 
+  const selectNote = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id) {
+      navigate(`/dashboard/notes/${id}`, { replace: true });
+    } else {
+      navigate("/dashboard/notes", { replace: true });
+    }
+  }, [navigate]);
+
   const handleCreate = useCallback(async () => {
     const note = await createNote.mutateAsync({ title: "", content: "" });
     setFilter("all");
     setSearchMode(false);
-    setSelectedId(note.id);
-  }, [createNote]);
+    selectNote(note.id);
+  }, [createNote, selectNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
@@ -204,7 +216,7 @@ export default function Notes() {
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
             onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
             onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
-            onNoteSelect={setSelectedId}
+            onNoteSelect={selectNote}
             activeTopicFilter={topicFilter}
             activeTypeFilter={metaTypeFilter}
           />
@@ -419,7 +431,7 @@ export default function Notes() {
           <NoteList
             notes={currentNotes}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={selectNote}
             showSimilarity={searchMode && showingSemanticResults}
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
           />
@@ -432,7 +444,7 @@ export default function Notes() {
           <NoteEditor
             key={selectedNote.id}
             note={selectedNote}
-            onNoteDeleted={() => setSelectedId(null)}
+            onNoteDeleted={() => selectNote(null)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
