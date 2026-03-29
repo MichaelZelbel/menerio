@@ -90,6 +90,7 @@ const App = () => (
                     <Route path="settings" element={<Settings />} />
                     
                     <Route path="activity" element={<ActivityPage />} />
+                    <Route path="review" element={<WeeklyReview />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
                   </Route>
 

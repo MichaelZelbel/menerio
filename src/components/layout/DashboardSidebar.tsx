@@ -48,6 +48,7 @@ export function DashboardSidebar() {
   const mainItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
+    { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
   ];
 
   const premiumItems = [
