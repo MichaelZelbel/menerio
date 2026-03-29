@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "./DashboardSidebar";
+import { QuickCapture } from "@/components/notes/QuickCapture";
 
 export function DashboardLayout() {
   return (
@@ -16,6 +17,7 @@ export function DashboardLayout() {
             <Outlet />
           </main>
         </div>
+        <QuickCapture />
       </div>
     </SidebarProvider>
   );
