@@ -136,7 +136,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         transformCopiedText: false,
       }),
     ],
-    content: note.content || "",
+    content: normalizeNoteContent(note.content),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML();
