@@ -55,8 +55,10 @@ type SearchMode = "semantic" | "exact";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<NoteFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
