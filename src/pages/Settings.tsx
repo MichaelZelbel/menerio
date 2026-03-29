@@ -394,6 +394,11 @@ export default function Settings() {
           <ConnectionsManager />
         </TabsContent>
 
+        {/* ── MCP Tab ── */}
+        <TabsContent value="mcp">
+          <MCPConnectionManager />
+        </TabsContent>
+
         {/* ── Slack Integration Tab ── */}
         <TabsContent value="integrations">
           <SlackIntegration />

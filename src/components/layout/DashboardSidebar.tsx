@@ -55,6 +55,7 @@ export function DashboardSidebar() {
 
   const systemItems = [
     { title: "Settings", url: "/dashboard/settings", icon: Settings },
+    { title: "Connect AI", url: "/dashboard/settings?tab=mcp", icon: Plug },
   ];
 
   return (
