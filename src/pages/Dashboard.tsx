@@ -5,6 +5,7 @@ import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
 import { useNotes } from "@/hooks/useNotes";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import { FirstCapturesWizard, useShowFirstCaptures } from "@/components/onboarding/FirstCapturesWizard";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
