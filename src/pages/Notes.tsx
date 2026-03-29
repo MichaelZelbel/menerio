@@ -11,6 +11,7 @@ import {
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
+import { SmartTagsPanel } from "@/components/notes/SmartTagsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +39,7 @@ import {
   Check,
   Sparkles,
   Type,
+  Tags,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -61,6 +63,9 @@ export default function Notes() {
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
+  const [personFilter, setPersonFilter] = useState<string | null>(null);
+  const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
+  const [showSmartTags, setShowSmartTags] = useState(false);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -89,28 +94,18 @@ export default function Notes() {
     trash: trashNotes.length,
   };
 
-  // Fire ILIKE immediately, debounce semantic
   const handleSearch = useCallback(
     (q: string) => {
       setSearchQuery(q);
       setSemanticResults(null);
-
       if (!q.trim()) return;
-
-      // Instant ILIKE
       ilikeSearch.mutate(q);
-
-      // Debounced semantic (only in semantic mode)
       if (searchType === "semantic") {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
           semanticSearch.mutate(
             { query: q },
-            {
-              onSuccess: (data) => {
-                setSemanticResults(data.results as SemanticSearchResult[]);
-              },
-            }
+            { onSuccess: (data) => setSemanticResults(data.results as SemanticSearchResult[]) }
           );
         }, 300);
       }
@@ -118,20 +113,13 @@ export default function Notes() {
     [ilikeSearch, semanticSearch, searchType]
   );
 
-  // Clean up debounce on unmount
   useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, []);
 
-  // Determine which search results to show
   const searchResults: SemanticSearchResult[] | null = useMemo(() => {
     if (!searchMode || !searchQuery.trim()) return null;
-    if (searchType === "exact") {
-      return ilikeSearch.data || null;
-    }
-    // Semantic mode: show semantic results if available, otherwise ILIKE as fallback
+    if (searchType === "exact") return ilikeSearch.data || null;
     return semanticResults || ilikeSearch.data || null;
   }, [searchMode, searchQuery, searchType, semanticResults, ilikeSearch.data]);
 
@@ -152,8 +140,21 @@ export default function Notes() {
         return topics.includes(topicFilter);
       });
     }
+    if (personFilter) {
+      notes = notes.filter((n) => {
+        const meta = n.metadata as Record<string, unknown> | null;
+        const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
+        return people.includes(personFilter);
+      });
+    }
+    if (metaTypeFilter) {
+      notes = notes.filter((n) => {
+        const meta = n.metadata as Record<string, unknown> | null;
+        return meta?.type === metaTypeFilter;
+      });
+    }
     return notes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -173,6 +174,13 @@ export default function Notes() {
     setSemanticResults(null);
   };
 
+  const clearAllFilters = () => {
+    setTopicFilter(null);
+    setPersonFilter(null);
+    setMetaTypeFilter(null);
+  };
+
+  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter;
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
@@ -180,9 +188,32 @@ export default function Notes() {
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
+      {/* Smart Tags panel */}
+      {showSmartTags && (
+        <div className="w-64 shrink-0 border-r border-border bg-background flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+            <span className="text-xs font-semibold flex items-center gap-1.5">
+              <Tags className="h-3.5 w-3.5" /> Smart Tags
+            </span>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSmartTags(false)}>
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+          <SmartTagsPanel
+            notes={allNotes}
+            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
+            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
+            onNoteSelect={setSelectedId}
+            activeTopicFilter={topicFilter}
+            activeTypeFilter={metaTypeFilter}
+          />
+        </div>
+      )}
+
       {/* Note list panel */}
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
-        {/* Header with filter dropdown */}
+        {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -199,10 +230,7 @@ export default function Notes() {
               {filterConfig.map((f) => (
                 <DropdownMenuItem
                   key={f.key}
-                  onClick={() => {
-                    setFilter(f.key);
-                    setSearchMode(false);
-                  }}
+                  onClick={() => { setFilter(f.key); setSearchMode(false); }}
                   className="gap-2"
                 >
                   <f.icon className="h-4 w-4" />
@@ -213,7 +241,6 @@ export default function Notes() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Entity type filter */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -241,6 +268,20 @@ export default function Notes() {
 
           <div className="flex-1" />
 
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={showSmartTags ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowSmartTags(!showSmartTags)}
+                title="Smart Tags"
+              >
+                <Tags className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">Smart Tags</TooltipContent>
+          </Tooltip>
           <Button
             variant="ghost"
             size="icon"
@@ -281,7 +322,6 @@ export default function Notes() {
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            {/* Search mode toggle + status */}
             <div className="flex items-center gap-1.5">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -302,9 +342,7 @@ export default function Notes() {
                     Smart
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  AI-powered semantic search — finds related concepts
-                </TooltipContent>
+                <TooltipContent side="bottom" className="text-xs">AI-powered semantic search</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -322,9 +360,7 @@ export default function Notes() {
                     Exact
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  Keyword matching — finds exact text
-                </TooltipContent>
+                <TooltipContent side="bottom" className="text-xs">Keyword matching</TooltipContent>
               </Tooltip>
               <div className="flex-1" />
               {isSemanticLoading && (
@@ -341,18 +377,29 @@ export default function Notes() {
           </div>
         )}
 
-        {/* Topic filter indicator */}
-        {topicFilter && (
-          <div className="px-3 py-1.5 border-b border-border shrink-0 flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground">Topic:</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-              {topicFilter}
-            </span>
-            <button
-              onClick={() => setTopicFilter(null)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3 w-3" />
+        {/* Active filter indicators */}
+        {hasActiveMetaFilter && (
+          <div className="px-3 py-1.5 border-b border-border shrink-0 flex items-center gap-1.5 flex-wrap">
+            {topicFilter && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium inline-flex items-center gap-1">
+                #{topicFilter}
+                <button onClick={() => setTopicFilter(null)}><X className="h-2.5 w-2.5" /></button>
+              </span>
+            )}
+            {personFilter && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-400 font-medium inline-flex items-center gap-1">
+                @{personFilter}
+                <button onClick={() => setPersonFilter(null)}><X className="h-2.5 w-2.5" /></button>
+              </span>
+            )}
+            {metaTypeFilter && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
+                {metaTypeFilter.replace("_", " ")}
+                <button onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
+              </span>
+            )}
+            <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">
+              Clear all
             </button>
           </div>
         )}
@@ -374,7 +421,7 @@ export default function Notes() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             showSimilarity={searchMode && showingSemanticResults}
-            onTopicClick={(topic) => setTopicFilter(topic)}
+            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
           />
         )}
       </div>
