@@ -392,6 +392,11 @@ export default function Settings() {
           <ConnectionsManager />
         </TabsContent>
 
+        {/* ── Slack Integration Tab ── */}
+        <TabsContent value="integrations">
+          <SlackIntegration />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
