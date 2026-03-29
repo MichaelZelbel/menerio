@@ -40,8 +40,9 @@ export function SlackIntegration() {
         .eq("app_name", "slack")
         .single();
       if (data) {
-        const perms = data.permissions as Record<string, unknown> | null;
-        setAppId(data.id);
+        const d = data as any;
+        const perms = d.permissions as Record<string, unknown> | null;
+        setAppId(d.id);
         setBotToken((perms?.bot_token as string) || "");
         setChannelId((perms?.channel_id as string) || "");
         setConnected(!!perms?.bot_token);
