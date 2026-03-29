@@ -80,7 +80,7 @@ export function SlackIntegration() {
           })
           .select("id")
           .single();
-        if (data) setAppId(data.id);
+        if (data) setAppId((data as any).id);
       }
       setConnected(!!botToken.trim());
       showToast.success("Slack integration saved");
