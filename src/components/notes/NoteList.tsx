@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2 } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
+import { getNotePreviewText } from "@/lib/note-content";
 
 interface NoteListProps {
   notes: (Note | SemanticSearchResult)[];
@@ -37,11 +38,6 @@ function getSimilarityColor(score: number): string {
   if (score >= 0.65) return "bg-primary";
   if (score >= 0.5) return "bg-amber-500";
   return "bg-muted-foreground";
-}
-
-function getPreview(content: string, maxLen = 80): string {
-  const text = content.replace(/\n/g, " ").trim();
-  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text || "No content";
 }
 
 export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicClick }: NoteListProps) {
@@ -90,7 +86,7 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
               )}
             </div>
             <p className="text-xs text-muted-foreground truncate mb-1.5">
-              {getPreview(note.content)}
+              {getNotePreviewText(note.content)}
             </p>
 
             {/* Metadata pills */}

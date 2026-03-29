@@ -68,6 +68,7 @@ import {
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
+import { normalizeNoteContent } from "@/lib/note-content";
 
 const AUTO_PROCESS_DELAY = 10_000; // 10s after last edit
 const MIN_WORDS_FOR_PROCESSING = 50;
@@ -135,7 +136,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         transformCopiedText: false,
       }),
     ],
-    content: note.content || "",
+    content: normalizeNoteContent(note.content),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML();
@@ -162,8 +163,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     setShowTagInput(false);
     setShowInfo(false);
     if (processTimer.current) clearTimeout(processTimer.current);
-    if (editor && note.content !== editor.getHTML()) {
-      editor.commands.setContent(note.content || "");
+    const normalizedContent = normalizeNoteContent(note.content);
+    if (editor && normalizedContent !== editor.getHTML()) {
+      editor.commands.setContent(normalizedContent);
     }
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);
