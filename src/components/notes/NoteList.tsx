@@ -146,6 +146,28 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                   {note.entity_type}
                 </span>
               )}
+              {/* Slack source badge */}
+              {(() => {
+                const m = note.metadata as Record<string, unknown> | null;
+                const source = m?.source as string | undefined;
+                if (source === "slack") {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#4A154B]/15 text-[#4A154B] dark:text-purple-400 font-medium">
+                      <MessageSquare className="h-2.5 w-2.5" />
+                      Slack
+                    </span>
+                  );
+                }
+                if (m?.is_quick_capture) {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                      <Zap className="h-2.5 w-2.5" />
+                      Quick
+                    </span>
+                  );
+                }
+                return null;
+              })()}
               {note.is_external && note.source_app && (
                 <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-700 dark:text-orange-400 font-medium">
                   <ExternalLink className="h-2.5 w-2.5" />
