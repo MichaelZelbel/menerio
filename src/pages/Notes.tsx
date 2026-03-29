@@ -60,6 +60,7 @@ export default function Notes() {
   const [searchType, setSearchType] = useState<SearchMode>("semantic");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [topicFilter, setTopicFilter] = useState<string | null>(null);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
