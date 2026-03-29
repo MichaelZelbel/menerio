@@ -68,6 +68,7 @@ import {
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
+import { normalizeNoteContent } from "@/lib/note-content";
 
 const AUTO_PROCESS_DELAY = 10_000; // 10s after last edit
 const MIN_WORDS_FOR_PROCESSING = 50;
