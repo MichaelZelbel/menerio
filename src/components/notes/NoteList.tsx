@@ -175,6 +175,18 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                   {note.source_app}
                 </span>
               )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const url = `${window.location.origin}/dashboard/notes/${note.id}`;
+                  navigator.clipboard.writeText(url);
+                  showToast.copied();
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                title="Copy link"
+              >
+                <Link2 className="h-2.5 w-2.5" />
+              </button>
               {note.tags?.length > 0 && (
                 <>
                   {note.tags.slice(0, 2).map((tag) => (
