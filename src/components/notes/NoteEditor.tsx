@@ -296,6 +296,15 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         >
           <Info className="h-4 w-4" />
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => setShowConnections(!showConnections)}
+          title="Find connections"
+        >
+          <Link2 className="h-4 w-4" />
+        </Button>
         {!note.is_trashed && (
           <Button
             variant="ghost"
