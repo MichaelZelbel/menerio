@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface NoteListProps {
