@@ -48,11 +48,12 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
           content: `Extract metadata from the user's note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
-- "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
-- "topics": array of 1-3 short topic tags (always at least one)
-- "type": one of "observation", "task", "idea", "reference", "person_note", "meeting", "journal"
+- "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
+- "topics": array of 1-5 short topic tags (always generate at least one)
+- "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
+- "sentiment": one of "positive", "negative", "neutral"
 - "summary": one-sentence summary of the note
-Only extract what's explicitly there.`,
+Only extract what's explicitly there. Don't invent details.`,
         },
         { role: "user", content: text },
       ],
@@ -62,7 +63,7 @@ Only extract what's explicitly there.`,
   try {
     return JSON.parse(d.choices[0].message.content);
   } catch {
-    return { topics: ["uncategorized"], type: "observation" };
+    return { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
   }
 }
 
@@ -72,7 +73,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    // Verify the user is authenticated
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -89,7 +89,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // Fetch the note
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
       .select("id, title, content")
@@ -116,7 +115,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       extractMetadata(fullText),
     ]);
 
-    // Update the note
+    // Update the note with both embedding and metadata
     const { error: updateErr } = await supabase
       .from("notes")
       .update({ embedding, metadata })
