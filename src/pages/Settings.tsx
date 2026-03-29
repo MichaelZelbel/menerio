@@ -25,10 +25,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
+import { MCPConnectionManager } from "@/components/settings/MCPConnectionManager";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
