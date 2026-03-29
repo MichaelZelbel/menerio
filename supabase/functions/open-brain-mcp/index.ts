@@ -458,6 +458,186 @@ server.registerTool(
   }
 );
 
+// Tool 7: Search Contacts
+server.registerTool(
+  "search_contacts",
+  {
+    title: "Search Contacts",
+    description: "Search your personal CRM contacts by name, company, or relationship type.",
+    inputSchema: {
+      query: z.string().optional().describe("Search by name or company"),
+      relationship: z.string().optional().describe("Filter by relationship type"),
+      limit: z.number().optional().default(10),
+    },
+  },
+  async ({ query, relationship, limit }) => {
+    try {
+      let q = supabase
+        .from("contacts")
+        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .order("name")
+        .limit(limit);
+
+      if (query) q = q.or(`name.ilike.%${query}%,company.ilike.%${query}%`);
+      if (relationship) q = q.eq("relationship", relationship);
+
+      const { data, error } = await q;
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!data?.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
+
+      const lines = data.map((c: any, i: number) => {
+        const parts = [`${i + 1}. ${c.name}`];
+        if (c.relationship) parts.push(`(${c.relationship})`);
+        if (c.company) parts.push(`@ ${c.company}`);
+        if (c.role) parts.push(`— ${c.role}`);
+        if (c.last_contact_date) {
+          const days = Math.floor((Date.now() - new Date(c.last_contact_date).getTime()) / 86400000);
+          parts.push(`| Last contact: ${days}d ago`);
+        }
+        if (c.notes) parts.push(`\n   Notes: ${c.notes.substring(0, 200)}`);
+        return parts.join(" ");
+      });
+
+      return { content: [{ type: "text" as const, text: `${data.length} contact(s):\n\n${lines.join("\n\n")}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 8: Get Contact Context
+server.registerTool(
+  "get_contact_context",
+  {
+    title: "Get Contact Context",
+    description: "Given a contact name, return their full details, recent interactions, and related notes.",
+    inputSchema: {
+      name: z.string().describe("The contact's name"),
+    },
+  },
+  async ({ name }) => {
+    try {
+      const { data: contacts } = await supabase
+        .from("contacts")
+        .select("*")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .ilike("name", `%${name}%`)
+        .limit(1);
+
+      if (!contacts?.length) return { content: [{ type: "text" as const, text: `No contact found matching "${name}".` }] };
+
+      const contact = contacts[0] as any;
+      const lines: string[] = [
+        `# ${contact.name}`,
+        contact.relationship ? `Relationship: ${contact.relationship}` : "",
+        contact.company ? `Company: ${contact.company}` : "",
+        contact.role ? `Role: ${contact.role}` : "",
+        contact.email ? `Email: ${contact.email}` : "",
+        contact.phone ? `Phone: ${contact.phone}` : "",
+        contact.notes ? `Notes: ${contact.notes}` : "",
+      ].filter(Boolean);
+
+      if (contact.last_contact_date) {
+        const days = Math.floor((Date.now() - new Date(contact.last_contact_date).getTime()) / 86400000);
+        lines.push(`Last contact: ${days} days ago (${contact.last_contact_date})`);
+      }
+
+      // Fetch interactions
+      const { data: interactions } = await supabase
+        .from("contact_interactions")
+        .select("interaction_date, type, summary, action_items")
+        .eq("contact_id", contact.id)
+        .order("interaction_date", { ascending: false })
+        .limit(10);
+
+      if (interactions?.length) {
+        lines.push("", "## Recent Interactions");
+        for (const int of interactions as any[]) {
+          lines.push(`- ${int.interaction_date} [${int.type}]: ${int.summary || "(no summary)"}`);
+          if (int.action_items?.length) {
+            for (const ai of int.action_items) lines.push(`  ⬜ ${ai}`);
+          }
+        }
+      }
+
+      // Fetch related notes
+      const { data: notes } = await supabase
+        .from("notes")
+        .select("title, content, created_at")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("is_trashed", false)
+        .contains("metadata", { people: [contact.name] })
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (notes?.length) {
+        lines.push("", "## Related Notes");
+        for (const n of notes) {
+          lines.push(`- [${new Date(n.created_at).toLocaleDateString()}] ${n.title}\n  ${n.content.substring(0, 150)}`);
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 9: Log Interaction
+server.registerTool(
+  "log_interaction",
+  {
+    title: "Log Interaction",
+    description: "Record a new interaction with a contact. Also updates the contact's last_contact_date.",
+    inputSchema: {
+      contact_name: z.string().describe("The contact's name"),
+      type: z.string().describe("Interaction type: meeting, call, email, message, social"),
+      summary: z.string().optional().describe("Brief summary of the interaction"),
+      action_items: z.array(z.string()).optional().describe("Action items from this interaction"),
+    },
+  },
+  async ({ contact_name, type, summary, action_items }) => {
+    try {
+      const { data: contacts } = await supabase
+        .from("contacts")
+        .select("id, name")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .ilike("name", `%${contact_name}%`)
+        .limit(1);
+
+      if (!contacts?.length) {
+        return { content: [{ type: "text" as const, text: `No contact found matching "${contact_name}". Create the contact first.` }] };
+      }
+
+      const contact = contacts[0] as any;
+      const today = new Date().toISOString().split("T")[0];
+
+      const { error: intError } = await supabase.from("contact_interactions").insert({
+        contact_id: contact.id,
+        user_id: BRAIN_OWNER_USER_ID,
+        type,
+        summary: summary || null,
+        action_items: action_items || [],
+        interaction_date: today,
+      });
+
+      if (intError) {
+        return { content: [{ type: "text" as const, text: `Failed to log: ${intError.message}` }], isError: true };
+      }
+
+      await supabase.from("contacts").update({ last_contact_date: today }).eq("id", contact.id);
+
+      let msg = `Logged ${type} with ${contact.name}`;
+      if (action_items?.length) msg += ` | ${action_items.length} action item(s)`;
+      return { content: [{ type: "text" as const, text: msg }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
 // --- Hono App with Auth Check ---
 const app = new Hono();
 
