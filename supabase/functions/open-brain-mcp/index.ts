@@ -320,61 +320,68 @@ server.registerTool(
   }
 );
 
-// Tool 5: Get Action Items
+// Tool 5: Get Action Items (from structured action_items table)
 server.registerTool(
   "get_action_items",
   {
     title: "Get Action Items",
-    description: "Return all open action items extracted from notes. Shows which note each action came from and when it was captured.",
+    description: "Return action items from the structured tracker. Filterable by status, priority, or person.",
     inputSchema: {
-      include_completed: z.boolean().optional().default(false).describe("Include completed action items"),
+      status: z.string().optional().describe("Filter by status: open, in_progress, done, dismissed"),
+      priority: z.string().optional().describe("Filter by priority: low, normal, high, urgent"),
+      person: z.string().optional().describe("Filter by related contact name"),
+      include_done: z.boolean().optional().default(false).describe("Include completed items"),
     },
   },
-  async ({ include_completed }) => {
+  async ({ status, priority, person, include_done }) => {
     try {
-      const { data, error } = await supabase
-        .from("notes")
-        .select("id, title, content, metadata, created_at")
-        .eq("is_trashed", false)
+      let q = supabase
+        .from("action_items")
+        .select("id, content, status, priority, due_date, created_at, updated_at, source_note_id, contact_id")
         .eq("user_id", BRAIN_OWNER_USER_ID)
         .order("created_at", { ascending: false });
 
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (status) {
+        q = q.eq("status", status);
+      } else if (!include_done) {
+        q = q.in("status", ["open", "in_progress"]);
       }
+      if (priority) q = q.eq("priority", priority);
 
-      const items: { action: string; noteTitle: string; date: string; completed: boolean }[] = [];
+      const { data, error } = await q.limit(50);
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
 
-      for (const note of data || []) {
-        const m = (note.metadata || {}) as Record<string, unknown>;
-        const completedActions = Array.isArray(m.completed_actions) ? m.completed_actions as string[] : [];
+      let items = data || [];
 
-        if (Array.isArray(m.action_items)) {
-          for (const action of m.action_items as string[]) {
-            const isCompleted = completedActions.includes(action);
-            if (!include_completed && isCompleted) continue;
-            items.push({
-              action,
-              noteTitle: note.title || note.content.substring(0, 50),
-              date: new Date(note.created_at).toLocaleDateString(),
-              completed: isCompleted,
-            });
-          }
+      // Filter by person name if requested
+      if (person && items.length > 0) {
+        const contactIds = items.filter((i: any) => i.contact_id).map((i: any) => i.contact_id);
+        if (contactIds.length > 0) {
+          const { data: contacts } = await supabase
+            .from("contacts")
+            .select("id, name")
+            .in("id", contactIds);
+          const matchIds = new Set(
+            (contacts || []).filter((c: any) => c.name.toLowerCase().includes(person.toLowerCase())).map((c: any) => c.id)
+          );
+          items = items.filter((i: any) => matchIds.has(i.contact_id));
+        } else {
+          items = [];
         }
       }
 
-      if (items.length === 0) {
-        return { content: [{ type: "text" as const, text: "No open action items found." }] };
-      }
+      if (!items.length) return { content: [{ type: "text" as const, text: "No action items found." }] };
 
-      const lines = items.map((item, i) => {
-        const check = item.completed ? "✅" : "⬜";
-        return `${check} ${i + 1}. ${item.action}\n   From: "${item.noteTitle}" (${item.date})`;
+      const lines = items.map((item: any, i: number) => {
+        const statusIcon = { open: "⬜", in_progress: "🔄", done: "✅", dismissed: "❌" }[item.status] || "⬜";
+        const age = Math.floor((Date.now() - new Date(item.created_at).getTime()) / 86400000);
+        let line = `${statusIcon} ${i + 1}. ${item.content}`;
+        line += `\n   Status: ${item.status} | Priority: ${item.priority} | ${age}d old`;
+        if (item.due_date) line += ` | Due: ${item.due_date}`;
+        return line;
       });
 
-      return {
-        content: [{ type: "text" as const, text: `${items.length} action item(s):\n\n${lines.join("\n\n")}` }],
-      };
+      return { content: [{ type: "text" as const, text: `${items.length} action item(s):\n\n${lines.join("\n\n")}` }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }

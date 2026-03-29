@@ -91,7 +91,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content")
+      .select("id, title, content, user_id")
       .eq("id", note_id)
       .single();
 
@@ -129,7 +129,48 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    return new Response(JSON.stringify({ ok: true, metadata }), {
+    // Insert extracted action items into the action_items table
+    const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
+    if (actionItems.length > 0) {
+      // Look up contacts matching mentioned people for linking
+      const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
+      let contactMap: Record<string, string> = {};
+      if (people.length > 0) {
+        const { data: contacts } = await supabase
+          .from("contacts")
+          .select("id, name")
+          .eq("user_id", note.user_id);
+        if (contacts) {
+          for (const c of contacts as any[]) {
+            contactMap[c.name.toLowerCase()] = c.id;
+          }
+        }
+      }
+
+      const rows = actionItems.map((content: string) => {
+        // Try to match a contact mentioned in this action item
+        let contact_id: string | null = null;
+        for (const [name, id] of Object.entries(contactMap)) {
+          if (content.toLowerCase().includes(name)) {
+            contact_id = id;
+            break;
+          }
+        }
+        return {
+          user_id: note.user_id,
+          content,
+          source_note_id: note_id,
+          contact_id,
+          status: "open",
+          priority: "normal",
+        };
+      });
+
+      const { error: aiError } = await supabase.from("action_items").insert(rows);
+      if (aiError) console.error("Action items insert error:", aiError);
+    }
+
+    return new Response(JSON.stringify({ ok: true, metadata, action_items_created: actionItems.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

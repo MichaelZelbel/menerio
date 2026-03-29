@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      action_items: {
+        Row: {
+          completed_at: string | null
+          contact_id: string | null
+          content: string
+          created_at: string | null
+          due_date: string | null
+          id: string
+          priority: string
+          source_note_id: string | null
+          status: string
+          tags: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          contact_id?: string | null
+          content: string
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          source_note_id?: string | null
+          status?: string
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          completed_at?: string | null
+          contact_id?: string | null
+          content?: string
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          source_note_id?: string | null
+          status?: string
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "action_items_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "action_items_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activity_events: {
         Row: {
           action: string

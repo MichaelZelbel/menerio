@@ -12,6 +12,7 @@ import {
   Plug,
   CalendarDays,
   UserCircle,
+  ListChecks,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -50,6 +51,7 @@ export function DashboardSidebar() {
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
+    { title: "Actions", url: "/dashboard/actions", icon: ListChecks },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
   ];
 
