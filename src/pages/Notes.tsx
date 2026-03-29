@@ -77,12 +77,21 @@ export default function Notes() {
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
 
+  const selectNote = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id) {
+      navigate(`/dashboard/notes/${id}`, { replace: true });
+    } else {
+      navigate("/dashboard/notes", { replace: true });
+    }
+  }, [navigate]);
+
   const handleCreate = useCallback(async () => {
     const note = await createNote.mutateAsync({ title: "", content: "" });
     setFilter("all");
     setSearchMode(false);
-    setSelectedId(note.id);
-  }, [createNote]);
+    selectNote(note.id);
+  }, [createNote, selectNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
