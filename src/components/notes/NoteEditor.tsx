@@ -86,6 +86,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showConnections, setShowConnections] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
