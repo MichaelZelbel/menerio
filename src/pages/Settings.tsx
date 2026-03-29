@@ -352,6 +352,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        {/* ── Import Tab ── */}
+        <TabsContent value="import">
+          <ImportMigrate />
+        </TabsContent>
+
         {/* ── AI Credits Tab ── */}
         <TabsContent value="credits">
           <CreditsDisplay />

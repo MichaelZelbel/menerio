@@ -187,6 +187,13 @@ const Dashboard = () => {
           <ActivityFeed limit={5} showViewAll />
         </div>
 
+        {/* Right sidebar continued - First Captures */}
+        {firstCaptures.show && (
+          <div className="lg:col-span-3">
+            <FirstCapturesWizard onComplete={firstCaptures.dismiss} />
+          </div>
+        )}
+
         {/* Right sidebar */}
         <div className="space-y-6">
           {showChecklist && (
