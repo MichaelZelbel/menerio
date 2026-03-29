@@ -33,6 +33,7 @@ const Wizard = lazy(() => import("./pages/Wizard"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
+const People = lazy(() => import("./pages/People"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
