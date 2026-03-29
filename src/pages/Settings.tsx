@@ -67,6 +67,8 @@ export default function Settings() {
   const { toast } = useToast();
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get("tab") || "profile";
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
