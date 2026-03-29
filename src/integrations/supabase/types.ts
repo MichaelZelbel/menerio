@@ -148,6 +148,111 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_interactions: {
+        Row: {
+          action_items: string[] | null
+          contact_id: string
+          created_at: string | null
+          id: string
+          interaction_date: string
+          note_id: string | null
+          summary: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          action_items?: string[] | null
+          contact_id: string
+          created_at?: string | null
+          id?: string
+          interaction_date?: string
+          note_id?: string | null
+          summary?: string | null
+          type: string
+          user_id?: string
+        }
+        Update: {
+          action_items?: string[] | null
+          contact_id?: string
+          created_at?: string | null
+          id?: string
+          interaction_date?: string
+          note_id?: string | null
+          summary?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_interactions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_interactions_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          company: string | null
+          contact_frequency_days: number | null
+          created_at: string | null
+          email: string | null
+          id: string
+          last_contact_date: string | null
+          metadata: Json | null
+          name: string
+          notes: string | null
+          phone: string | null
+          relationship: string | null
+          role: string | null
+          tags: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          company?: string | null
+          contact_frequency_days?: number | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          last_contact_date?: string | null
+          metadata?: Json | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          relationship?: string | null
+          role?: string | null
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          company?: string | null
+          contact_frequency_days?: number | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          last_contact_date?: string | null
+          metadata?: Json | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          relationship?: string | null
+          role?: string | null
+          tags?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       llm_usage_events: {
         Row: {
           completion_tokens: number

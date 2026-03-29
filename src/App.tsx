@@ -33,6 +33,7 @@ const Wizard = lazy(() => import("./pages/Wizard"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
+const People = lazy(() => import("./pages/People"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,6 +92,7 @@ const App = () => (
                     
                     <Route path="activity" element={<ActivityPage />} />
                     <Route path="review" element={<WeeklyReview />} />
+                    <Route path="people" element={<People />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
                   </Route>
 

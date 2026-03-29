@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Plug,
   CalendarDays,
+  UserCircle,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -48,6 +49,7 @@ export function DashboardSidebar() {
   const mainItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
+    { title: "People", url: "/dashboard/people", icon: UserCircle },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
   ];
 
