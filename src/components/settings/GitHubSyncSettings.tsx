@@ -357,6 +357,12 @@ export function GitHubSyncSettings() {
 
       {/* Conflicts panel */}
       {connection && <SyncConflictsPanel />}
+
+      {/* Sync dashboard */}
+      {connection && <SyncDashboard />}
+
+      {/* Folder mapping */}
+      {connection && <FolderMappingSettings />}
     </div>
   );
 }
