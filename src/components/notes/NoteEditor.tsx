@@ -655,6 +655,22 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     {showHistory && (
       <VersionHistoryPanel noteId={note.id} onClose={() => setShowHistory(false)} />
     )}
+    {/* Local Graph Panel */}
+    {showLocalGraph && (
+      <LocalGraphPanel
+        noteId={note.id}
+        noteTitle={title}
+        onNavigate={handleNavigateToNote}
+        onClose={() => setShowLocalGraph(false)}
+        onLinkToNote={() => setShowLinkToNote(true)}
+      />
+    )}
+    <LinkToNoteDialog
+      open={showLinkToNote}
+      onOpenChange={setShowLinkToNote}
+      targetNoteId={note.id}
+      targetNoteTitle={title}
+    />
     </div>
   );
 }
