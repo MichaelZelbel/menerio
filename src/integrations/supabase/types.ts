@@ -576,6 +576,45 @@ export type Database = {
           },
         ]
       }
+      telegram_connections: {
+        Row: {
+          bot_token: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_paired: boolean | null
+          pairing_code: string | null
+          telegram_chat_id: number | null
+          updated_at: string | null
+          user_id: string
+          webhook_secret: string
+        }
+        Insert: {
+          bot_token: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_paired?: boolean | null
+          pairing_code?: string | null
+          telegram_chat_id?: number | null
+          updated_at?: string | null
+          user_id: string
+          webhook_secret?: string
+        }
+        Update: {
+          bot_token?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_paired?: boolean | null
+          pairing_code?: string | null
+          telegram_chat_id?: number | null
+          updated_at?: string | null
+          user_id?: string
+          webhook_secret?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
