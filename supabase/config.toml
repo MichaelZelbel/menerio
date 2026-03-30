@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.get-graph-data]
 verify_jwt = false
+
+[functions.suggest-connections]
+verify_jwt = false

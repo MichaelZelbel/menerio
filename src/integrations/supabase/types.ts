@@ -352,6 +352,45 @@ export type Database = {
         }
         Relationships: []
       }
+      dismissed_suggestions: {
+        Row: {
+          dismissed_at: string | null
+          id: string
+          source_note_id: string
+          target_note_id: string
+          user_id: string
+        }
+        Insert: {
+          dismissed_at?: string | null
+          id?: string
+          source_note_id: string
+          target_note_id: string
+          user_id: string
+        }
+        Update: {
+          dismissed_at?: string | null
+          id?: string
+          source_note_id?: string
+          target_note_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dismissed_suggestions_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dismissed_suggestions_target_note_id_fkey"
+            columns: ["target_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       github_connections: {
         Row: {
           branch: string | null

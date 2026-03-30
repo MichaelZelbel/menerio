@@ -30,6 +30,7 @@ import { ExternalNotePanel } from "./ExternalNotePanel";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -578,6 +579,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
 
       {/* Backlinks panel */}
       <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
+
+      {/* Suggested Links panel */}
+      <SuggestedLinksPanel
+        noteId={note.id}
+        onInsertWikilink={(targetId, targetTitle) => {
+          if (editor) {
+            editor.commands.insertWikilink({ noteId: targetId, noteTitle: targetTitle });
+          }
+        }}
+      />
 
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
