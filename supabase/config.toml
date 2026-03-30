@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.discord-capture]
 verify_jwt = false
+
+[functions.github-sync-export]
+verify_jwt = false

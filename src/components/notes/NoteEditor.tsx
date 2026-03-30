@@ -216,6 +216,10 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       is_trashed: true,
       trashed_at: new Date().toISOString(),
     });
+    // Trigger GitHub delete when trashing
+    if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
+      ghSync.mutate({ noteId: note.id, action: "delete" });
+    }
     showToast.success("Note moved to trash");
   };
 
