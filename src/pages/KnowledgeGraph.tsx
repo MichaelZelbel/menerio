@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { SEOHead } from "@/components/SEOHead";
 import { useGraphData, GraphNode, GraphEdge } from "@/hooks/useGraphData";
+import { OrphanNotesDetector } from "@/components/graph/OrphanNotesDetector";
+import { BridgeNotesHighlighter, TopicClustersView, useBridgeNoteIds } from "@/components/graph/GraphAnalytics";
+import { GraphExportButton } from "@/components/graph/GraphExport";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Loader2,
   Search,
