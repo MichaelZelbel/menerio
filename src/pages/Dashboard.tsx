@@ -199,6 +199,7 @@ const Dashboard = () => {
         {/* Right sidebar */}
         <div className="space-y-6">
           <TodaysConnections />
+          <DiscoveryFeed />
           {showChecklist && (
             <Card>
               <CardHeader className="flex flex-row items-start justify-between pb-3">
