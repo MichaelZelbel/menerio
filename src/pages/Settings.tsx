@@ -227,6 +227,7 @@ export default function Settings() {
           <TabsTrigger value="mcp" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> MCP</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
           <TabsTrigger value="telegram" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5 hidden sm:block" /> Telegram</TabsTrigger>
+          <TabsTrigger value="discord" className="gap-1.5 text-xs"><Gamepad2 className="h-3.5 w-3.5 hidden sm:block" /> Discord</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
