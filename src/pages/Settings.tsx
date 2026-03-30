@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
