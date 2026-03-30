@@ -173,6 +173,8 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
+  const [showLocalGraph, setShowLocalGraph] = useState(false);
+  const [showLinkToNote, setShowLinkToNote] = useState(false);
 
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
