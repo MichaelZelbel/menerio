@@ -70,17 +70,47 @@ export function LocalGraphPanel({
   const { data: connections = [] } = useNoteConnections(noteId);
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 300, height: 220 });
+  const [dimensions, setDimensions] = useState({ width: 300, height: 280 });
+  const [graphHeight, setGraphHeight] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const obs = new ResizeObserver((entries) => {
       const { width } = entries[0].contentRect;
-      setDimensions({ width, height: 220 });
+      setDimensions((prev) => ({ width, height: prev.height }));
     });
     obs.observe(containerRef.current);
     return () => obs.disconnect();
   }, []);
+
+  // Keep dimensions.height in sync with graphHeight
+  useEffect(() => {
+    setDimensions((prev) => ({ ...prev, height: graphHeight }));
+  }, [graphHeight]);
+
+  // Drag-to-resize handler
+  const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartRef.current = { y: e.clientY, h: graphHeight };
+    setIsResizing(true);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      const delta = ev.clientY - resizeStartRef.current.y;
+      const newH = Math.max(150, Math.min(600, resizeStartRef.current.h + delta));
+      setGraphHeight(newH);
+    };
+    const onMouseUp = () => {
+      setIsResizing(false);
+      resizeStartRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [graphHeight]);
 
   // Center on current note after data loads
   useEffect(() => {
