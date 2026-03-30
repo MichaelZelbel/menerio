@@ -67,6 +67,95 @@ Only extract what's explicitly there. Don't invent details.`,
   }
 }
 
+async function processInBackground(noteId: string, authHeader: string) {
+  try {
+    const { data: note, error: fetchErr } = await supabase
+      .from("notes")
+      .select("id, title, content, user_id")
+      .eq("id", noteId)
+      .single();
+
+    if (fetchErr || !note) {
+      console.error("Note not found:", noteId);
+      return;
+    }
+
+    const fullText = `${note.title}\n\n${note.content}`.trim();
+    if (!fullText) return;
+
+    // Generate embedding and extract metadata in parallel
+    const [embedding, metadata] = await Promise.all([
+      getEmbedding(fullText),
+      extractMetadata(fullText),
+    ]);
+
+    // Update the note with both embedding and metadata
+    const { error: updateErr } = await supabase
+      .from("notes")
+      .update({ embedding, metadata })
+      .eq("id", noteId);
+
+    if (updateErr) {
+      console.error("Update error:", updateErr);
+      return;
+    }
+
+    // Insert extracted action items into the action_items table
+    const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
+    if (actionItems.length > 0) {
+      const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
+      let contactMap: Record<string, string> = {};
+      if (people.length > 0) {
+        const { data: contacts } = await supabase
+          .from("contacts")
+          .select("id, name")
+          .eq("user_id", note.user_id);
+        if (contacts) {
+          for (const c of contacts as any[]) {
+            contactMap[c.name.toLowerCase()] = c.id;
+          }
+        }
+      }
+
+      const rows = actionItems.map((content: string) => {
+        let contact_id: string | null = null;
+        for (const [name, id] of Object.entries(contactMap)) {
+          if (content.toLowerCase().includes(name)) {
+            contact_id = id;
+            break;
+          }
+        }
+        return {
+          user_id: note.user_id,
+          content,
+          source_note_id: noteId,
+          contact_id,
+          status: "open",
+          priority: "normal",
+        };
+      });
+
+      const { error: aiError } = await supabase.from("action_items").insert(rows);
+      if (aiError) console.error("Action items insert error:", aiError);
+    }
+
+    // Trigger connection computation (fire-and-forget)
+    const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
+    fetch(computeUrl, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ note_id: noteId }),
+    }).catch(err => console.error("compute-connections trigger error:", err));
+
+    console.log("process-note completed for:", noteId);
+  } catch (err) {
+    console.error("Background processing error:", err);
+  }
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -89,99 +178,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const { data: note, error: fetchErr } = await supabase
-      .from("notes")
-      .select("id, title, content, user_id")
-      .eq("id", note_id)
-      .single();
+    // Offload heavy work to background using EdgeRuntime.waitUntil
+    // @ts-ignore EdgeRuntime is available in Supabase edge functions
+    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
 
-    if (fetchErr || !note) {
-      return new Response(JSON.stringify({ error: "Note not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const fullText = `${note.title}\n\n${note.content}`.trim();
-    if (!fullText) {
-      return new Response(JSON.stringify({ ok: true, skipped: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Generate embedding and extract metadata in parallel
-    const [embedding, metadata] = await Promise.all([
-      getEmbedding(fullText),
-      extractMetadata(fullText),
-    ]);
-
-    // Update the note with both embedding and metadata
-    const { error: updateErr } = await supabase
-      .from("notes")
-      .update({ embedding, metadata })
-      .eq("id", note_id);
-
-    if (updateErr) {
-      console.error("Update error:", updateErr);
-      return new Response(JSON.stringify({ error: updateErr.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Insert extracted action items into the action_items table
-    const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
-    if (actionItems.length > 0) {
-      // Look up contacts matching mentioned people for linking
-      const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
-      let contactMap: Record<string, string> = {};
-      if (people.length > 0) {
-        const { data: contacts } = await supabase
-          .from("contacts")
-          .select("id, name")
-          .eq("user_id", note.user_id);
-        if (contacts) {
-          for (const c of contacts as any[]) {
-            contactMap[c.name.toLowerCase()] = c.id;
-          }
-        }
-      }
-
-      const rows = actionItems.map((content: string) => {
-        // Try to match a contact mentioned in this action item
-        let contact_id: string | null = null;
-        for (const [name, id] of Object.entries(contactMap)) {
-          if (content.toLowerCase().includes(name)) {
-            contact_id = id;
-            break;
-          }
-        }
-        return {
-          user_id: note.user_id,
-          content,
-          source_note_id: note_id,
-          contact_id,
-          status: "open",
-          priority: "normal",
-        };
-      });
-
-      const { error: aiError } = await supabase.from("action_items").insert(rows);
-      if (aiError) console.error("Action items insert error:", aiError);
-    }
-
-    // Trigger connection computation in the background (fire-and-forget)
-    const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
-    fetch(computeUrl, {
-      method: "POST",
-      headers: {
-        Authorization: authHeader!,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ note_id }),
-    }).catch(err => console.error("compute-connections trigger error:", err));
-
-    return new Response(JSON.stringify({ ok: true, metadata, action_items_created: actionItems.length }), {
+    // Return immediately
+    return new Response(JSON.stringify({ ok: true, processing: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
