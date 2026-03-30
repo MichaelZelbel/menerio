@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Github, Twitter, Linkedin, Mail } from "lucide-react";
+import logoImg from "@/assets/logo.png";
 
 const productLinks = [
   { label: "Docs", to: "/docs" },
