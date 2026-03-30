@@ -20,6 +20,7 @@ import {
 import { Loader2, Github, CheckCircle2, XCircle, AlertTriangle, Trash2, RefreshCw } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
+import { ImportVaultDialog } from "./ImportVaultDialog";
 
 export function GitHubSyncSettings() {
   const { user } = useAuth();
