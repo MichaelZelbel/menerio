@@ -156,6 +156,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         transformPastedText: true,
         transformCopiedText: false,
       }),
+      WikilinkExtension,
     ],
     content: normalizeNoteContent(note.content),
     editable: !note.is_trashed && !note.is_external,
