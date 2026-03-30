@@ -187,7 +187,12 @@ export function LocalGraphPanel({
   const totalConnections = connections.length;
 
   return (
-    <div className="w-80 border-l border-border bg-background flex flex-col h-full shrink-0">
+    <div className="border-l border-border bg-background flex flex-col h-full shrink-0 relative" style={{ width: panelWidth }}>
+      {/* Horizontal resize handle */}
+      <div
+        onMouseDown={onResizeHMouseDown}
+        className={`absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-primary/20 transition-colors ${isResizingH ? "bg-primary/30" : ""}`}
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
