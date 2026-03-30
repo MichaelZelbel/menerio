@@ -60,6 +60,7 @@ export default function Notes() {
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
+  const [showLocalGraph, setShowLocalGraph] = useState(false);
 
   // Sync selectedId when URL param changes (e.g. from graph node click)
   useEffect(() => {
