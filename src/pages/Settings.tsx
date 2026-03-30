@@ -29,6 +29,7 @@ import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, Cred
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
+import { TelegramIntegration } from "@/components/settings/TelegramIntegration";
 import { MCPConnectionManager } from "@/components/settings/MCPConnectionManager";
 import { ImportMigrate } from "@/components/settings/ImportMigrate";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
