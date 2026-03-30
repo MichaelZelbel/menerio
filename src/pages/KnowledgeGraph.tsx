@@ -406,6 +406,7 @@ export default function KnowledgeGraph() {
               </button>
             )}
           </div>
+          <GraphExportButton />
           <Button
             variant={showFilters ? "secondary" : "outline"}
             size="sm"
