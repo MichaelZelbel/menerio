@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.send-to-temerio]
 verify_jwt = false
+
+[functions.telegram-capture]
+verify_jwt = false

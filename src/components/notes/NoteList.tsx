@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2 } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
@@ -152,6 +152,14 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                     <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#4A154B]/15 text-[#4A154B] dark:text-purple-400 font-medium">
                       <MessageSquare className="h-2.5 w-2.5" />
                       Slack
+                    </span>
+                  );
+                }
+                if (source === "telegram") {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#0088cc]/15 text-[#0088cc] dark:text-sky-400 font-medium">
+                      <Send className="h-2.5 w-2.5" />
+                      Telegram
                     </span>
                   );
                 }
