@@ -420,6 +420,17 @@ export function noteToMarkdown(
     frontmatter.people = meta.people;
   }
 
+  // Obsidian-compatible properties
+  if (Array.isArray(meta.aliases) && (meta.aliases as string[]).length > 0) {
+    frontmatter.aliases = meta.aliases;
+  }
+  if (meta.cssclass) frontmatter.cssclass = meta.cssclass;
+
+  // Re-emit preserved unknown Obsidian frontmatter fields
+  if (meta._obsidian_frontmatter && typeof meta._obsidian_frontmatter === "object") {
+    Object.assign(frontmatter, meta._obsidian_frontmatter as Record<string, unknown>);
+  }
+
   // Preserve full Menerio metadata as base64 JSON for lossless round-trip
   if (Object.keys(meta).length > 0) {
     frontmatter.menerio_metadata = btoa(JSON.stringify(meta));
