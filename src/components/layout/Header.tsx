@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import logoImg from "@/assets/logo.png";
 import { Link, useNavigate } from "react-router-dom";
 import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard, Shield, Crown } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
