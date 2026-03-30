@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.github-import-vault]
 verify_jwt = false
+
+[functions.github-sync-pull]
+verify_jwt = false
+
+[functions.github-sync-scheduled]
+verify_jwt = false
