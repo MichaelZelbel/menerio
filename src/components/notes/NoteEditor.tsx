@@ -564,9 +564,23 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
 
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
-        <span>
-          {updateNote.isPending ? "Saving…" : `Saved ${formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}`}
-        </span>
+        <div className="flex items-center gap-2">
+          <span>
+            {updateNote.isPending ? "Saving…" : `Saved ${formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}`}
+          </span>
+          {ghConn?.sync_enabled && (
+            <span className="flex items-center gap-1">
+              {isSyncing && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+              {!isSyncing && syncStatus === "synced" && <CheckCircle2 className="h-2.5 w-2.5 text-success" />}
+              {!isSyncing && syncStatus === "error" && (
+                <span title={syncLog?.error_message || "Sync error"}>
+                  <AlertCircle className="h-2.5 w-2.5 text-destructive" />
+                </span>
+              )}
+              {!isSyncing && !syncStatus && <span className="text-muted-foreground/50">Not synced</span>}
+            </span>
+          )}
+        </div>
         <span>{wordCount} words</span>
       </div>
 
