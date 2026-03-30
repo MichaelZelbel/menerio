@@ -148,7 +148,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
-export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
+export function NoteEditor({ note, onNoteDeleted, showLocalGraph, onToggleLocalGraph }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
