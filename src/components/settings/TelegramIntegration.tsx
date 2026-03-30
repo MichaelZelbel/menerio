@@ -64,61 +64,8 @@ export function TelegramIntegration() {
     })();
   }, [user]);
 
-  const handleConnect = async () => {
-    if (!user || !botToken.trim()) return;
-    setSaving(true);
-    try {
-      const pairingCode = generatePairingCode();
 
-      if (connection) {
-        // Update existing
-        await supabase
-          .from("telegram_connections" as any)
-          .update({
-            bot_token: botToken.trim(),
-            pairing_code: connection.is_paired ? null : pairingCode,
-            is_active: true,
-          })
-          .eq("id", connection.id);
-      } else {
-        // Create new
-        await supabase
-          .from("telegram_connections" as any)
-          .insert({
-            user_id: user.id,
-            bot_token: botToken.trim(),
-            pairing_code: pairingCode,
-          });
-      }
 
-      // Set webhook
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await supabase.functions.invoke("telegram-capture", {
-        body: {},
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
-          "x-action": "set-webhook",
-        },
-      });
-
-      // Reload connection
-      const { data: updated } = await supabase
-        .from("telegram_connections" as any)
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
-
-      if (updated) {
-        setConnection(updated as unknown as TelegramConnection);
-      }
-
-      showToast.success("Telegram bot connected! Webhook registered.");
-    } catch (err: any) {
-      showToast.error(err.message || "Failed to connect");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleSetWebhook = async () => {
     const { data: { session } } = await supabase.auth.getSession();
