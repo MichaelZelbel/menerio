@@ -190,83 +190,46 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // ── Capture the note via quick-capture ──
-    // We call quick-capture internally using service role
-    const captureRes = await fetch(
-      `${SUPABASE_URL}/functions/v1/quick-capture`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "x-api-key": "", // not used, we'll use a direct approach
-        },
-        body: JSON.stringify({
-          content: text,
-          source: "telegram",
-        }),
-      }
-    );
+    const title =
+      text.slice(0, 50).replace(/\n/g, " ") +
+      (text.length > 50 ? "…" : "");
 
-    // Actually, quick-capture needs auth. Let's just inline the capture logic
-    // by creating the note directly and let process-note handle the rest.
-    if (!captureRes.ok) {
-      // Fallback: create note directly
-      const title =
-        text.slice(0, 50).replace(/\n/g, " ") +
-        (text.length > 50 ? "…" : "");
+    const { data: note, error: noteErr } = await supabase
+      .from("notes")
+      .insert({
+        user_id: conn.user_id,
+        title,
+        content: text,
+        metadata: { is_quick_capture: true, source: "telegram" },
+      })
+      .select("id")
+      .single();
 
-      const { data: note, error: noteErr } = await supabase
-        .from("notes")
-        .insert({
-          user_id: conn.user_id,
-          title,
-          content: text,
-          metadata: { is_quick_capture: true, source: "telegram" },
-        })
-        .select("id")
-        .single();
-
-      if (noteErr) {
-        console.error("Note insert error:", noteErr);
-        await sendTelegramMessage(
-          conn.bot_token,
-          chatId,
-          "❌ Failed to save note. Please try again."
-        );
-        return json({ ok: true });
-      }
-
+    if (noteErr) {
+      console.error("Note insert error:", noteErr);
       await sendTelegramMessage(
         conn.bot_token,
         chatId,
-        `✅ <b>Captured!</b>\n"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"`
+        "❌ Failed to save note. Please try again."
       );
       return json({ ok: true });
     }
 
-    const captureData = await captureRes.json();
-    const meta = captureData.metadata || {};
+    // Trigger async processing via process-note (fire-and-forget)
+    fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ note_id: note.id }),
+    }).catch((err) => console.error("process-note fire-and-forget error:", err));
 
-    // Build reply
-    const parts: string[] = [];
-    const noteType = meta.type || "note";
-    const topics = Array.isArray(meta.topics) ? meta.topics : [];
-
-    parts.push(
-      `✅ <b>Captured as ${noteType}</b>${topics.length > 0 ? ` — ${topics.join(", ")}` : ""}`
+    await sendTelegramMessage(
+      conn.bot_token,
+      chatId,
+      `✅ <b>Captured!</b>\n"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"`
     );
-
-    if (Array.isArray(meta.people) && meta.people.length > 0) {
-      parts.push(`👤 ${meta.people.join(", ")}`);
-    }
-
-    if (Array.isArray(meta.action_items) && meta.action_items.length > 0) {
-      parts.push(
-        `📋 Actions: ${meta.action_items.slice(0, 3).join(" | ")}`
-      );
-    }
-
-    await sendTelegramMessage(conn.bot_token, chatId, parts.join("\n"));
     return json({ ok: true });
   } catch (err) {
     console.error("telegram-capture error:", err);
