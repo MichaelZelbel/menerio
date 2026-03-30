@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.telegram-capture]
 verify_jwt = false
+
+[functions.discord-capture]
+verify_jwt = false

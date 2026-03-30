@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send, Gamepad2 } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
@@ -160,6 +160,14 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                     <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#0088cc]/15 text-[#0088cc] dark:text-sky-400 font-medium">
                       <Send className="h-2.5 w-2.5" />
                       Telegram
+                    </span>
+                  );
+                }
+                if (source === "discord") {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#5865F2]/15 text-[#5865F2] dark:text-indigo-400 font-medium">
+                      <Gamepad2 className="h-2.5 w-2.5" />
+                      Discord
                     </span>
                   );
                 }
