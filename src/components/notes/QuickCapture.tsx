@@ -77,17 +77,8 @@ export function QuickCapture() {
 
       showToast.success("Thought captured");
 
-      // Background: trigger AI processing
-      processNote.mutate(note.id, {
-        onSuccess: (data) => {
-          if (data?.metadata) {
-            const meta = data.metadata as Record<string, unknown>;
-            const type = meta.type || "thought";
-            const topics = Array.isArray(meta.topics) ? (meta.topics as string[]).join(", ") : "";
-            showToast.success(`Classified as ${type}${topics ? ` — ${topics}` : ""}`);
-          }
-        },
-      });
+      // Background: trigger AI processing (runs async on server)
+      processNote.mutate(note.id);
     } catch {
       showToast.error("Failed to capture thought");
     } finally {
