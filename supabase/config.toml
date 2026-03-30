@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.suggest-connections]
 verify_jwt = false
+
+[functions.recompute-all-connections]
+verify_jwt = false

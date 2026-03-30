@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { SEOHead } from "@/components/SEOHead";
 import { useGraphData, GraphNode, GraphEdge } from "@/hooks/useGraphData";
+import { OrphanNotesDetector } from "@/components/graph/OrphanNotesDetector";
+import { BridgeNotesHighlighter, TopicClustersView, useBridgeNoteIds } from "@/components/graph/GraphAnalytics";
+import { GraphExportButton } from "@/components/graph/GraphExport";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Loader2,
   Search,
@@ -81,6 +85,8 @@ export default function KnowledgeGraph() {
   const [selectedNode, setSelectedNode] = useState<ForceNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [sidebarTab, setSidebarTab] = useState<"filters" | "analytics">("filters");
+  const bridgeNoteIds = useBridgeNoteIds();
 
   const [filters, setFilters] = useState<Filters>({
     searchTerm: "",
@@ -201,6 +207,15 @@ export default function KnowledgeGraph() {
       ctx.fillStyle = isDimmed ? adjustAlpha(color, 0.2) : color;
       ctx.fill();
 
+      // Bridge note glow
+      if (bridgeNoteIds.has(node.id) && !isDimmed) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, size + 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = "hsla(38, 92%, 50%, 0.4)";
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+
       if (isSelected) {
         ctx.strokeStyle = "hsl(220, 70%, 45%)";
         ctx.lineWidth = 2 / globalScale;
@@ -223,7 +238,7 @@ export default function KnowledgeGraph() {
         ctx.fillText(label, node.x, node.y + size + 3 / globalScale);
       }
     },
-    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor]
+    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor, bridgeNoteIds]
   );
 
   // Track neighbors of hovered node for dimming
@@ -391,6 +406,7 @@ export default function KnowledgeGraph() {
               </button>
             )}
           </div>
+          <GraphExportButton />
           <Button
             variant={showFilters ? "secondary" : "outline"}
             size="sm"
@@ -408,126 +424,141 @@ export default function KnowledgeGraph() {
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Filter sidebar */}
+        {/* Sidebar with tabs */}
         {showFilters && (
-          <div className="w-56 shrink-0 border-r border-border bg-muted/10 overflow-y-auto p-3 space-y-4">
-            {/* Connection types */}
-            <div>
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Connection Types
-              </h3>
-              <div className="space-y-2">
-                {[
-                  { key: "showManualLink", label: "Manual Links", color: EDGE_STYLES.manual_link.color },
-                  { key: "showSemantic", label: "Semantic", color: EDGE_STYLES.semantic.color },
-                  { key: "showSharedPerson", label: "Shared Person", color: EDGE_STYLES.shared_person.color },
-                  { key: "showSharedTopic", label: "Shared Topic", color: EDGE_STYLES.shared_topic.color },
-                ].map(({ key, label, color }) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <Switch
-                      checked={(filters as any)[key]}
-                      onCheckedChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}
-                      className="scale-75"
-                    />
-                    <div className="h-2 w-4 rounded-full" style={{ background: color }} />
-                    <Label className="text-[11px]">{label}</Label>
+          <div className="w-60 shrink-0 border-r border-border bg-muted/10 overflow-y-auto flex flex-col">
+            <Tabs value={sidebarTab} onValueChange={(v) => setSidebarTab(v as any)} className="flex flex-col flex-1">
+              <TabsList className="w-full rounded-none border-b border-border h-8">
+                <TabsTrigger value="filters" className="text-[10px] flex-1 h-7">Filters</TabsTrigger>
+                <TabsTrigger value="analytics" className="text-[10px] flex-1 h-7">Analytics</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="filters" className="flex-1 overflow-y-auto p-3 space-y-4 mt-0">
+                {/* Connection types */}
+                <div>
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Connection Types
+                  </h3>
+                  <div className="space-y-2">
+                    {[
+                      { key: "showManualLink", label: "Manual Links", color: EDGE_STYLES.manual_link.color },
+                      { key: "showSemantic", label: "Semantic", color: EDGE_STYLES.semantic.color },
+                      { key: "showSharedPerson", label: "Shared Person", color: EDGE_STYLES.shared_person.color },
+                      { key: "showSharedTopic", label: "Shared Topic", color: EDGE_STYLES.shared_topic.color },
+                    ].map(({ key, label, color }) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <Switch
+                          checked={(filters as any)[key]}
+                          onCheckedChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}
+                          className="scale-75"
+                        />
+                        <div className="h-2 w-4 rounded-full" style={{ background: color }} />
+                        <Label className="text-[11px]">{label}</Label>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Min strength */}
-            <div>
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Min Strength: {filters.minStrength.toFixed(1)}
-              </h3>
-              <Slider
-                value={[filters.minStrength]}
-                min={0}
-                max={1}
-                step={0.1}
-                onValueChange={([v]) => setFilters((f) => ({ ...f, minStrength: v }))}
-                className="w-full"
-              />
-            </div>
-
-            <Separator />
-
-            {/* Note types */}
-            <div>
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Note Types
-              </h3>
-              <div className="space-y-1">
-                {ALL_NOTE_TYPES.map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => toggleNoteType(type)}
-                    className={`flex items-center gap-2 w-full px-1.5 py-0.5 rounded text-[11px] transition-colors ${
-                      filters.noteTypes.has(type) ? "text-foreground" : "text-muted-foreground/40"
-                    }`}
-                  >
-                    <div
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{
-                        background: TYPE_COLORS[type],
-                        opacity: filters.noteTypes.has(type) ? 1 : 0.3,
-                      }}
-                    />
-                    <span className="capitalize">{type.replace("_", " ")}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Display options */}
-            <div>
-              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Display
-              </h3>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={filters.showOrphans}
-                    onCheckedChange={(v) => setFilters((f) => ({ ...f, showOrphans: v }))}
-                    className="scale-75"
-                  />
-                  <Label className="text-[11px]">Show orphan notes</Label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={filters.sizeMode === "connections"}
-                    onCheckedChange={(v) =>
-                      setFilters((f) => ({ ...f, sizeMode: v ? "connections" : "uniform" }))
-                    }
-                    className="scale-75"
+
+                <Separator />
+
+                {/* Min strength */}
+                <div>
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Min Strength: {filters.minStrength.toFixed(1)}
+                  </h3>
+                  <Slider
+                    value={[filters.minStrength]}
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    onValueChange={([v]) => setFilters((f) => ({ ...f, minStrength: v }))}
+                    className="w-full"
                   />
-                  <Label className="text-[11px]">Size by connections</Label>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Labels</Label>
-                  <div className="flex gap-1">
-                    {(["hover", "always", "never"] as const).map((mode) => (
+
+                <Separator />
+
+                {/* Note types */}
+                <div>
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Note Types
+                  </h3>
+                  <div className="space-y-1">
+                    {ALL_NOTE_TYPES.map((type) => (
                       <button
-                        key={mode}
-                        onClick={() => setFilters((f) => ({ ...f, labelMode: mode }))}
-                        className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                          filters.labelMode === mode
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        key={type}
+                        onClick={() => toggleNoteType(type)}
+                        className={`flex items-center gap-2 w-full px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                          filters.noteTypes.has(type) ? "text-foreground" : "text-muted-foreground/40"
                         }`}
                       >
-                        {mode}
+                        <div
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{
+                            background: TYPE_COLORS[type],
+                            opacity: filters.noteTypes.has(type) ? 1 : 0.3,
+                          }}
+                        />
+                        <span className="capitalize">{type.replace("_", " ")}</span>
                       </button>
                     ))}
                   </div>
                 </div>
-              </div>
-            </div>
+
+                <Separator />
+
+                {/* Display options */}
+                <div>
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Display
+                  </h3>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={filters.showOrphans}
+                        onCheckedChange={(v) => setFilters((f) => ({ ...f, showOrphans: v }))}
+                        className="scale-75"
+                      />
+                      <Label className="text-[11px]">Show orphan notes</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={filters.sizeMode === "connections"}
+                        onCheckedChange={(v) =>
+                          setFilters((f) => ({ ...f, sizeMode: v ? "connections" : "uniform" }))
+                        }
+                        className="scale-75"
+                      />
+                      <Label className="text-[11px]">Size by connections</Label>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Labels</Label>
+                      <div className="flex gap-1">
+                        {(["hover", "always", "never"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => setFilters((f) => ({ ...f, labelMode: mode }))}
+                            className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                              filters.labelMode === mode
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80"
+                            }`}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="analytics" className="flex-1 overflow-y-auto p-3 space-y-4 mt-0">
+                <OrphanNotesDetector />
+                <BridgeNotesHighlighter compact />
+                <TopicClustersView />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 
