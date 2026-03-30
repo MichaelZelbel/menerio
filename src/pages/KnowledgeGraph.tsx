@@ -207,6 +207,15 @@ export default function KnowledgeGraph() {
       ctx.fillStyle = isDimmed ? adjustAlpha(color, 0.2) : color;
       ctx.fill();
 
+      // Bridge note glow
+      if (bridgeNoteIds.has(node.id) && !isDimmed) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, size + 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = "hsla(38, 92%, 50%, 0.4)";
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+
       if (isSelected) {
         ctx.strokeStyle = "hsl(220, 70%, 45%)";
         ctx.lineWidth = 2 / globalScale;
