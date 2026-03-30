@@ -137,11 +137,10 @@ export function useGitHubVersionHistory(noteId: string | null) {
 export function useGitHubFileAtCommit() {
   return useMutation({
     mutationFn: async ({ path, commitSha }: { path: string; commitSha: string }) => {
-      // Need connection details
       const { data: conn } = await supabase
         .from("github_connections" as any)
         .select("github_token, repo_owner, repo_name")
-        .maybeSingle();
+        .maybeSingle() as { data: any };
 
       if (!conn) throw new Error("No GitHub connection");
 
