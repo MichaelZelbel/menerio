@@ -255,7 +255,7 @@ export function ImportVaultDialog() {
             {/* Unresolved links */}
             {importSummary.unresolved_links.length > 0 && (
               <div className="space-y-1">
-                <div className="flex items-center gap-1 text-xs text-amber-600">
+                <div className="flex items-center gap-1 text-xs text-warning">
                   <AlertTriangle className="h-3 w-3" />
                   {importSummary.unresolved_links.length} unresolved wikilinks
                 </div>
