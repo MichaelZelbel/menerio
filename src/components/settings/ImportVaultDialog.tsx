@@ -231,7 +231,7 @@ export function ImportVaultDialog() {
         {step === "done" && importSummary && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <CheckCircle2 className="h-5 w-5 text-success" />
               <span className="font-medium">Import Complete</span>
             </div>
 
