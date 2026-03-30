@@ -352,6 +352,101 @@ export type Database = {
         }
         Relationships: []
       }
+      github_connections: {
+        Row: {
+          branch: string | null
+          created_at: string | null
+          github_token: string
+          github_username: string | null
+          id: string
+          last_sync_at: string | null
+          repo_name: string | null
+          repo_owner: string | null
+          sync_direction: string | null
+          sync_enabled: boolean | null
+          updated_at: string | null
+          user_id: string
+          vault_path: string | null
+        }
+        Insert: {
+          branch?: string | null
+          created_at?: string | null
+          github_token: string
+          github_username?: string | null
+          id?: string
+          last_sync_at?: string | null
+          repo_name?: string | null
+          repo_owner?: string | null
+          sync_direction?: string | null
+          sync_enabled?: boolean | null
+          updated_at?: string | null
+          user_id: string
+          vault_path?: string | null
+        }
+        Update: {
+          branch?: string | null
+          created_at?: string | null
+          github_token?: string
+          github_username?: string | null
+          id?: string
+          last_sync_at?: string | null
+          repo_name?: string | null
+          repo_owner?: string | null
+          sync_direction?: string | null
+          sync_enabled?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          vault_path?: string | null
+        }
+        Relationships: []
+      }
+      github_sync_log: {
+        Row: {
+          error_message: string | null
+          github_path: string
+          github_sha: string | null
+          id: string
+          last_commit_sha: string | null
+          note_id: string
+          sync_direction: string | null
+          sync_status: string | null
+          synced_at: string | null
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          github_path: string
+          github_sha?: string | null
+          id?: string
+          last_commit_sha?: string | null
+          note_id: string
+          sync_direction?: string | null
+          sync_status?: string | null
+          synced_at?: string | null
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          github_path?: string
+          github_sha?: string | null
+          id?: string
+          last_commit_sha?: string | null
+          note_id?: string
+          sync_direction?: string | null
+          sync_status?: string | null
+          synced_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "github_sync_log_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       llm_usage_events: {
         Row: {
           completion_tokens: number
