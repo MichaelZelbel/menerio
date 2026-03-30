@@ -90,6 +90,8 @@ const MIN_WORDS_FOR_PROCESSING = 50;
 interface NoteEditorProps {
   note: Note;
   onNoteDeleted?: () => void;
+  showLocalGraph?: boolean;
+  onToggleLocalGraph?: () => void;
 }
 
 /** Extract all wikilink noteIds from editor JSON content */
@@ -148,7 +150,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
-export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
+export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
@@ -173,7 +175,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
-  const [showLocalGraph, setShowLocalGraph] = useState(false);
+  const showLocalGraph = showLocalGraphProp ?? false;
   const [showLinkToNote, setShowLinkToNote] = useState(false);
 
   // Wikilink autocomplete state
@@ -410,7 +412,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConnections(!showConnections)} title="Find connections">
           <Link2 className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => setShowLocalGraph(!showLocalGraph)} title="Local graph">
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => onToggleLocalGraph?.()} title="Local graph">
           <Network className="h-4 w-4" />
         </Button>
         {syncLog && (
@@ -661,7 +663,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         noteId={note.id}
         noteTitle={title}
         onNavigate={handleNavigateToNote}
-        onClose={() => setShowLocalGraph(false)}
+        onClose={() => onToggleLocalGraph?.()}
         onLinkToNote={() => setShowLinkToNote(true)}
       />
     )}

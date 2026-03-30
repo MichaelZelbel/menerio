@@ -60,6 +60,7 @@ export default function Notes() {
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
+  const [showLocalGraph, setShowLocalGraph] = useState(false);
 
   // Sync selectedId when URL param changes (e.g. from graph node click)
   useEffect(() => {
@@ -452,6 +453,8 @@ export default function Notes() {
             key={selectedNote.id}
             note={selectedNote}
             onNoteDeleted={() => selectNote(null)}
+            showLocalGraph={showLocalGraph}
+            onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
