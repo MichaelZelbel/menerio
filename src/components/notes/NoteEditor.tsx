@@ -580,6 +580,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       {/* Backlinks panel */}
       <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
 
+      {/* Suggested Links panel */}
+      <SuggestedLinksPanel
+        noteId={note.id}
+        onInsertWikilink={(targetId, targetTitle) => {
+          if (editor) {
+            editor.commands.insertWikilink({ noteId: targetId, noteTitle: targetTitle });
+          }
+        }}
+      />
+
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
         <div className="flex items-center gap-2">
