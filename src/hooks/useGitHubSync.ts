@@ -110,16 +110,15 @@ export function useGitHubVersionHistory(noteId: string | null) {
         .select("github_path")
         .eq("user_id", user!.id)
         .eq("note_id", noteId!)
-        .maybeSingle();
+        .maybeSingle() as { data: any };
 
       if (!syncLog?.github_path) return [];
 
-      // Get GitHub connection
       const { data: conn } = await supabase
         .from("github_connections" as any)
         .select("github_token, repo_owner, repo_name, branch")
         .eq("user_id", user!.id)
-        .maybeSingle();
+        .maybeSingle() as { data: any };
 
       if (!conn) return [];
 
