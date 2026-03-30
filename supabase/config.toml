@@ -35,3 +35,9 @@ verify_jwt = false
 
 [functions.github-sync-scheduled]
 verify_jwt = false
+
+[functions.compute-connections]
+verify_jwt = false
+
+[functions.get-graph-data]
+verify_jwt = false

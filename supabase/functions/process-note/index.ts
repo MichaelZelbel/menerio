@@ -170,6 +170,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (aiError) console.error("Action items insert error:", aiError);
     }
 
+    // Trigger connection computation in the background (fire-and-forget)
+    const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
+    fetch(computeUrl, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ note_id }),
+    }).catch(err => console.error("compute-connections trigger error:", err));
+
     return new Response(JSON.stringify({ ok: true, metadata, action_items_created: actionItems.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
