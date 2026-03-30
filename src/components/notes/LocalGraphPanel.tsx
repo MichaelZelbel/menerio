@@ -70,10 +70,13 @@ export function LocalGraphPanel({
   const { data: connections = [] } = useNoteConnections(noteId);
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState(320);
   const [dimensions, setDimensions] = useState({ width: 300, height: 280 });
   const [graphHeight, setGraphHeight] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
+  const [isResizingH, setIsResizingH] = useState(false);
   const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
+  const resizeHStartRef = useRef<{ x: number; w: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -111,6 +114,28 @@ export function LocalGraphPanel({
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }, [graphHeight]);
+
+  // Horizontal drag-to-resize handler (drag left edge to widen)
+  const onResizeHMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeHStartRef.current = { x: e.clientX, w: panelWidth };
+    setIsResizingH(true);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizeHStartRef.current) return;
+      const delta = resizeHStartRef.current.x - ev.clientX;
+      const newW = Math.max(280, Math.min(800, resizeHStartRef.current.w + delta));
+      setPanelWidth(newW);
+    };
+    const onMouseUp = () => {
+      setIsResizingH(false);
+      resizeHStartRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [panelWidth]);
 
   // Center on current note after data loads
   useEffect(() => {
@@ -162,7 +187,12 @@ export function LocalGraphPanel({
   const totalConnections = connections.length;
 
   return (
-    <div className="w-80 border-l border-border bg-background flex flex-col h-full shrink-0">
+    <div className="border-l border-border bg-background flex flex-col h-full shrink-0 relative" style={{ width: panelWidth }}>
+      {/* Horizontal resize handle */}
+      <div
+        onMouseDown={onResizeHMouseDown}
+        className={`absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-primary/20 transition-colors ${isResizingH ? "bg-primary/30" : ""}`}
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
