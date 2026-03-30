@@ -31,6 +31,8 @@ import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
+import { LocalGraphPanel } from "./LocalGraphPanel";
+import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -72,6 +74,7 @@ import {
   GitCommit,
   CheckCircle2,
   AlertCircle,
+  Network,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -170,6 +173,8 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
+  const [showLocalGraph, setShowLocalGraph] = useState(false);
+  const [showLinkToNote, setShowLinkToNote] = useState(false);
 
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
@@ -404,6 +409,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         </Button>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConnections(!showConnections)} title="Find connections">
           <Link2 className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => setShowLocalGraph(!showLocalGraph)} title="Local graph">
+          <Network className="h-4 w-4" />
         </Button>
         {syncLog && (
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(!showHistory)} title="Version history">
@@ -647,6 +655,22 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     {showHistory && (
       <VersionHistoryPanel noteId={note.id} onClose={() => setShowHistory(false)} />
     )}
+    {/* Local Graph Panel */}
+    {showLocalGraph && (
+      <LocalGraphPanel
+        noteId={note.id}
+        noteTitle={title}
+        onNavigate={handleNavigateToNote}
+        onClose={() => setShowLocalGraph(false)}
+        onLinkToNote={() => setShowLinkToNote(true)}
+      />
+    )}
+    <LinkToNoteDialog
+      open={showLinkToNote}
+      onOpenChange={setShowLinkToNote}
+      targetNoteId={note.id}
+      targetNoteTitle={title}
+    />
     </div>
   );
 }
