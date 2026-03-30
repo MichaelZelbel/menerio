@@ -238,7 +238,7 @@ export default function KnowledgeGraph() {
         ctx.fillText(label, node.x, node.y + size + 3 / globalScale);
       }
     },
-    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor]
+    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor, bridgeNoteIds]
   );
 
   // Track neighbors of hovered node for dimming
