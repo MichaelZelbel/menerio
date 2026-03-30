@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.github-sync-export]
 verify_jwt = false
+
+[functions.github-import-vault]
+verify_jwt = false
