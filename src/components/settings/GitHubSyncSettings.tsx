@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useGitHubConnection, useGitHubBulkSync } from "@/hooks/useGitHubSync";
+import { SyncDashboard, FolderMappingSettings } from "./SyncDashboard";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -356,6 +357,12 @@ export function GitHubSyncSettings() {
 
       {/* Conflicts panel */}
       {connection && <SyncConflictsPanel />}
+
+      {/* Sync dashboard */}
+      {connection && <SyncDashboard />}
+
+      {/* Folder mapping */}
+      {connection && <FolderMappingSettings />}
     </div>
   );
 }

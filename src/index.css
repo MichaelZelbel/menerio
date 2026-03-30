@@ -357,6 +357,22 @@
   color: hsl(var(--foreground));
 }
 
+/* Wikilink decoration */
+.wikilink-decoration {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.08);
+  border-radius: 2px;
+  padding: 0 2px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 150ms;
+}
+
+.wikilink-decoration:hover {
+  background: hsl(var(--primary) / 0.18);
+  text-decoration: underline;
+}
+
 @keyframes gradient-shift {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }

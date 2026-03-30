@@ -420,6 +420,17 @@ export function noteToMarkdown(
     frontmatter.people = meta.people;
   }
 
+  // Obsidian-compatible properties
+  if (Array.isArray(meta.aliases) && (meta.aliases as string[]).length > 0) {
+    frontmatter.aliases = meta.aliases;
+  }
+  if (meta.cssclass) frontmatter.cssclass = meta.cssclass;
+
+  // Re-emit preserved unknown Obsidian frontmatter fields
+  if (meta._obsidian_frontmatter && typeof meta._obsidian_frontmatter === "object") {
+    Object.assign(frontmatter, meta._obsidian_frontmatter as Record<string, unknown>);
+  }
+
   // Preserve full Menerio metadata as base64 JSON for lossless round-trip
   if (Object.keys(meta).length > 0) {
     frontmatter.menerio_metadata = btoa(JSON.stringify(meta));
@@ -464,6 +475,29 @@ export function markdownToNote(
     if (fm.tags) metadata.topics = Array.isArray(fm.tags) ? fm.tags : [fm.tags];
     if (fm.type) metadata.type = fm.type;
     if (fm.people) metadata.people = Array.isArray(fm.people) ? fm.people : [fm.people];
+  }
+
+  // Preserve Obsidian-specific properties
+  if (fm.aliases) metadata.aliases = Array.isArray(fm.aliases) ? fm.aliases : [fm.aliases];
+  if (fm.cssclass) metadata.cssclass = fm.cssclass;
+
+  // Preserve unknown frontmatter fields for lossless round-trip
+  const knownKeys = new Set([
+    "id", "title", "created", "modified", "tags", "type", "people",
+    "menerio_metadata", "favorite", "pinned", "aliases", "cssclass",
+  ]);
+  const unknownFields: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(fm)) {
+    if (!knownKeys.has(key)) unknownFields[key] = val;
+  }
+  if (Object.keys(unknownFields).length > 0) {
+    metadata._obsidian_frontmatter = unknownFields;
+  }
+
+  // Detect daily notes pattern (YYYY-MM-DD.md title)
+  const title = fm.title || "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(title)) {
+    metadata.type = metadata.type || "daily_note";
   }
 
   // Convert wikilinks to internal links
