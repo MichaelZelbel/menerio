@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { useGitHubConnection, useGitHubSyncExport, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { ExternalNotePanel } from "./ExternalNotePanel";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
@@ -64,8 +65,12 @@ import {
   Send,
   Sparkles,
   Link2,
+  GitCommit,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent } from "@/lib/note-content";
@@ -84,12 +89,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const processNote = useProcessNote();
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
+  const { data: ghConn } = useGitHubConnection();
+  const ghSync = useGitHubSyncExport();
+  const { data: syncLog } = useSyncLogForNote(note.id);
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
@@ -98,6 +107,17 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Trigger GitHub sync after note saves
+  const triggerGitHubSync = useCallback((noteId: string) => {
+    if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
+    if (ghConn.sync_direction !== "export" && ghConn.sync_direction !== "bidirectional") return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      ghSync.mutate({ noteId, action: "update" });
+    }, 3000); // 3s debounce after last save
+  }, [ghConn, ghSync]);
 
   const editor = useEditor({
     extensions: [
@@ -143,6 +163,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: html });
+        triggerGitHubSync(note.id);
       }, 800);
 
       // Schedule auto AI processing
@@ -177,6 +198,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       updateNote.mutate({ id: note.id, title: val });
+      triggerGitHubSync(note.id);
     }, 800);
   };
 
@@ -194,6 +216,10 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       is_trashed: true,
       trashed_at: new Date().toISOString(),
     });
+    // Trigger GitHub delete when trashing
+    if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
+      ghSync.mutate({ noteId: note.id, action: "delete" });
+    }
     showToast.success("Note moved to trash");
   };
 
@@ -256,8 +282,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
 
+  // Sync status indicator helper
+  const syncStatus = syncLog?.sync_status;
+  const isSyncing = ghSync.isPending;
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full">
+    <div className="flex flex-col h-full flex-1 min-w-0">
       {/* Action toolbar */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
         <Button
@@ -307,6 +338,18 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         >
           <Link2 className="h-4 w-4" />
         </Button>
+        {/* Version History (only if synced to GitHub) */}
+        {syncLog && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowHistory(!showHistory)}
+            title="Version history"
+          >
+            <GitCommit className="h-4 w-4" />
+          </Button>
+        )}
         {!note.is_trashed && (
           <Button
             variant="ghost"
@@ -525,9 +568,23 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
 
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
-        <span>
-          {updateNote.isPending ? "Saving…" : `Saved ${formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}`}
-        </span>
+        <div className="flex items-center gap-2">
+          <span>
+            {updateNote.isPending ? "Saving…" : `Saved ${formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}`}
+          </span>
+          {ghConn?.sync_enabled && (
+            <span className="flex items-center gap-1">
+              {isSyncing && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+              {!isSyncing && syncStatus === "synced" && <CheckCircle2 className="h-2.5 w-2.5 text-success" />}
+              {!isSyncing && syncStatus === "error" && (
+                <span title={syncLog?.error_message || "Sync error"}>
+                  <AlertCircle className="h-2.5 w-2.5 text-destructive" />
+                </span>
+              )}
+              {!isSyncing && !syncStatus && <span className="text-muted-foreground/50">Not synced</span>}
+            </span>
+          )}
+        </div>
         <span>{wordCount} words</span>
       </div>
 
@@ -565,6 +622,11 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         onOpenChange={setShowForwardDialog}
         note={note}
       />
+    </div>
+    {/* Version History Panel */}
+    {showHistory && (
+      <VersionHistoryPanel noteId={note.id} onClose={() => setShowHistory(false)} />
+    )}
     </div>
   );
 }
