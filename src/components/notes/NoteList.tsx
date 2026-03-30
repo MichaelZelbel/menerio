@@ -163,6 +163,14 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                     </span>
                   );
                 }
+                if (source === "discord") {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#5865F2]/15 text-[#5865F2] dark:text-indigo-400 font-medium">
+                      <Gamepad2 className="h-2.5 w-2.5" />
+                      Discord
+                    </span>
+                  );
+                }
                 if (m?.is_quick_capture) {
                   return (
                     <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
