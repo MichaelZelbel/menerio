@@ -16,6 +16,7 @@ import {
   Network,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
+import logoImg from "@/assets/logo.png";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
