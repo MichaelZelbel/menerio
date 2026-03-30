@@ -65,6 +65,9 @@ import {
   Send,
   Sparkles,
   Link2,
+  GitCommit,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { formatDistanceToNow, format } from "date-fns";
