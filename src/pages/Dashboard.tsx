@@ -7,6 +7,7 @@ import { useNotes } from "@/hooks/useNotes";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { FirstCapturesWizard, useShowFirstCaptures } from "@/components/onboarding/FirstCapturesWizard";
 import { TodaysConnections } from "@/components/dashboard/TodaysConnections";
+import { DiscoveryFeed } from "@/components/dashboard/DiscoveryFeed";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
