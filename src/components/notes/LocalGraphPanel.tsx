@@ -70,10 +70,13 @@ export function LocalGraphPanel({
   const { data: connections = [] } = useNoteConnections(noteId);
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState(320);
   const [dimensions, setDimensions] = useState({ width: 300, height: 280 });
   const [graphHeight, setGraphHeight] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
+  const [isResizingH, setIsResizingH] = useState(false);
   const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
+  const resizeHStartRef = useRef<{ x: number; w: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
