@@ -264,7 +264,11 @@ export function LocalGraphPanel({
             }}
             linkWidth={(link: any) => Math.max(0.5, (link.strength || 0.5) * 2)}
             onNodeClick={(node: any) => {
-              if (node.id !== noteId) onNavigate(node.id);
+              onNavigate(node.id);
+            }}
+            onNodeHover={(node: any) => {
+              const el = containerRef.current?.querySelector("canvas");
+              if (el) el.style.cursor = node ? "pointer" : "default";
             }}
             cooldownTime={2000}
             d3AlphaDecay={0.05}
