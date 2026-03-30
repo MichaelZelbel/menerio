@@ -663,7 +663,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         noteId={note.id}
         noteTitle={title}
         onNavigate={handleNavigateToNote}
-        onClose={() => setShowLocalGraph(false)}
+        onClose={() => onToggleLocalGraph?.()}
         onLinkToNote={() => setShowLinkToNote(true)}
       />
     )}
