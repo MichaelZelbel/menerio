@@ -1,63 +1,102 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { SEOHead } from "@/components/SEOHead";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { useGraphData, GraphNode, GraphEdge } from "@/hooks/useGraphData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Search, FileText, UserCircle, X, Maximize2, Minimize2 } from "lucide-react";
+import {
+  Loader2,
+  Search,
+  FileText,
+  X,
+  Maximize2,
+  Minimize2,
+  Filter,
+  ChevronRight,
+  ExternalLink,
+  Sparkles,
+} from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
 
-interface GraphNode {
-  id: string;
-  name: string;
-  type: "note" | "contact" | "topic";
-  color: string;
-  val: number; // node size
-  metadata?: Record<string, unknown>;
-}
-
-interface GraphLink {
-  source: string;
-  target: string;
-  label?: string;
-  value: number;
-}
-
-interface GraphData {
-  nodes: GraphNode[];
-  links: GraphLink[];
-}
-
+// Color palette for note types using design system hues
 const TYPE_COLORS: Record<string, string> = {
-  observation: "hsl(220, 70%, 50%)",
+  observation: "hsl(220, 14%, 60%)",
+  idea: "hsl(270, 55%, 55%)",
   task: "hsl(38, 92%, 50%)",
-  idea: "hsl(280, 60%, 55%)",
-  reference: "hsl(152, 60%, 40%)",
-  person_note: "hsl(340, 60%, 50%)",
   meeting_note: "hsl(205, 78%, 50%)",
-  decision: "hsl(0, 72%, 51%)",
-  project: "hsl(160, 60%, 45%)",
-  contact: "hsl(270, 60%, 55%)",
-  topic: "hsl(38, 80%, 55%)",
-  default: "hsl(220, 14%, 60%)",
+  decision: "hsl(175, 60%, 42%)",
+  person_note: "hsl(340, 60%, 55%)",
+  project: "hsl(152, 60%, 40%)",
+  reference: "hsl(15, 70%, 55%)",
+  daily_note: "hsl(45, 80%, 50%)",
+  note: "hsl(220, 14%, 70%)",
 };
 
+// Edge style config
+const EDGE_STYLES: Record<string, { dash: number[]; color: string; opacity: number }> = {
+  semantic: { dash: [2, 3], color: "hsl(220, 14%, 55%)", opacity: 0.3 },
+  shared_person: { dash: [6, 3], color: "hsl(340, 60%, 55%)", opacity: 0.5 },
+  shared_topic: { dash: [6, 3], color: "hsl(205, 78%, 50%)", opacity: 0.5 },
+  manual_link: { dash: [], color: "hsl(220, 70%, 45%)", opacity: 0.8 },
+};
+
+interface ForceNode extends GraphNode {
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  __connectionCount?: number;
+}
+
+interface Filters {
+  searchTerm: string;
+  minStrength: number;
+  showSemantic: boolean;
+  showSharedPerson: boolean;
+  showSharedTopic: boolean;
+  showManualLink: boolean;
+  noteTypes: Set<string>;
+  showOrphans: boolean;
+  sizeMode: "connections" | "uniform";
+  labelMode: "hover" | "always" | "never";
+}
+
+const ALL_NOTE_TYPES = [
+  "observation", "idea", "task", "meeting_note", "decision",
+  "person_note", "project", "reference", "daily_note", "note",
+];
+
 export default function KnowledgeGraph() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
-  const [loading, setLoading] = useState(true);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const graphRef = useRef<any>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
+  const [showFilters, setShowFilters] = useState(true);
+  const [selectedNode, setSelectedNode] = useState<ForceNode | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
+  const [filters, setFilters] = useState<Filters>({
+    searchTerm: "",
+    minStrength: 0,
+    showSemantic: true,
+    showSharedPerson: true,
+    showSharedTopic: true,
+    showManualLink: true,
+    noteTypes: new Set(ALL_NOTE_TYPES),
+    showOrphans: false,
+    sizeMode: "connections",
+    labelMode: "hover",
+  });
+
+  // Fetch graph data from edge function
+  const { data: graphData, isLoading } = useGraphData({ limit: 200, min_strength: filters.minStrength });
 
   // Measure container
   useEffect(() => {
@@ -66,7 +105,7 @@ export default function KnowledgeGraph() {
         const rect = containerRef.current.getBoundingClientRect();
         setDimensions({
           width: rect.width || 800,
-          height: fullscreen ? window.innerHeight - 60 : Math.max(rect.height, 500),
+          height: fullscreen ? window.innerHeight - 10 : Math.max(rect.height, 550),
         });
       }
     };
@@ -75,358 +114,624 @@ export default function KnowledgeGraph() {
     return () => window.removeEventListener("resize", measure);
   }, [fullscreen]);
 
-  // Build graph from notes + contacts
-  const buildGraph = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  // Build filtered graph for ForceGraph2D
+  const processedGraph = useMemo(() => {
+    if (!graphData) return { nodes: [], links: [] };
 
-    const [notesRes, contactsRes] = await Promise.all([
-      supabase
-        .from("notes")
-        .select("id, title, metadata, tags, created_at")
-        .eq("user_id", user.id)
-        .eq("is_trashed", false)
-        .order("created_at", { ascending: false })
-        .limit(200),
-      supabase
-        .from("contacts")
-        .select("id, name, relationship")
-        .eq("user_id", user.id),
-    ]);
+    const enabledTypes = new Set<string>();
+    if (filters.showSemantic) enabledTypes.add("semantic");
+    if (filters.showSharedPerson) enabledTypes.add("shared_person");
+    if (filters.showSharedTopic) enabledTypes.add("shared_topic");
+    if (filters.showManualLink) enabledTypes.add("manual_link");
 
-    const notes = notesRes.data || [];
-    const contacts = contactsRes.data || [];
+    // Filter edges
+    let edges = graphData.edges.filter(
+      (e) => enabledTypes.has(e.type) && e.strength >= filters.minStrength
+    );
 
-    const nodes: GraphNode[] = [];
-    const links: GraphLink[] = [];
-    const topicMap = new Map<string, string[]>(); // topic -> note IDs
-    const peopleMap = new Map<string, string[]>(); // person name -> note IDs
+    // Filter nodes
+    let nodes = graphData.nodes.filter((n) => filters.noteTypes.has(n.type || "note"));
 
-    // Add note nodes
-    for (const note of notes) {
-      const meta = (note.metadata || {}) as Record<string, unknown>;
-      const noteType = (meta.type as string) || "default";
-      const color = TYPE_COLORS[noteType] || TYPE_COLORS.default;
+    // Search filter
+    if (filters.searchTerm) {
+      const term = filters.searchTerm.toLowerCase();
+      nodes = nodes.filter((n) => n.title.toLowerCase().includes(term));
+    }
 
-      nodes.push({
-        id: note.id,
-        name: note.title || "Untitled",
-        type: "note",
-        color,
-        val: 1,
-        metadata: meta,
-      });
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    edges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-      // Track topics
-      const topics = (Array.isArray(meta.topics) ? meta.topics : note.tags || []) as string[];
-      for (const topic of topics) {
-        const key = topic.toLowerCase();
-        if (!topicMap.has(key)) topicMap.set(key, []);
-        topicMap.get(key)!.push(note.id);
+    // Count connections per node
+    const connCount = new Map<string, number>();
+    for (const e of edges) {
+      connCount.set(e.source, (connCount.get(e.source) || 0) + 1);
+      connCount.set(e.target, (connCount.get(e.target) || 0) + 1);
+    }
+
+    // Filter orphans
+    if (!filters.showOrphans) {
+      nodes = nodes.filter((n) => (connCount.get(n.id) || 0) > 0);
+      const remaining = new Set(nodes.map((n) => n.id));
+      edges = edges.filter((e) => remaining.has(e.source) && remaining.has(e.target));
+    }
+
+    // Build ForceGraph2D data
+    const forceNodes: ForceNode[] = nodes.map((n) => ({
+      ...n,
+      __connectionCount: connCount.get(n.id) || 0,
+    }));
+
+    const forceLinks = edges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      type: e.type,
+      strength: e.strength,
+    }));
+
+    return { nodes: forceNodes, links: forceLinks };
+  }, [graphData, filters]);
+
+  // Node sizing
+  const getNodeSize = useCallback(
+    (node: ForceNode) => {
+      if (filters.sizeMode === "uniform") return 6;
+      const count = node.__connectionCount || 0;
+      return Math.max(4, Math.min(18, 4 + count * 2));
+    },
+    [filters.sizeMode]
+  );
+
+  // Node color
+  const getNodeColor = useCallback((node: ForceNode) => {
+    return TYPE_COLORS[node.type] || TYPE_COLORS.note;
+  }, []);
+
+  // Canvas renderer
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const size = getNodeSize(node);
+      const isHovered = hoveredNode === node.id;
+      const isSelected = selectedNode?.id === node.id;
+      const isDimmed = hoveredNode && !isHovered && !isNeighbor(node.id);
+      const color = getNodeColor(node);
+
+      // Node circle
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, isHovered || isSelected ? size + 2 : size, 0, 2 * Math.PI);
+      ctx.fillStyle = isDimmed ? adjustAlpha(color, 0.2) : color;
+      ctx.fill();
+
+      if (isSelected) {
+        ctx.strokeStyle = "hsl(220, 70%, 45%)";
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
       }
 
-      // Track people
-      if (Array.isArray(meta.people)) {
-        for (const person of meta.people as string[]) {
-          const key = person.toLowerCase();
-          if (!peopleMap.has(key)) peopleMap.set(key, []);
-          peopleMap.get(key)!.push(note.id);
-        }
+      // Labels
+      const showLabel =
+        filters.labelMode === "always" ||
+        (filters.labelMode === "hover" && (isHovered || isSelected)) ||
+        (globalScale > 2.5 && !isDimmed);
+
+      if (showLabel) {
+        const fontSize = Math.max(11 / globalScale, 3);
+        ctx.font = `500 ${fontSize}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = isDimmed ? "hsla(220, 25%, 30%, 0.3)" : "hsl(220, 25%, 20%)";
+        const label = (node.title || "").length > 28 ? node.title.slice(0, 25) + "…" : node.title;
+        ctx.fillText(label, node.x, node.y + size + 3 / globalScale);
       }
+    },
+    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor]
+  );
+
+  // Track neighbors of hovered node for dimming
+  const neighborsRef = useRef(new Set<string>());
+  const isNeighbor = useCallback((id: string) => neighborsRef.current.has(id), []);
+
+  useEffect(() => {
+    if (!hoveredNode) {
+      neighborsRef.current = new Set();
+      return;
     }
+    const neighbors = new Set<string>();
+    neighbors.add(hoveredNode);
+    for (const l of processedGraph.links) {
+      const s = typeof l.source === "string" ? l.source : (l.source as any).id;
+      const t = typeof l.target === "string" ? l.target : (l.target as any).id;
+      if (s === hoveredNode) neighbors.add(t);
+      if (t === hoveredNode) neighbors.add(s);
+    }
+    neighborsRef.current = neighbors;
+  }, [hoveredNode, processedGraph.links]);
 
-    // Add contact nodes
-    for (const contact of contacts) {
-      nodes.push({
-        id: `contact-${contact.id}`,
-        name: contact.name,
-        type: "contact",
-        color: TYPE_COLORS.contact,
-        val: 2,
-      });
+  // Link canvas renderer
+  const linkCanvasObject = useCallback(
+    (link: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const style = EDGE_STYLES[link.type] || EDGE_STYLES.semantic;
+      const source = link.source;
+      const target = link.target;
+      if (!source.x || !target.x) return;
 
-      // Link contacts to notes that mention them
-      const key = contact.name.toLowerCase();
-      if (peopleMap.has(key)) {
-        for (const noteId of peopleMap.get(key)!) {
-          links.push({
-            source: `contact-${contact.id}`,
-            target: noteId,
-            label: "mentioned",
-            value: 1,
-          });
-        }
+      const isDimmed = hoveredNode && !neighborsRef.current.has(source.id) && !neighborsRef.current.has(target.id);
+      const width = Math.max(0.5, link.strength * 2.5) / globalScale;
+
+      ctx.beginPath();
+      ctx.moveTo(source.x, source.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.strokeStyle = isDimmed ? adjustAlpha(style.color, 0.05) : adjustAlpha(style.color, style.opacity);
+      ctx.lineWidth = width;
+
+      if (style.dash.length > 0) {
+        ctx.setLineDash(style.dash.map((d) => d / globalScale));
+      } else {
+        ctx.setLineDash([]);
       }
-    }
 
-    // Link notes that share topics (only for topics with 2+ notes, max connections)
-    for (const [topic, noteIds] of topicMap) {
-      if (noteIds.length < 2 || noteIds.length > 20) continue;
-      // Only connect pairs up to a limit
-      for (let i = 0; i < Math.min(noteIds.length, 5); i++) {
-        for (let j = i + 1; j < Math.min(noteIds.length, 5); j++) {
-          links.push({
-            source: noteIds[i],
-            target: noteIds[j],
-            label: topic,
-            value: 0.5,
-          });
-        }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrow for manual links
+      if (link.type === "manual_link" && globalScale > 1) {
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len === 0) return;
+        const nodeSize = getNodeSize(target);
+        const arrowLen = 6 / globalScale;
+        const arrowX = target.x - (dx / len) * (nodeSize + 2);
+        const arrowY = target.y - (dy / len) * (nodeSize + 2);
+        const angle = Math.atan2(dy, dx);
+
+        ctx.beginPath();
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+          arrowX - arrowLen * Math.cos(angle - Math.PI / 6),
+          arrowY - arrowLen * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+          arrowX - arrowLen * Math.cos(angle + Math.PI / 6),
+          arrowY - arrowLen * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fillStyle = style.color;
+        ctx.fill();
       }
-    }
+    },
+    [hoveredNode, getNodeSize]
+  );
 
-    // Calculate connectivity for node sizing
-    const connectivity = new Map<string, number>();
-    for (const link of links) {
-      const s = typeof link.source === "string" ? link.source : (link.source as unknown as GraphNode).id;
-      const t = typeof link.target === "string" ? link.target : (link.target as unknown as GraphNode).id;
-      connectivity.set(s, (connectivity.get(s) || 0) + 1);
-      connectivity.set(t, (connectivity.get(t) || 0) + 1);
-    }
-    for (const node of nodes) {
-      node.val = Math.max(1, Math.min(8, (connectivity.get(node.id) || 0) + 1));
-    }
-
-    setGraphData({ nodes, links });
-    setLoading(false);
-  }, [user]);
-
-  useEffect(() => { buildGraph(); }, [buildGraph]);
-
-  // Filtered graph
-  const filteredGraph = useMemo(() => {
-    let filteredNodes = graphData.nodes;
-
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filteredNodes = filteredNodes.filter((n) => n.name.toLowerCase().includes(term));
-    }
-
-    if (typeFilter !== "all") {
-      filteredNodes = filteredNodes.filter((n) => {
-        if (typeFilter === "contact") return n.type === "contact";
-        const meta = n.metadata;
-        return meta && (meta.type as string) === typeFilter;
-      });
-    }
-
-    const nodeIds = new Set(filteredNodes.map((n) => n.id));
-    const filteredLinks = graphData.links.filter((l) => {
-      const s = typeof l.source === "string" ? l.source : (l.source as unknown as GraphNode).id;
-      const t = typeof l.target === "string" ? l.target : (l.target as unknown as GraphNode).id;
-      return nodeIds.has(s) && nodeIds.has(t);
-    });
-
-    return { nodes: filteredNodes, links: filteredLinks };
-  }, [graphData, searchTerm, typeFilter]);
-
-  const handleNodeClick = (node: GraphNode) => {
+  const handleNodeClick = useCallback((node: any) => {
     setSelectedNode(node);
-  };
+  }, []);
+
+  const handleNodeDoubleClick = useCallback(
+    (node: any) => {
+      navigate(`/dashboard/notes/${node.id}`);
+    },
+    [navigate]
+  );
+
+  const handleSearch = useCallback(
+    (term: string) => {
+      setFilters((f) => ({ ...f, searchTerm: term }));
+      if (term && graphRef.current) {
+        const node = processedGraph.nodes.find((n) =>
+          n.title.toLowerCase().includes(term.toLowerCase())
+        );
+        if (node && node.x !== undefined && node.y !== undefined) {
+          graphRef.current.centerAt(node.x, node.y, 500);
+          graphRef.current.zoom(3, 500);
+          setSelectedNode(node);
+        }
+      }
+    },
+    [processedGraph.nodes]
+  );
+
+  const toggleNoteType = useCallback((type: string) => {
+    setFilters((f) => {
+      const next = new Set(f.noteTypes);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return { ...f, noteTypes: next };
+    });
+  }, []);
+
+  // Connection details for selected node
+  const selectedNodeEdges = useMemo(() => {
+    if (!selectedNode) return [];
+    return processedGraph.links.filter((l) => {
+      const s = typeof l.source === "string" ? l.source : (l.source as any).id;
+      const t = typeof l.target === "string" ? l.target : (l.target as any).id;
+      return s === selectedNode.id || t === selectedNode.id;
+    });
+  }, [selectedNode, processedGraph.links]);
+
+  const selectedNeighborNodes = useMemo(() => {
+    if (!selectedNode) return [];
+    const neighborIds = new Set<string>();
+    for (const e of selectedNodeEdges) {
+      const s = typeof e.source === "string" ? e.source : (e.source as any).id;
+      const t = typeof e.target === "string" ? e.target : (e.target as any).id;
+      if (s !== selectedNode.id) neighborIds.add(s);
+      if (t !== selectedNode.id) neighborIds.add(t);
+    }
+    return processedGraph.nodes.filter((n) => neighborIds.has(n.id));
+  }, [selectedNode, selectedNodeEdges, processedGraph.nodes]);
 
   return (
-    <div className={fullscreen ? "fixed inset-0 z-50 bg-background" : ""}>
+    <div className={fullscreen ? "fixed inset-0 z-50 bg-background flex flex-col" : "flex flex-col h-full"}>
       <SEOHead title="Knowledge Graph — Menerio" noIndex />
 
-      <div className="flex items-center justify-between mb-4 px-2">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background shrink-0">
         <div>
-          <h1 className="text-2xl font-display font-bold">Knowledge Graph</h1>
-          <p className="text-sm text-muted-foreground">
-            {graphData.nodes.length} nodes · {graphData.links.length} connections
+          <h1 className="text-lg font-display font-bold">Knowledge Graph</h1>
+          <p className="text-xs text-muted-foreground">
+            {processedGraph.nodes.length} nodes · {processedGraph.links.length} edges
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setFullscreen(!fullscreen)}>
-          {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 mb-4 px-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Filter nodes…"
-            className="pl-8 h-8 text-xs"
-          />
-          {searchTerm && (
-            <button onClick={() => setSearchTerm("")} className="absolute right-2 top-1/2 -translate-y-1/2">
-              <X className="h-3 w-3 text-muted-foreground" />
-            </button>
-          )}
+        <div className="flex items-center gap-2">
+          <div className="relative w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={filters.searchTerm}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search nodes…"
+              className="pl-8 h-8 text-xs"
+            />
+            {filters.searchTerm && (
+              <button
+                onClick={() => setFilters((f) => ({ ...f, searchTerm: "" }))}
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+              >
+                <X className="h-3 w-3 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+          <Button
+            variant={showFilters ? "secondary" : "outline"}
+            size="sm"
+            className="h-8 text-xs gap-1"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter className="h-3.5 w-3.5" />
+            Filters
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setFullscreen(!fullscreen)}>
+            {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </Button>
         </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-36 h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            <SelectItem value="contact">Contacts</SelectItem>
-            <SelectItem value="observation">Observations</SelectItem>
-            <SelectItem value="task">Tasks</SelectItem>
-            <SelectItem value="idea">Ideas</SelectItem>
-            <SelectItem value="reference">References</SelectItem>
-            <SelectItem value="decision">Decisions</SelectItem>
-            <SelectItem value="project">Projects</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      <div className="flex gap-4">
-        {/* Graph */}
-        <div
-          ref={containerRef}
-          className="flex-1 rounded-lg border bg-card overflow-hidden"
-          style={{ minHeight: fullscreen ? "calc(100vh - 120px)" : 500 }}
-        >
-          {loading ? (
+      {/* Main content */}
+      <div className="flex flex-1 min-h-0">
+        {/* Filter sidebar */}
+        {showFilters && (
+          <div className="w-56 shrink-0 border-r border-border bg-muted/10 overflow-y-auto p-3 space-y-4">
+            {/* Connection types */}
+            <div>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Connection Types
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { key: "showManualLink", label: "Manual Links", color: EDGE_STYLES.manual_link.color },
+                  { key: "showSemantic", label: "Semantic", color: EDGE_STYLES.semantic.color },
+                  { key: "showSharedPerson", label: "Shared Person", color: EDGE_STYLES.shared_person.color },
+                  { key: "showSharedTopic", label: "Shared Topic", color: EDGE_STYLES.shared_topic.color },
+                ].map(({ key, label, color }) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <Switch
+                      checked={(filters as any)[key]}
+                      onCheckedChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}
+                      className="scale-75"
+                    />
+                    <div className="h-2 w-4 rounded-full" style={{ background: color }} />
+                    <Label className="text-[11px]">{label}</Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Min strength */}
+            <div>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Min Strength: {filters.minStrength.toFixed(1)}
+              </h3>
+              <Slider
+                value={[filters.minStrength]}
+                min={0}
+                max={1}
+                step={0.1}
+                onValueChange={([v]) => setFilters((f) => ({ ...f, minStrength: v }))}
+                className="w-full"
+              />
+            </div>
+
+            <Separator />
+
+            {/* Note types */}
+            <div>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Note Types
+              </h3>
+              <div className="space-y-1">
+                {ALL_NOTE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => toggleNoteType(type)}
+                    className={`flex items-center gap-2 w-full px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                      filters.noteTypes.has(type) ? "text-foreground" : "text-muted-foreground/40"
+                    }`}
+                  >
+                    <div
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{
+                        background: TYPE_COLORS[type],
+                        opacity: filters.noteTypes.has(type) ? 1 : 0.3,
+                      }}
+                    />
+                    <span className="capitalize">{type.replace("_", " ")}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Display options */}
+            <div>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Display
+              </h3>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={filters.showOrphans}
+                    onCheckedChange={(v) => setFilters((f) => ({ ...f, showOrphans: v }))}
+                    className="scale-75"
+                  />
+                  <Label className="text-[11px]">Show orphan notes</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={filters.sizeMode === "connections"}
+                    onCheckedChange={(v) =>
+                      setFilters((f) => ({ ...f, sizeMode: v ? "connections" : "uniform" }))
+                    }
+                    className="scale-75"
+                  />
+                  <Label className="text-[11px]">Size by connections</Label>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Labels</Label>
+                  <div className="flex gap-1">
+                    {(["hover", "always", "never"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setFilters((f) => ({ ...f, labelMode: mode }))}
+                        className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                          filters.labelMode === mode
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Graph canvas */}
+        <div ref={containerRef} className="flex-1 min-w-0 bg-card relative">
+          {isLoading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin mr-2" />
               Building graph…
             </div>
-          ) : filteredGraph.nodes.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              <p className="text-sm">No nodes to display. Create some notes first.</p>
+          ) : processedGraph.nodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+              <FileText className="h-8 w-8" />
+              <p className="text-sm">No nodes to display.</p>
+              <p className="text-xs">Create notes and let the AI find connections.</p>
             </div>
           ) : (
             <ForceGraph2D
-              graphData={filteredGraph}
-              width={dimensions.width}
+              ref={graphRef}
+              graphData={processedGraph}
+              width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
               height={dimensions.height}
-              nodeLabel={(node: GraphNode) => node.name}
-              nodeColor={(node: GraphNode) => node.color}
-              nodeRelSize={5}
-              nodeVal={(node: GraphNode) => node.val}
-              linkColor={() => "hsla(220, 14%, 50%, 0.15)"}
-              linkWidth={1}
-              onNodeClick={(node) => handleNodeClick(node as unknown as GraphNode)}
-              nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-                const label = node.name as string;
-                const fontSize = Math.max(10 / globalScale, 2);
-                const nodeSize = Math.sqrt(node.val || 1) * 5;
-
-                // Draw node
-                ctx.beginPath();
-                if (node.type === "contact") {
-                  // Diamond for contacts
-                  ctx.moveTo(node.x, node.y - nodeSize);
-                  ctx.lineTo(node.x + nodeSize, node.y);
-                  ctx.lineTo(node.x, node.y + nodeSize);
-                  ctx.lineTo(node.x - nodeSize, node.y);
-                } else {
-                  ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
-                }
-                ctx.fillStyle = node.color;
-                ctx.fill();
-
-                // Draw label if zoomed enough
-                if (globalScale > 1.5) {
-                  ctx.font = `${fontSize}px Inter, sans-serif`;
-                  ctx.textAlign = "center";
-                  ctx.textBaseline = "top";
-                  ctx.fillStyle = "hsl(220, 25%, 30%)";
-                  const truncated = label.length > 25 ? label.slice(0, 22) + "…" : label;
-                  ctx.fillText(truncated, node.x, node.y + nodeSize + 2);
-                }
-              }}
+              nodeCanvasObject={nodeCanvasObject}
               nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-                const nodeSize = Math.sqrt(node.val || 1) * 5 + 4;
+                const size = getNodeSize(node) + 4;
                 ctx.beginPath();
-                ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
+                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
                 ctx.fillStyle = color;
                 ctx.fill();
               }}
-              cooldownTicks={100}
+              linkCanvasObjectMode={() => "replace"}
+              linkCanvasObject={linkCanvasObject}
+              onNodeClick={handleNodeClick}
+              onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
+              onNodeDragEnd={(node: any) => {
+                node.fx = node.x;
+                node.fy = node.y;
+              }}
+              onBackgroundClick={() => setSelectedNode(null)}
+              cooldownTicks={120}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
+              enableNodeDrag
+              enableZoomInteraction
+              enablePanInteraction
             />
           )}
         </div>
 
-        {/* Detail sidebar */}
+        {/* Detail panel */}
         {selectedNode && (
-          <Card className="w-72 shrink-0 self-start">
-            <CardHeader className="flex flex-row items-start justify-between pb-2">
-              <CardTitle className="text-sm truncate flex-1">{selectedNode.name}</CardTitle>
-              <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setSelectedNode(null)}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-2">
-                {selectedNode.type === "contact" ? (
-                  <UserCircle className="h-4 w-4 text-info" />
-                ) : (
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                )}
-                <Badge variant="outline" className="text-xs capitalize">{selectedNode.type}</Badge>
-                {selectedNode.metadata?.type && (
-                  <Badge variant="secondary" className="text-xs capitalize">
-                    {selectedNode.metadata.type as string}
-                  </Badge>
-                )}
+          <div className="w-72 shrink-0 border-l border-border bg-background overflow-y-auto">
+            <div className="p-4 space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground leading-tight">
+                  {selectedNode.title || "Untitled"}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  onClick={() => setSelectedNode(null)}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
               </div>
 
-              {selectedNode.metadata?.topics && (
+              <div className="flex flex-wrap gap-1.5">
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] capitalize"
+                  style={{ borderColor: getNodeColor(selectedNode) }}
+                >
+                  {(selectedNode.type || "note").replace("_", " ")}
+                </Badge>
+                {selectedNode.tags?.map((t) => (
+                  <Badge key={t} variant="outline" className="text-[9px] px-1.5 py-0">
+                    {t}
+                  </Badge>
+                ))}
+              </div>
+
+              {selectedNode.topics && selectedNode.topics.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {(selectedNode.metadata.topics as string[]).map((t) => (
-                    <Badge key={t} variant="outline" className="text-[10px] px-1.5 py-0">
+                  {selectedNode.topics.map((t) => (
+                    <Badge key={t} variant="outline" className="text-[9px] px-1 py-0 bg-primary/5">
                       {t}
                     </Badge>
                   ))}
                 </div>
               )}
 
-              {selectedNode.metadata?.summary && (
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {selectedNode.metadata.summary as string}
-                </p>
+              <Separator />
+
+              {/* Connection summary */}
+              <div>
+                <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Connections ({selectedNodeEdges.length})
+                </h3>
+                {["manual_link", "semantic", "shared_person", "shared_topic"].map((type) => {
+                  const ofType = selectedNodeEdges.filter((e) => e.type === type);
+                  if (ofType.length === 0) return null;
+                  return (
+                    <div key={type} className="mb-2">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <div
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: EDGE_STYLES[type]?.color }}
+                        />
+                        <span className="text-[10px] text-muted-foreground capitalize">
+                          {type.replace("_", " ")} ({ofType.length})
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Connected notes list */}
+              {selectedNeighborNodes.length > 0 && (
+                <div>
+                  <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Connected Notes
+                  </h3>
+                  <div className="space-y-1">
+                    {selectedNeighborNodes.slice(0, 15).map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => setSelectedNode(n as ForceNode)}
+                        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-muted/50 transition-colors group"
+                      >
+                        <div
+                          className="h-2 w-2 rounded-full shrink-0"
+                          style={{ background: getNodeColor(n as ForceNode) }}
+                        />
+                        <span className="truncate flex-1">{n.title || "Untitled"}</span>
+                        <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
 
               <Separator />
 
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Connections: {filteredGraph.links.filter((l) => {
-                    const s = typeof l.source === "string" ? l.source : (l.source as unknown as GraphNode).id;
-                    const t = typeof l.target === "string" ? l.target : (l.target as unknown as GraphNode).id;
-                    return s === selectedNode.id || t === selectedNode.id;
-                  }).length}
-                </span>
-              </div>
-
-              <Button
-                size="sm"
-                className="w-full text-xs"
-                onClick={() => {
-                  if (selectedNode.type === "contact") {
-                    navigate("/dashboard/people");
-                  } else {
-                    navigate(`/dashboard/notes?selected=${selectedNode.id}`);
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="sm"
+                  className="w-full text-xs gap-1.5"
+                  onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open Note
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs gap-1.5"
+                  onClick={() =>
+                    navigate(`/dashboard/notes/${selectedNode.id}`)
                   }
-                }}
-              >
-                Open {selectedNode.type === "contact" ? "Contact" : "Note"}
-              </Button>
-            </CardContent>
-          </Card>
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Find Connections
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-3 mt-4 px-2 text-[10px] text-muted-foreground">
-        <span className="font-semibold uppercase tracking-wider">Legend:</span>
-        {Object.entries(TYPE_COLORS)
-          .filter(([k]) => k !== "default")
-          .slice(0, 8)
-          .map(([type, color]) => (
-            <div key={type} className="flex items-center gap-1">
-              <div className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
-              <span className="capitalize">{type.replace("_", " ")}</span>
-            </div>
-          ))}
+      {/* Legend bar */}
+      <div className="flex items-center gap-4 px-4 py-2 border-t border-border bg-muted/20 text-[10px] text-muted-foreground shrink-0 overflow-x-auto">
+        <span className="font-semibold uppercase tracking-wider shrink-0">Nodes:</span>
+        {ALL_NOTE_TYPES.slice(0, 6).map((type) => (
+          <div key={type} className="flex items-center gap-1 shrink-0">
+            <div className="h-2 w-2 rounded-full" style={{ background: TYPE_COLORS[type] }} />
+            <span className="capitalize">{type.replace("_", " ")}</span>
+          </div>
+        ))}
+        <span className="mx-2">|</span>
+        <span className="font-semibold uppercase tracking-wider shrink-0">Edges:</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <div className="w-4 border-t-2 border-solid" style={{ borderColor: EDGE_STYLES.manual_link.color }} />
+          <span>Manual</span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <div className="w-4 border-t-2 border-dotted" style={{ borderColor: EDGE_STYLES.semantic.color }} />
+          <span>Semantic</span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <div className="w-4 border-t-2 border-dashed" style={{ borderColor: EDGE_STYLES.shared_person.color }} />
+          <span>Person</span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <div className="w-4 border-t-2 border-dashed" style={{ borderColor: EDGE_STYLES.shared_topic.color }} />
+          <span>Topic</span>
+        </div>
       </div>
     </div>
   );
+}
+
+function adjustAlpha(hslColor: string, alpha: number): string {
+  // Convert "hsl(h, s%, l%)" to "hsla(h, s%, l%, alpha)"
+  return hslColor.replace("hsl(", "hsla(").replace(")", `, ${alpha})`);
 }
