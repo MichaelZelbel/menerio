@@ -162,6 +162,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: html });
+        triggerGitHubSync(note.id);
       }, 800);
 
       // Schedule auto AI processing
