@@ -175,8 +175,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
-  const showLocalGraph = props_showLocalGraph ?? false;
-  const toggleLocalGraph = onToggleLocalGraph ?? (() => {});
+  const showLocalGraph = showLocalGraphProp ?? false;
   const [showLinkToNote, setShowLinkToNote] = useState(false);
 
   // Wikilink autocomplete state
