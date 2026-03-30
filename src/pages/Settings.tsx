@@ -429,6 +429,11 @@ export default function Settings() {
           <TelegramIntegration />
         </TabsContent>
 
+        {/* ── Discord Integration Tab ── */}
+        <TabsContent value="discord">
+          <DiscordIntegration />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
