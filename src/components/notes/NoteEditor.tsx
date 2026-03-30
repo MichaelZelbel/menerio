@@ -412,7 +412,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConnections(!showConnections)} title="Find connections">
           <Link2 className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => setShowLocalGraph(!showLocalGraph)} title="Local graph">
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => onToggleLocalGraph?.()} title="Local graph">
           <Network className="h-4 w-4" />
         </Button>
         {syncLog && (
