@@ -313,6 +313,45 @@ export type Database = {
         }
         Relationships: []
       }
+      discord_connections: {
+        Row: {
+          application_id: string
+          bot_token: string
+          created_at: string | null
+          discord_channel_id: string | null
+          discord_guild_id: string
+          id: string
+          is_active: boolean | null
+          public_key: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          application_id: string
+          bot_token: string
+          created_at?: string | null
+          discord_channel_id?: string | null
+          discord_guild_id: string
+          id?: string
+          is_active?: boolean | null
+          public_key: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          application_id?: string
+          bot_token?: string
+          created_at?: string | null
+          discord_channel_id?: string | null
+          discord_guild_id?: string
+          id?: string
+          is_active?: boolean | null
+          public_key?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       llm_usage_events: {
         Row: {
           completion_tokens: number
