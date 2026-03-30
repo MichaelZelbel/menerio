@@ -202,6 +202,8 @@ const Dashboard = () => {
         <div className="space-y-6">
           <TodaysConnections />
           <DiscoveryFeed />
+          <OrphanNotesDetector compact />
+          <BridgeNotesHighlighter compact />
           {showChecklist && (
             <Card>
               <CardHeader className="flex flex-row items-start justify-between pb-3">
