@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import logoImg from "@/assets/logo.png";
 import { Link, useNavigate } from "react-router-dom";
 import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard, Shield, Crown } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -61,9 +62,7 @@ export function Header() {
     >
       <div className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <span className="text-sm font-bold text-primary-foreground">M</span>
-          </div>
+          <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
           <span className="text-xl font-bold font-display text-foreground">Menerio</span>
         </Link>
 

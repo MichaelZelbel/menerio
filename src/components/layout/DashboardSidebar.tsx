@@ -16,6 +16,7 @@ import {
   Network,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
+import logoImg from "@/assets/logo.png";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -70,9 +71,7 @@ export function DashboardSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-            <span className="text-xs font-bold text-primary-foreground">M</span>
-          </div>
+          <img src={logoImg} alt="Menerio" className="h-7 w-7 object-contain" />
           {!collapsed && (
             <span className="text-sm font-semibold font-display text-foreground">Menerio</span>
           )}
