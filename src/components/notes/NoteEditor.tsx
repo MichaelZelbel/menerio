@@ -328,6 +328,18 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         >
           <Link2 className="h-4 w-4" />
         </Button>
+        {/* Version History (only if synced to GitHub) */}
+        {syncLog && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowHistory(!showHistory)}
+            title="Version history"
+          >
+            <GitCommit className="h-4 w-4" />
+          </Button>
+        )}
         {!note.is_trashed && (
           <Button
             variant="ghost"
