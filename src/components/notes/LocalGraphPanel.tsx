@@ -70,17 +70,47 @@ export function LocalGraphPanel({
   const { data: connections = [] } = useNoteConnections(noteId);
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 300, height: 220 });
+  const [dimensions, setDimensions] = useState({ width: 300, height: 280 });
+  const [graphHeight, setGraphHeight] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const obs = new ResizeObserver((entries) => {
       const { width } = entries[0].contentRect;
-      setDimensions({ width, height: 220 });
+      setDimensions((prev) => ({ width, height: prev.height }));
     });
     obs.observe(containerRef.current);
     return () => obs.disconnect();
   }, []);
+
+  // Keep dimensions.height in sync with graphHeight
+  useEffect(() => {
+    setDimensions((prev) => ({ ...prev, height: graphHeight }));
+  }, [graphHeight]);
+
+  // Drag-to-resize handler
+  const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartRef.current = { y: e.clientY, h: graphHeight };
+    setIsResizing(true);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      const delta = ev.clientY - resizeStartRef.current.y;
+      const newH = Math.max(150, Math.min(600, resizeStartRef.current.h + delta));
+      setGraphHeight(newH);
+    };
+    const onMouseUp = () => {
+      setIsResizing(false);
+      resizeStartRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [graphHeight]);
 
   // Center on current note after data loads
   useEffect(() => {
@@ -145,13 +175,13 @@ export function LocalGraphPanel({
       </div>
 
       {/* Graph canvas */}
-      <div ref={containerRef} className="border-b border-border bg-muted/20">
+      <div ref={containerRef} className="border-b border-border bg-muted/20 relative">
         {isLoading ? (
-          <div className="flex items-center justify-center h-[220px]">
+          <div className="flex items-center justify-center" style={{ height: graphHeight }}>
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
         ) : graphNodes.length === 0 ? (
-          <div className="flex items-center justify-center h-[220px] text-xs text-muted-foreground">
+          <div className="flex items-center justify-center text-xs text-muted-foreground" style={{ height: graphHeight }}>
             No connections yet
           </div>
         ) : (
@@ -168,7 +198,32 @@ export function LocalGraphPanel({
               const type = node.type || "note";
               return TYPE_COLORS[type] || TYPE_COLORS.note;
             }}
-            nodeLabel={(node: any) => node.title || "Untitled"}
+            nodeLabel={() => ""}
+            nodeCanvasObjectMode={() => "after"}
+            nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+              const label = node.title || "Untitled";
+              const fontSize = Math.max(10 / globalScale, 2);
+              ctx.font = `${node.__isCurrent ? "bold " : ""}${fontSize}px sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "top";
+
+              const radius = node.__isCurrent ? Math.sqrt(3) * 4 : 4;
+              const yOffset = radius + 2 / globalScale;
+
+              // Background for readability
+              const textWidth = ctx.measureText(label).width;
+              const padding = 2 / globalScale;
+              ctx.fillStyle = "rgba(0,0,0,0.55)";
+              ctx.fillRect(
+                node.x - textWidth / 2 - padding,
+                node.y + yOffset - padding / 2,
+                textWidth + padding * 2,
+                fontSize + padding
+              );
+
+              ctx.fillStyle = "#fff";
+              ctx.fillText(label, node.x, node.y + yOffset);
+            }}
             linkColor={(link: any) => {
               const style = EDGE_STYLES[link.type] || EDGE_STYLES.semantic;
               return style.color;
@@ -188,6 +243,13 @@ export function LocalGraphPanel({
             enablePanInteraction={true}
           />
         )}
+      </div>
+      {/* Resize handle */}
+      <div
+        onMouseDown={onResizeMouseDown}
+        className={`h-2 cursor-row-resize flex items-center justify-center border-b border-border hover:bg-accent/50 transition-colors ${isResizing ? "bg-accent" : ""}`}
+      >
+        <div className="w-8 h-0.5 rounded-full bg-muted-foreground/30" />
       </div>
 
       {/* Connection stats */}
