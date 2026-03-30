@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useGitHubConnection, useGitHubBulkSync } from "@/hooks/useGitHubSync";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import { Loader2, Github, CheckCircle2, XCircle, AlertTriangle, Trash2, RefreshC
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { ImportVaultDialog } from "./ImportVaultDialog";
+import { SyncConflictsPanel } from "./SyncConflictsPanel";
 
 export function GitHubSyncSettings() {
   const { user } = useAuth();
@@ -49,6 +50,30 @@ export function GitHubSyncSettings() {
     }
   }, [connection]);
 
+  const syncNow = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("github-sync-pull", {
+        body: {},
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      refetch();
+      qc.invalidateQueries({ queryKey: ["github-sync-log"] });
+      qc.invalidateQueries({ queryKey: ["github-sync-conflicts"] });
+      qc.invalidateQueries({ queryKey: ["github-sync-conflict-count"] });
+      qc.invalidateQueries({ queryKey: ["notes"] });
+      const parts: string[] = [];
+      if (data.pulled > 0) parts.push(`${data.pulled} pulled`);
+      if (data.pushed > 0) parts.push(`${data.pushed} pushed`);
+      if (data.new_imports > 0) parts.push(`${data.new_imports} imported`);
+      if (data.conflicts > 0) parts.push(`${data.conflicts} conflicts`);
+      showToast.success(parts.length > 0 ? `Sync complete: ${parts.join(", ")}` : "Everything is up to date");
+    },
+    onError: () => showToast.error("Sync failed"),
+  });
+
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
@@ -65,7 +90,6 @@ export function GitHubSyncSettings() {
         await supabase.from("github_connections" as any).update(updates).eq("user_id", user.id);
       } else {
         if (!token) { showToast.error("Token is required"); setSaving(false); return; }
-        // Fetch GitHub username
         let username = "";
         try {
           const res = await fetch("https://api.github.com/user", {
@@ -165,142 +189,173 @@ export function GitHubSyncSettings() {
     );
   }
 
+  const isBidirectional = (connection?.sync_direction || syncDirection) === "bidirectional";
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Github className="h-5 w-5" />
-          GitHub Sync
-        </CardTitle>
-        <CardDescription>
-          Sync your notes to a GitHub repository as Markdown files. Every save becomes a Git commit, giving you full version history.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Connection status */}
-        {connection && (
-          <div className="flex items-center gap-2">
-            <Badge variant="success" className="gap-1">
-              <CheckCircle2 className="h-3 w-3" />
-              Connected
-            </Badge>
-            {connection.github_username && (
-              <span className="text-sm text-muted-foreground">@{connection.github_username}</span>
-            )}
-            {connection.last_sync_at && (
-              <span className="text-xs text-muted-foreground">
-                Last sync: {formatDistanceToNow(new Date(connection.last_sync_at), { addSuffix: true })}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Token */}
-        <div className="space-y-2">
-          <Label htmlFor="gh-token">
-            Personal Access Token {connection && <span className="text-muted-foreground">(leave blank to keep current)</span>}
-          </Label>
-          <Input
-            id="gh-token"
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder={connection ? "••••••••" : "ghp_xxxxxxxxxxxx"}
-          />
-          <p className="text-xs text-muted-foreground">
-            Create a token at{" "}
-            <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-              github.com/settings/tokens
-            </a>{" "}
-            with <code className="text-[10px] bg-muted px-1 rounded">repo</code> scope.
-          </p>
-        </div>
-
-        <Separator />
-
-        {/* Repository settings */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="gh-owner">Repository Owner</Label>
-            <Input id="gh-owner" value={repoOwner} onChange={(e) => setRepoOwner(e.target.value)} placeholder="username" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="gh-repo">Repository Name</Label>
-            <Input id="gh-repo" value={repoName} onChange={(e) => setRepoName(e.target.value)} placeholder="my-brain" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="gh-branch">Branch</Label>
-            <Input id="gh-branch" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="gh-vault">Vault Path</Label>
-            <Input id="gh-vault" value={vaultPath} onChange={(e) => setVaultPath(e.target.value)} placeholder="/" />
-            <p className="text-[10px] text-muted-foreground">Subdirectory within the repo. Use "/" for root.</p>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Sync Direction</Label>
-          <Select value={syncDirection} onValueChange={setSyncDirection}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="export">Export only (Menerio → GitHub)</SelectItem>
-              <SelectItem value="import">Import only (GitHub → Menerio)</SelectItem>
-              <SelectItem value="bidirectional">Bidirectional</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Separator />
-
-        {/* Actions */}
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {connection ? "Update Settings" : "Connect"}
-          </Button>
-          <Button variant="outline" onClick={handleTest} disabled={testing}>
-            {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Test Connection
-            {testResult === "success" && <CheckCircle2 className="ml-2 h-4 w-4 text-success" />}
-            {testResult === "error" && <XCircle className="ml-2 h-4 w-4 text-destructive" />}
-          </Button>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Github className="h-5 w-5" />
+            GitHub Sync
+          </CardTitle>
+          <CardDescription>
+            Sync your notes to a GitHub repository as Markdown files. Every save becomes a Git commit, giving you full version history.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Connection status */}
           {connection && (
-            <>
-              <Button variant="outline" onClick={handleBulkSync} disabled={bulkSync.isPending}>
-                {bulkSync.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                Sync All Notes
-              </Button>
-              <ImportVaultDialog />
-              <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
-                {disconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                Disconnect
-              </Button>
-            </>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="success" className="gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Connected
+              </Badge>
+              {connection.github_username && (
+                <span className="text-sm text-muted-foreground">@{connection.github_username}</span>
+              )}
+              {connection.last_sync_at && (
+                <span className="text-xs text-muted-foreground">
+                  Last sync: {formatDistanceToNow(new Date(connection.last_sync_at), { addSuffix: true })}
+                </span>
+              )}
+            </div>
           )}
-        </div>
 
-        {/* Bulk sync progress */}
-        {bulkSync.isPending && (
+          {/* Token */}
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Syncing notes to GitHub…</p>
-            <Progress value={undefined} className="h-2" />
+            <Label htmlFor="gh-token">
+              Personal Access Token {connection && <span className="text-muted-foreground">(leave blank to keep current)</span>}
+            </Label>
+            <Input
+              id="gh-token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={connection ? "••••••••" : "ghp_xxxxxxxxxxxx"}
+            />
+            <p className="text-xs text-muted-foreground">
+              Create a token at{" "}
+              <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                github.com/settings/tokens
+              </a>{" "}
+              with <code className="text-[10px] bg-muted px-1 rounded">repo</code> scope.
+            </p>
           </div>
-        )}
-        {bulkSync.data && !bulkSync.isPending && (
-          <div className="text-sm text-muted-foreground">
-            ✅ {bulkSync.data.succeeded} synced
-            {bulkSync.data.failed > 0 && (
-              <span className="text-destructive"> · ❌ {bulkSync.data.failed} failed</span>
+
+          <Separator />
+
+          {/* Repository settings */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="gh-owner">Repository Owner</Label>
+              <Input id="gh-owner" value={repoOwner} onChange={(e) => setRepoOwner(e.target.value)} placeholder="username" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gh-repo">Repository Name</Label>
+              <Input id="gh-repo" value={repoName} onChange={(e) => setRepoName(e.target.value)} placeholder="my-brain" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="gh-branch">Branch</Label>
+              <Input id="gh-branch" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gh-vault">Vault Path</Label>
+              <Input id="gh-vault" value={vaultPath} onChange={(e) => setVaultPath(e.target.value)} placeholder="/" />
+              <p className="text-[10px] text-muted-foreground">Subdirectory within the repo. Use "/" for root.</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Sync Direction</Label>
+            <Select value={syncDirection} onValueChange={setSyncDirection}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="export">Export only (Menerio → GitHub)</SelectItem>
+                <SelectItem value="import">Import only (GitHub → Menerio)</SelectItem>
+                <SelectItem value="bidirectional">Bidirectional</SelectItem>
+              </SelectContent>
+            </Select>
+            {syncDirection === "bidirectional" && (
+              <div className="flex items-start gap-2 p-2 rounded-md bg-warning/10 border border-warning/30">
+                <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground">
+                  Bidirectional sync may create conflicts if the same note is edited in both Menerio and Obsidian between syncs. Conflicts will be flagged for manual resolution.
+                </p>
+              </div>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          <Separator />
+
+          {/* Actions */}
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {connection ? "Update Settings" : "Connect"}
+            </Button>
+            <Button variant="outline" onClick={handleTest} disabled={testing}>
+              {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Test Connection
+              {testResult === "success" && <CheckCircle2 className="ml-2 h-4 w-4 text-success" />}
+              {testResult === "error" && <XCircle className="ml-2 h-4 w-4 text-destructive" />}
+            </Button>
+            {connection && (
+              <>
+                {(isBidirectional || connection.sync_direction === "import") && (
+                  <Button variant="outline" onClick={() => syncNow.mutate()} disabled={syncNow.isPending}>
+                    {syncNow.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Sync Now
+                  </Button>
+                )}
+                <Button variant="outline" onClick={handleBulkSync} disabled={bulkSync.isPending}>
+                  {bulkSync.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Export All Notes
+                </Button>
+                <ImportVaultDialog />
+                <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
+                  {disconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  Disconnect
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Sync results */}
+          {syncNow.data && !syncNow.isPending && (
+            <div className="text-sm text-muted-foreground">
+              {syncNow.data.pulled > 0 && <span>📥 {syncNow.data.pulled} pulled </span>}
+              {syncNow.data.pushed > 0 && <span>📤 {syncNow.data.pushed} pushed </span>}
+              {syncNow.data.new_imports > 0 && <span>🆕 {syncNow.data.new_imports} imported </span>}
+              {syncNow.data.conflicts > 0 && <span className="text-destructive">⚠️ {syncNow.data.conflicts} conflicts </span>}
+            </div>
+          )}
+
+          {/* Bulk sync progress */}
+          {bulkSync.isPending && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Exporting notes to GitHub…</p>
+              <Progress value={undefined} className="h-2" />
+            </div>
+          )}
+          {bulkSync.data && !bulkSync.isPending && (
+            <div className="text-sm text-muted-foreground">
+              ✅ {bulkSync.data.succeeded} exported
+              {bulkSync.data.failed > 0 && (
+                <span className="text-destructive"> · ❌ {bulkSync.data.failed} failed</span>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Conflicts panel */}
+      {connection && <SyncConflictsPanel />}
+    </div>
   );
 }
