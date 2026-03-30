@@ -62,7 +62,7 @@ export function htmlToMarkdown(html: string): string {
   });
 
   // Code blocks
-  md = md.replace(/<pre[^>]*><code[^>]*(?:class="language-(\w+)")?[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, lang, code) => {
+  md = md.replace(/<pre[^>]*><code(?:\s+class="language-(\w+)")?[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, lang, code) => {
     return `\`\`\`${lang || ""}\n${decodeEntities(code).trimEnd()}\n\`\`\`\n\n`;
   });
 
