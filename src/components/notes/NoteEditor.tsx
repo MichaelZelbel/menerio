@@ -70,6 +70,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent } from "@/lib/note-content";
