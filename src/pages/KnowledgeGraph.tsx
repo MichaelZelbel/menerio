@@ -85,6 +85,8 @@ export default function KnowledgeGraph() {
   const [selectedNode, setSelectedNode] = useState<ForceNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [sidebarTab, setSidebarTab] = useState<"filters" | "analytics">("filters");
+  const bridgeNoteIds = useBridgeNoteIds();
 
   const [filters, setFilters] = useState<Filters>({
     searchTerm: "",
