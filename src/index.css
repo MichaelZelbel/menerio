@@ -357,7 +357,25 @@
   color: hsl(var(--foreground));
 }
 
-/* Wikilink decoration */
+/* Wikilink node */
+.wikilink-node {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.08);
+  border-radius: 3px;
+  padding: 1px 3px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 150ms;
+  font-size: 0.95em;
+  user-select: none;
+}
+
+.wikilink-node:hover {
+  background: hsl(var(--primary) / 0.18);
+  text-decoration: underline;
+}
+
+/* Legacy wikilink decoration (for backwards compat) */
 .wikilink-decoration {
   color: hsl(var(--primary));
   background: hsl(var(--primary) / 0.08);

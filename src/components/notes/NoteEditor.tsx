@@ -23,11 +23,13 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
-import { Note, useUpdateNote, useDeleteNote, useProcessNote } from "@/hooks/useNotes";
+import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
 import { useGitHubConnection, useGitHubSyncExport, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { ExternalNotePanel } from "./ExternalNotePanel";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
+import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
+import { BacklinksPanel } from "./BacklinksPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -75,8 +77,10 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent } from "@/lib/note-content";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 
-const AUTO_PROCESS_DELAY = 10_000; // 10s after last edit
+const AUTO_PROCESS_DELAY = 10_000;
 const MIN_WORDS_FOR_PROCESSING = 50;
 
 interface NoteEditorProps {
@@ -84,12 +88,71 @@ interface NoteEditorProps {
   onNoteDeleted?: () => void;
 }
 
+/** Extract all wikilink noteIds from editor JSON content */
+function extractWikilinkIds(doc: any): string[] {
+  const ids: string[] = [];
+  function walk(node: any) {
+    if (node.type === "wikilink" && node.attrs?.noteId) {
+      ids.push(node.attrs.noteId);
+    }
+    if (node.content) node.content.forEach(walk);
+  }
+  if (doc) walk(doc);
+  return [...new Set(ids)];
+}
+
+/** Sync manual_link connections based on wikilinks in content */
+async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
+  try {
+    // Get existing manual_link connections from this note
+    const { data: existing } = await supabase
+      .from("note_connections" as any)
+      .select("id, target_note_id")
+      .eq("source_note_id", noteId)
+      .eq("connection_type", "manual_link")
+      .eq("user_id", userId);
+
+    const existingMap = new Map((existing || []).map((e: any) => [e.target_note_id, e.id]));
+    const newTargets = new Set(linkedNoteIds);
+
+    // Delete removed links
+    const toDelete = (existing || [])
+      .filter((e: any) => !newTargets.has(e.target_note_id))
+      .map((e: any) => e.id);
+
+    if (toDelete.length > 0) {
+      await supabase.from("note_connections" as any).delete().in("id", toDelete);
+    }
+
+    // Upsert new links
+    const toUpsert = linkedNoteIds
+      .filter((id) => !existingMap.has(id))
+      .map((targetId) => ({
+        user_id: userId,
+        source_note_id: noteId,
+        target_note_id: targetId,
+        connection_type: "manual_link",
+        strength: 1.0,
+        metadata: {},
+      }));
+
+    if (toUpsert.length > 0) {
+      await supabase.from("note_connections" as any).insert(toUpsert);
+    }
+  } catch (err) {
+    console.error("Failed to sync manual links:", err);
+  }
+}
+
 export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
+  const createNote = useCreateNote();
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: ghConn } = useGitHubConnection();
   const ghSync = useGitHubSyncExport();
   const { data: syncLog } = useSyncLogForNote(note.id);
@@ -106,19 +169,63 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
+
+  // Wikilink autocomplete state
+  const [wikilinkOpen, setWikilinkOpen] = useState(false);
+  const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
+  const wikilinkInsertPos = useRef<number | null>(null);
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Trigger GitHub sync after note saves
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
     if (ghConn.sync_direction !== "export" && ghConn.sync_direction !== "bidirectional") return;
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
       ghSync.mutate({ noteId, action: "update" });
-    }, 3000); // 3s debounce after last save
+    }, 3000);
   }, [ghConn, ghSync]);
+
+  const handleOpenAutocomplete = useCallback((pos: number) => {
+    // Get caret position from editor view
+    const editorEl = document.querySelector(".tiptap-editor .ProseMirror");
+    if (!editorEl) return;
+    const rect = editorEl.getBoundingClientRect();
+    // Use selection coords
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const caretRect = range.getBoundingClientRect();
+      setWikilinkPos({ top: caretRect.bottom, left: caretRect.left });
+    } else {
+      setWikilinkPos({ top: rect.top + 40, left: rect.left + 20 });
+    }
+    wikilinkInsertPos.current = pos;
+    setWikilinkOpen(true);
+  }, []);
+
+  const handleWikilinkSelect = useCallback((title: string, noteId: string) => {
+    if (!editor) return;
+    editor.commands.insertWikilink({ noteId, noteTitle: title });
+    setWikilinkOpen(false);
+  }, []);
+
+  const handleWikilinkCreate = useCallback(async (title: string) => {
+    if (!editor) return;
+    try {
+      const newNote = await createNote.mutateAsync({ title });
+      editor.commands.insertWikilink({ noteId: newNote.id, noteTitle: title });
+      setWikilinkOpen(false);
+    } catch {
+      showToast.error("Failed to create note");
+    }
+  }, [createNote]);
+
+  const handleNavigateToNote = useCallback((noteId: string) => {
+    navigate(`/dashboard/notes/${noteId}`);
+  }, [navigate]);
 
   const editor = useEditor({
     extensions: [
@@ -156,7 +263,10 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         transformPastedText: true,
         transformCopiedText: false,
       }),
-      WikilinkExtension,
+      WikilinkExtension.configure({
+        onNavigate: (noteId: string) => handleNavigateToNote(noteId),
+        onOpenAutocomplete: (pos: number) => handleOpenAutocomplete(pos),
+      }),
     ],
     content: normalizeNoteContent(note.content),
     editable: !note.is_trashed && !note.is_external,
@@ -166,6 +276,14 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: html });
         triggerGitHubSync(note.id);
+
+        // Sync manual_link connections
+        if (user) {
+          const doc = e.getJSON();
+          const linkedIds = extractWikilinkIds(doc);
+          syncManualLinks(note.id, user.id, linkedIds);
+          queryClient.invalidateQueries({ queryKey: ["backlinks"] });
+        }
       }, 800);
 
       // Schedule auto AI processing
@@ -179,6 +297,10 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
       }, AUTO_PROCESS_DELAY);
     },
   });
+
+  // Keep handleWikilinkSelect and handleWikilinkCreate referencing editor
+  const editorRef = useRef(editor);
+  useEffect(() => { editorRef.current = editor; }, [editor]);
 
   // Sync when note changes
   useEffect(() => {
@@ -204,21 +326,11 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     }, 800);
   };
 
-  const toggleFavorite = () => {
-    updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
-  };
-
-  const togglePin = () => {
-    updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
-  };
+  const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
+  const togglePin = () => updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
 
   const moveToTrash = () => {
-    updateNote.mutate({
-      id: note.id,
-      is_trashed: true,
-      trashed_at: new Date().toISOString(),
-    });
-    // Trigger GitHub delete when trashing
+    updateNote.mutate({ id: note.id, is_trashed: true, trashed_at: new Date().toISOString() });
     if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
       ghSync.mutate({ noteId: note.id, action: "delete" });
     }
@@ -226,11 +338,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   };
 
   const restoreFromTrash = () => {
-    updateNote.mutate({
-      id: note.id,
-      is_trashed: false,
-      trashed_at: null,
-    });
+    updateNote.mutate({ id: note.id, is_trashed: false, trashed_at: null });
     showToast.success("Note restored");
   };
 
@@ -242,31 +350,21 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
 
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
-    if (!tag || note.tags?.includes(tag)) {
-      setTagInput("");
-      return;
-    }
-    const newTags = [...(note.tags || []), tag];
-    updateNote.mutate({ id: note.id, tags: newTags });
+    if (!tag || note.tags?.includes(tag)) { setTagInput(""); return; }
+    updateNote.mutate({ id: note.id, tags: [...(note.tags || []), tag] });
     setTagInput("");
   };
 
   const removeTag = (tag: string) => {
-    const newTags = (note.tags || []).filter((t) => t !== tag);
-    updateNote.mutate({ id: note.id, tags: newTags });
+    updateNote.mutate({ id: note.id, tags: (note.tags || []).filter((t) => t !== tag) });
   };
 
   const extractEvent = async () => {
     const text = `${title}\n\n${editor?.getText() || ""}`.trim();
-    if (!text || text.length < 10) {
-      showToast.error("Note is too short to extract an event");
-      return;
-    }
+    if (!text || text.length < 10) { showToast.error("Note is too short to extract an event"); return; }
     setIsExtractingEvent(true);
     try {
-      const { data, error } = await supabase.functions.invoke("extract-event", {
-        body: { content: text },
-      });
+      const { data, error } = await supabase.functions.invoke("extract-event", { body: { content: text } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       setEventDraft(data.event as EventDraft);
@@ -283,8 +381,6 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
   const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
-
-  // Sync status indicator helper
   const syncStatus = syncLog?.sync_status;
   const isSyncing = ghSync.isPending;
 
@@ -293,111 +389,39 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     <div className="flex flex-col h-full flex-1 min-w-0">
       {/* Action toolbar */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={toggleFavorite}
-          title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
-        >
-          <Star
-            className={cn("h-4 w-4", note.is_favorite && "fill-warning text-warning")}
-          />
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleFavorite} title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}>
+          <Star className={cn("h-4 w-4", note.is_favorite && "fill-warning text-warning")} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={togglePin}
-          title={note.is_pinned ? "Unpin" : "Pin to top"}
-        >
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={togglePin} title={note.is_pinned ? "Unpin" : "Pin to top"}>
           <Pin className={cn("h-4 w-4", note.is_pinned && "text-primary")} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => setShowTagInput(!showTagInput)}
-          title="Add tag"
-        >
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowTagInput(!showTagInput)} title="Add tag">
           <Tag className="h-4 w-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => setShowInfo(!showInfo)}
-          title="Note info"
-        >
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowInfo(!showInfo)} title="Note info">
           <Info className="h-4 w-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => setShowConnections(!showConnections)}
-          title="Find connections"
-        >
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConnections(!showConnections)} title="Find connections">
           <Link2 className="h-4 w-4" />
         </Button>
-        {/* Version History (only if synced to GitHub) */}
         {syncLog && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setShowHistory(!showHistory)}
-            title="Version history"
-          >
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(!showHistory)} title="Version history">
             <GitCommit className="h-4 w-4" />
           </Button>
         )}
         {!note.is_trashed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={extractEvent}
-            disabled={isExtractingEvent}
-            title="Create event in Temerio"
-          >
-            {isExtractingEvent ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CalendarPlus className="h-4 w-4" />
-            )}
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={extractEvent} disabled={isExtractingEvent} title="Create event in Temerio">
+            {isExtractingEvent ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
           </Button>
         )}
         {!note.is_trashed && !note.is_external && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setShowForwardDialog(true)}
-            title="An App senden"
-          >
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowForwardDialog(true)} title="An App senden">
             <Send className="h-4 w-4" />
           </Button>
         )}
-        {/* Classify button — shown when no metadata extracted yet */}
         {!note.is_trashed && !metadata?.type && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
-            onClick={() => {
-              if (checkCredits()) {
-                processNote.mutate(note.id);
-              }
-            }}
-            disabled={processNote.isPending}
-            title="Extract metadata with AI"
-          >
-            {processNote.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { if (checkCredits()) processNote.mutate(note.id); }} disabled={processNote.isPending} title="Extract metadata with AI">
+            {processNote.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             Classify
           </Button>
         )}
@@ -409,12 +433,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
             <Button variant="ghost" size="sm" onClick={restoreFromTrash} className="gap-1.5 text-xs">
               <RotateCcw className="h-3.5 w-3.5" /> Restore
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowDeleteDialog(true)}
-              className="gap-1.5 text-xs text-destructive hover:text-destructive"
-            >
+            <Button variant="ghost" size="sm" onClick={() => setShowDeleteDialog(true)} className="gap-1.5 text-xs text-destructive hover:text-destructive">
               <Trash2 className="h-3.5 w-3.5" /> Delete Forever
             </Button>
           </>
@@ -429,21 +448,10 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
               <DropdownMenuItem onClick={moveToTrash}>
                 <Trash2 className="mr-2 h-4 w-4" /> Move to Trash
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  navigator.clipboard.writeText(`${title}\n\n${plainText}`);
-                  showToast.success("Copied to clipboard");
-                }}
-              >
+              <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}>
                 <Copy className="mr-2 h-4 w-4" /> Copy to Clipboard
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const url = `${window.location.origin}/dashboard/notes/${note.id}`;
-                  navigator.clipboard.writeText(url);
-                  showToast.copied();
-                }}
-              >
+              <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
                 <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -568,6 +576,9 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         </div>
       )}
 
+      {/* Backlinks panel */}
+      <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
+
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-muted/30 text-[10px] text-muted-foreground shrink-0">
         <div className="flex items-center gap-2">
@@ -601,28 +612,24 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={permanentDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction onClick={permanentDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete Forever
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Create Event in Temerio */}
-      <CreateEventDialog
-        open={showEventDialog}
-        onOpenChange={setShowEventDialog}
-        draft={eventDraft}
-      />
+      <CreateEventDialog open={showEventDialog} onOpenChange={setShowEventDialog} draft={eventDraft} />
+      <ForwardToAppDialog open={showForwardDialog} onOpenChange={setShowForwardDialog} note={note} />
 
-      {/* Forward to App */}
-      <ForwardToAppDialog
-        open={showForwardDialog}
-        onOpenChange={setShowForwardDialog}
-        note={note}
+      {/* Wikilink autocomplete */}
+      <WikilinkAutocomplete
+        isOpen={wikilinkOpen}
+        onClose={() => setWikilinkOpen(false)}
+        onSelect={handleWikilinkSelect}
+        onCreate={handleWikilinkCreate}
+        position={wikilinkPos}
+        excludeNoteId={note.id}
       />
     </div>
     {/* Version History Panel */}

@@ -1,73 +1,126 @@
-import { Extension } from "@tiptap/core";
+import { Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 
 /**
- * Tiptap extension that adds Obsidian-style [[wikilink]] support:
- * - Renders [[text]] as styled inline marks
- * - Converts typed wikilinks into clickable internal links on Enter/Space
+ * WikiLink inline node for Tiptap.
+ * Stores a linked note's ID and title as attributes.
+ * Renders as a styled clickable element.
  */
 
-const wikilinkPluginKey = new PluginKey("wikilink");
-
-// Regex to find [[target]] or [[target|alias]] in text nodes
-const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
-
 export interface WikilinkOptions {
-  onNavigate?: (title: string) => void;
+  onNavigate?: (noteId: string) => void;
+  onOpenAutocomplete?: (pos: number) => void;
 }
 
-export const WikilinkExtension = Extension.create<WikilinkOptions>({
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    wikilink: {
+      insertWikilink: (attrs: { noteId: string; noteTitle: string; displayText?: string }) => ReturnType;
+    };
+  }
+}
+
+export const WikilinkExtension = Node.create<WikilinkOptions>({
   name: "wikilink",
+  group: "inline",
+  inline: true,
+  atom: true,
 
   addOptions() {
     return {
       onNavigate: undefined,
+      onOpenAutocomplete: undefined,
+    };
+  },
+
+  addAttributes() {
+    return {
+      noteId: { default: null },
+      noteTitle: { default: "" },
+      displayText: { default: "" },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'span[data-wikilink]',
+        getAttrs: (el) => {
+          const element = el as HTMLElement;
+          return {
+            noteId: element.getAttribute("data-note-id"),
+            noteTitle: element.getAttribute("data-note-title"),
+            displayText: element.getAttribute("data-display-text") || "",
+          };
+        },
+      },
+    ];
+  },
+
+  renderHTML({ node }) {
+    const display = node.attrs.displayText || node.attrs.noteTitle;
+    return [
+      "span",
+      mergeAttributes({
+        "data-wikilink": "true",
+        "data-note-id": node.attrs.noteId,
+        "data-note-title": node.attrs.noteTitle,
+        "data-display-text": node.attrs.displayText || "",
+        class: "wikilink-node",
+        contenteditable: "false",
+      }),
+      `[[${display}]]`,
+    ];
+  },
+
+  addCommands() {
+    return {
+      insertWikilink:
+        (attrs) =>
+        ({ chain }) => {
+          return chain()
+            .insertContent({
+              type: this.name,
+              attrs,
+            })
+            .run();
+        },
     };
   },
 
   addProseMirrorPlugins() {
-    const onNavigate = this.options.onNavigate;
+    const extension = this;
 
     return [
       new Plugin({
-        key: wikilinkPluginKey,
+        key: new PluginKey("wikilinkInput"),
         props: {
-          decorations(state) {
-            const { doc } = state;
-            const decorations: Decoration[] = [];
-
-            doc.descendants((node, pos) => {
-              if (!node.isText || !node.text) return;
-
-              let match: RegExpExecArray | null;
-              WIKILINK_RE.lastIndex = 0;
-              while ((match = WIKILINK_RE.exec(node.text)) !== null) {
-                const start = pos + match.index;
-                const end = start + match[0].length;
-                decorations.push(
-                  Decoration.inline(start, end, {
-                    class: "wikilink-decoration",
-                    "data-wikilink-target": match[1],
-                    "data-wikilink-alias": match[2] || "",
-                  })
-                );
+          handleTextInput(view, from, to, text) {
+            // Detect [[ typing
+            if (text === "[") {
+              const { state } = view;
+              const before = state.doc.textBetween(Math.max(0, from - 1), from);
+              if (before === "[") {
+                // Delete the first [ and trigger autocomplete
+                const tr = state.tr.delete(from - 1, from);
+                view.dispatch(tr);
+                extension.options.onOpenAutocomplete?.(from - 1);
+                return true;
               }
-
-              return false; // don't descend into text nodes
-            });
-
-            return DecorationSet.create(doc, decorations);
+            }
+            return false;
           },
 
           handleClick(view, pos, event) {
             const target = event.target as HTMLElement;
-            if (!target.classList?.contains("wikilink-decoration")) return false;
-
-            const title = target.getAttribute("data-wikilink-target");
-            if (title && onNavigate) {
-              onNavigate(title);
-              return true;
+            const wikilinkEl = target.closest?.(".wikilink-node");
+            if (wikilinkEl) {
+              const noteId = wikilinkEl.getAttribute("data-note-id");
+              if (noteId && extension.options.onNavigate) {
+                extension.options.onNavigate(noteId);
+                return true;
+              }
             }
             return false;
           },
