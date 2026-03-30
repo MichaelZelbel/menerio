@@ -197,6 +197,7 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       updateNote.mutate({ id: note.id, title: val });
+      triggerGitHubSync(note.id);
     }, 800);
   };
 
