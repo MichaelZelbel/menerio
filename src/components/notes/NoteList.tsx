@@ -155,6 +155,14 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                     </span>
                   );
                 }
+                if (source === "telegram") {
+                  return (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-[#0088cc]/15 text-[#0088cc] dark:text-sky-400 font-medium">
+                      <Send className="h-2.5 w-2.5" />
+                      Telegram
+                    </span>
+                  );
+                }
                 if (m?.is_quick_capture) {
                   return (
                     <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">

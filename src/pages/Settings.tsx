@@ -422,6 +422,11 @@ export default function Settings() {
           <SlackIntegration />
         </TabsContent>
 
+        {/* ── Telegram Integration Tab ── */}
+        <TabsContent value="telegram">
+          <TelegramIntegration />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
