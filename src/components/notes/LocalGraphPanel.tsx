@@ -115,6 +115,28 @@ export function LocalGraphPanel({
     document.addEventListener("mouseup", onMouseUp);
   }, [graphHeight]);
 
+  // Horizontal drag-to-resize handler (drag left edge to widen)
+  const onResizeHMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeHStartRef.current = { x: e.clientX, w: panelWidth };
+    setIsResizingH(true);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizeHStartRef.current) return;
+      const delta = resizeHStartRef.current.x - ev.clientX;
+      const newW = Math.max(280, Math.min(800, resizeHStartRef.current.w + delta));
+      setPanelWidth(newW);
+    };
+    const onMouseUp = () => {
+      setIsResizingH(false);
+      resizeHStartRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [panelWidth]);
+
   // Center on current note after data loads
   useEffect(() => {
     if (graphRef.current && graphData) {
