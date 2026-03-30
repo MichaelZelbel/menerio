@@ -592,6 +592,269 @@ server.registerTool(
   }
 );
 
+// Tool 10: Get Connected Notes (Graph)
+server.registerTool(
+  "get_connected_notes",
+  {
+    title: "Get Connected Notes",
+    description: "Given a note title or ID, return all connected notes with connection types and strengths from the knowledge graph.",
+    inputSchema: {
+      note: z.string().describe("Note title or ID to look up"),
+      limit: z.number().optional().default(20),
+    },
+  },
+  async ({ note, limit }) => {
+    try {
+      // Find the note by title or ID
+      let noteId = note;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(note);
+      if (!isUuid) {
+        const { data } = await supabase
+          .from("notes")
+          .select("id")
+          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .ilike("title", `%${note}%`)
+          .limit(1);
+        if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
+        noteId = data[0].id;
+      }
+
+      const { data: connections } = await supabase
+        .from("note_connections")
+        .select("*")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .or(`source_note_id.eq.${noteId},target_note_id.eq.${noteId}`)
+        .order("strength", { ascending: false })
+        .limit(limit);
+
+      if (!connections?.length) return { content: [{ type: "text" as const, text: "No connections found for this note." }] };
+
+      // Get linked note details
+      const linkedIds = [...new Set(connections.map((c: any) =>
+        c.source_note_id === noteId ? c.target_note_id : c.source_note_id
+      ))];
+      const { data: linkedNotes } = await supabase
+        .from("notes")
+        .select("id, title, metadata")
+        .in("id", linkedIds);
+
+      const noteMap = new Map((linkedNotes || []).map((n: any) => [n.id, n]));
+
+      const lines = connections.map((c: any, i: number) => {
+        const linkedId = c.source_note_id === noteId ? c.target_note_id : c.source_note_id;
+        const linked = noteMap.get(linkedId);
+        const dir = c.source_note_id === noteId ? "→" : "←";
+        return `${i + 1}. ${dir} ${linked?.title || "Unknown"} [${c.connection_type}] strength: ${c.strength}`;
+      });
+
+      return { content: [{ type: "text" as const, text: `${connections.length} connection(s):\n\n${lines.join("\n")}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 11: Find Path Between Notes
+server.registerTool(
+  "find_path",
+  {
+    title: "Find Path Between Notes",
+    description: "Given two note titles, find the shortest path between them through the knowledge graph.",
+    inputSchema: {
+      from_note: z.string().describe("Title or ID of the starting note"),
+      to_note: z.string().describe("Title or ID of the destination note"),
+    },
+  },
+  async ({ from_note, to_note }) => {
+    try {
+      // Resolve IDs
+      async function resolveId(query: string): Promise<string | null> {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
+        if (isUuid) return query;
+        const { data } = await supabase
+          .from("notes")
+          .select("id")
+          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .ilike("title", `%${query}%`)
+          .limit(1);
+        return data?.[0]?.id || null;
+      }
+
+      const [fromId, toId] = await Promise.all([resolveId(from_note), resolveId(to_note)]);
+      if (!fromId) return { content: [{ type: "text" as const, text: `Note not found: "${from_note}"` }] };
+      if (!toId) return { content: [{ type: "text" as const, text: `Note not found: "${to_note}"` }] };
+
+      // Fetch all connections for BFS
+      const { data: allConns } = await supabase
+        .from("note_connections")
+        .select("source_note_id, target_note_id, connection_type, strength")
+        .eq("user_id", BRAIN_OWNER_USER_ID);
+
+      if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
+
+      // Build adjacency
+      const adj = new Map<string, { id: string; type: string }[]>();
+      for (const c of allConns) {
+        if (!adj.has(c.source_note_id)) adj.set(c.source_note_id, []);
+        if (!adj.has(c.target_note_id)) adj.set(c.target_note_id, []);
+        adj.get(c.source_note_id)!.push({ id: c.target_note_id, type: c.connection_type });
+        adj.get(c.target_note_id)!.push({ id: c.source_note_id, type: c.connection_type });
+      }
+
+      // BFS
+      const visited = new Set<string>();
+      const parent = new Map<string, { id: string; type: string }>();
+      const queue = [fromId];
+      visited.add(fromId);
+      let found = false;
+
+      while (queue.length > 0 && !found) {
+        const current = queue.shift()!;
+        for (const neighbor of adj.get(current) || []) {
+          if (!visited.has(neighbor.id)) {
+            visited.add(neighbor.id);
+            parent.set(neighbor.id, { id: current, type: neighbor.type });
+            if (neighbor.id === toId) { found = true; break; }
+            queue.push(neighbor.id);
+          }
+        }
+      }
+
+      if (!found) return { content: [{ type: "text" as const, text: "No path found between these notes." }] };
+
+      // Reconstruct path
+      const path: string[] = [toId];
+      const edgeTypes: string[] = [];
+      let cur = toId;
+      while (cur !== fromId) {
+        const p = parent.get(cur)!;
+        edgeTypes.unshift(p.type);
+        path.unshift(p.id);
+        cur = p.id;
+      }
+
+      // Get note titles
+      const { data: pathNotes } = await supabase
+        .from("notes")
+        .select("id, title")
+        .in("id", path);
+      const titleMap = new Map((pathNotes || []).map((n: any) => [n.id, n.title]));
+
+      const pathStr = path.map((id, i) => {
+        const title = titleMap.get(id) || "Unknown";
+        return i < path.length - 1
+          ? `${title} --[${edgeTypes[i]}]-->`
+          : title;
+      }).join(" ");
+
+      return { content: [{ type: "text" as const, text: `Path (${path.length} notes, ${path.length - 1} hops):\n\n${pathStr}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 12: Get Topic Clusters
+server.registerTool(
+  "get_clusters",
+  {
+    title: "Get Topic Clusters",
+    description: "Return topic clusters in the knowledge graph — groups of tightly connected notes.",
+    inputSchema: {
+      min_size: z.number().optional().default(2).describe("Minimum cluster size"),
+    },
+  },
+  async ({ min_size }) => {
+    try {
+      // Fetch all connections
+      const { data: allConns } = await supabase
+        .from("note_connections")
+        .select("source_note_id, target_note_id")
+        .eq("user_id", BRAIN_OWNER_USER_ID);
+
+      if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
+
+      // Get all note IDs involved
+      const allIds = new Set<string>();
+      const adj = new Map<string, string[]>();
+      for (const c of allConns) {
+        allIds.add(c.source_note_id);
+        allIds.add(c.target_note_id);
+        if (!adj.has(c.source_note_id)) adj.set(c.source_note_id, []);
+        if (!adj.has(c.target_note_id)) adj.set(c.target_note_id, []);
+        adj.get(c.source_note_id)!.push(c.target_note_id);
+        adj.get(c.target_note_id)!.push(c.source_note_id);
+      }
+
+      // Label propagation
+      const labels = new Map<string, string>();
+      for (const id of allIds) labels.set(id, id);
+
+      for (let iter = 0; iter < 10; iter++) {
+        let changed = false;
+        for (const id of allIds) {
+          const neighbors = adj.get(id) || [];
+          if (neighbors.length === 0) continue;
+          const freq = new Map<string, number>();
+          for (const nb of neighbors) {
+            const l = labels.get(nb)!;
+            freq.set(l, (freq.get(l) || 0) + 1);
+          }
+          let maxLabel = labels.get(id)!;
+          let maxCount = 0;
+          for (const [l, c] of freq) {
+            if (c > maxCount) { maxCount = c; maxLabel = l; }
+          }
+          if (maxLabel !== labels.get(id)) {
+            labels.set(id, maxLabel);
+            changed = true;
+          }
+        }
+        if (!changed) break;
+      }
+
+      // Group
+      const clusters = new Map<string, string[]>();
+      for (const [id, label] of labels) {
+        if (!clusters.has(label)) clusters.set(label, []);
+        clusters.get(label)!.push(id);
+      }
+
+      const validClusters = [...clusters.values()].filter((c) => c.length >= min_size).sort((a, b) => b.length - a.length);
+
+      if (validClusters.length === 0) return { content: [{ type: "text" as const, text: "No clusters found." }] };
+
+      // Get titles for all notes in clusters
+      const allClusterIds = validClusters.flat();
+      const { data: notes } = await supabase
+        .from("notes")
+        .select("id, title, metadata")
+        .in("id", allClusterIds);
+      const noteMap = new Map((notes || []).map((n: any) => [n.id, n]));
+
+      const lines = validClusters.map((ids, i) => {
+        const clusterNotes = ids.map((id) => noteMap.get(id)).filter(Boolean);
+        const topics = new Map<string, number>();
+        for (const n of clusterNotes) {
+          const m = (n.metadata || {}) as Record<string, unknown>;
+          for (const t of (Array.isArray(m.topics) ? m.topics : []) as string[]) {
+            topics.set(t, (topics.get(t) || 0) + 1);
+          }
+        }
+        const topTopics = [...topics.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
+        const label = topTopics.length > 0 ? topTopics.join(" & ") : `Cluster ${i + 1}`;
+        const noteList = clusterNotes.slice(0, 5).map((n: any) => `  - ${n.title}`).join("\n");
+        const more = ids.length > 5 ? `\n  ... and ${ids.length - 5} more` : "";
+        return `${i + 1}. ${label} (${ids.length} notes)\n${noteList}${more}`;
+      });
+
+      return { content: [{ type: "text" as const, text: `${validClusters.length} cluster(s):\n\n${lines.join("\n\n")}` }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
 // Tool 9: Log Interaction
 server.registerTool(
   "log_interaction",
