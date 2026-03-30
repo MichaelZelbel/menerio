@@ -492,6 +492,57 @@ export type Database = {
         }
         Relationships: []
       }
+      note_connections: {
+        Row: {
+          connection_type: string
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          source_note_id: string
+          strength: number | null
+          target_note_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          connection_type: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          source_note_id: string
+          strength?: number | null
+          target_note_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          connection_type?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          source_note_id?: string
+          strength?: number | null
+          target_note_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_connections_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_connections_target_note_id_fkey"
+            columns: ["target_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notes: {
         Row: {
           content: string
