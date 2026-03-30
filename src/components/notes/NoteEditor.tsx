@@ -619,6 +619,11 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
         note={note}
       />
     </div>
+    {/* Version History Panel */}
+    {showHistory && (
+      <VersionHistoryPanel noteId={note.id} onClose={() => setShowHistory(false)} />
+    )}
+    </div>
   );
 }
 
