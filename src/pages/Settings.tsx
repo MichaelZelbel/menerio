@@ -436,6 +436,11 @@ export default function Settings() {
           <DiscordIntegration />
         </TabsContent>
 
+        {/* ── GitHub Sync Tab ── */}
+        <TabsContent value="github">
+          <GitHubSyncSettings />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
