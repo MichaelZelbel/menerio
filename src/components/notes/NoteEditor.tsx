@@ -278,8 +278,13 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
 
+  // Sync status indicator helper
+  const syncStatus = syncLog?.sync_status;
+  const isSyncing = ghSync.isPending;
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full">
+    <div className="flex flex-col h-full flex-1 min-w-0">
       {/* Action toolbar */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
         <Button
