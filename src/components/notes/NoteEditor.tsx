@@ -88,12 +88,16 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const processNote = useProcessNote();
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
+  const { data: ghConn } = useGitHubConnection();
+  const ghSync = useGitHubSyncExport();
+  const { data: syncLog } = useSyncLogForNote(note.id);
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
@@ -102,6 +106,17 @@ export function NoteEditor({ note, onNoteDeleted }: NoteEditorProps) {
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Trigger GitHub sync after note saves
+  const triggerGitHubSync = useCallback((noteId: string) => {
+    if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
+    if (ghConn.sync_direction !== "export" && ghConn.sync_direction !== "bidirectional") return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      ghSync.mutate({ noteId, action: "update" });
+    }, 3000); // 3s debounce after last save
+  }, [ghConn, ghSync]);
 
   const editor = useEditor({
     extensions: [
