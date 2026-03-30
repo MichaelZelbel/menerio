@@ -453,6 +453,8 @@ export default function Notes() {
             key={selectedNote.id}
             note={selectedNote}
             onNoteDeleted={() => selectNote(null)}
+            showLocalGraph={showLocalGraph}
+            onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
