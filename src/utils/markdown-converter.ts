@@ -37,7 +37,7 @@ export interface ParsedMarkdownNote {
  * context has no DOM either, so we keep it dependency-free.
  */
 export function htmlToMarkdown(html: string): string {
-  if (!html) return "";
+  if (!html || !html.trim()) return "";
 
   let md = html;
 
