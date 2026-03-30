@@ -361,7 +361,7 @@ export function internalLinksToWikilinks(
 ): string {
   // Match markdown links pointing to /dashboard/notes/<uuid>
   return md.replace(
-    /\[([^\]]+)\]\(\/dashboard\/notes\/([0-9a-f-]{36})\)/gi,
+    /\[([^\]]+)\]\(\/dashboard\/notes\/([0-9a-f-]+)\)/gi,
     (_, linkText, noteId) => {
       const title = noteIdToTitle.get(noteId);
       return `[[${title || linkText}]]`;
