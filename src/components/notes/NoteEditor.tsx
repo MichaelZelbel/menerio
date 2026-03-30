@@ -90,6 +90,8 @@ const MIN_WORDS_FOR_PROCESSING = 50;
 interface NoteEditorProps {
   note: Note;
   onNoteDeleted?: () => void;
+  showLocalGraph?: boolean;
+  onToggleLocalGraph?: () => void;
 }
 
 /** Extract all wikilink noteIds from editor JSON content */
