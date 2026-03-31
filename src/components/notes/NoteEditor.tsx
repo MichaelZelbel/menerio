@@ -744,9 +744,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       <NoteChatPanel
         note={note}
         onClose={() => setShowChat(false)}
+        messages={chatMessages}
+        onMessagesChange={(msgs) => {
+          setChatMessages(msgs);
+          chatMessagesRef.current.set(note.id, msgs);
+        }}
         onNoteChanged={() => {
           queryClient.invalidateQueries({ queryKey: ["notes"] });
-          // Refresh the editor content
           if (editor) {
             supabase
               .from("notes" as any)
