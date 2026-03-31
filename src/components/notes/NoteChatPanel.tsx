@@ -220,7 +220,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t border-border shrink-0">
+      <div className="p-3 pb-20 border-t border-border shrink-0">
         <div className="flex gap-2">
           <Textarea
             ref={textareaRef}
