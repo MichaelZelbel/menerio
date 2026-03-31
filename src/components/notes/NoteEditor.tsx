@@ -521,6 +521,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {/* Rich text formatting toolbar */}
       {!note.is_trashed && <EditorToolbar editor={editor} />}
 
+      {/* Smart Tags / Metadata editor */}
+      {!note.is_trashed && (
+        <NoteMetadataEditor
+          metadata={metadata}
+          onUpdate={(updated) => {
+            updateNote.mutate({ id: note.id, metadata: updated } as any);
+          }}
+        />
+      )}
+
       {/* Editor */}
       <div
         className={cn(
