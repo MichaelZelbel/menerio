@@ -139,13 +139,17 @@ export async function openRouterWithCredits(
   let promptTokens = 0;
   let completionTokens = 0;
 
+  let usageSource: "provider" | "fallback";
   if (result.usage) {
     promptTokens = result.usage.prompt_tokens || 0;
     completionTokens = result.usage.completion_tokens || 0;
     totalTokens = result.usage.total_tokens || (promptTokens + completionTokens);
+    usageSource = "provider";
   } else {
     // Fallback: use estimated tokens when provider omits usage
     totalTokens = FALLBACK_TOKENS[model] || 300;
+    usageSource = "fallback";
+    console.warn(`[llm-credits] No usage data from provider for model=${model}, using fallback=${totalTokens}`);
   }
 
   // Deduct actual tokens
@@ -157,6 +161,7 @@ export async function openRouterWithCredits(
     provider: "openrouter",
     promptTokens,
     completionTokens,
+    usageSource,
   });
 
   return { result, credits };
