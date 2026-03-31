@@ -27,15 +27,16 @@ interface ChatMessage {
   }>;
 }
 
-interface NoteChatPanelProps {
+export interface NoteChatPanelProps {
   note: Note;
   onClose: () => void;
   onNoteChanged: () => void;
+  messages: ChatMessage[];
+  onMessagesChange: (msgs: ChatMessage[]) => void;
 }
 
-export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelProps) {
+export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessagesChange }: NoteChatPanelProps) {
   const { session } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
