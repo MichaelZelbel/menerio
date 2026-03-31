@@ -1,4 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  checkBalance,
+  openRouterWithCredits,
+  insufficientCreditsResponse,
+  type CreditInfo,
+} from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -30,15 +36,18 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const { note_id, mode } = body;
-    // mode: "note" (suggestions for a specific note) or "daily" (daily discovery feed)
 
     if (mode === "daily") {
+      // Daily discovery uses metadata matching only (no LLM calls, no credits needed)
       return await handleDailyDiscovery(user.id);
     }
 
     if (!note_id) return json({ error: "note_id or mode=daily required" }, 400);
 
-    // Fetch the source note
+    // Pre-check balance before LLM call
+    const balance = await checkBalance(supabase, user.id);
+    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+
     const { data: note } = await supabase
       .from("notes")
       .select("id, title, content, metadata, embedding")
@@ -69,7 +78,6 @@ Deno.serve(async (req: Request) => {
 
     const dismissedIds = new Set((dismissed || []).map((d: any) => d.target_note_id));
 
-    // Find semantically similar notes
     if (!note.embedding) return json({ suggestions: [] });
 
     const embedding = typeof note.embedding === "string" ? note.embedding : JSON.stringify(note.embedding);
@@ -80,7 +88,6 @@ Deno.serve(async (req: Request) => {
       p_user_id: user.id,
     });
 
-    // Filter out self, already linked, and dismissed
     const candidates = (matches || [])
       .filter((m: any) => m.id !== note_id && !linkedIds.has(m.id) && !dismissedIds.has(m.id))
       .slice(0, 5);
@@ -119,23 +126,19 @@ Return a JSON array with objects containing:
 Only return should_link: true for connections that would genuinely help the user.
 Don't suggest links just because notes share a common word. The connection should be insightful.`;
 
-    const llmRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    // LLM call with credit deduction
+    const { result: llmData, credits } = await openRouterWithCredits(
+      supabase, OPENROUTER_API_KEY, user.id, "suggest-connections:chat", "chat/completions",
+      {
         model: "openai/gpt-4o-mini",
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: "You analyze note connections. Always respond with valid JSON containing a 'suggestions' array." },
           { role: "user", content: prompt },
         ],
-      }),
-    });
+      }
+    );
 
-    const llmData = await llmRes.json();
     let suggestions: any[] = [];
     try {
       const parsed = JSON.parse(llmData.choices[0].message.content);
@@ -144,7 +147,6 @@ Don't suggest links just because notes share a common word. The connection shoul
       suggestions = [];
     }
 
-    // Enrich with note titles
     const enriched = suggestions.map((s: any) => {
       const candidate = candidates.find((c: any) => c.id === s.note_id);
       return {
@@ -154,15 +156,24 @@ Don't suggest links just because notes share a common word. The connection shoul
       };
     });
 
-    return json({ suggestions: enriched });
-  } catch (err) {
+    return json({
+      suggestions: enriched,
+      credits: {
+        remaining_tokens: credits.remaining_tokens,
+        remaining_credits: credits.remaining_credits,
+      },
+    });
+  } catch (err: any) {
+    if (err.message === "INSUFFICIENT_CREDITS" || err.message === "NO_ACTIVE_PERIOD") {
+      return insufficientCreditsResponse(corsHeaders);
+    }
     console.error("suggest-connections error:", err);
     return json({ error: err.message }, 500);
   }
 });
 
 async function handleDailyDiscovery(userId: string) {
-  // Get recent notes with embeddings
+  // Daily discovery uses only embedding similarity + metadata matching — no LLM calls, no credit cost
   const { data: recentNotes } = await supabase
     .from("notes")
     .select("id, title, content, metadata, embedding")
@@ -176,7 +187,6 @@ async function handleDailyDiscovery(userId: string) {
     return json({ discoveries: [], message: "Need more notes for daily discoveries." });
   }
 
-  // Get dismissed pairs
   const { data: dismissed } = await supabase
     .from("dismissed_suggestions")
     .select("source_note_id, target_note_id")
@@ -186,11 +196,8 @@ async function handleDailyDiscovery(userId: string) {
     (dismissed || []).map((d: any) => `${d.source_note_id}:${d.target_note_id}`)
   );
 
-  // Use today's date as a seed to pick different notes each day
   const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
   const startIdx = dayIndex % Math.max(1, recentNotes.length - 3);
-
-  // Pick 3 anchor notes
   const anchors = recentNotes.slice(startIdx, startIdx + 3);
   const discoveries: any[] = [];
 
@@ -216,7 +223,6 @@ async function handleDailyDiscovery(userId: string) {
       const anchorMeta = (anchor.metadata || {}) as Record<string, unknown>;
       const bestMeta = (best.metadata || {}) as Record<string, unknown>;
 
-      // Generate a quick reason
       const sharedTopics = (Array.isArray(anchorMeta.topics) && Array.isArray(bestMeta.topics))
         ? (anchorMeta.topics as string[]).filter(t =>
             (bestMeta.topics as string[]).some(bt => bt.toLowerCase() === t.toLowerCase())
