@@ -320,10 +320,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // Sync when note changes
   useEffect(() => {
+    // Save current chat messages for the previous note
+    // (note.id has already changed, so we use a ref to track the previous)
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
+    // Restore chat messages for this note (or empty)
+    setChatMessages(chatMessagesRef.current.get(note.id) || []);
     if (processTimer.current) clearTimeout(processTimer.current);
     const normalizedContent = normalizeNoteContent(note.content);
     if (editor && normalizedContent !== editor.getHTML()) {
