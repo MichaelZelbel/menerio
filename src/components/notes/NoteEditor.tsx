@@ -546,7 +546,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       )}
 
       {/* Rich text formatting toolbar */}
-      {!note.is_trashed && <EditorToolbar editor={editor} />}
+      {!note.is_trashed && !sourceMode && <EditorToolbar editor={editor} />}
 
       {/* Smart Tags / Metadata editor */}
       {!note.is_trashed && (
