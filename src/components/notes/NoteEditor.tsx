@@ -600,7 +600,24 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
-        <EditorContent editor={editor} className="tiptap-editor" />
+        {sourceMode ? (
+          <textarea
+            value={sourceText}
+            onChange={(e) => {
+              setSourceText(e.target.value);
+              if (saveTimer.current) clearTimeout(saveTimer.current);
+              saveTimer.current = setTimeout(() => {
+                updateNote.mutate({ id: note.id, content: e.target.value });
+                triggerGitHubSync(note.id);
+              }, 800);
+            }}
+            className="w-full flex-1 bg-transparent border-none outline-none resize-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40"
+            placeholder="Markdown source…"
+            disabled={note.is_trashed || note.is_external}
+          />
+        ) : (
+          <EditorContent editor={editor} className="tiptap-editor" />
+        )}
       </div>
 
       {/* Connections panel */}
