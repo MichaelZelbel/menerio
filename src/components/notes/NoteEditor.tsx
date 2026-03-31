@@ -183,7 +183,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [showLinkToNote, setShowLinkToNote] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState("");
-
+  const [showChat, setShowChat] = useState(false);
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
