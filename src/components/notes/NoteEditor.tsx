@@ -461,7 +461,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           </Button>
         )}
 
-        <div className="flex-1" />
+        {!note.is_trashed && !note.is_external && (
+          <Button variant="ghost" size="icon" className={cn("h-8 w-8", sourceMode && "bg-accent text-accent-foreground")} onClick={toggleSourceMode} title={sourceMode ? "Rich text mode" : "Markdown source"}>
+            <Code2 className="h-4 w-4" />
+          </Button>
+        )}
 
         {note.is_trashed ? (
           <>
