@@ -562,7 +562,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {/* Editor */}
       <div
         className={cn(
-          "flex-1 overflow-y-auto p-4 relative transition-colors",
+          "flex-1 overflow-y-auto p-4 relative transition-colors flex flex-col min-h-0",
           isDragOver && "bg-primary/5 ring-2 ring-primary/30 ring-inset"
         )}
         onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
