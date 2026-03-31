@@ -400,7 +400,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (!editor) return;
     if (!sourceMode) {
       // Rich → Source
-      const md = editor.storage.markdown?.getMarkdown?.() || editor.getHTML();
+      const md = (editor.storage as any).markdown?.getMarkdown?.() || editor.getHTML();
       setSourceText(md);
       setSourceMode(true);
     } else {
