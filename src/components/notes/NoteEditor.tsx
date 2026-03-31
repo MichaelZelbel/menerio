@@ -562,7 +562,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {/* Editor */}
       <div
         className={cn(
-          "flex-1 overflow-y-auto p-4 relative transition-colors",
+          "flex-1 overflow-y-auto p-4 relative transition-colors flex flex-col min-h-0",
           isDragOver && "bg-primary/5 ring-2 ring-primary/30 ring-inset"
         )}
         onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -612,7 +612,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 triggerGitHubSync(note.id);
               }, 800);
             }}
-            className="w-full flex-1 bg-transparent border-none outline-none resize-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40"
+            className="w-full flex-1 min-h-0 bg-transparent border-none outline-none resize-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40"
             placeholder="Markdown source…"
             disabled={note.is_trashed || note.is_external}
           />
