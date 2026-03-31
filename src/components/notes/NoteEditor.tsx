@@ -184,6 +184,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
