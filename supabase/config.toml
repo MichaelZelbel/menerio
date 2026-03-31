@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.recompute-all-connections]
 verify_jwt = false
+
+[functions.note-chat]
+verify_jwt = false
