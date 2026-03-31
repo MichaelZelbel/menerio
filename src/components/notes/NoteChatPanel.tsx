@@ -75,7 +75,12 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       );
 
       if (fnErr) {
-        throw new Error(fnErr.message || "Chat request failed");
+        // Preview environment can interfere with edge function requests
+        const msg = fnErr.message || "Chat request failed";
+        if (msg.includes("Failed to send") || msg.includes("FunctionsFetchError")) {
+          throw new Error("Edge function call failed. This may work on the published URL — try publishing first.");
+        }
+        throw new Error(msg);
       }
 
       if (data?.error) {
