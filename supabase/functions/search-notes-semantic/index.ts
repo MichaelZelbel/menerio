@@ -1,9 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  getEmbeddingWithCredits,
+  insufficientCreditsResponse,
+} from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -20,31 +23,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/text-embedding-3-small",
-      input: text,
-    }),
-  });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => "");
-    throw new Error(`Embedding failed: ${r.status} ${msg}`);
-  }
-  const d = await r.json();
-  return d.data[0].embedding;
-}
-
-async function ilikeFallback(
-  userId: string,
-  query: string,
-  limit: number
-) {
+async function ilikeFallback(userId: string, query: string, limit: number) {
   const q = query.toLowerCase();
   const { data, error } = await supabase
     .from("notes")
@@ -88,10 +67,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     let results: unknown[];
     let mode = "semantic";
+    let credits: any = null;
 
     try {
-      const embedding = await getEmbedding(query);
-      const embeddingStr = `[${embedding.join(",")}]`;
+      // Embedding call with credit deduction
+      const embResult = await getEmbeddingWithCredits(
+        supabase, OPENROUTER_API_KEY, user.id, "search-semantic", query
+      );
+      credits = embResult.credits;
+      const embeddingStr = `[${embResult.embedding.join(",")}]`;
 
       const { data, error } = await supabase.rpc("match_notes", {
         query_embedding: embeddingStr,
@@ -101,13 +85,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       if (error) throw error;
       results = data || [];
-    } catch (embErr) {
-      console.error("Semantic search failed, falling back to ILIKE:", embErr);
-      results = await ilikeFallback(user.id, query, limit);
-      mode = "ilike_fallback";
+    } catch (embErr: any) {
+      if (embErr.message === "INSUFFICIENT_CREDITS" || embErr.message === "NO_ACTIVE_PERIOD") {
+        // Fall back to ILIKE search when credits are exhausted (graceful degradation)
+        console.log("Falling back to ILIKE search: insufficient credits");
+        results = await ilikeFallback(user.id, query, limit);
+        mode = "ilike_fallback_no_credits";
+      } else {
+        console.error("Semantic search failed, falling back to ILIKE:", embErr);
+        results = await ilikeFallback(user.id, query, limit);
+        mode = "ilike_fallback";
+      }
     }
 
-    return json({ results, mode });
+    return json({
+      results,
+      mode,
+      credits: credits ? {
+        remaining_tokens: credits.remaining_tokens,
+        remaining_credits: credits.remaining_credits,
+      } : null,
+    });
   } catch (err) {
     console.error("search-notes-semantic error:", err);
     return json({ error: err.message }, 500);

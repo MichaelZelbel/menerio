@@ -1,5 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
+import {
+  checkBalance,
+  openRouterWithCredits,
+  insufficientCreditsResponse,
+} from "../_shared/llm-credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +22,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth check
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
@@ -42,6 +46,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Pre-check balance
+    const balance = await checkBalance(supabaseAdmin, user.id);
+    if (!balance.allowed) {
+      return insufficientCreditsResponse(corsHeaders);
+    }
+
     const body = await req.json().catch(() => ({}));
     const days = body.days || 7;
 
@@ -50,7 +60,6 @@ Deno.serve(async (req) => {
     const weekStart = since.toISOString().split("T")[0];
     const weekEnd = new Date().toISOString().split("T")[0];
 
-    // Fetch notes from the period
     const { data: notes, error: notesError } = await supabaseAdmin
       .from("notes")
       .select("id, title, content, metadata, tags, created_at, entity_type")
@@ -73,7 +82,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Prepare notes for the LLM
     const noteSummaries = notes.map((n, i) => {
       const m = (n.metadata || {}) as Record<string, unknown>;
       const parts = [
@@ -105,13 +113,10 @@ Deno.serve(async (req) => {
 Notes:
 ${noteSummaries.join("\n\n")}`;
 
-    const llmResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    // LLM call with credit deduction
+    const { result: llmData, credits } = await openRouterWithCredits(
+      supabaseAdmin, OPENROUTER_API_KEY, user.id, "weekly-review:chat", "chat/completions",
+      {
         model: "openai/gpt-4o-mini",
         response_format: { type: "json_object" },
         messages: [
@@ -122,19 +127,9 @@ ${noteSummaries.join("\n\n")}`;
           },
           { role: "user", content: prompt },
         ],
-      }),
-    });
+      }
+    );
 
-    if (!llmResponse.ok) {
-      const errText = await llmResponse.text().catch(() => "");
-      console.error("LLM error:", llmResponse.status, errText);
-      return new Response(JSON.stringify({ error: "AI analysis failed" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const llmData = await llmResponse.json();
     let reviewData: Record<string, unknown>;
     try {
       reviewData = JSON.parse(llmData.choices[0].message.content);
@@ -159,17 +154,25 @@ ${noteSummaries.join("\n\n")}`;
 
     if (saveError) {
       console.error("Save error:", saveError);
-      // Still return the review even if save fails
       return new Response(
-        JSON.stringify({ review: reviewData, week_start: weekStart, week_end: weekEnd, saved: false }),
+        JSON.stringify({
+          review: reviewData, week_start: weekStart, week_end: weekEnd, saved: false,
+          credits: { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits },
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    return new Response(JSON.stringify({ ...savedReview, saved: true }), {
+    return new Response(JSON.stringify({
+      ...savedReview, saved: true,
+      credits: { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits },
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.message === "INSUFFICIENT_CREDITS" || err.message === "NO_ACTIVE_PERIOD") {
+      return insufficientCreditsResponse(corsHeaders);
+    }
     console.error("weekly-review error:", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { triggerCreditsRefresh } from "@/lib/credits-events";
 
 export interface RelatedItem {
   type: string;
@@ -158,6 +159,8 @@ export function useProcessNote() {
         body: { note_id: noteId },
       });
       if (res.error) throw res.error;
+      // Trigger credits refresh after AI processing
+      triggerCreditsRefresh();
       return res.data;
     },
   });
@@ -200,6 +203,8 @@ export function useSemanticSearch() {
         body: { query, threshold, limit },
       });
       if (res.error) throw res.error;
+      // Trigger credits refresh after semantic search
+      triggerCreditsRefresh();
       return res.data as { results: SemanticSearchResult[]; mode: string };
     },
   });

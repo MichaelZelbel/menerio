@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { onCreditsChange } from "@/lib/credits-events";
 
 export interface AICredits {
   tokensGranted: number;
@@ -93,6 +94,13 @@ export function useAICredits() {
 
   useEffect(() => {
     fetchCredits();
+  }, [fetchCredits]);
+
+  // Listen for credit-change events dispatched after AI operations
+  useEffect(() => {
+    return onCreditsChange(() => {
+      fetchCredits();
+    });
   }, [fetchCredits]);
 
   return { credits, isLoading, error, refetch: fetchCredits };

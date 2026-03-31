@@ -1,7 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  checkBalance,
+  deductExternalLLMTokens,
+  insufficientCreditsResponse,
+} from "../_shared/llm-credits.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
+
+const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,19 +33,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsErr } = await supabase.auth.getClaims(token);
-    if (claimsErr || !claimsData?.claims) {
+    const { data: { user }, error: authErr } = await db.auth.getUser(token);
+    if (authErr || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Pre-check balance
+    const balance = await checkBalance(db, user.id);
+    if (!balance.allowed) {
+      return insufficientCreditsResponse(corsHeaders);
     }
 
     const { content } = await req.json();
@@ -67,53 +76,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
               parameters: {
                 type: "object",
                 properties: {
-                  headline: {
-                    type: "string",
-                    description: "Short event title/headline",
-                  },
-                  description: {
-                    type: "string",
-                    description: "Event description or context",
-                  },
-                  happened_at: {
-                    type: "string",
-                    description: "Start date in YYYY-MM-DD format",
-                  },
-                  happened_end: {
-                    type: "string",
-                    description:
-                      "End date in YYYY-MM-DD format, or null if single-day event",
-                  },
-                  status: {
-                    type: "string",
-                    enum: ["past_fact", "future_plan", "ongoing", "unknown"],
-                    description: "Event status relative to current date",
-                  },
-                  impact_level: {
-                    type: "integer",
-                    minimum: 1,
-                    maximum: 4,
-                    description: "1=minor, 2=moderate, 3=significant, 4=major",
-                  },
-                  confidence_date: {
-                    type: "integer",
-                    minimum: 0,
-                    maximum: 10,
-                    description:
-                      "How confident is the date (0=guess, 10=certain)",
-                  },
-                  confidence_truth: {
-                    type: "integer",
-                    minimum: 0,
-                    maximum: 10,
-                    description:
-                      "How confident is this event real/true (0=rumor, 10=confirmed)",
-                  },
-                  participants: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Names of people involved",
-                  },
+                  headline: { type: "string", description: "Short event title/headline" },
+                  description: { type: "string", description: "Event description or context" },
+                  happened_at: { type: "string", description: "Start date in YYYY-MM-DD format" },
+                  happened_end: { type: "string", description: "End date in YYYY-MM-DD format, or null if single-day event" },
+                  status: { type: "string", enum: ["past_fact", "future_plan", "ongoing", "unknown"], description: "Event status relative to current date" },
+                  impact_level: { type: "integer", minimum: 1, maximum: 4, description: "1=minor, 2=moderate, 3=significant, 4=major" },
+                  confidence_date: { type: "integer", minimum: 0, maximum: 10, description: "How confident is the date (0=guess, 10=certain)" },
+                  confidence_truth: { type: "integer", minimum: 0, maximum: 10, description: "How confident is this event real/true (0=rumor, 10=confirmed)" },
+                  participants: { type: "array", items: { type: "string" }, description: "Names of people involved" },
                 },
                 required: ["headline", "happened_at", "status"],
                 additionalProperties: false,
@@ -121,10 +92,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             },
           },
         ],
-        tool_choice: {
-          type: "function",
-          function: { name: "extract_event" },
-        },
+        tool_choice: { type: "function", function: { name: "extract_event" } },
         messages: [
           {
             role: "system",
@@ -166,12 +134,32 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    // Deduct tokens based on actual usage from the gateway response
+    let credits = null;
+    try {
+      const creditResult = await deductExternalLLMTokens(
+        db, user.id, "extract-event",
+        result.usage || {},
+        "google/gemini-3-flash-preview",
+        "lovable"
+      );
+      credits = {
+        remaining_tokens: creditResult.remaining_tokens,
+        remaining_credits: creditResult.remaining_credits,
+      };
+    } catch (err) {
+      console.error("Credit deduction failed (non-fatal):", err);
+    }
+
     const eventData = JSON.parse(toolCall.function.arguments);
 
-    return new Response(JSON.stringify({ event: eventData }), {
+    return new Response(JSON.stringify({ event: eventData, credits }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.message === "INSUFFICIENT_CREDITS" || err.message === "NO_ACTIVE_PERIOD") {
+      return insufficientCreditsResponse(corsHeaders);
+    }
     console.error("extract-event error:", err);
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),

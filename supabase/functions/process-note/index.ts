@@ -1,9 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  checkBalance,
+  getEmbeddingWithCredits,
+  chatWithCredits,
+  insufficientCreditsResponse,
+} from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -12,40 +17,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/text-embedding-3-small",
-      input: text,
-    }),
-  });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => "");
-    throw new Error(`Embedding failed: ${r.status} ${msg}`);
-  }
-  const d = await r.json();
-  return d.data[0].embedding;
-}
-
-async function extractMetadata(text: string): Promise<Record<string, unknown>> {
-  const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `Extract metadata from the user's note. Return JSON with:
+const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
@@ -53,19 +25,7 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
 - "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
 - "sentiment": one of "positive", "negative", "neutral"
 - "summary": one-sentence summary of the note
-Only extract what's explicitly there. Don't invent details.`,
-        },
-        { role: "user", content: text },
-      ],
-    }),
-  });
-  const d = await r.json();
-  try {
-    return JSON.parse(d.choices[0].message.content);
-  } catch {
-    return { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
-  }
-}
+Only extract what's explicitly there. Don't invent details.`;
 
 async function processInBackground(noteId: string, authHeader: string) {
   try {
@@ -83,11 +43,46 @@ async function processInBackground(noteId: string, authHeader: string) {
     const fullText = `${note.title}\n\n${note.content}`.trim();
     if (!fullText) return;
 
-    // Generate embedding and extract metadata in parallel
-    const [embedding, metadata] = await Promise.all([
-      getEmbedding(fullText),
-      extractMetadata(fullText),
-    ]);
+    // Pre-check balance before making any LLM calls
+    const balance = await checkBalance(supabase, note.user_id);
+    if (!balance.allowed) {
+      console.log(`Skipping AI processing for note ${noteId}: insufficient credits for user ${note.user_id}`);
+      return;
+    }
+
+    // Generate embedding and extract metadata in parallel (each deducts tokens)
+    let embedding: number[] | null = null;
+    let metadata: Record<string, unknown> = {};
+    let lastCredits: any = null;
+
+    try {
+      const [embResult, chatResult] = await Promise.all([
+        getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, note.user_id, "process-note", fullText),
+        chatWithCredits(
+          supabase, OPENROUTER_API_KEY, note.user_id, "process-note",
+          [
+            { role: "system", content: METADATA_SYSTEM_PROMPT },
+            { role: "user", content: fullText },
+          ],
+          { response_format: { type: "json_object" } }
+        ),
+      ]);
+
+      embedding = embResult.embedding;
+      lastCredits = chatResult.credits;
+
+      try {
+        metadata = JSON.parse(chatResult.result.choices[0].message.content);
+      } catch {
+        metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
+      }
+    } catch (err: any) {
+      if (err.message === "INSUFFICIENT_CREDITS") {
+        console.log(`Credit limit reached during processing of note ${noteId}`);
+        return;
+      }
+      throw err;
+    }
 
     // Update the note with both embedding and metadata
     const { error: updateErr } = await supabase
@@ -150,7 +145,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       body: JSON.stringify({ note_id: noteId }),
     }).catch(err => console.error("compute-connections trigger error:", err));
 
-    console.log("process-note completed for:", noteId);
+    console.log("process-note completed for:", noteId, "remaining credits:", lastCredits?.remaining_credits);
   } catch (err) {
     console.error("Background processing error:", err);
   }
