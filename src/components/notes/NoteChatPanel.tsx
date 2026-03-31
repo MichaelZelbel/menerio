@@ -75,7 +75,12 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       );
 
       if (fnErr) {
-        throw new Error(fnErr.message || "Chat request failed");
+        // Preview environment can interfere with edge function requests
+        const msg = fnErr.message || "Chat request failed";
+        if (msg.includes("Failed to send") || msg.includes("FunctionsFetchError")) {
+          throw new Error("Edge function call failed. This may work on the published URL — try publishing first.");
+        }
+        throw new Error(msg);
       }
 
       if (data?.error) {
@@ -126,7 +131,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
   };
 
   return (
-    <div className="flex flex-col h-full w-80 border-l border-border bg-background">
+    <div className="flex flex-col h-full w-80 border-l border-border bg-background z-[60]">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-muted/30 shrink-0">
         <div className="flex items-center gap-2">
@@ -220,7 +225,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t border-border shrink-0">
+      <div className="p-3 pb-20 border-t border-border shrink-0">
         <div className="flex gap-2">
           <Textarea
             ref={textareaRef}
