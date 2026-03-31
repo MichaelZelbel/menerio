@@ -385,7 +385,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           "note-chat",
           "chat/completions",
           {
-            model: "openai/gpt-4o-mini",
+            model: "minimax/minimax-m2.7",
             messages: llmMessages,
             tools: TOOLS,
           }
