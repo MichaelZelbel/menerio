@@ -908,6 +908,19 @@ export type Database = {
       }
     }
     Functions: {
+      deduct_ai_tokens: {
+        Args: {
+          p_completion_tokens?: number
+          p_feature: string
+          p_idempotency_key?: string
+          p_model?: string
+          p_prompt_tokens?: number
+          p_provider?: string
+          p_tokens: number
+          p_user_id: string
+        }
+        Returns: Json
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
