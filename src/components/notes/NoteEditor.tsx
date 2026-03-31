@@ -396,6 +396,26 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const syncStatus = syncLog?.sync_status;
   const isSyncing = ghSync.isPending;
 
+  const toggleSourceMode = useCallback(() => {
+    if (!editor) return;
+    if (!sourceMode) {
+      // Rich → Source
+      const md = editor.storage.markdown?.getMarkdown?.() || editor.getHTML();
+      setSourceText(md);
+      setSourceMode(true);
+    } else {
+      // Source → Rich
+      editor.commands.setContent(sourceText);
+      // trigger save
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        updateNote.mutate({ id: note.id, content: editor.getHTML() });
+        triggerGitHubSync(note.id);
+      }, 800);
+      setSourceMode(false);
+    }
+  }, [editor, sourceMode, sourceText, note.id, updateNote, triggerGitHubSync]);
+
   return (
     <div className="flex h-full">
     <div className="flex flex-col h-full flex-1 min-w-0">
