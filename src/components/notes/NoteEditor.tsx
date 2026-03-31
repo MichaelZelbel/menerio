@@ -319,6 +319,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
+    setSourceMode(false);
     if (processTimer.current) clearTimeout(processTimer.current);
     const normalizedContent = normalizeNoteContent(note.content);
     if (editor && normalizedContent !== editor.getHTML()) {
