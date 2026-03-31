@@ -34,6 +34,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
+import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
