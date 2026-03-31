@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   toolResults?: Array<{
