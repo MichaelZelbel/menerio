@@ -612,7 +612,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 triggerGitHubSync(note.id);
               }, 800);
             }}
-            className="w-full flex-1 bg-transparent border-none outline-none resize-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40"
+            className="w-full flex-1 min-h-0 bg-transparent border-none outline-none resize-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40"
             placeholder="Markdown source…"
             disabled={note.is_trashed || note.is_external}
           />
