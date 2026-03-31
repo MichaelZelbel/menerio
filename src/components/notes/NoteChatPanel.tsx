@@ -57,7 +57,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
     setError(null);
     const userMsg: ChatMessage = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+    onMessagesChange(newMessages);
     setInput("");
     setIsLoading(true);
 
