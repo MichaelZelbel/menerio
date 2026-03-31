@@ -98,7 +98,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
         content: data.reply || "",
         toolResults: data.tool_results,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      onMessagesChange([...messages, userMsg, assistantMsg]);
 
       // If any tool modified the note, notify parent to refresh
       const modifyingTools = [
