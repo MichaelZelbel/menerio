@@ -34,6 +34,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
+import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -77,6 +78,7 @@ import {
   AlertCircle,
   Network,
   Code2,
+  MessageSquare,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -181,7 +183,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [showLinkToNote, setShowLinkToNote] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState("");
-
+  const [showChat, setShowChat] = useState(false);
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
@@ -467,6 +469,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Code2 className="h-4 w-4" />
           </Button>
         )}
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
+          <MessageSquare className="h-4 w-4" />
+        </Button>
 
         {note.is_trashed ? (
           <>
@@ -729,6 +734,31 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       targetNoteId={note.id}
       targetNoteTitle={title}
     />
+    {showChat && (
+      <NoteChatPanel
+        note={note}
+        onClose={() => setShowChat(false)}
+        onNoteChanged={() => {
+          queryClient.invalidateQueries({ queryKey: ["notes"] });
+          // Refresh the editor content
+          if (editor) {
+            supabase
+              .from("notes" as any)
+              .select("content, tags, metadata")
+              .eq("id", note.id)
+              .single()
+              .then(({ data }) => {
+                if (data) {
+                  const normalized = normalizeNoteContent((data as any).content);
+                  if (normalized !== editor.getHTML()) {
+                    editor.commands.setContent(normalized);
+                  }
+                }
+              });
+          }
+        }}
+      />
+    )}
     </div>
   );
 }
