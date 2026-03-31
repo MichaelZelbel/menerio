@@ -60,6 +60,7 @@ export async function deductTokens(
     promptTokens?: number;
     completionTokens?: number;
     idempotencyKey?: string;
+    usageSource?: "provider" | "fallback";
   }
 ): Promise<CreditInfo> {
   const { data, error } = await db.rpc("deduct_ai_tokens", {
@@ -139,13 +140,17 @@ export async function openRouterWithCredits(
   let promptTokens = 0;
   let completionTokens = 0;
 
+  let usageSource: "provider" | "fallback";
   if (result.usage) {
     promptTokens = result.usage.prompt_tokens || 0;
     completionTokens = result.usage.completion_tokens || 0;
     totalTokens = result.usage.total_tokens || (promptTokens + completionTokens);
+    usageSource = "provider";
   } else {
     // Fallback: use estimated tokens when provider omits usage
     totalTokens = FALLBACK_TOKENS[model] || 300;
+    usageSource = "fallback";
+    console.warn(`[llm-credits] No usage data from provider for model=${model}, using fallback=${totalTokens}`);
   }
 
   // Deduct actual tokens
@@ -157,6 +162,7 @@ export async function openRouterWithCredits(
     provider: "openrouter",
     promptTokens,
     completionTokens,
+    usageSource,
   });
 
   return { result, credits };
@@ -211,6 +217,11 @@ export async function deductExternalLLMTokens(
   const pt = usage.prompt_tokens || 0;
   const ct = usage.completion_tokens || 0;
   const total = usage.total_tokens || (pt + ct) || FALLBACK_TOKENS[model] || 300;
+  const usageSource = (usage.prompt_tokens || usage.completion_tokens || usage.total_tokens) ? "provider" : "fallback";
+
+  if (usageSource === "fallback") {
+    console.warn(`[llm-credits] External LLM fallback estimate for model=${model}, tokens=${total}`);
+  }
 
   return deductTokens(db, {
     userId,
@@ -220,6 +231,7 @@ export async function deductExternalLLMTokens(
     provider,
     promptTokens: pt,
     completionTokens: ct,
+    usageSource,
   });
 }
 
