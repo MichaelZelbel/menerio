@@ -189,7 +189,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
                         {tr.tool.replace(/_/g, " ")}
                       </span>
                       {(tr.result as any)?.success && (
-                        <span className="text-green-600 dark:text-green-400">✓</span>
+                        <span className="text-primary">✓</span>
                       )}
                     </div>
                   ))}

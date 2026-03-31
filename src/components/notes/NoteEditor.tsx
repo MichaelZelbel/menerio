@@ -77,6 +77,7 @@ import {
   AlertCircle,
   Network,
   Code2,
+  MessageSquare,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
