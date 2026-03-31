@@ -32,6 +32,7 @@ import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
+import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
@@ -519,6 +520,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
       {/* Rich text formatting toolbar */}
       {!note.is_trashed && <EditorToolbar editor={editor} />}
+
+      {/* Smart Tags / Metadata editor */}
+      {!note.is_trashed && (
+        <NoteMetadataEditor
+          metadata={metadata}
+          onUpdate={(updated) => {
+            updateNote.mutate({ id: note.id, metadata: updated } as any);
+          }}
+        />
+      )}
 
       {/* Editor */}
       <div
