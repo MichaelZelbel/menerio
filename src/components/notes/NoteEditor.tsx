@@ -34,7 +34,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
-import { NoteChatPanel } from "./NoteChatPanel";
+import { NoteChatPanel, type ChatMessage } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -184,6 +184,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
@@ -318,10 +320,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // Sync when note changes
   useEffect(() => {
+    // Save current chat messages for the previous note
+    // (note.id has already changed, so we use a ref to track the previous)
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
+    // Restore chat messages for this note (or empty)
+    setChatMessages(chatMessagesRef.current.get(note.id) || []);
     if (processTimer.current) clearTimeout(processTimer.current);
     const normalizedContent = normalizeNoteContent(note.content);
     if (editor && normalizedContent !== editor.getHTML()) {
@@ -738,9 +744,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       <NoteChatPanel
         note={note}
         onClose={() => setShowChat(false)}
+        messages={chatMessages}
+        onMessagesChange={(msgs) => {
+          setChatMessages(msgs);
+          chatMessagesRef.current.set(note.id, msgs);
+        }}
         onNoteChanged={() => {
           queryClient.invalidateQueries({ queryKey: ["notes"] });
-          // Refresh the editor content
           if (editor) {
             supabase
               .from("notes" as any)

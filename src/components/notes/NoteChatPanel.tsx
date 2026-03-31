@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   toolResults?: Array<{
@@ -27,15 +27,16 @@ interface ChatMessage {
   }>;
 }
 
-interface NoteChatPanelProps {
+export interface NoteChatPanelProps {
   note: Note;
   onClose: () => void;
   onNoteChanged: () => void;
+  messages: ChatMessage[];
+  onMessagesChange: (msgs: ChatMessage[]) => void;
 }
 
-export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelProps) {
+export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessagesChange }: NoteChatPanelProps) {
   const { session } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +57,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     setError(null);
     const userMsg: ChatMessage = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+    onMessagesChange(newMessages);
     setInput("");
     setIsLoading(true);
 
@@ -97,7 +98,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         content: data.reply || "",
         toolResults: data.tool_results,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      onMessagesChange([...messages, userMsg, assistantMsg]);
 
       // If any tool modified the note, notify parent to refresh
       const modifyingTools = [
