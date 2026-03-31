@@ -217,6 +217,11 @@ export async function deductExternalLLMTokens(
   const pt = usage.prompt_tokens || 0;
   const ct = usage.completion_tokens || 0;
   const total = usage.total_tokens || (pt + ct) || FALLBACK_TOKENS[model] || 300;
+  const usageSource = (usage.prompt_tokens || usage.completion_tokens || usage.total_tokens) ? "provider" : "fallback";
+
+  if (usageSource === "fallback") {
+    console.warn(`[llm-credits] External LLM fallback estimate for model=${model}, tokens=${total}`);
+  }
 
   return deductTokens(db, {
     userId,
@@ -226,6 +231,7 @@ export async function deductExternalLLMTokens(
     provider,
     promptTokens: pt,
     completionTokens: ct,
+    usageSource,
   });
 }
 
