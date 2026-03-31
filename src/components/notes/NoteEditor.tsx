@@ -734,6 +734,31 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       targetNoteId={note.id}
       targetNoteTitle={title}
     />
+    {showChat && (
+      <NoteChatPanel
+        note={note}
+        onClose={() => setShowChat(false)}
+        onNoteChanged={() => {
+          queryClient.invalidateQueries({ queryKey: ["notes"] });
+          // Refresh the editor content
+          if (editor) {
+            supabase
+              .from("notes" as any)
+              .select("content, tags, metadata")
+              .eq("id", note.id)
+              .single()
+              .then(({ data }) => {
+                if (data) {
+                  const normalized = normalizeNoteContent((data as any).content);
+                  if (normalized !== editor.getHTML()) {
+                    editor.commands.setContent(normalized);
+                  }
+                }
+              });
+          }
+        }}
+      />
+    )}
     </div>
   );
 }
