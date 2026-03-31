@@ -60,6 +60,7 @@ export async function deductTokens(
     promptTokens?: number;
     completionTokens?: number;
     idempotencyKey?: string;
+    usageSource?: "provider" | "fallback";
   }
 ): Promise<CreditInfo> {
   const { data, error } = await db.rpc("deduct_ai_tokens", {
