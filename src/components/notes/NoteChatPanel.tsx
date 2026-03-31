@@ -126,7 +126,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
   };
 
   return (
-    <div className="flex flex-col h-full w-80 border-l border-border bg-background">
+    <div className="flex flex-col h-full w-80 border-l border-border bg-background z-[60]">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-muted/30 shrink-0">
         <div className="flex items-center gap-2">
