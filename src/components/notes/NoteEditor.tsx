@@ -469,6 +469,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Code2 className="h-4 w-4" />
           </Button>
         )}
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
+          <MessageSquare className="h-4 w-4" />
+        </Button>
 
         {note.is_trashed ? (
           <>
