@@ -385,6 +385,37 @@ export default function Notes() {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-xs">Keyword matching</TooltipContent>
               </Tooltip>
+
+              {/* Search scope — only visible in semantic mode */}
+              {searchType === "semantic" && (
+                <>
+                  <span className="text-muted-foreground/40 text-[10px]">|</span>
+                  {(["all", "notes", "media"] as SearchScope[]).map((s) => (
+                    <Button
+                      key={s}
+                      variant={searchScope === s ? "secondary" : "ghost"}
+                      size="sm"
+                      className="h-6 px-2 text-[10px] gap-1"
+                      onClick={() => {
+                        setSearchScope(s);
+                        setSemanticResults(null);
+                        if (searchQuery.trim()) {
+                          semanticSearch.mutate(
+                            { query: searchQuery, scope: s },
+                            { onSuccess: (data) => setSemanticResults(data.results as SemanticSearchResult[]) }
+                          );
+                        }
+                      }}
+                    >
+                      {s === "media" && <Image className="h-3 w-3" />}
+                      {s === "notes" && <FileText className="h-3 w-3" />}
+                      {s === "all" && <Search className="h-3 w-3" />}
+                      {s === "all" ? "All" : s === "notes" ? "Notes" : "Media"}
+                    </Button>
+                  ))}
+                </>
+              )}
+
               <div className="flex-1" />
               {isSemanticLoading && (
                 <span className="text-[10px] text-muted-foreground animate-pulse flex items-center gap-1">
