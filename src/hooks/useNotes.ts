@@ -38,6 +38,13 @@ export interface Note {
 
 export interface SemanticSearchResult extends Note {
   similarity: number | null;
+  match_source?: "note" | "media" | "both";
+  media_description?: string;
+  media_storage_path?: string;
+  media_type?: string;
+  media_topics?: string[];
+  media_page_number?: number;
+  media_filename?: string;
 }
 
 type NoteInsert = {
