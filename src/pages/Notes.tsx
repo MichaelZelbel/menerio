@@ -40,6 +40,7 @@ import {
   Sparkles,
   Type,
   Tags,
+  Image,
 } from "lucide-react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
