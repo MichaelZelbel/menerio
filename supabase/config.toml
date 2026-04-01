@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.analyze-pdf]
 verify_jwt = false
+
+[functions.backfill-media-analysis]
+verify_jwt = false
