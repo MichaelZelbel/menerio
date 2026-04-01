@@ -50,3 +50,9 @@ verify_jwt = false
 
 [functions.note-chat]
 verify_jwt = false
+
+[functions.analyze-media]
+verify_jwt = false
+
+[functions.analyze-pdf]
+verify_jwt = false

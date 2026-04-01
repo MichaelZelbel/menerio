@@ -531,6 +531,71 @@ export type Database = {
         }
         Relationships: []
       }
+      media_analysis: {
+        Row: {
+          analysis_status: string
+          created_at: string | null
+          description: string | null
+          embedding: string | null
+          error_message: string | null
+          extracted_text: string | null
+          id: string
+          media_type: string
+          note_id: string
+          original_filename: string | null
+          page_number: number | null
+          raw_analysis: Json | null
+          storage_path: string
+          topics: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis_status?: string
+          created_at?: string | null
+          description?: string | null
+          embedding?: string | null
+          error_message?: string | null
+          extracted_text?: string | null
+          id?: string
+          media_type: string
+          note_id: string
+          original_filename?: string | null
+          page_number?: number | null
+          raw_analysis?: Json | null
+          storage_path: string
+          topics?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis_status?: string
+          created_at?: string | null
+          description?: string | null
+          embedding?: string | null
+          error_message?: string | null
+          extracted_text?: string | null
+          id?: string
+          media_type?: string
+          note_id?: string
+          original_filename?: string | null
+          page_number?: number | null
+          raw_analysis?: Json | null
+          storage_path?: string
+          topics?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_analysis_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       note_connections: {
         Row: {
           connection_type: string

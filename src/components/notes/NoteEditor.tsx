@@ -270,6 +270,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       AudioEmbed,
       FileUploadHandler.configure({
         userId: user?.id || "",
+        noteId: note.id,
         onUploadStart: () => setIsUploading(true),
         onUploadEnd: () => setIsUploading(false),
         onUploadError: (msg: string) => showToast.error(msg),

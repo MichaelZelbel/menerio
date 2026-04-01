@@ -39,7 +39,7 @@ export function validateFile(file: File): string | null {
 export async function uploadAttachment(
   file: File,
   userId: string
-): Promise<{ url: string; mediaType: MediaType }> {
+): Promise<{ url: string; mediaType: MediaType; storagePath: string }> {
   const error = validateFile(file);
   if (error) throw new Error(error);
 
@@ -57,5 +57,5 @@ export async function uploadAttachment(
     .from("note-attachments")
     .getPublicUrl(path);
 
-  return { url: data.publicUrl, mediaType };
+  return { url: data.publicUrl, mediaType, storagePath: path };
 }
