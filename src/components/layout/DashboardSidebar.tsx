@@ -12,6 +12,7 @@ import {
   Plug,
   CalendarDays,
   UserCircle,
+  User,
   ListChecks,
   Network,
   Image,
@@ -65,6 +66,7 @@ export function DashboardSidebar() {
   ];
 
   const systemItems = [
+    { title: "My Profile", url: "/dashboard/profile", icon: User },
     { title: "Settings", url: "/dashboard/settings", icon: Settings },
     { title: "Connect AI", url: "/dashboard/settings?tab=mcp", icon: Plug },
   ];
