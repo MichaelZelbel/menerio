@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { SEOHead } from "@/components/SEOHead";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -22,9 +24,13 @@ import {
   Loader2,
   AlertCircle,
   X,
+  Play,
+  Square,
+  Sparkles,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 
 const SUPABASE_URL = "https://tjeapelvjlmbxafsmjef.supabase.co";
 
@@ -56,6 +62,162 @@ const CONTENT_TYPES = [
   "code",
   "other",
 ];
+
+// Average tokens per image analysis (~500 prompt + ~200 completion)
+const AVG_TOKENS_PER_IMAGE = 700;
+const TOKENS_PER_CREDIT = 200;
+
+function BatchAnalysisPanel() {
+  const [scanResult, setScanResult] = useState<{
+    unanalyzed_images: number;
+    unanalyzed_pdfs: number;
+    unanalyzed_total: number;
+    total_media: number;
+    already_analyzed: number;
+  } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{ processed: number; total: number; failed: number } | null>(null);
+  const [stopRequested, setStopRequested] = useState(false);
+
+  const handleScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/backfill-media-analysis`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mode: "scan" }),
+      });
+
+      if (!resp.ok) throw new Error("Scan failed");
+      const result = await resp.json();
+      setScanResult(result);
+    } catch (err: any) {
+      toast.error("Failed to scan: " + err.message);
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const handleRun = useCallback(async () => {
+    if (!scanResult || scanResult.unanalyzed_total === 0) return;
+    setRunning(true);
+    setStopRequested(false);
+    setProgress({ processed: 0, total: scanResult.unanalyzed_total, failed: 0 });
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/backfill-media-analysis`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mode: "run", batch_size: 5, delay_ms: 2000 }),
+      });
+
+      if (!resp.ok) throw new Error("Backfill failed");
+      const result = await resp.json();
+      setProgress({ processed: result.processed, total: result.total, failed: result.failed || 0 });
+      toast.success(result.message);
+      // Refresh scan
+      setScanResult(prev => prev ? {
+        ...prev,
+        unanalyzed_total: Math.max(0, prev.unanalyzed_total - (result.processed || 0)),
+        unanalyzed_images: 0,
+        unanalyzed_pdfs: 0,
+        already_analyzed: prev.already_analyzed + (result.processed || 0),
+      } : null);
+    } catch (err: any) {
+      toast.error("Backfill failed: " + err.message);
+    } finally {
+      setRunning(false);
+    }
+  }, [scanResult]);
+
+  const estimatedCredits = scanResult
+    ? Math.ceil((scanResult.unanalyzed_total * AVG_TOKENS_PER_IMAGE) / TOKENS_PER_CREDIT)
+    : 0;
+
+  return (
+    <Card className="mb-4">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          Batch Media Analysis
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!scanResult ? (
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-muted-foreground flex-1">
+              Scan your notes to find unanalyzed images and PDFs.
+            </p>
+            <Button size="sm" variant="outline" onClick={handleScan} disabled={scanning}>
+              {scanning ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Search className="h-3 w-3 mr-1" />}
+              Scan
+            </Button>
+          </div>
+        ) : scanResult.unanalyzed_total === 0 ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+            All {scanResult.total_media} media items are analyzed.
+            <Button size="sm" variant="ghost" className="ml-auto text-xs" onClick={handleScan} disabled={scanning}>
+              Re-scan
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                Found <strong>{scanResult.unanalyzed_images}</strong> unanalyzed images
+                {scanResult.unanalyzed_pdfs > 0 && <> and <strong>{scanResult.unanalyzed_pdfs}</strong> PDFs</>}
+              </span>
+              <span className="text-muted-foreground">
+                Est. cost: ~{estimatedCredits} credits
+              </span>
+            </div>
+
+            {progress && (
+              <div className="space-y-1">
+                <Progress value={(progress.processed / progress.total) * 100} className="h-2" />
+                <p className="text-[10px] text-muted-foreground">
+                  {progress.processed} of {progress.total} processed
+                  {progress.failed > 0 && <>, {progress.failed} failed</>}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {!running ? (
+                <Button size="sm" onClick={handleRun}>
+                  <Play className="h-3 w-3 mr-1" />
+                  Start analysis
+                </Button>
+              ) : (
+                <Button size="sm" variant="destructive" onClick={() => setStopRequested(true)} disabled={stopRequested}>
+                  <Square className="h-3 w-3 mr-1" />
+                  {stopRequested ? "Stopping…" : "Stop"}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={handleScan} disabled={scanning || running}>
+                Re-scan
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function MediaLibrary() {
   const { user } = useAuth();
@@ -191,6 +353,9 @@ export default function MediaLibrary() {
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-6">
+        {/* Batch Analysis Panel */}
+        <BatchAnalysisPanel />
+
         {isLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {Array.from({ length: 12 }).map((_, i) => (
