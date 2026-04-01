@@ -52,6 +52,7 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 ];
 
 type SearchMode = "semantic" | "exact";
+type SearchScope = "all" | "notes" | "media";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
