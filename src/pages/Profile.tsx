@@ -120,6 +120,12 @@ export default function Profile() {
           </TabsList>
 
           <TabsContent value="profile" className="space-y-3 mt-4">
+            <ProfileSuggestions
+              categories={categories}
+              entryCount={entries.length}
+              noteCount={noteCount}
+              onAccept={(data) => upsertEntry.mutate(data)}
+            />
             {categories.map((cat) => (
               <CategorySection
                 key={cat.id}
