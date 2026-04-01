@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, createRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { Markdown } from "tiptap-markdown";
 import StarterKit from "@tiptap/starter-kit";
@@ -31,6 +31,7 @@ import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
+import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
@@ -194,6 +195,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
@@ -573,6 +575,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
       {/* Editor */}
       <div
+        ref={editorContainerRef}
         className={cn(
           "flex-1 overflow-y-auto p-4 relative transition-colors flex flex-col min-h-0",
           isDragOver && "bg-primary/5 ring-2 ring-primary/30 ring-inset"
@@ -631,6 +634,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         ) : (
           <EditorContent editor={editor} className="tiptap-editor" />
         )}
+        {/* Media analysis overlay badges */}
+        {!sourceMode && <MediaAnalysisOverlay noteId={note.id} editorContainerRef={editorContainerRef} />}
       </div>
 
       {/* Connections panel */}
