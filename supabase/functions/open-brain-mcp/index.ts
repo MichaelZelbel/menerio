@@ -1060,8 +1060,151 @@ server.registerTool(
   }
 );
 
+// Tool: Get User Profile
+server.registerTool(
+  "get_user_profile",
+  {
+    title: "Get User Profile",
+    description:
+      "Retrieve the user's personal profile — identity, preferences, values, goals, health info, and explicit instructions for how to interact with them. Use this at the start of conversations to understand who you're working with, or when you need specific context about the user's preferences, background, or communication style. Supports scope filtering so you only get the categories relevant to your role.",
+    inputSchema: {
+      scope: z.string().optional().describe("Filter by scope: all, professional, personal, health. Omit to get everything except private."),
+      categories: z.array(z.string()).optional().describe("Only return these category slugs"),
+      include_notes: z.boolean().optional().default(false).describe("Include linked note content"),
+      include_instructions: z.boolean().optional().default(true).describe("Include agent instructions"),
+    },
+  },
+  async ({ scope, categories: catSlugs, include_notes, include_instructions }) => {
+    try {
+      // Fetch categories (never return private via MCP)
+      let catQuery = supabase
+        .from("profile_categories")
+        .select("id, name, slug, visibility_scope, sort_order")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .neq("visibility_scope", "private")
+        .order("sort_order");
 
-const app = new Hono();
+      if (scope) {
+        catQuery = catQuery.in("visibility_scope", ["all", scope]);
+      }
+
+      const { data: cats, error: catErr } = await catQuery;
+      if (catErr) return { content: [{ type: "text" as const, text: `Error: ${catErr.message}` }], isError: true };
+
+      let filteredCats = cats || [];
+      if (catSlugs?.length) {
+        filteredCats = filteredCats.filter((c: any) => catSlugs.includes(c.slug));
+      }
+
+      // Fetch entries for these categories
+      const catIds = filteredCats.map((c: any) => c.id);
+      if (catIds.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
+          }],
+        };
+      }
+
+      const { data: entries } = await supabase
+        .from("profile_entries")
+        .select("category_id, label, value, linked_note_id, sort_order")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .in("category_id", catIds)
+        .order("sort_order");
+
+      // Check if there are any entries at all
+      if (!entries?.length) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
+          }],
+        };
+      }
+
+      // Optionally fetch linked notes
+      const noteMap = new Map<string, { title: string; content: string }>();
+      if (include_notes) {
+        const noteIds = entries.filter((e: any) => e.linked_note_id).map((e: any) => e.linked_note_id);
+        if (noteIds.length > 0) {
+          const { data: notes } = await supabase
+            .from("notes")
+            .select("id, title, content")
+            .in("id", [...new Set(noteIds)]);
+          for (const n of notes || []) {
+            noteMap.set(n.id, { title: n.title, content: n.content });
+          }
+        }
+      }
+
+      // Build structured response
+      const profileCategories = filteredCats.map((cat: any) => {
+        const catEntries = (entries || [])
+          .filter((e: any) => e.category_id === cat.id)
+          .map((e: any) => {
+            const entry: Record<string, unknown> = {
+              label: e.label,
+              value: e.value,
+              has_linked_note: !!e.linked_note_id,
+            };
+            if (e.linked_note_id && noteMap.has(e.linked_note_id)) {
+              entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
+              if (include_notes) {
+                entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
+              }
+            }
+            return entry;
+          });
+
+        if (catEntries.length === 0) return null;
+        return { name: cat.name, slug: cat.slug, entries: catEntries };
+      }).filter(Boolean);
+
+      if (profileCategories.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
+          }],
+        };
+      }
+
+      const result: Record<string, unknown> = {
+        profile: { categories: profileCategories },
+      };
+
+      // Agent instructions
+      if (include_instructions) {
+        let instQuery = supabase
+          .from("agent_instructions")
+          .select("instruction, applies_to")
+          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("is_active", true)
+          .order("sort_order");
+
+        const { data: insts } = await instQuery;
+        const filtered = (insts || []).filter((i: any) => {
+          if (scope) return i.applies_to === "all" || i.applies_to === scope;
+          return i.applies_to !== "private";
+        });
+
+        if (filtered.length > 0) {
+          (result.profile as any).agent_instructions = filtered.map((i: any) => i.instruction);
+        }
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+
 
 app.all("*", async (c) => {
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
