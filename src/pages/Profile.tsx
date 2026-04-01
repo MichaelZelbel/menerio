@@ -34,11 +34,27 @@ export default function Profile() {
     deleteView,
   } = useProfile();
 
+  const { user } = useAuth();
+
   const [seeded, setSeeded] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
+
+  // Get note count for nudge logic
+  const { data: noteCount = 0 } = useQuery({
+    queryKey: ["note-count", user?.id],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("notes")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false);
+      return count || 0;
+    },
+    enabled: !!user?.id,
+  });
 
   // Seed defaults on first visit
   useEffect(() => {
