@@ -1,38 +1,44 @@
-## Media Analysis UI in Note Editor
+## Enhanced Search Integration & Media Library
 
-### Components to create
+### 1. Database: `match_media` RPC function
+Create a new `match_media` RPC (similar to `match_notes`) that searches `media_analysis` embeddings and returns matching entries with their parent note info.
 
-1. **`src/components/notes/MediaAnalysisOverlay.tsx`** — A React component that renders as an overlay system on images and PDF embeds in the editor:
-   - Polls `media_analysis` table for entries matching the current note
-   - For each image/PDF with analysis: renders a small badge (sparkle icon = complete, spinner = processing, warning = failed)
-   - Uses a portal/absolute-positioned overlay approach since TipTap renders images as plain `<img>` tags
-   - Clicking the badge toggles a collapsible panel below the image
+### 2. Edge function: `search-notes-semantic`
+Update to:
+- Accept a `scope` parameter: `"all"` (default), `"notes"`, `"media"`
+- When scope includes media, call `match_media` RPC in parallel with `match_notes`
+- Deduplicate results by note_id, keeping the higher similarity score
+- Return `match_source` field: `"note"`, `"media"`, or `"both"`
+- Include media match details: `media_description`, `media_storage_path`, `media_type`
 
-2. **`src/components/notes/MediaAnalysisPanel.tsx`** — The expanded analysis detail panel:
-   - **Extracted text** section with monospace font, "Copy text" button, fallback "No text detected"
-   - **AI description** section with label
-   - **Topics** as clickable pills (navigate to search)
-   - **Content type** badge
-   - **Re-analyze** button that triggers a fresh `analyze-media` call
-   - For PDFs: page-by-page collapsible breakdown, "Copy all text" button, page count badge
+### 3. Frontend search types update (`src/hooks/useNotes.ts`)
+- Extend `SemanticSearchResult` with optional `match_source`, `media_description`, `media_storage_path`
+- Pass `scope` parameter to the edge function
 
-3. **`src/hooks/useMediaAnalysis.ts`** — Hook to fetch and subscribe to media analysis data for a given note:
-   - Queries `media_analysis` where `note_id = noteId`
-   - Returns entries keyed by `storage_path`
-   - Provides `reanalyze(mediaId)` function
+### 4. Search UI updates (`src/pages/Notes.tsx`)
+- Add a third search scope toggle: "All" / "Notes" / "Media"
+- Pass scope to `semanticSearch.mutate()`
 
-### Integration approach
+### 5. Note list updates (`src/components/notes/NoteList.tsx`)
+- For results with `match_source === "media"` or `"both"`, show:
+  - Small image thumbnail from `media_storage_path`
+  - "Matched in image/PDF" label with AI description subtitle
+  - Combined indicator for "both" matches
 
-Since TipTap renders images as plain `<img>` DOM elements, we'll use a **DOM observer pattern**:
-- After editor renders, scan for `img` elements and `iframe[data-type='pdf']` in the editor content
-- Extract `src` URLs, match against `media_analysis` entries by `storage_path` or URL
-- Render overlay badges as React portals positioned relative to each media element
-- Use `MutationObserver` to re-scan when editor content changes
+### 6. Media Library page (`src/pages/MediaLibrary.tsx`)
+- Grid view of all `media_analysis` entries with thumbnails
+- Search bar (semantic, searches media embeddings only)
+- Filter by content_type, date range, topic
+- Status summary: X analyzed, Y pending, Z failed
+- Click to navigate to parent note
+- Add route and sidebar entry
 
-### Changes to existing files
-
-- **`src/components/notes/NoteEditor.tsx`** — Import and render `<MediaAnalysisOverlay>` inside the editor area, passing `noteId` and a ref to the editor container div
-
-### Not changed
-- No changes to markdown export — analysis panels are render-only UI, not part of the document model
-- No changes to edge functions
+### Files changed
+- New migration: `match_media` RPC
+- `supabase/functions/search-notes-semantic/index.ts`
+- `src/hooks/useNotes.ts`
+- `src/pages/Notes.tsx`
+- `src/components/notes/NoteList.tsx`
+- New: `src/pages/MediaLibrary.tsx`
+- `src/App.tsx` — add route
+- `src/components/layout/DashboardSidebar.tsx` — add sidebar item
