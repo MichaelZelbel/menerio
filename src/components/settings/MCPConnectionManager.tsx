@@ -25,6 +25,7 @@ const TOOLS = [
   { name: "get_person_notes", desc: "All notes mentioning a specific person" },
   { name: "search_images", desc: "Search across all analyzed images and PDFs by description or extracted text" },
   { name: "get_note_media", desc: "Get all media analysis results (images, PDFs) for a specific note" },
+  { name: "get_user_profile", desc: "Retrieve the user's profile — identity, preferences, values, goals, and agent instructions" },
 ];
 
 export function MCPConnectionManager() {
