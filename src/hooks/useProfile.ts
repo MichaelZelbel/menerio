@@ -40,7 +40,16 @@ export interface AgentInstruction {
   updated_at: string;
 }
 
-const DEFAULT_CATEGORIES = [
+export interface ProfileView {
+  id: string;
+  user_id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  included_scopes: string[];
+  created_at: string;
+}
+
   { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
   { name: "Location & Living", slug: "location", icon: "map-pin", description: "Current city, timezone, living situation", sort_order: 1, visibility_scope: "personal" },
   { name: "Professional Life", slug: "professional", icon: "briefcase", description: "Job, company, industry, skills", sort_order: 2, visibility_scope: "professional" },
