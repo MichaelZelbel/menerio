@@ -40,6 +40,7 @@ import {
   Sparkles,
   Type,
   Tags,
+  Image,
 } from "lucide-react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 ];
 
 type SearchMode = "semantic" | "exact";
+type SearchScope = "all" | "notes" | "media";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -71,6 +73,7 @@ export default function Notes() {
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [searchType, setSearchType] = useState<SearchMode>("semantic");
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
@@ -124,13 +127,13 @@ export default function Notes() {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
           semanticSearch.mutate(
-            { query: q },
+            { query: q, scope: searchScope },
             { onSuccess: (data) => setSemanticResults(data.results as SemanticSearchResult[]) }
           );
         }, 300);
       }
     },
-    [ilikeSearch, semanticSearch, searchType]
+    [ilikeSearch, semanticSearch, searchType, searchScope]
   );
 
   useEffect(() => {
@@ -382,6 +385,37 @@ export default function Notes() {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-xs">Keyword matching</TooltipContent>
               </Tooltip>
+
+              {/* Search scope — only visible in semantic mode */}
+              {searchType === "semantic" && (
+                <>
+                  <span className="text-muted-foreground/40 text-[10px]">|</span>
+                  {(["all", "notes", "media"] as SearchScope[]).map((s) => (
+                    <Button
+                      key={s}
+                      variant={searchScope === s ? "secondary" : "ghost"}
+                      size="sm"
+                      className="h-6 px-2 text-[10px] gap-1"
+                      onClick={() => {
+                        setSearchScope(s);
+                        setSemanticResults(null);
+                        if (searchQuery.trim()) {
+                          semanticSearch.mutate(
+                            { query: searchQuery, scope: s },
+                            { onSuccess: (data) => setSemanticResults(data.results as SemanticSearchResult[]) }
+                          );
+                        }
+                      }}
+                    >
+                      {s === "media" && <Image className="h-3 w-3" />}
+                      {s === "notes" && <FileText className="h-3 w-3" />}
+                      {s === "all" && <Search className="h-3 w-3" />}
+                      {s === "all" ? "All" : s === "notes" ? "Notes" : "Media"}
+                    </Button>
+                  ))}
+                </>
+              )}
+
               <div className="flex-1" />
               {isSemanticLoading && (
                 <span className="text-[10px] text-muted-foreground animate-pulse flex items-center gap-1">

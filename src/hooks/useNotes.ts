@@ -38,6 +38,13 @@ export interface Note {
 
 export interface SemanticSearchResult extends Note {
   similarity: number | null;
+  match_source?: "note" | "media" | "both";
+  media_description?: string;
+  media_storage_path?: string;
+  media_type?: string;
+  media_topics?: string[];
+  media_page_number?: number;
+  media_filename?: string;
 }
 
 type NoteInsert = {
@@ -194,13 +201,15 @@ export function useSemanticSearch() {
       query,
       threshold = 0.5,
       limit = 20,
+      scope = "all",
     }: {
       query: string;
       threshold?: number;
       limit?: number;
+      scope?: "all" | "notes" | "media";
     }): Promise<{ results: SemanticSearchResult[]; mode: string }> => {
       const res = await supabase.functions.invoke("search-notes-semantic", {
-        body: { query, threshold, limit },
+        body: { query, threshold, limit, scope },
       });
       if (res.error) throw res.error;
       // Trigger credits refresh after semantic search

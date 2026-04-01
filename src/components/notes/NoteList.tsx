@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send, Gamepad2, Network } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send, Gamepad2, Network, Image, FileText as FileTextIcon } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
@@ -53,12 +53,20 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
     <div className="flex-1 overflow-y-auto">
       {notes.map((note) => {
         const similarity = "similarity" in note ? (note as SemanticSearchResult).similarity : null;
+        const matchSource = "match_source" in note ? (note as SemanticSearchResult).match_source : undefined;
+        const mediaDesc = "media_description" in note ? (note as SemanticSearchResult).media_description : undefined;
+        const mediaPath = "media_storage_path" in note ? (note as SemanticSearchResult).media_storage_path : undefined;
+        const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
         const meta = note.metadata as Record<string, unknown> | null;
         const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
         const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
         const actionItems = Array.isArray(meta?.action_items) ? (meta.action_items as string[]) : [];
         const metaType = typeof meta?.type === "string" ? meta.type : null;
         const hasMetadata = topics.length > 0 || people.length > 0 || actionItems.length > 0 || metaType;
+        const isMediaMatch = matchSource === "media" || matchSource === "both";
+        const thumbnailUrl = mediaPath && mediaPath.includes("note-attachments")
+          ? `https://tjeapelvjlmbxafsmjef.supabase.co/storage/v1/object/public/note-attachments/${mediaPath}`
+          : null;
 
         return (
           <button
@@ -85,9 +93,40 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                 </span>
               )}
             </div>
-            <p className="text-xs text-muted-foreground truncate mb-1.5">
-              {getNotePreviewText(note.content)}
-            </p>
+
+            {/* Media match indicator */}
+            {isMediaMatch && (
+              <div className="flex items-center gap-2 mb-1.5">
+                {thumbnailUrl && (
+                  <img
+                    src={thumbnailUrl}
+                    alt=""
+                    className="h-10 w-10 rounded object-cover shrink-0 border border-border"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="text-[10px] font-medium text-primary flex items-center gap-1">
+                    {mediaMatchType === "pdf" || mediaMatchType === "pdf_page" ? (
+                      <><FileTextIcon className="h-2.5 w-2.5" /> Matched in PDF</>
+                    ) : (
+                      <><Image className="h-2.5 w-2.5" /> Matched in image</>
+                    )}
+                    {matchSource === "both" && (
+                      <span className="text-muted-foreground ml-1">+ note text</span>
+                    )}
+                  </span>
+                  {mediaDesc && (
+                    <p className="text-[10px] text-muted-foreground truncate">{mediaDesc}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!isMediaMatch && (
+              <p className="text-xs text-muted-foreground truncate mb-1.5">
+                {getNotePreviewText(note.content)}
+              </p>
+            )}
 
             {/* Metadata pills */}
             {hasMetadata && (
