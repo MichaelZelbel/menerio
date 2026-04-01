@@ -67,10 +67,27 @@ Only extract what's explicitly there.`,
   }
 }
 
+async function getMediaForNotes(noteIds: string[]): Promise<Map<string, any[]>> {
+  if (!noteIds.length) return new Map();
+  const { data } = await supabase
+    .from("media_analysis")
+    .select("note_id, storage_path, media_type, description, extracted_text, topics, page_number, original_filename")
+    .in("note_id", noteIds)
+    .eq("analysis_status", "complete");
+
+  const map = new Map<string, any[]>();
+  for (const item of data || []) {
+    if (!map.has(item.note_id)) map.set(item.note_id, []);
+    map.get(item.note_id)!.push(item);
+  }
+  return map;
+}
+
 function formatNote(
   t: { content: string; title?: string; metadata: Record<string, unknown>; created_at: string; id?: string },
   i: number,
-  showSimilarity?: number
+  showSimilarity?: number,
+  media?: any[]
 ): string {
   const m = t.metadata || {};
   const parts: string[] = [];
@@ -89,6 +106,19 @@ function formatNote(
   if (Array.isArray(m.action_items) && m.action_items.length)
     parts.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
   parts.push(`\n${t.content}`);
+
+  // Append media analysis info
+  if (media && media.length > 0) {
+    parts.push(`\nMedia (${media.length}):`);
+    for (const m of media) {
+      const label = m.media_type === "pdf" || m.media_type === "pdf_page"
+        ? `PDF${m.page_number ? ` p.${m.page_number}` : ""}`
+        : "Image";
+      parts.push(`  [${label}] ${m.description || "(no description)"}`);
+      if (m.topics?.length) parts.push(`    Topics: ${m.topics.join(", ")}`);
+    }
+  }
+
   return parts.join("\n");
 }
 
