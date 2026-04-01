@@ -217,7 +217,10 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: "No thoughts found." }] };
       }
 
-      const results = data.map((t: any, i: number) => formatNote(t, i));
+      // Enrich with media
+      const noteIds = data.map((t: any) => t.id);
+      const mediaMap = await getMediaForNotes(noteIds);
+      const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
 
       return {
         content: [{ type: "text" as const, text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}` }],
