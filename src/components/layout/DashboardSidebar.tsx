@@ -12,6 +12,7 @@ import {
   Plug,
   CalendarDays,
   UserCircle,
+  User,
   ListChecks,
   Network,
   Image,
