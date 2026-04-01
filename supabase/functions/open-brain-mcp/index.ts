@@ -944,7 +944,123 @@ server.registerTool(
   }
 );
 
-// --- Hono App with Auth Check ---
+// Tool 13: Search Images
+server.registerTool(
+  "search_images",
+  {
+    title: "Search Images & PDFs",
+    description:
+      "Search across all analyzed images and PDFs by description or extracted text. Returns matching media with descriptions, extracted text, and the parent note context. Use this to find visual content like diagrams, screenshots, whiteboards, or any image/PDF that was previously captured.",
+    inputSchema: {
+      query: z.string().describe("What to search for in images/PDFs"),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.5),
+    },
+  },
+  async ({ query, limit, threshold }) => {
+    try {
+      const qEmb = await getEmbedding(query);
+      const { data, error } = await supabase.rpc("match_media", {
+        query_embedding: qEmb,
+        match_threshold: threshold,
+        match_count: limit,
+        p_user_id: BRAIN_OWNER_USER_ID,
+      });
+
+      if (error) {
+        return { content: [{ type: "text" as const, text: `Search error: ${error.message}` }], isError: true };
+      }
+
+      if (!data || data.length === 0) {
+        return { content: [{ type: "text" as const, text: `No images or PDFs found matching "${query}".` }] };
+      }
+
+      const results = data.map((m: any, i: number) => {
+        const parts: string[] = [];
+        parts.push(`--- Result ${i + 1} (${(m.similarity * 100).toFixed(1)}% match) ---`);
+        const label = m.media_type === "pdf" || m.media_type === "pdf_page"
+          ? `PDF${m.page_number ? ` page ${m.page_number}` : ""}`
+          : "Image";
+        parts.push(`Type: ${label}`);
+        if (m.original_filename) parts.push(`File: ${m.original_filename}`);
+        parts.push(`Note: ${m.note_title}`);
+        if (m.description) parts.push(`Description: ${m.description}`);
+        if (m.topics?.length) parts.push(`Topics: ${m.topics.join(", ")}`);
+        if (m.extracted_text) parts.push(`Extracted text:\n${m.extracted_text.substring(0, 500)}`);
+        return parts.join("\n");
+      });
+
+      return {
+        content: [{ type: "text" as const, text: `Found ${data.length} media match(es):\n\n${results.join("\n\n")}` }],
+      };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 14: Get Note Media
+server.registerTool(
+  "get_note_media",
+  {
+    title: "Get Note Media",
+    description:
+      "Given a note title or ID, return all analyzed images and PDFs in that note with their descriptions, extracted text, and topics.",
+    inputSchema: {
+      note: z.string().describe("Note title or ID"),
+    },
+  },
+  async ({ note }) => {
+    try {
+      // Resolve note ID
+      let noteId = note;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(note);
+      if (!isUuid) {
+        const { data } = await supabase
+          .from("notes")
+          .select("id")
+          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .ilike("title", `%${note}%`)
+          .limit(1);
+        if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
+        noteId = data[0].id;
+      }
+
+      const { data: media, error } = await supabase
+        .from("media_analysis")
+        .select("storage_path, media_type, page_number, original_filename, description, extracted_text, topics, analysis_status, raw_analysis")
+        .eq("note_id", noteId)
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .order("created_at", { ascending: true });
+
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!media?.length) return { content: [{ type: "text" as const, text: "No media found in this note." }] };
+
+      const lines = media.map((m: any, i: number) => {
+        const parts: string[] = [];
+        const label = m.media_type === "pdf" || m.media_type === "pdf_page"
+          ? `PDF${m.page_number ? ` page ${m.page_number}` : ""}`
+          : "Image";
+        parts.push(`${i + 1}. [${label}] ${m.original_filename || m.storage_path.split("/").pop()}`);
+        parts.push(`   Status: ${m.analysis_status}`);
+        if (m.description) parts.push(`   Description: ${m.description}`);
+        if (m.topics?.length) parts.push(`   Topics: ${m.topics.join(", ")}`);
+        if (m.extracted_text) parts.push(`   Text: ${m.extracted_text.substring(0, 300)}${m.extracted_text.length > 300 ? "…" : ""}`);
+        const raw = m.raw_analysis as Record<string, unknown> | null;
+        if (raw?.content_type) parts.push(`   Content type: ${raw.content_type}`);
+        return parts.join("\n");
+      });
+
+      return {
+        content: [{ type: "text" as const, text: `${media.length} media item(s) in this note:\n\n${lines.join("\n\n")}` }],
+      };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+
 const app = new Hono();
 
 app.all("*", async (c) => {
