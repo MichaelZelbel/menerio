@@ -3,9 +3,9 @@ import {
   FileText,
   Star,
   Trash2,
-  Brain,
   Search,
 } from "lucide-react";
+import logoImg from "@/assets/logo.png";
 
 export type NoteFilter = "all" | "favorites" | "trash";
 
