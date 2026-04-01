@@ -40,6 +40,16 @@ export interface AgentInstruction {
   updated_at: string;
 }
 
+export interface ProfileView {
+  id: string;
+  user_id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  included_scopes: string[];
+  created_at: string;
+}
+
 const DEFAULT_CATEGORIES = [
   { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
   { name: "Location & Living", slug: "location", icon: "map-pin", description: "Current city, timezone, living situation", sort_order: 1, visibility_scope: "personal" },
@@ -103,6 +113,20 @@ export function useProfile() {
         .order("sort_order");
       if (error) throw error;
       return data as AgentInstruction[];
+    },
+    enabled: !!userId,
+  });
+
+  const viewsQuery = useQuery({
+    queryKey: ["profile-views", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profile_views")
+        .select("*")
+        .eq("user_id", userId!)
+        .order("created_at");
+      if (error) throw error;
+      return data as ProfileView[];
     },
     enabled: !!userId,
   });
@@ -202,10 +226,49 @@ export function useProfile() {
     },
   });
 
+  const upsertView = useMutation({
+    mutationFn: async (view: Partial<ProfileView> & { id?: string }) => {
+      if (view.id) {
+        const { error } = await supabase.from("profile_views").update({
+          name: view.name,
+          description: view.description,
+          included_scopes: view.included_scopes,
+        }).eq("id", view.id);
+        if (error) throw error;
+      } else {
+        const slug = (view.name ?? "custom").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const { error } = await supabase.from("profile_views").insert({
+          user_id: userId!,
+          name: view.name!,
+          slug,
+          description: view.description ?? null,
+          included_scopes: view.included_scopes ?? ["all"],
+        });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-views"] });
+      showToast.success("View saved");
+    },
+  });
+
+  const deleteView = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("profile_views").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-views"] });
+      showToast.success("View deleted");
+    },
+  });
+
   return {
     categories: categoriesQuery.data ?? [],
     entries: entriesQuery.data ?? [],
     instructions: instructionsQuery.data ?? [],
+    views: viewsQuery.data ?? [],
     isLoading: categoriesQuery.isLoading || entriesQuery.isLoading,
     seedDefaults,
     upsertCategory,
@@ -214,5 +277,7 @@ export function useProfile() {
     deleteEntry,
     upsertInstruction,
     deleteInstruction,
+    upsertView,
+    deleteView,
   };
 }

@@ -17,6 +17,7 @@ export default function Profile() {
     categories,
     entries,
     instructions,
+    views,
     isLoading,
     seedDefaults,
     upsertCategory,
@@ -25,6 +26,8 @@ export default function Profile() {
     deleteEntry,
     upsertInstruction,
     deleteInstruction,
+    upsertView,
+    deleteView,
   } = useProfile();
 
   const [seeded, setSeeded] = useState(false);
@@ -154,7 +157,14 @@ export default function Profile() {
           </TabsContent>
 
           <TabsContent value="export" className="mt-4">
-            <ExportTab categories={categories} entries={entries} instructions={instructions} />
+            <ExportTab
+              categories={categories}
+              entries={entries}
+              instructions={instructions}
+              views={views}
+              onSaveView={(data) => upsertView.mutate(data)}
+              onDeleteView={(id) => deleteView.mutate(id)}
+            />
           </TabsContent>
         </Tabs>
       </div>
