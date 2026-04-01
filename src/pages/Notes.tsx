@@ -72,6 +72,7 @@ export default function Notes() {
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [searchType, setSearchType] = useState<SearchMode>("semantic");
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
