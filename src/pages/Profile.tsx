@@ -17,6 +17,7 @@ export default function Profile() {
     categories,
     entries,
     instructions,
+    views,
     isLoading,
     seedDefaults,
     upsertCategory,
@@ -25,6 +26,8 @@ export default function Profile() {
     deleteEntry,
     upsertInstruction,
     deleteInstruction,
+    upsertView,
+    deleteView,
   } = useProfile();
 
   const [seeded, setSeeded] = useState(false);
