@@ -72,6 +72,7 @@ export async function deductTokens(
     p_prompt_tokens: p.promptTokens ?? 0,
     p_completion_tokens: p.completionTokens ?? 0,
     p_idempotency_key: p.idempotencyKey ?? null,
+    p_usage_source: p.usageSource ?? "unknown",
   });
 
   if (error) throw new Error(`Token deduction RPC failed: ${error.message}`);
