@@ -112,6 +112,39 @@ export type Database = {
           },
         ]
       }
+      agent_instructions: {
+        Row: {
+          applies_to: string | null
+          created_at: string | null
+          id: string
+          instruction: string
+          is_active: boolean | null
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          applies_to?: string | null
+          created_at?: string | null
+          id?: string
+          instruction: string
+          is_active?: boolean | null
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          applies_to?: string | null
+          created_at?: string | null
+          id?: string
+          instruction?: string
+          is_active?: boolean | null
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       ai_allowance_periods: {
         Row: {
           created_at: string
@@ -793,6 +826,129 @@ export type Database = {
           metadata?: Json | null
           title?: string
           type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profile_categories: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          icon: string | null
+          id: string
+          is_default: boolean | null
+          name: string
+          slug: string
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+          visibility_scope: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_default?: boolean | null
+          name: string
+          slug: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+          visibility_scope?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          slug?: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id?: string
+          visibility_scope?: string | null
+        }
+        Relationships: []
+      }
+      profile_entries: {
+        Row: {
+          category_id: string
+          created_at: string | null
+          id: string
+          label: string
+          linked_note_id: string | null
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+          value: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string | null
+          id?: string
+          label: string
+          linked_note_id?: string | null
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+          value: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string | null
+          id?: string
+          label?: string
+          linked_note_id?: string | null
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id?: string
+          value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_entries_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "profile_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_entries_linked_note_id_fkey"
+            columns: ["linked_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profile_views: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          included_scopes: string[]
+          name: string
+          slug: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          included_scopes?: string[]
+          name: string
+          slug: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          included_scopes?: string[]
+          name?: string
+          slug?: string
           user_id?: string
         }
         Relationships: []
