@@ -40,8 +40,24 @@ async function processInBackground(noteId: string, authHeader: string) {
       return;
     }
 
-    const fullText = `${note.title}\n\n${note.content}`.trim();
+    let fullText = `${note.title}\n\n${note.content}`.trim();
     if (!fullText) return;
+
+    // Include media analysis content in the embedding text
+    const { data: mediaEntries } = await supabase
+      .from("media_analysis")
+      .select("extracted_text, description, topics")
+      .eq("note_id", noteId)
+      .eq("analysis_status", "complete");
+
+    let mediaTopics: string[] = [];
+    if (mediaEntries && mediaEntries.length > 0) {
+      const mediaTexts = mediaEntries.map((m: any) => {
+        if (m.topics) mediaTopics.push(...m.topics);
+        return [m.description, m.extracted_text].filter(Boolean).join(" ");
+      });
+      fullText += "\n\n[Media content]\n" + mediaTexts.join("\n");
+    }
 
     // Pre-check balance before making any LLM calls
     const balance = await checkBalance(supabase, note.user_id);
