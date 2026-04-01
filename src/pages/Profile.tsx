@@ -157,7 +157,14 @@ export default function Profile() {
           </TabsContent>
 
           <TabsContent value="export" className="mt-4">
-            <ExportTab categories={categories} entries={entries} instructions={instructions} />
+            <ExportTab
+              categories={categories}
+              entries={entries}
+              instructions={instructions}
+              views={views}
+              onSaveView={(data) => upsertView.mutate(data)}
+              onDeleteView={(id) => deleteView.mutate(id)}
+            />
           </TabsContent>
         </Tabs>
       </div>
