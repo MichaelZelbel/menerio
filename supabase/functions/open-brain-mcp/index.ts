@@ -159,7 +159,10 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }] };
       }
 
-      const results = data.map((t: any, i: number) => formatNote(t, i, t.similarity));
+      // Enrich with media
+      const noteIds = data.map((t: any) => t.id);
+      const mediaMap = await getMediaForNotes(noteIds);
+      const results = data.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
 
       return {
         content: [{ type: "text" as const, text: `Found ${data.length} thought(s):\n\n${results.join("\n\n")}` }],
