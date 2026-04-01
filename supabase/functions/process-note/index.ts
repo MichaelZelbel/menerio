@@ -100,6 +100,13 @@ async function processInBackground(noteId: string, authHeader: string) {
       throw err;
     }
 
+    // Merge media-derived topics into note metadata
+    if (mediaTopics.length > 0 && Array.isArray(metadata.topics)) {
+      const existingTopics = metadata.topics as string[];
+      const merged = [...new Set([...existingTopics, ...mediaTopics])];
+      metadata.topics = merged;
+    }
+
     // Update the note with both embedding and metadata
     const { error: updateErr } = await supabase
       .from("notes")
