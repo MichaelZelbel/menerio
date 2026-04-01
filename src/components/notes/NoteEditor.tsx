@@ -31,6 +31,7 @@ import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
+import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
