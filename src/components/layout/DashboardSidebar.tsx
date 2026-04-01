@@ -57,6 +57,7 @@ export function DashboardSidebar() {
     { title: "Actions", url: "/dashboard/actions", icon: ListChecks },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
     { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
+    { title: "Media Library", url: "/dashboard/media", icon: Image },
   ];
 
   const premiumItems = [
