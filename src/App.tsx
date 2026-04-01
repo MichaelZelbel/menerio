@@ -37,6 +37,7 @@ const People = lazy(() => import("./pages/People"));
 const Actions = lazy(() => import("./pages/Actions"));
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
 const MediaLibrary = lazy(() => import("./pages/MediaLibrary"));
+const Profile = lazy(() => import("./pages/Profile"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
