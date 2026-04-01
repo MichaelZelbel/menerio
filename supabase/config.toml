@@ -59,3 +59,6 @@ verify_jwt = false
 
 [functions.backfill-media-analysis]
 verify_jwt = false
+
+[functions.generate-profile-suggestions]
+verify_jwt = false
