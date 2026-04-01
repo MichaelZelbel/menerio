@@ -9,8 +9,12 @@ import { useProfile } from "@/hooks/useProfile";
 import { CategorySection } from "@/components/profile/CategorySection";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
+import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Profile() {
   const {
@@ -30,11 +34,27 @@ export default function Profile() {
     deleteView,
   } = useProfile();
 
+  const { user } = useAuth();
+
   const [seeded, setSeeded] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
+
+  // Get note count for nudge logic
+  const { data: noteCount = 0 } = useQuery({
+    queryKey: ["note-count", user?.id],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("notes")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false);
+      return count || 0;
+    },
+    enabled: !!user?.id,
+  });
 
   // Seed defaults on first visit
   useEffect(() => {
@@ -100,6 +120,12 @@ export default function Profile() {
           </TabsList>
 
           <TabsContent value="profile" className="space-y-3 mt-4">
+            <ProfileSuggestions
+              categories={categories}
+              entryCount={entries.length}
+              noteCount={noteCount}
+              onAccept={(data) => upsertEntry.mutate(data)}
+            />
             {categories.map((cat) => (
               <CategorySection
                 key={cat.id}
