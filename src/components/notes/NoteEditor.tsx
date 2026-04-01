@@ -575,6 +575,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
       {/* Editor */}
       <div
+        ref={editorContainerRef}
         className={cn(
           "flex-1 overflow-y-auto p-4 relative transition-colors flex flex-col min-h-0",
           isDragOver && "bg-primary/5 ring-2 ring-primary/30 ring-inset"
@@ -633,6 +634,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         ) : (
           <EditorContent editor={editor} className="tiptap-editor" />
         )}
+        {/* Media analysis overlay badges */}
+        {!sourceMode && <MediaAnalysisOverlay noteId={note.id} editorContainerRef={editorContainerRef} />}
       </div>
 
       {/* Connections panel */}
