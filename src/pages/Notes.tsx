@@ -126,13 +126,13 @@ export default function Notes() {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
           semanticSearch.mutate(
-            { query: q },
+            { query: q, scope: searchScope },
             { onSuccess: (data) => setSemanticResults(data.results as SemanticSearchResult[]) }
           );
         }, 300);
       }
     },
-    [ilikeSearch, semanticSearch, searchType]
+    [ilikeSearch, semanticSearch, searchType, searchScope]
   );
 
   useEffect(() => {
