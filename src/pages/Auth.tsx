@@ -63,9 +63,7 @@ export default function Auth() {
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <Link to="/" className="inline-flex items-center gap-2 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <span className="text-lg font-bold text-primary-foreground">M</span>
-            </div>
+            <img src={logoImg} alt="Menerio" className="h-10 w-10 object-contain" />
           </Link>
           <h1 className="text-2xl font-bold font-display">Welcome to Menerio</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign in to your account or create a new one</p>
