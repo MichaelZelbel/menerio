@@ -14,6 +14,7 @@ import {
   UserCircle,
   ListChecks,
   Network,
+  Image,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
