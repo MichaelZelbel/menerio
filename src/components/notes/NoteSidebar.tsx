@@ -3,9 +3,9 @@ import {
   FileText,
   Star,
   Trash2,
-  Brain,
   Search,
 } from "lucide-react";
+import logoImg from "@/assets/logo.png";
 
 export type NoteFilter = "all" | "favorites" | "trash";
 
@@ -35,9 +35,7 @@ export function NoteSidebar({
       {/* Brand */}
       <div className="px-4 py-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <Brain className="h-4 w-4 text-primary-foreground" />
-          </div>
+          <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
           <span className="text-base font-bold font-display">Menerio</span>
         </div>
       </div>
