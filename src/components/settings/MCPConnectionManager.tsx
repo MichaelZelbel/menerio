@@ -23,6 +23,8 @@ const TOOLS = [
   { name: "get_stats", desc: "Summary statistics: totals, top topics, people, recent activity" },
   { name: "get_action_items", desc: "All open action items extracted from notes" },
   { name: "get_person_notes", desc: "All notes mentioning a specific person" },
+  { name: "search_images", desc: "Search across all analyzed images and PDFs by description or extracted text" },
+  { name: "get_note_media", desc: "Get all media analysis results (images, PDFs) for a specific note" },
 ];
 
 export function MCPConnectionManager() {
