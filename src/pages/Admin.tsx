@@ -626,10 +626,6 @@ function CreditsSettingsTab() {
     setSaving(false);
   };
 
-  if (loading) {
-    return <Card><CardContent className="pt-6"><Skeleton className="h-32 w-full" /></CardContent></Card>;
-  }
-
   const SETTING_LABELS: Record<string, string> = {
     tokens_per_credit: "Tokens per Credit",
     credits_free_per_month: "Free Tier Monthly Credits",
@@ -637,31 +633,252 @@ function CreditsSettingsTab() {
   };
 
   return (
+    <div className="space-y-6">
+      {loading ? (
+        <Card><CardContent className="pt-6"><Skeleton className="h-32 w-full" /></CardContent></Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>AI Credit Settings</CardTitle>
+            <CardDescription>Configure token-to-credit ratios and monthly allocations.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {settings.map((s) => (
+              <div key={s.key} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-4">
+                <div className="flex-1 min-w-0">
+                  <Label className="text-sm font-medium">{SETTING_LABELS[s.key] || s.key}</Label>
+                  {s.description && <p className="text-xs text-muted-foreground">{s.description}</p>}
+                </div>
+                <Input
+                  type="number"
+                  value={s.value_int}
+                  onChange={(e) => updateValue(s.key, Number(e.target.value))}
+                  className="w-full sm:w-32"
+                />
+              </div>
+            ))}
+            <Separator />
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <Save className="mr-1.5 h-3.5 w-3.5" /> Save Settings
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <UsageLogTable />
+    </div>
+  );
+}
+
+// ─── LLM Usage Log Table ───
+
+const USAGE_PAGE_SIZE = 20;
+
+interface UsageEvent {
+  id: string;
+  created_at: string;
+  user_id: string;
+  feature: string;
+  model: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  metadata: any;
+}
+
+function UsageLogTable() {
+  const [events, setEvents] = useState<UsageEvent[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [userSearch, setUserSearch] = useState("");
+  const [modelFilter, setModelFilter] = useState("all");
+  const [distinctModels, setDistinctModels] = useState<string[]>([]);
+
+  // Fetch distinct models once
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("llm_usage_events" as any)
+        .select("model")
+        .not("model", "is", null);
+      if (data) {
+        const unique = [...new Set((data as any[]).map((d: any) => d.model as string).filter(Boolean))].sort();
+        setDistinctModels(unique);
+      }
+    })();
+  }, []);
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+
+    // If user search, find matching profile IDs first
+    let matchedUserIds: string[] | null = null;
+    if (userSearch.trim()) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("id")
+        .ilike("display_name", `%${userSearch.trim()}%`);
+      matchedUserIds = (profileData || []).map((p: any) => p.id);
+      if (matchedUserIds.length === 0) {
+        setEvents([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
+    }
+
+    let query = supabase
+      .from("llm_usage_events" as any)
+      .select("id, created_at, user_id, feature, model, prompt_tokens, completion_tokens, total_tokens, metadata", { count: "exact" });
+
+    if (modelFilter !== "all") {
+      query = query.eq("model", modelFilter);
+    }
+    if (matchedUserIds) {
+      query = query.in("user_id", matchedUserIds);
+    }
+
+    query = query.order("created_at", { ascending: false }).range(page * USAGE_PAGE_SIZE, (page + 1) * USAGE_PAGE_SIZE - 1);
+
+    const { data, count, error } = await query;
+    if (error) {
+      setLoading(false);
+      return;
+    }
+
+    const rows = (data as any[] || []) as UsageEvent[];
+    setEvents(rows);
+    setTotal(count || 0);
+
+    // Fetch display names for user IDs on this page
+    const userIds = [...new Set(rows.map((r) => r.user_id))];
+    if (userIds.length > 0) {
+      const { data: pData } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", userIds);
+      const map: Record<string, string> = {};
+      (pData || []).forEach((p: any) => { map[p.id] = p.display_name || p.id.slice(0, 8); });
+      setProfiles((prev) => ({ ...prev, ...map }));
+    }
+
+    setLoading(false);
+  }, [page, modelFilter, userSearch]);
+
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+
+  const totalPages = Math.ceil(total / USAGE_PAGE_SIZE);
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const getUsageSource = (metadata: any): string => {
+    if (!metadata) return "unknown";
+    return metadata.usage_source || "unknown";
+  };
+
+  return (
     <Card>
       <CardHeader>
-        <CardTitle>AI Credit Settings</CardTitle>
-        <CardDescription>Configure token-to-credit ratios and monthly allocations.</CardDescription>
+        <CardTitle>LLM Usage Log</CardTitle>
+        <CardDescription>All LLM calls across all users.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {settings.map((s) => (
-          <div key={s.key} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-4">
-            <div className="flex-1 min-w-0">
-              <Label className="text-sm font-medium">{SETTING_LABELS[s.key] || s.key}</Label>
-              {s.description && <p className="text-xs text-muted-foreground">{s.description}</p>}
-            </div>
+        {/* Filters */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              type="number"
-              value={s.value_int}
-              onChange={(e) => updateValue(s.key, Number(e.target.value))}
-              className="w-full sm:w-32"
+              placeholder="Filter by user name…"
+              value={userSearch}
+              onChange={(e) => { setUserSearch(e.target.value); setPage(0); }}
+              className="pl-9"
             />
+            {userSearch && (
+              <button onClick={() => { setUserSearch(""); setPage(0); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-        ))}
-        <Separator />
-        <Button onClick={handleSave} disabled={saving}>
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          <Save className="mr-1.5 h-3.5 w-3.5" /> Save Settings
-        </Button>
+          <Select value={modelFilter} onValueChange={(v) => { setModelFilter(v); setPage(0); }}>
+            <SelectTrigger className="w-[220px]"><SelectValue placeholder="All Models" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Models</SelectItem>
+              {distinctModels.map((m) => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Table */}
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Feature</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead className="text-right">Prompt</TableHead>
+                <TableHead className="text-right">Completion</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead>Source</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 8 }).map((_, j) => (
+                      <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : events.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No usage events found.</TableCell>
+                </TableRow>
+              ) : (
+                events.map((e) => {
+                  const source = getUsageSource(e.metadata);
+                  return (
+                    <TableRow key={e.id}>
+                      <TableCell className="text-xs whitespace-nowrap">{formatDate(e.created_at)}</TableCell>
+                      <TableCell className="text-sm">{profiles[e.user_id] || e.user_id.slice(0, 8) + "…"}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-[10px]">{e.feature}</Badge></TableCell>
+                      <TableCell className="text-xs text-muted-foreground max-w-[140px] truncate">{e.model || "—"}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">{Number(e.prompt_tokens).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">{Number(e.completion_tokens).toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-xs font-medium tabular-nums">{Number(e.total_tokens).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <Badge variant={source === "provider" ? "success" : source === "fallback" ? "warning" : "secondary"} className="text-[10px]">
+                          {source}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">{total} events total · Page {page + 1} of {totalPages}</p>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
