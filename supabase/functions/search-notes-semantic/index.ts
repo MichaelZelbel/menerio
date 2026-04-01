@@ -1,7 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   getEmbeddingWithCredits,
-  insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -39,6 +38,7 @@ async function ilikeFallback(userId: string, query: string, limit: number) {
   return (data || []).map((n: Record<string, unknown>) => ({
     ...n,
     similarity: null,
+    match_source: "note" as const,
   }));
 }
 
@@ -64,6 +64,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const threshold = body.threshold ?? 0.5;
     const limit = Math.min(body.limit ?? 20, 50);
+    const scope = body.scope || "all"; // "all" | "notes" | "media"
 
     let results: unknown[];
     let mode = "semantic";
@@ -77,17 +78,108 @@ Deno.serve(async (req: Request): Promise<Response> => {
       credits = embResult.credits;
       const embeddingStr = `[${embResult.embedding.join(",")}]`;
 
-      const { data, error } = await supabase.rpc("match_notes", {
-        query_embedding: embeddingStr,
-        match_threshold: threshold,
-        match_count: limit,
-        p_user_id: user.id,
-      });
-      if (error) throw error;
-      results = data || [];
+      const searchNotes = scope !== "media";
+      const searchMedia = scope !== "notes";
+
+      // Run searches in parallel
+      const [noteResults, mediaResults] = await Promise.all([
+        searchNotes
+          ? supabase.rpc("match_notes", {
+              query_embedding: embeddingStr,
+              match_threshold: threshold,
+              match_count: limit,
+              p_user_id: user.id,
+            }).then(({ data, error }) => {
+              if (error) throw error;
+              return (data || []).map((n: any) => ({
+                ...n,
+                match_source: "note",
+              }));
+            })
+          : Promise.resolve([]),
+        searchMedia
+          ? supabase.rpc("match_media", {
+              query_embedding: embeddingStr,
+              match_threshold: threshold,
+              match_count: limit,
+              p_user_id: user.id,
+            }).then(({ data, error }) => {
+              if (error) {
+                console.warn("match_media failed:", error);
+                return [];
+              }
+              return data || [];
+            })
+          : Promise.resolve([]),
+      ]);
+
+      if (scope === "media") {
+        // Return media results directly — each linked to its parent note
+        results = (mediaResults as any[]).map((m: any) => ({
+          id: m.note_id,
+          title: m.note_title,
+          content: "",
+          metadata: null,
+          tags: [],
+          similarity: m.similarity,
+          match_source: "media",
+          media_description: m.description,
+          media_storage_path: m.storage_path,
+          media_type: m.media_type,
+          media_topics: m.topics,
+          media_page_number: m.page_number,
+          media_filename: m.original_filename,
+          created_at: m.created_at,
+        }));
+      } else {
+        // Merge and deduplicate by note_id
+        const noteMap = new Map<string, any>();
+
+        for (const n of noteResults as any[]) {
+          noteMap.set(n.id, { ...n, match_source: "note" });
+        }
+
+        for (const m of mediaResults as any[]) {
+          const noteId = m.note_id;
+          const existing = noteMap.get(noteId);
+          if (existing) {
+            // Note already matched — mark as "both", keep higher similarity
+            existing.match_source = "both";
+            if (m.similarity > (existing.similarity || 0)) {
+              existing.similarity = m.similarity;
+            }
+            // Attach media details
+            existing.media_description = m.description;
+            existing.media_storage_path = m.storage_path;
+            existing.media_type = m.media_type;
+            existing.media_topics = m.topics;
+          } else {
+            // Media-only match — create a note-like result
+            noteMap.set(noteId, {
+              id: noteId,
+              title: m.note_title,
+              content: "",
+              metadata: null,
+              tags: [],
+              similarity: m.similarity,
+              match_source: "media",
+              media_description: m.description,
+              media_storage_path: m.storage_path,
+              media_type: m.media_type,
+              media_topics: m.topics,
+              media_page_number: m.page_number,
+              media_filename: m.original_filename,
+              created_at: m.created_at,
+            });
+          }
+        }
+
+        results = Array.from(noteMap.values())
+          .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+          .slice(0, limit);
+      }
     } catch (embErr: any) {
       if (embErr.message === "INSUFFICIENT_CREDITS" || embErr.message === "NO_ACTIVE_PERIOD") {
-        // Fall back to ILIKE search when credits are exhausted (graceful degradation)
         console.log("Falling back to ILIKE search: insufficient credits");
         results = await ilikeFallback(user.id, query, limit);
         mode = "ilike_fallback_no_credits";
