@@ -1014,6 +1014,29 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_premium_user: { Args: { _user_id: string }; Returns: boolean }
+      match_media: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_user_id?: string
+          query_embedding: string
+        }
+        Returns: {
+          created_at: string
+          description: string
+          extracted_text: string
+          id: string
+          media_type: string
+          note_id: string
+          note_title: string
+          original_filename: string
+          page_number: number
+          raw_analysis: Json
+          similarity: number
+          storage_path: string
+          topics: string[]
+        }[]
+      }
       match_notes: {
         Args: {
           match_count?: number
