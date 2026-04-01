@@ -195,6 +195,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
