@@ -1,44 +1,45 @@
 
+## Image & PDF Intelligence Pipeline
 
-## Add LLM Usage Log Table to Admin AI Credits Tab
+### 1. Database Migration — `media_analysis` table
+- Create `media_analysis` table with columns: `user_id`, `note_id`, `storage_path`, `media_type`, `page_number`, `original_filename`, `extracted_text`, `description`, `topics`, `raw_analysis`, `embedding` (vector 1536), `analysis_status`, `error_message`
+- RLS: users can view/manage own rows; admins can view all
+- Indexes on `note_id`, `user_id`, `analysis_status`, and HNSW on embedding
 
-### What changes
+### 2. Edge Function: `analyze-media`
+- Accepts `note_id`, `storage_path`, `media_type`, optional `page_number`
+- Downloads file from Supabase Storage, converts to base64
+- Sends to vision LLM via OpenRouter (`openai/gpt-4o-mini` with vision) using `chatWithCredits` for credit enforcement
+- Vision prompt extracts: `extracted_text`, `description`, `topics`, `content_type`
+- Generates embedding of combined text via `getEmbeddingWithCredits`
+- Stores result in `media_analysis` table (status: complete/failed)
+- Uses `EdgeRuntime.waitUntil` for background processing
 
-Add a new `UsageLogTable` component below the existing `CreditsSettingsTab` card in the "AI Credits" tab. This table displays all `llm_usage_events` entries across all users with filtering, pagination, and usage-source indication.
+### 3. Edge Function: `analyze-pdf`
+- Accepts `note_id` and `storage_path`
+- In Deno edge functions, full PDF-to-image conversion is limited. Instead:
+  - Use `pdf-lib` to extract page count
+  - Send the full PDF as a document to the vision LLM (gpt-4o-mini supports PDFs via base64)
+  - For multi-page PDFs, process page-by-page if the model supports it, or process as a single document
+- Stores per-page or whole-document entries in `media_analysis`
+- Creates combined embedding from all extracted content
 
-### Data source
+### 4. Update `process-note` to include media content
+- After media analysis completes, the note's embedding should incorporate media-derived text
+- In `process-note`, gather all `media_analysis` entries for the note (status=complete)
+- Append their `extracted_text` and `description` to the note text before embedding
+- Merge media `topics` into note `metadata.topics`
 
-Query `llm_usage_events` joined with `profiles` (for display names). The RLS on `llm_usage_events` only allows SELECT for own user — but admin users need to see all. This requires a new RLS policy.
-
-### Database migration
-
-Add an admin SELECT policy on `llm_usage_events`:
-```sql
-CREATE POLICY "Admins can view all usage events"
-ON public.llm_usage_events
-FOR SELECT
-TO authenticated
-USING (is_admin(auth.uid()));
-```
-
-### UI structure (single file: `src/pages/Admin.tsx`)
-
-1. **Modify `CreditsSettingsTab`** to render the existing settings card plus a new `<UsageLogTable />` underneath.
-
-2. **New `UsageLogTable` component** with:
-   - Card titled "LLM Usage Log"
-   - Filters row: user search input (by display name) + model select dropdown (populated from distinct models in data)
-   - Table columns: Time, User, Feature, Model, Prompt Tokens, Completion Tokens, Total Tokens, Source (provider/fallback badge)
-   - Pagination: Previous/Next buttons, 20 rows per page
-   - The "Source" column checks `metadata->usage_source`; if missing, shows "unknown"
-
-3. **Data fetching**: 
-   - Fetch from `llm_usage_events` with `.order("created_at", { ascending: false })` and `.range()` for pagination
-   - Join user names by fetching `profiles` for the user IDs on the current page
-   - Filter by model using `.eq("model", selectedModel)` when set
-   - Filter by user by first looking up matching profile IDs, then filtering with `.in("user_id", matchedIds)`
+### 5. Frontend: trigger analysis on upload + processing indicator
+- Modify `FileUploadHandler.ts` to call `analyze-media` (or `analyze-pdf`) after successful upload
+- Add a subtle processing indicator (pulsing border) on images/PDFs while analysis is pending
+- No blocking — user continues editing while analysis runs in background
 
 ### Files changed
-- `src/pages/Admin.tsx` — add `UsageLogTable` component, update `CreditsSettingsTab` to include it
-- New migration — add admin RLS policy on `llm_usage_events`
-
+- New migration: `media_analysis` table + RLS + indexes
+- New: `supabase/functions/analyze-media/index.ts`
+- New: `supabase/functions/analyze-pdf/index.ts`
+- Modified: `supabase/functions/process-note/index.ts` — include media content in embedding
+- Modified: `src/components/notes/extensions/FileUploadHandler.ts` — trigger analysis after upload
+- Modified: `supabase/config.toml` — add new functions with `verify_jwt = false`
+- UI: Add processing indicator styling for images/PDFs being analyzed
