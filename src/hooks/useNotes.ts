@@ -201,13 +201,15 @@ export function useSemanticSearch() {
       query,
       threshold = 0.5,
       limit = 20,
+      scope = "all",
     }: {
       query: string;
       threshold?: number;
       limit?: number;
+      scope?: "all" | "notes" | "media";
     }): Promise<{ results: SemanticSearchResult[]; mode: string }> => {
       const res = await supabase.functions.invoke("search-notes-semantic", {
-        body: { query, threshold, limit },
+        body: { query, threshold, limit, scope },
       });
       if (res.error) throw res.error;
       // Trigger credits refresh after semantic search
