@@ -1,36 +1,44 @@
 
 
-## Add Markdown Source Mode Toggle to Note Editor
-
-### Overview
-This is straightforward to implement. The TipTap editor already uses the `tiptap-markdown` extension, which provides `editor.storage.markdown.getMarkdown()` to extract raw Markdown from the rich editor. Switching back just means calling `editor.commands.setContent(markdownString)` — the Markdown extension handles the parsing automatically.
+## Add LLM Usage Log Table to Admin AI Credits Tab
 
 ### What changes
 
-**`src/components/notes/NoteEditor.tsx`**
-- Add a `sourceMode` boolean state
-- When toggling to source mode: grab Markdown from editor, store it in a `sourceText` state, show a `<textarea>` instead of the TipTap `<EditorContent>`
-- When toggling back to rich mode: feed the edited Markdown back into the editor via `setContent()`, which the Markdown extension parses
-- Hide the rich-text `EditorToolbar` while in source mode (it doesn't apply to raw text)
-- Add a toggle button (e.g., `<Code2>` icon or a `"Source"` / `"Rich Text"` toggle) in the action toolbar at the top
+Add a new `UsageLogTable` component below the existing `CreditsSettingsTab` card in the "AI Credits" tab. This table displays all `llm_usage_events` entries across all users with filtering, pagination, and usage-source indication.
 
-**`src/components/notes/EditorToolbar.tsx`**
-- No changes needed — it simply won't render when source mode is active
+### Data source
 
-### How the toggle works
-```
-Rich mode → click "Source"
-  1. sourceText = editor.storage.markdown.getMarkdown()
-  2. Show <textarea> with sourceText, hide EditorContent + toolbar
+Query `llm_usage_events` joined with `profiles` (for display names). The RLS on `llm_usage_events` only allows SELECT for own user — but admin users need to see all. This requires a new RLS policy.
 
-Source mode → click "Rich Text"
-  1. editor.commands.setContent(sourceText)  // Markdown ext parses it
-  2. Trigger the normal save debounce
-  3. Show EditorContent + toolbar, hide textarea
+### Database migration
+
+Add an admin SELECT policy on `llm_usage_events`:
+```sql
+CREATE POLICY "Admins can view all usage events"
+ON public.llm_usage_events
+FOR SELECT
+TO authenticated
+USING (is_admin(auth.uid()));
 ```
 
-### Considerations
-- Auto-save continues to work: in source mode, edits to the textarea trigger the same debounced save (storing raw Markdown is fine since the content column already holds Markdown-compatible HTML)
-- The textarea gets the same styling/padding as the editor area for visual consistency
-- Trashed/external notes remain read-only in both modes
+### UI structure (single file: `src/pages/Admin.tsx`)
+
+1. **Modify `CreditsSettingsTab`** to render the existing settings card plus a new `<UsageLogTable />` underneath.
+
+2. **New `UsageLogTable` component** with:
+   - Card titled "LLM Usage Log"
+   - Filters row: user search input (by display name) + model select dropdown (populated from distinct models in data)
+   - Table columns: Time, User, Feature, Model, Prompt Tokens, Completion Tokens, Total Tokens, Source (provider/fallback badge)
+   - Pagination: Previous/Next buttons, 20 rows per page
+   - The "Source" column checks `metadata->usage_source`; if missing, shows "unknown"
+
+3. **Data fetching**: 
+   - Fetch from `llm_usage_events` with `.order("created_at", { ascending: false })` and `.range()` for pagination
+   - Join user names by fetching `profiles` for the user IDs on the current page
+   - Filter by model using `.eq("model", selectedModel)` when set
+   - Filter by user by first looking up matching profile IDs, then filtering with `.in("user_id", matchedIds)`
+
+### Files changed
+- `src/pages/Admin.tsx` — add `UsageLogTable` component, update `CreditsSettingsTab` to include it
+- New migration — add admin RLS policy on `llm_usage_events`
 
