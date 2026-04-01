@@ -9,8 +9,12 @@ import { useProfile } from "@/hooks/useProfile";
 import { CategorySection } from "@/components/profile/CategorySection";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
+import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Profile() {
   const {
