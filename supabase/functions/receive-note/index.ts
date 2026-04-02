@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: app, error: appErr } = await supabase
       .from("connected_apps")
-      .select("user_id, app_name, is_active, permissions")
+      .select("id, user_id, app_name, is_active, permissions, connection_status")
       .eq("api_key", apiKey)
       .single();
 
