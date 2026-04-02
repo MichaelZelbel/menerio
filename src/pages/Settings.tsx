@@ -231,6 +231,7 @@ export default function Settings() {
           <TabsTrigger value="telegram" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5 hidden sm:block" /> Telegram</TabsTrigger>
           <TabsTrigger value="discord" className="gap-1.5 text-xs"><Gamepad2 className="h-3.5 w-3.5 hidden sm:block" /> Discord</TabsTrigger>
           <TabsTrigger value="github" className="gap-1.5 text-xs"><Github className="h-3.5 w-3.5 hidden sm:block" /> GitHub</TabsTrigger>
+          <TabsTrigger value="apikeys" className="gap-1.5 text-xs"><Key className="h-3.5 w-3.5 hidden sm:block" /> API Keys</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
