@@ -24,6 +24,7 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
+import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink } from "@/hooks/useNoteSharing";
 import { useGitHubConnection, useGitHubSyncExport, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { ExternalNotePanel } from "./ExternalNotePanel";
@@ -80,6 +81,10 @@ import {
   Network,
   Code2,
   MessageSquare,
+  Share2,
+  Globe,
+  LinkIcon,
+  Unlink,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -160,6 +165,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
   const createNote = useCreateNote();
+  const shareNote = useShareNote();
+  const unshareNote = useUnshareNote();
+  const copyShareLink = useCopyShareLink();
+  const { data: sharedNote } = useSharedNote(note.id);
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -478,6 +487,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Code2 className="h-4 w-4" />
           </Button>
         )}
+        {sharedNote?.is_active && (
+          <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground">
+            <Globe className="h-3 w-3" /> Shared
+          </Badge>
+        )}
         <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
           <MessageSquare className="h-4 w-4" />
         </Button>
@@ -508,6 +522,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
                 <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
               </DropdownMenuItem>
+              {sharedNote?.is_active ? (
+                <>
+                  <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
+                    <Globe className="mr-2 h-4 w-4" /> Copy Public Link
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => unshareNote.mutate(note.id)}>
+                    <Unlink className="mr-2 h-4 w-4" /> Stop Sharing
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <DropdownMenuItem onClick={() => shareNote.mutate(note.id)} disabled={shareNote.isPending}>
+                  <Share2 className="mr-2 h-4 w-4" /> Share Note
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

@@ -983,6 +983,44 @@ export type Database = {
         }
         Relationships: []
       }
+      shared_notes: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          note_id: string
+          share_token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          note_id: string
+          share_token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          note_id?: string
+          share_token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shared_notes_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: true
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_log: {
         Row: {
           action: string
@@ -1157,6 +1195,7 @@ export type Database = {
             }
             Returns: Json
           }
+      get_shared_note_by_token: { Args: { p_token: string }; Returns: Json }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
