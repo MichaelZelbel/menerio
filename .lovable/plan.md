@@ -1,44 +1,46 @@
-## Enhanced Search Integration & Media Library
 
-### 1. Database: `match_media` RPC function
-Create a new `match_media` RPC (similar to `match_notes`) that searches `media_analysis` embeddings and returns matching entries with their parent note info.
 
-### 2. Edge function: `search-notes-semantic`
-Update to:
-- Accept a `scope` parameter: `"all"` (default), `"notes"`, `"media"`
-- When scope includes media, call `match_media` RPC in parallel with `match_notes`
-- Deduplicate results by note_id, keeping the higher similarity score
-- Return `match_source` field: `"note"`, `"media"`, or `"both"`
-- Include media match details: `media_description`, `media_storage_path`, `media_type`
+# Public Note Sharing (Evernote-style)
 
-### 3. Frontend search types update (`src/hooks/useNotes.ts`)
-- Extend `SemanticSearchResult` with optional `match_source`, `media_description`, `media_storage_path`
-- Pass `scope` parameter to the edge function
+## What it does
+One-click "Share" action on any note that generates a public URL, copies it to clipboard, and makes the note viewable by anyone with the link — no login required.
 
-### 4. Search UI updates (`src/pages/Notes.tsx`)
-- Add a third search scope toggle: "All" / "Notes" / "Media"
-- Pass scope to `semanticSearch.mutate()`
+## Architecture
 
-### 5. Note list updates (`src/components/notes/NoteList.tsx`)
-- For results with `match_source === "media"` or `"both"`, show:
-  - Small image thumbnail from `media_storage_path`
-  - "Matched in image/PDF" label with AI description subtitle
-  - Combined indicator for "both" matches
+### 1. Database: `shared_notes` table + migration
+- `id` (uuid, PK), `note_id` (uuid, FK to notes, unique), `user_id` (uuid, FK to auth.users), `share_token` (text, unique, indexed — short random string), `is_active` (boolean, default true), `created_at`, `updated_at`
+- RLS: authenticated users can manage their own rows
+- A SELECT policy for `anon` role: allow selecting shared_notes + joining to notes where `is_active = true` and token matches (handled via a security-definer function instead)
 
-### 6. Media Library page (`src/pages/MediaLibrary.tsx`)
-- Grid view of all `media_analysis` entries with thumbnails
-- Search bar (semantic, searches media embeddings only)
-- Filter by content_type, date range, topic
-- Status summary: X analyzed, Y pending, Z failed
-- Click to navigate to parent note
-- Add route and sidebar entry
+### 2. Edge function: `get-shared-note`
+- Public endpoint (no auth required)
+- Accepts `token` query param
+- Looks up `shared_notes` by `share_token` where `is_active = true`
+- Fetches the note content (title, content, created_at, updated_at, entity_type, tags) — NOT metadata, embedding, or user_id
+- Returns sanitized note data as JSON
+- Returns 404 if token invalid or share is inactive
 
-### Files changed
-- New migration: `match_media` RPC
-- `supabase/functions/search-notes-semantic/index.ts`
-- `src/hooks/useNotes.ts`
-- `src/pages/Notes.tsx`
-- `src/components/notes/NoteList.tsx`
-- New: `src/pages/MediaLibrary.tsx`
-- `src/App.tsx` — add route
-- `src/components/layout/DashboardSidebar.tsx` — add sidebar item
+### 3. Public viewer page: `/shared/:token`
+- New route outside the dashboard (no auth required), inside `PageLayout`
+- Fetches note via the edge function
+- Renders a read-only view: title, content (rendered from Tiptap-compatible HTML/markdown), tags, date
+- Clean, minimal design with Menerio branding
+- "Powered by Menerio" footer link
+
+### 4. Share action in NoteEditor
+- Add "Share note" `DropdownMenuItem` with a `Share2` icon to the existing overflow menu (next to "Copy Note Link")
+- On click: upsert a row in `shared_notes` with a generated token, copy the public URL to clipboard, show toast "Public link copied to clipboard"
+- If already shared: show "Copy public link" (copies existing URL) and "Stop sharing" (sets `is_active = false`)
+- Small share indicator (globe icon) in the editor header when a note is actively shared
+
+### 5. Share token generation
+- Use a short, URL-friendly random string (e.g., 12-char alphanumeric via `crypto.randomUUID().replace(/-/g, '').slice(0, 12)`)
+
+## Files to create/modify
+- **New migration**: `shared_notes` table
+- **New edge function**: `supabase/functions/get-shared-note/index.ts`
+- **New page**: `src/pages/SharedNote.tsx` — public viewer
+- **Modified**: `src/App.tsx` — add `/shared/:token` route
+- **Modified**: `src/components/notes/NoteEditor.tsx` — add share menu items + share indicator
+- **Modified**: `src/hooks/useNotes.ts` — add share/unshare mutation helpers
+
