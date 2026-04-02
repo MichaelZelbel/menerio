@@ -65,3 +65,18 @@ verify_jwt = false
 
 [functions.get-shared-note]
 verify_jwt = false
+
+[functions.hub-api-keys]
+verify_jwt = false
+
+[functions.hub-api-notes]
+verify_jwt = false
+
+[functions.hub-api-contacts]
+verify_jwt = false
+
+[functions.hub-api-actions]
+verify_jwt = false
+
+[functions.hub-api-stats]
+verify_jwt = false
