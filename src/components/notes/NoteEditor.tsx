@@ -296,7 +296,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         onOpenAutocomplete: (pos: number) => handleOpenAutocomplete(pos),
       }),
     ],
-    content: normalizeNoteContent(note.content),
+    content: (() => {
+      const normalized = normalizeNoteContent(note.content);
+      return note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
+    })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML();
