@@ -24,6 +24,7 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
+import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink } from "@/hooks/useNoteSharing";
 import { useGitHubConnection, useGitHubSyncExport, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { ExternalNotePanel } from "./ExternalNotePanel";
