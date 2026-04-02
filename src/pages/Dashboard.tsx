@@ -41,6 +41,7 @@ const Dashboard = () => {
   const firstCaptures = useShowFirstCaptures();
   const { credits, isLoading: creditsLoading } = useAICredits();
   const { data: notes = [] } = useNotes("all");
+  const profileSummary = useProfileSummary();
   const navigate = useNavigate();
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "there";
   const roleConfig = ROLE_CONFIG[role || "free"];
