@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
-import { ConnectionsManager } from "@/components/settings/ConnectionsManager";
+import { AppIntegrations } from "@/components/settings/AppIntegrations";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
 import { TelegramIntegration } from "@/components/settings/TelegramIntegration";
 import { DiscordIntegration } from "@/components/settings/DiscordIntegration";
@@ -415,7 +415,7 @@ export default function Settings() {
 
         {/* ── Connections Tab ── */}
         <TabsContent value="connections">
-          <ConnectionsManager />
+          <AppIntegrations />
         </TabsContent>
 
         {/* ── MCP Tab ── */}
