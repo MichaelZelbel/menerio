@@ -24,6 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
+import { useProfileSummary } from "@/hooks/useProfileSummary";
 import {
   Sidebar,
   SidebarContent,
