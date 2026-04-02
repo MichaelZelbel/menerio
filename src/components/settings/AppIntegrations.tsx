@@ -288,6 +288,9 @@ export function AppIntegrations() {
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{known.description}</p>
+                        {existing?.connection_status === "pending" && (
+                          <p className="text-xs text-warning mt-0.5">Paste the key in {known.name} to complete setup.</p>
+                        )}
                       </div>
                     </div>
 
