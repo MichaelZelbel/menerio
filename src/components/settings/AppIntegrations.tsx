@@ -272,9 +272,19 @@ export function AppIntegrations() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{known.name}</span>
                           {existing && (
-                            <Badge variant={existing.is_active ? "default" : "secondary"} className="text-[10px] px-1.5">
-                              {existing.is_active ? "Connected" : "Paused"}
-                            </Badge>
+                            existing.connection_status === "pending" ? (
+                              <Badge variant="warning" className="text-[10px] px-1.5">
+                                Awaiting handshake…
+                              </Badge>
+                            ) : !existing.is_active ? (
+                              <Badge variant="secondary" className="text-[10px] px-1.5">
+                                Paused
+                              </Badge>
+                            ) : (
+                              <Badge variant="success" className="text-[10px] px-1.5">
+                                Connected
+                              </Badge>
+                            )
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{known.description}</p>
