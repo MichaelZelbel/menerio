@@ -121,6 +121,7 @@ export default function Profile() {
           </TabsList>
 
           <TabsContent value="profile" className="space-y-3 mt-4">
+            <ProfileCompleteness categories={categories} entries={entries} />
             <ProfileSuggestions
               categories={categories}
               entryCount={entries.length}
