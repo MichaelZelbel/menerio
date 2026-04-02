@@ -92,3 +92,6 @@ verify_jwt = false
 
 [functions.process-note]
 verify_jwt = false
+
+[functions.verify-connection]
+verify_jwt = false

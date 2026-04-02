@@ -356,9 +356,13 @@ export function AppIntegrations() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{app.display_name}</span>
-                          <Badge variant={app.is_active ? "default" : "secondary"} className="text-[10px] px-1.5">
-                            {app.is_active ? "Connected" : "Paused"}
-                          </Badge>
+                          {app.connection_status === "pending" ? (
+                            <Badge variant="warning" className="text-[10px] px-1.5">Awaiting handshake…</Badge>
+                          ) : !app.is_active ? (
+                            <Badge variant="secondary" className="text-[10px] px-1.5">Paused</Badge>
+                          ) : (
+                            <Badge variant="success" className="text-[10px] px-1.5">Connected</Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground font-mono">{app.app_name}</p>
                         {app.webhook_url && (
