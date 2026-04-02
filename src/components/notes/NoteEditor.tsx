@@ -517,6 +517,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
                 <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
               </DropdownMenuItem>
+              {sharedNote?.is_active ? (
+                <>
+                  <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
+                    <Globe className="mr-2 h-4 w-4" /> Copy Public Link
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => unshareNote.mutate(note.id)}>
+                    <Unlink className="mr-2 h-4 w-4" /> Stop Sharing
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <DropdownMenuItem onClick={() => shareNote.mutate(note.id)} disabled={shareNote.isPending}>
+                  <Share2 className="mr-2 h-4 w-4" /> Share Note
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
