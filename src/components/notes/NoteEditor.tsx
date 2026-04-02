@@ -344,7 +344,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     // Restore chat messages for this note (or empty)
     setChatMessages(chatMessagesRef.current.get(note.id) || []);
     if (processTimer.current) clearTimeout(processTimer.current);
-    const normalizedContent = normalizeNoteContent(note.content);
+    let normalizedContent = normalizeNoteContent(note.content);
+    if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
     if (editor && normalizedContent !== editor.getHTML()) {
       editor.commands.setContent(normalizedContent);
     }
