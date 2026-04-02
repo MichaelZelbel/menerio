@@ -72,6 +72,8 @@ const App = () => (
                     <Route path="/impressum" element={<Impressum />} />
                   </Route>
 
+                  <Route path="/shared/:token" element={<SharedNote />} />
+
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   <Route
