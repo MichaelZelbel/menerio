@@ -85,6 +85,7 @@ interface ConnectedApp {
   api_key: string;
   webhook_url: string | null;
   is_active: boolean;
+  connection_status: "pending" | "active" | "revoked";
   permissions: { can_push_notes: boolean; can_receive_patches: boolean };
   created_at: string;
   updated_at: string;
