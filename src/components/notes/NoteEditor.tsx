@@ -681,11 +681,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </div>
       )}
 
-      {/* External note panel */}
+      {/* External note panel — collapsed by default */}
       {note.is_external && (
-        <div className="shrink-0 border-t border-border px-4 py-4 overflow-y-auto max-h-[40%] bg-muted/20">
-          <ExternalNotePanel note={note} />
-        </div>
+        <details className="shrink-0 border-t border-border bg-muted/20 group">
+          <summary className="px-4 py-2 cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground select-none flex items-center gap-1.5">
+            <span className="transition-transform group-open:rotate-90">▶</span>
+            Data from {note.source_app || "external app"}
+          </summary>
+          <div className="px-4 pb-4 overflow-y-auto max-h-[30%]">
+            <ExternalNotePanel note={note} />
+          </div>
+        </details>
       )}
 
       {/* Backlinks panel */}
