@@ -85,9 +85,6 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
       {/* Source app header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-foreground">
-            Daten aus {note.source_app}
-          </h3>
           <Badge
             variant="outline"
             className={SYNC_COLORS[note.sync_status] || ""}
@@ -109,7 +106,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
             onClick={() => window.open(note.source_url!, "_blank")}
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            In {note.source_app} öffnen
+            Open in {note.source_app}
           </Button>
         )}
       </div>
@@ -117,7 +114,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
       {/* Reject reason */}
       {note.sync_status === "rejected" && rejectReason && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-          <strong>Abgelehnt:</strong> {rejectReason}
+          <strong>Rejected:</strong> {rejectReason}
         </div>
       )}
 
@@ -201,7 +198,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
           <Separator />
           <div>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Verknüpfungen
+              Related Items
             </h4>
             <div className="space-y-1.5">
               {related.map((item, i) => {
