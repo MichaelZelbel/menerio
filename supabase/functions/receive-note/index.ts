@@ -100,6 +100,7 @@ Deno.serve(async (req: Request) => {
         return json({ error: updateErr.message }, 500);
       }
 
+      triggerProcessNote(existing.id);
       return json({ action: "updated", note_id: existing.id }, 200);
     } else {
       // INSERT
@@ -114,6 +115,7 @@ Deno.serve(async (req: Request) => {
         return json({ error: insertErr.message }, 500);
       }
 
+      triggerProcessNote(inserted.id);
       return json({ action: "created", note_id: inserted.id }, 201);
     }
   } catch (err) {
@@ -121,3 +123,14 @@ Deno.serve(async (req: Request) => {
     return json({ error: err.message || "Internal error" }, 500);
   }
 });
+
+function triggerProcessNote(noteId: string) {
+  fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ note_id: noteId }),
+  }).catch((err) => console.error("process-note trigger error:", err));
+}
