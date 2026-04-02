@@ -23,6 +23,21 @@ export function normalizeNoteContent(content: string | null | undefined): string
   return decoded;
 }
 
+/**
+ * Strip a leading H1 from HTML content if its text matches the note title.
+ * Prevents the doubled-headline problem for synced notes.
+ */
+export function stripLeadingH1(html: string, title: string): string {
+  if (!html || !title) return html;
+  const match = html.match(/^<h1[^>]*>([\s\S]*?)<\/h1>\s*/i);
+  if (!match) return html;
+  const h1Text = match[1].replace(/<[^>]+>/g, "").trim();
+  if (h1Text.toLowerCase() === title.trim().toLowerCase()) {
+    return html.slice(match[0].length);
+  }
+  return html;
+}
+
 export function getNotePreviewText(content: string | null | undefined, maxLen = 80): string {
   const normalized = normalizeNoteContent(content);
 
