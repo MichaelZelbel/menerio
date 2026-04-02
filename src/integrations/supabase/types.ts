@@ -558,6 +558,38 @@ export type Database = {
         }
         Relationships: []
       }
+      hub_api_usage: {
+        Row: {
+          created_at: string | null
+          id: string
+          key_id: string
+          request_count: number
+          window_start: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          key_id: string
+          request_count?: number
+          window_start: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          key_id?: string
+          request_count?: number
+          window_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hub_api_usage_key_id_fkey"
+            columns: ["key_id"]
+            isOneToOne: false
+            referencedRelation: "hub_api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       llm_usage_events: {
         Row: {
           completion_tokens: number
