@@ -415,7 +415,7 @@ export default function Settings() {
 
         {/* ── Connections Tab ── */}
         <TabsContent value="connections">
-          <ConnectionsManager />
+          <AppIntegrations />
         </TabsContent>
 
         {/* ── MCP Tab ── */}

@@ -428,7 +428,7 @@ export function AppIntegrations() {
                 {newApiKey}
               </code>
               <Button variant="outline" size="icon" onClick={() => newApiKey && handleCopy(newApiKey)}>
-                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
