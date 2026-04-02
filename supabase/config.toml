@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.generate-profile-suggestions]
 verify_jwt = false
+
+[functions.get-shared-note]
+verify_jwt = false

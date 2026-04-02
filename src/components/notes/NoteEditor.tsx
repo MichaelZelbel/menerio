@@ -487,6 +487,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Code2 className="h-4 w-4" />
           </Button>
         )}
+        {sharedNote?.is_active && (
+          <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground">
+            <Globe className="h-3 w-3" /> Shared
+          </Badge>
+        )}
         <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
           <MessageSquare className="h-4 w-4" />
         </Button>
