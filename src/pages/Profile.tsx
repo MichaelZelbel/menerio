@@ -10,6 +10,7 @@ import { CategorySection } from "@/components/profile/CategorySection";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
 import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
+import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
 import { useQuery } from "@tanstack/react-query";
