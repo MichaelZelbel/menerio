@@ -165,6 +165,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
   const createNote = useCreateNote();
+  const shareNote = useShareNote();
+  const unshareNote = useUnshareNote();
+  const copyShareLink = useCopyShareLink();
+  const { data: sharedNote } = useSharedNote(note.id);
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
   const navigate = useNavigate();
