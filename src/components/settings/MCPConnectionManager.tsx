@@ -51,6 +51,16 @@ export function MCPConnectionManager() {
 
   return (
     <div className="space-y-6">
+      {/* Profile tip */}
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 flex items-start gap-2.5 text-sm">
+        <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        <p className="text-muted-foreground">
+          <span className="font-medium text-foreground">Tip:</span> Make sure your{" "}
+          <a href="/dashboard/profile" className="underline text-primary hover:text-primary/80">profile</a>{" "}
+          is filled in so your new AI tool can understand who you are. The more context it has, the better it works.
+        </p>
+      </div>
+
       {/* Connection URL */}
       <Card>
         <CardHeader>
