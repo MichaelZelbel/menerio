@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
 import { useNotes } from "@/hooks/useNotes";
+import { useProfileSummary } from "@/hooks/useProfileSummary";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { FirstCapturesWizard, useShowFirstCaptures } from "@/components/onboarding/FirstCapturesWizard";
 import { TodaysConnections } from "@/components/dashboard/TodaysConnections";
@@ -25,6 +26,7 @@ import {
   X,
   Crown,
   ArrowRight,
+  User,
 } from "lucide-react";
 
 const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "success" | "info" | "warning" }> = {
