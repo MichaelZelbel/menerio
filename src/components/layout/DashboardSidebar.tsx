@@ -129,6 +129,9 @@ export function DashboardSidebar() {
                     <NavLink to={item.url}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.title === "My Profile" && !collapsed && (
+                        <span className={`ml-auto h-2 w-2 rounded-full ${profileDotColor}`} />
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
