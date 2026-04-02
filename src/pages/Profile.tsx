@@ -10,6 +10,7 @@ import { CategorySection } from "@/components/profile/CategorySection";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
 import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
+import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
 import { useQuery } from "@tanstack/react-query";
@@ -120,6 +121,7 @@ export default function Profile() {
           </TabsList>
 
           <TabsContent value="profile" className="space-y-3 mt-4">
+            <ProfileCompleteness categories={categories} entries={entries} />
             <ProfileSuggestions
               categories={categories}
               entryCount={entries.length}

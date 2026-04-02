@@ -24,6 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
+import { useProfileSummary } from "@/hooks/useProfileSummary";
 import {
   Sidebar,
   SidebarContent,
@@ -45,6 +46,10 @@ export function DashboardSidebar() {
   const location = useLocation();
   const { role } = useAuth();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
+  const { completeness } = useProfileSummary();
+
+  const profileDotColor =
+    completeness < 30 ? "bg-destructive" : completeness < 70 ? "bg-yellow-500" : "bg-green-500";
 
   const isActive = (path: string) =>
     path === "/dashboard"
@@ -124,6 +129,9 @@ export function DashboardSidebar() {
                     <NavLink to={item.url}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.title === "My Profile" && !collapsed && (
+                        <span className={`ml-auto h-2 w-2 rounded-full ${profileDotColor}`} />
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
