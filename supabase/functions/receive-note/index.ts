@@ -42,6 +42,18 @@ Deno.serve(async (req: Request) => {
       return json({ error: "unauthorized — app is deactivated" }, 401);
     }
 
+    // Fallback handshake: upgrade pending → active on first successful sync
+    const connStatus = (app as any).connection_status;
+    if (connStatus === "revoked") {
+      return json({ error: "connection has been revoked" }, 401);
+    }
+    if (connStatus === "pending") {
+      await supabase
+        .from("connected_apps")
+        .update({ connection_status: "active" })
+        .eq("id", (app as any).id);
+    }
+
     const permissions = app.permissions as Record<string, boolean> | null;
     if (permissions && permissions.can_push_notes === false) {
       return json({ error: "forbidden — app does not have push permission" }, 403);
