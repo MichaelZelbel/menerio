@@ -1,95 +1,66 @@
 
 
-# Beta Readiness: Querino → Menerio One-Way Sync
+# Automatic Handshake: Querino ↔ Menerio Connection Verification
 
-## Current State
+## Concept
 
-The integration is **almost fully built** across both projects. Querino has complete sync infrastructure (queue, rendering, UI). Menerio has the `receive-note` endpoint and full external note display. The gap is small but critical.
+The current flow creates a `connected_apps` row the moment the user clicks "Connect." Instead, we keep that behavior (the row is created with a new status field), but the app shows as **"Waiting for handshake"** until Querino actually verifies the key. Once Querino pastes the key and calls a new `verify-connection` endpoint on Menerio, both sides confirm the link and show "Connected."
 
-## What's Missing (Menerio side only)
+## Flow
 
-### 1. Register `receive-note` in `supabase/config.toml`
-
-The edge function file exists but is **not registered** in `config.toml`, so it won't deploy. Add:
-
-```toml
-[functions.receive-note]
-verify_jwt = false
+```text
+Menerio                              Querino
+───────                              ───────
+1. User clicks "Connect Querino"
+2. Key generated, row inserted
+   with connection_status = 'pending'
+3. User copies key
+4. User pastes key in Querino settings
+                                     5. Querino calls POST /verify-connection
+                                        with x-api-key header
+6. Menerio validates key,
+   updates connection_status = 'active'
+7. Returns { ok: true, app: "menerio" }
+                                     8. Querino marks its side as connected
+9. Menerio UI polls/refetches,
+   shows "Connected" ✓
 ```
 
-Also register `send-patch` and `patch-response` if you want the full bidirectional flow later:
+## Changes
 
-```toml
-[functions.send-patch]
-verify_jwt = false
+### 1. Database migration: Add `connection_status` column to `connected_apps`
 
-[functions.patch-response]
-verify_jwt = false
-```
+Add a new column `connection_status` (text, default `'pending'`) with allowed values: `pending`, `active`, `revoked`. The existing `is_active` column controls pause/unpause; `connection_status` tracks whether the handshake completed.
 
-### 2. Add a unique index for upsert deduplication
+### 2. New edge function: `verify-connection`
 
-The `receive-note` function does manual SELECT-then-INSERT/UPDATE to upsert by `(user_id, source_app, source_id)`. This works but is not race-safe. Add a unique index:
+**File: `supabase/functions/verify-connection/index.ts`**
 
-```sql
-CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_source_dedup
-ON notes (user_id, source_app, source_id)
-WHERE source_app IS NOT NULL AND source_id IS NOT NULL;
-```
+- Accepts POST with `x-api-key` header (same as `receive-note`)
+- Looks up the key in `connected_apps`
+- If found and `connection_status` is `pending`: updates to `active`, returns `{ ok: true, app_name: "menerio", user_display_name: <profile display_name> }`
+- If already `active`: returns `{ ok: true, already_connected: true }`
+- If not found or revoked: returns 401
+- This is the "handshake" endpoint Querino calls immediately after the user pastes the key
 
-This also enables switching to a proper `ON CONFLICT` upsert later.
+### 3. Update `AppIntegrations.tsx` UI
 
-### 3. Trigger `process-note` after receiving external notes
+- Show three visual states based on `connection_status`:
+  - `pending` → amber badge "Awaiting handshake" with a hint ("Paste the key in Querino to complete setup")
+  - `active` → green badge "Connected" (current behavior for `is_active`)
+  - Not connected → "Connect" button (current behavior)
+- Add `refetchInterval: 5000` to the query so it auto-refreshes while any app is in `pending` state (stops polling once all are `active` or disconnected)
+- The existing "Paused" badge remains for `is_active === false` on an `active` connection
 
-Currently `receive-note` creates the note but does **not** trigger embedding generation or metadata extraction. The `hub-api-notes` POST endpoint does this. Add a background call to `process-note` after insert/update in `receive-note`:
+### 4. Update `receive-note` to also accept `pending` connections
 
-```typescript
-// After successful insert or update:
-fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({ noteId: noteId, userId }),
-}).catch(() => {});
-```
+Currently `receive-note` checks `is_active`. It should also allow `connection_status = 'pending'` keys — the first successful `receive-note` call could also upgrade `pending` → `active` as a fallback handshake path (so even if `verify-connection` isn't called explicitly, the first real sync completes the handshake).
 
-This ensures external notes get embeddings and appear in semantic search and the knowledge graph.
+### 5. Querino-side context (for when you work on Querino)
 
-### 4. Set up a `connected_apps` entry for Querino
+Querino needs to call `POST https://tjeapelvjlmbxafsmjef.supabase.co/functions/v1/verify-connection` with the `x-api-key` header when the user saves their Menerio key. If the response is `{ ok: true }`, Querino marks its integration as connected. This is a Querino change, noted here for reference.
 
-The user needs a way to create a connected app entry for Querino. The `ConnectionsManager` component in Settings already provides this UI (separate from the Hub API Keys system). The user:
-1. Goes to Settings → Connections
-2. Creates a new app called "Querino" 
-3. Copies the generated API key
-4. Pastes it into Querino's Menerio integration settings
+## Summary
 
-No code change needed — just user action.
-
-## What Does NOT Need to Change
-
-- **Querino**: Fully implemented. `render-for-menerio`, `process-menerio-sync-queue`, sync queue, bulk sync UI, per-artifact sync buttons — all done.
-- **Menerio `receive-note`**: Logic is correct — validates `x-api-key`, checks `connected_apps`, upserts notes with `is_external: true`, `source_app`, `source_id`.
-- **Menerio note display**: `ExternalNotePanel`, `NoteEditor` read-only mode for external notes, `NoteList` source_app badge — all working.
-- **Menerio `send-patch` / `patch-response`**: Already built for future bidirectional sync.
-
-## Summary of Changes
-
-| Change | File | Effort |
-|--------|------|--------|
-| Register `receive-note` in config | `supabase/config.toml` | 1 line |
-| Register `send-patch` + `patch-response` | `supabase/config.toml` | 2 lines |
-| Add source dedup index | New migration | 3 lines SQL |
-| Add `process-note` trigger in `receive-note` | `supabase/functions/receive-note/index.ts` | ~10 lines |
-
-Total: ~15 lines of code changes. Everything else is already built.
-
-## Technical Detail
-
-The two auth systems coexist intentionally:
-- **Connected Apps** (`x-api-key` + `connected_apps` table): Used by spoke apps like Querino for note push/sync. Plaintext key, simple.
-- **Hub API Keys** (`Bearer mnr_...` + `hub_api_keys` table): Used by external integrations needing scoped REST access (profile, notes, contacts, etc.). SHA-256 hashed, scoped.
-
-Querino uses the Connected Apps system, which is correct for its use case.
+No user-facing "webhook URL" fields. No manual "I'm connected" toggles. The user clicks Connect in Menerio, copies a key, pastes it in Querino, and both apps automatically confirm the link. Three files touched in Menerio: one migration, one new edge function, one UI component update.
 
