@@ -443,6 +443,11 @@ export default function Settings() {
           <GitHubSyncSettings />
         </TabsContent>
 
+        {/* ── API Keys Tab ── */}
+        <TabsContent value="apikeys">
+          <ApiKeysManager />
+        </TabsContent>
+
         {/* ── Danger Zone Tab ── */}
         <TabsContent value="danger">
           <Card className="border-destructive/30">
