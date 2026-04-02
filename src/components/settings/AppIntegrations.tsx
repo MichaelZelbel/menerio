@@ -112,12 +112,13 @@ export function AppIntegrations() {
   const [customDisplayName, setCustomDisplayName] = useState("");
   const [customWebhookUrl, setCustomWebhookUrl] = useState("");
 
-  const hasPending = apps.some((a) => a.connection_status === "pending");
-
   const { data: apps = [], isLoading } = useQuery<ConnectedApp[]>({
     queryKey: ["connected_apps", user?.id],
     enabled: !!user,
-    refetchInterval: hasPending ? 5000 : false,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.some((a) => a.connection_status === "pending") ? 5000 : false;
+    },
     queryFn: async () => {
       const { data, error } = await supabase
         .from("connected_apps" as any)
