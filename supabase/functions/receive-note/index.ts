@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: app, error: appErr } = await supabase
       .from("connected_apps")
-      .select("user_id, app_name, is_active, permissions")
+      .select("id, user_id, app_name, is_active, permissions, connection_status")
       .eq("api_key", apiKey)
       .single();
 
@@ -40,6 +40,18 @@ Deno.serve(async (req: Request) => {
     }
     if (!app.is_active) {
       return json({ error: "unauthorized — app is deactivated" }, 401);
+    }
+
+    // Fallback handshake: upgrade pending → active on first successful sync
+    const connStatus = (app as any).connection_status;
+    if (connStatus === "revoked") {
+      return json({ error: "connection has been revoked" }, 401);
+    }
+    if (connStatus === "pending") {
+      await supabase
+        .from("connected_apps")
+        .update({ connection_status: "active" })
+        .eq("id", (app as any).id);
     }
 
     const permissions = app.permissions as Record<string, boolean> | null;

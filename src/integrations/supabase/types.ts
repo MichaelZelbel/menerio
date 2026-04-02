@@ -206,6 +206,7 @@ export type Database = {
         Row: {
           api_key: string
           app_name: string
+          connection_status: string
           created_at: string | null
           display_name: string
           id: string
@@ -218,6 +219,7 @@ export type Database = {
         Insert: {
           api_key: string
           app_name: string
+          connection_status?: string
           created_at?: string | null
           display_name: string
           id?: string
@@ -230,6 +232,7 @@ export type Database = {
         Update: {
           api_key?: string
           app_name?: string
+          connection_status?: string
           created_at?: string | null
           display_name?: string
           id?: string

@@ -85,6 +85,7 @@ interface ConnectedApp {
   api_key: string;
   webhook_url: string | null;
   is_active: boolean;
+  connection_status: "pending" | "active" | "revoked";
   permissions: { can_push_notes: boolean; can_receive_patches: boolean };
   created_at: string;
   updated_at: string;
@@ -114,6 +115,10 @@ export function AppIntegrations() {
   const { data: apps = [], isLoading } = useQuery<ConnectedApp[]>({
     queryKey: ["connected_apps", user?.id],
     enabled: !!user,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.some((a) => a.connection_status === "pending") ? 5000 : false;
+    },
     queryFn: async () => {
       const { data, error } = await supabase
         .from("connected_apps" as any)
@@ -267,12 +272,25 @@ export function AppIntegrations() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{known.name}</span>
                           {existing && (
-                            <Badge variant={existing.is_active ? "default" : "secondary"} className="text-[10px] px-1.5">
-                              {existing.is_active ? "Connected" : "Paused"}
-                            </Badge>
+                            existing.connection_status === "pending" ? (
+                              <Badge variant="warning" className="text-[10px] px-1.5">
+                                Awaiting handshake…
+                              </Badge>
+                            ) : !existing.is_active ? (
+                              <Badge variant="secondary" className="text-[10px] px-1.5">
+                                Paused
+                              </Badge>
+                            ) : (
+                              <Badge variant="success" className="text-[10px] px-1.5">
+                                Connected
+                              </Badge>
+                            )
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{known.description}</p>
+                        {existing?.connection_status === "pending" && (
+                          <p className="text-xs text-warning mt-0.5">Paste the key in {known.name} to complete setup.</p>
+                        )}
                       </div>
                     </div>
 
@@ -338,9 +356,13 @@ export function AppIntegrations() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{app.display_name}</span>
-                          <Badge variant={app.is_active ? "default" : "secondary"} className="text-[10px] px-1.5">
-                            {app.is_active ? "Connected" : "Paused"}
-                          </Badge>
+                          {app.connection_status === "pending" ? (
+                            <Badge variant="warning" className="text-[10px] px-1.5">Awaiting handshake…</Badge>
+                          ) : !app.is_active ? (
+                            <Badge variant="secondary" className="text-[10px] px-1.5">Paused</Badge>
+                          ) : (
+                            <Badge variant="success" className="text-[10px] px-1.5">Connected</Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground font-mono">{app.app_name}</p>
                         {app.webhook_url && (
