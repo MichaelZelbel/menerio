@@ -40,10 +40,8 @@ export default function ReviewQueue() {
         headline: item.payload.headline || item.title,
         description: item.payload.description || "",
         happened_at: item.payload.happened_at || new Date().toISOString().slice(0, 16),
-        people_names: item.payload.people_names || [],
-        emotion_valence: item.payload.emotion_valence ?? 0.5,
-        category: item.payload.category || "life",
-        target_app: type === "add_event_cherishly" ? "cherishly" : "temerio",
+        status: "past_fact",
+        participants: item.payload.people_names || [],
       };
       setEventDraft(draft);
       setActiveItemId(item.id);
