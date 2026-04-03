@@ -1057,6 +1057,53 @@ export type Database = {
         }
         Relationships: []
       }
+      review_queue: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          payload: Json
+          reviewed_at: string | null
+          source_note_id: string | null
+          status: string
+          suggestion_type: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          payload?: Json
+          reviewed_at?: string | null
+          source_note_id?: string | null
+          status?: string
+          suggestion_type: string
+          title: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          payload?: Json
+          reviewed_at?: string | null
+          source_note_id?: string | null
+          status?: string
+          suggestion_type?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_queue_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shared_notes: {
         Row: {
           created_at: string
