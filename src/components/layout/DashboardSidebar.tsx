@@ -50,6 +50,7 @@ export function DashboardSidebar() {
   const { role } = useAuth();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const { completeness } = useProfileSummary();
+  const { pendingCount } = useReviewQueue();
 
   const profileDotColor =
     completeness < 30 ? "bg-destructive" : completeness < 70 ? "bg-yellow-500" : "bg-green-500";
