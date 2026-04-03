@@ -103,6 +103,7 @@ const App = () => (
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="people" element={<People />} />
                     <Route path="actions" element={<Actions />} />
+                    <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
