@@ -708,6 +708,7 @@ export const docCategories: DocCategory[] = [
     pages: [
       { slug: "contacts-crm", title: "People & Contacts" },
       { slug: "action-items", title: "Action Items" },
+      { slug: "review-queue", title: "Review Queue" },
     ],
   },
   {
