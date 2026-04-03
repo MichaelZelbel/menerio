@@ -64,13 +64,14 @@ export default function ReviewQueue() {
     showToast.info("Suggestion dismissed");
   };
 
-  const handleEventSent = () => {
+  const handleEventDialogClose = () => {
+    // Mark as accepted when dialog closes (user either sent or cancelled)
     if (activeItemId) {
       updateStatus.mutate({ id: activeItemId, status: "accepted" });
-      setActiveItemId(null);
     }
     setEventDialogOpen(false);
     setEventDraft(null);
+    setActiveItemId(null);
   };
 
   if (isLoading) {
