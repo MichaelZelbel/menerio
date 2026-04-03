@@ -33,7 +33,7 @@ export default function ReviewQueue() {
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
 
-  const handleAccept = (item: ReviewItem) => {
+  const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
     if (type === "add_event_temerio" || type === "add_event_cherishly") {
