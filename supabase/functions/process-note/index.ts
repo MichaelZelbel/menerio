@@ -27,6 +27,121 @@ const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JS
 - "summary": one-sentence summary of the note
 Only extract what's explicitly there. Don't invent details.`;
 
+/* ── Review Queue suggestion generator ── */
+async function generateReviewItems(
+  userId: string,
+  noteId: string,
+  noteTitle: string,
+  metadata: Record<string, unknown>,
+) {
+  try {
+    const people = Array.isArray(metadata.people) ? (metadata.people as string[]) : [];
+    const dates = Array.isArray(metadata.dates_mentioned) ? (metadata.dates_mentioned as string[]) : [];
+    const noteType = metadata.type as string | undefined;
+    const summary = (metadata.summary as string) || noteTitle;
+
+    const suggestions: Array<{
+      user_id: string;
+      source_note_id: string;
+      suggestion_type: string;
+      title: string;
+      description: string;
+      payload: Record<string, unknown>;
+      status: string;
+    }> = [];
+
+    // Check which apps are connected
+    const { data: connectedApps } = await supabase
+      .from("connected_apps")
+      .select("app_name")
+      .eq("user_id", userId)
+      .eq("connection_status", "active")
+      .eq("is_active", true);
+
+    const activeApps = new Set((connectedApps || []).map((a: any) => a.app_name));
+
+    // Event detection: dates + people → suggest Temerio / Cherishly
+    if (dates.length > 0 && (people.length > 0 || noteType === "meeting_note")) {
+      const headline = noteTitle || summary;
+      const happened_at = dates[0] + "T12:00";
+
+      if (activeApps.has("temerio")) {
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_event_temerio",
+          title: `Add "${headline}" as a Temerio event`,
+          description: `Detected date ${dates[0]} and people: ${people.join(", ") || "—"}. This looks like an event worth tracking.`,
+          payload: {
+            headline,
+            description: summary,
+            happened_at,
+            people_names: people,
+            emotion_valence: 0.7,
+            category: "life",
+          },
+          status: "pending",
+        });
+      }
+
+      if (activeApps.has("cherishly")) {
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_event_cherishly",
+          title: `Add "${headline}" to Cherishly`,
+          description: `A moment with ${people.join(", ") || "someone special"} on ${dates[0]}. Save it as a cherished memory?`,
+          payload: {
+            headline,
+            description: summary,
+            happened_at,
+            people_names: people,
+            emotion_valence: 0.8,
+            category: "life",
+          },
+          status: "pending",
+        });
+      }
+    }
+
+    // Person detection: check if mentioned people exist as contacts
+    if (people.length > 0) {
+      const { data: existingContacts } = await supabase
+        .from("contacts")
+        .select("name")
+        .eq("user_id", userId);
+
+      const existingNames = new Set(
+        (existingContacts || []).map((c: any) => c.name.toLowerCase()),
+      );
+
+      for (const person of people) {
+        if (!existingNames.has(person.toLowerCase())) {
+          suggestions.push({
+            user_id: userId,
+            source_note_id: noteId,
+            suggestion_type: "add_contact",
+            title: `Add "${person}" to your People`,
+            description: `${person} was mentioned in "${noteTitle}" but isn't in your contacts yet.`,
+            payload: { name: person },
+            status: "pending",
+          });
+        }
+      }
+    }
+
+    // Insert all suggestions
+    if (suggestions.length > 0) {
+      const { error } = await supabase.from("review_queue").insert(suggestions);
+      if (error) console.error("review_queue insert error:", error);
+      else console.log(`Created ${suggestions.length} review suggestions for note ${noteId}`);
+    }
+  } catch (err) {
+    console.error("generateReviewItems error:", err);
+  }
+}
+
+/* ── Main background processor ── */
 async function processInBackground(noteId: string, authHeader: string) {
   try {
     const { data: note, error: fetchErr } = await supabase
@@ -157,6 +272,9 @@ async function processInBackground(noteId: string, authHeader: string) {
       if (aiError) console.error("Action items insert error:", aiError);
     }
 
+    // Generate review queue suggestions (no extra LLM calls)
+    await generateReviewItems(note.user_id, noteId, note.title, metadata);
+
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
     fetch(computeUrl, {
@@ -196,11 +314,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // Offload heavy work to background using EdgeRuntime.waitUntil
     // @ts-ignore EdgeRuntime is available in Supabase edge functions
     EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
 
-    // Return immediately
     return new Response(JSON.stringify({ ok: true, processing: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
