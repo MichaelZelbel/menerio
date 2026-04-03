@@ -16,6 +16,7 @@ import {
   ListChecks,
   Network,
   Image,
+  BookOpen,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
@@ -74,6 +75,7 @@ export function DashboardSidebar() {
     { title: "My Profile", url: "/dashboard/profile", icon: User },
     { title: "Settings", url: "/dashboard/settings", icon: Settings },
     { title: "Connect AI", url: "/dashboard/settings?tab=mcp", icon: Plug },
+    { title: "Documentation", url: "/docs", icon: BookOpen },
   ];
 
   return (
