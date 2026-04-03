@@ -594,8 +594,52 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </div>
       )}
 
-      {/* Rich text formatting toolbar */}
-      {!note.is_trashed && !sourceMode && <EditorToolbar editor={editor} />}
+      {/* Rich text formatting toolbar — hidden for external read-only notes */}
+      {!note.is_trashed && !sourceMode && !note.is_external && <EditorToolbar editor={editor} />}
+
+      {/* Read-only action bar for external notes */}
+      {!note.is_trashed && note.is_external && (
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/50">
+          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">
+            Read-only · Synced from <span className="font-medium text-foreground">{note.source_app || "external app"}</span>
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {note.source_url && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1.5"
+                onClick={() => window.open(note.source_url!, "_blank")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open in {note.source_app || "App"}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1.5"
+              onClick={async () => {
+                try {
+                  const newNote = await createNote.mutateAsync({
+                    title: `${note.title} (copy)`,
+                    content: editor?.getHTML() || note.content,
+                    tags: note.tags || [],
+                  });
+                  showToast.success("Duplicated to a local note");
+                  navigate(`/notes?id=${newNote.id}`);
+                } catch {
+                  showToast.error("Failed to duplicate note");
+                }
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Duplicate to Menerio
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Smart Tags / Metadata editor */}
       {!note.is_trashed && (
