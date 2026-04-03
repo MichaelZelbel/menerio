@@ -101,3 +101,6 @@ verify_jwt = false
 
 [functions.receive-profile]
 verify_jwt = false
+
+[functions.search-notes-semantic]
+verify_jwt = false
