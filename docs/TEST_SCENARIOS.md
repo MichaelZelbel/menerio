@@ -268,6 +268,46 @@
   3. Wait for processing to complete
 - **Expected Outcome:** Note metadata is populated: entity_type, tags, topics, people, sentiment, summary. Smart Tags panel shows extracted data. AI credits are deducted.
 
+### TS-NOTES-014: External Note — Read-Only Toolbar
+
+- **Objective:** Validate that external (synced) notes show a simplified read-only action bar instead of the full editor toolbar
+- **Preconditions:** An external note exists (synced from Planinio, Querino, or another connected app via `receive-note`)
+- **Steps:**
+  1. Navigate to `/dashboard/notes`
+  2. Select an external note (identified by the orange source-app badge)
+  3. Observe the toolbar area above the editor content
+- **Expected Outcome:** No rich-text formatting toolbar (bold, italic, headings, etc.) is shown. Instead, a read-only bar displays: 🔒 lock icon, "Read-only · Synced from {source_app}" label, "Open in {app}" button (if `source_url` exists), and "Duplicate to Menerio" button.
+
+### TS-NOTES-015: External Note — Open in Source App
+
+- **Objective:** Validate one-click jump to the originating app
+- **Preconditions:** An external note with a `source_url` exists
+- **Steps:**
+  1. Open the external note
+  2. Click "Open in {app}" button in the read-only bar
+- **Expected Outcome:** A new browser tab opens with the `source_url`, navigating to the note in the originating app (e.g., Planinio, Querino).
+
+### TS-NOTES-016: External Note — Duplicate to Local Note
+
+- **Objective:** Validate duplicating an external note to create a local editable copy
+- **Preconditions:** An external note exists
+- **Steps:**
+  1. Open the external note
+  2. Click "Duplicate to Menerio" in the read-only bar
+  3. Wait for the duplication to complete
+- **Expected Outcome:** Toast "Duplicated to a local note" appears. User is navigated to the new note. The new note title is "{original title} (copy)", has the same content and tags, and is NOT external (full editor toolbar is visible, note is editable).
+
+### TS-NOTES-017: External Note — Structured Fields & Patch
+
+- **Objective:** Validate the External Note Panel for viewing/editing structured fields
+- **Preconditions:** An external note with structured fields exists
+- **Steps:**
+  1. Open the external note
+  2. Scroll to the External Note Panel (sync status, structured fields, related items)
+  3. Click the pencil icon next to a structured field
+  4. Edit the value and press Enter
+- **Expected Outcome:** A patch request is sent to the source app. Loading spinner appears during the request. Success toast confirms the patch was sent.
+
 ---
 
 ## Section 3: Note Sharing
