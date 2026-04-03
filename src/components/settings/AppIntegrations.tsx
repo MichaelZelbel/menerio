@@ -73,6 +73,14 @@ const KNOWN_APPS: KnownApp[] = [
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "💝",
   },
+  {
+    id: "clarinio",
+    name: "Clarinio",
+    description: "Personal profile mirror — two-way sync of your profile data.",
+    supabaseUrl: "https://clarinio.supabase.co",
+    webhookPath: "/functions/v1/menerio-webhook",
+    icon: "🪞",
+  },
 ];
 
 /* ────────────────────────────── Types ────────────────────────────── */
