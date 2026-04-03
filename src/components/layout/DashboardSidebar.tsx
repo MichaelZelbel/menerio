@@ -16,6 +16,7 @@ import {
   ListChecks,
   Network,
   Image,
+  BookOpen,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
