@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateEventDialog, type EventDraft } from "@/components/notes/CreateEventDialog";
 import { showToast } from "@/lib/toast";
+import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import {
   CalendarDays,
@@ -32,7 +33,7 @@ export default function ReviewQueue() {
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
 
-  const handleAccept = (item: ReviewItem) => {
+  const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
     if (type === "add_event_temerio" || type === "add_event_cherishly") {
@@ -50,8 +51,19 @@ export default function ReviewQueue() {
     }
 
     if (type === "add_contact") {
+      const name = (item.payload.name as string) || "";
+      if (!name) {
+        showToast.error("No name found in suggestion");
+        return;
+      }
+      // Insert the contact directly
+      const { error } = await supabase.from("contacts").insert({ name });
+      if (error) {
+        showToast.error("Failed to add contact: " + error.message);
+        return;
+      }
       updateStatus.mutate({ id: item.id, status: "accepted" });
-      navigate(`/dashboard/people?prefill=${encodeURIComponent(item.payload.name || "")}`);
+      showToast.success(`Added "${name}" to your People`);
       return;
     }
 
