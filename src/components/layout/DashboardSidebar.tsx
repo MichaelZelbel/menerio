@@ -17,6 +17,7 @@ import {
   Network,
   Image,
   BookOpen,
+  ClipboardList,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { useProfileSummary } from "@/hooks/useProfileSummary";
+import { useReviewQueue } from "@/hooks/useReviewQueue";
 import {
   Sidebar,
   SidebarContent,
