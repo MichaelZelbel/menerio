@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "./DashboardSidebar";
+import { DashboardSearch } from "./DashboardSearch";
 import { QuickCapture } from "@/components/notes/QuickCapture";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -13,7 +14,7 @@ export function DashboardLayout() {
         <div className="flex-1 flex flex-col">
           <header className="h-14 flex items-center gap-4 border-b bg-background px-4">
             <SidebarTrigger />
-            <h2 className="text-sm font-semibold text-foreground">Menerio</h2>
+            <DashboardSearch />
             <div className="ml-auto flex items-center gap-1">
               <NotificationCenter />
               <ThemeToggle />
