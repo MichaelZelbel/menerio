@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateEventDialog, type EventDraft } from "@/components/notes/CreateEventDialog";
 import { showToast } from "@/lib/toast";
+import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import {
   CalendarDays,
