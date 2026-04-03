@@ -176,7 +176,7 @@ const Dashboard = () => {
                   {notes.slice(0, 5).map((note) => (
                     <button
                       key={note.id}
-                      onClick={() => navigate("/dashboard/notes")}
+                      onClick={() => navigate(`/dashboard/notes/${note.id}`)}
                       className="w-full text-left flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
                     >
                       <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
