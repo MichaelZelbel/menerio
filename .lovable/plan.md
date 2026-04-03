@@ -1,66 +1,103 @@
 
 
-# Automatic Handshake: Querino ↔ Menerio Connection Verification
+# One-Way Sync: Planinio → Menerio
 
-## Concept
+## Overview
 
-The current flow creates a `connected_apps` row the moment the user clicks "Connect." Instead, we keep that behavior (the row is created with a new status field), but the app shows as **"Waiting for handshake"** until Querino actually verifies the key. Once Querino pastes the key and calls a new `verify-connection` endpoint on Menerio, both sides confirm the link and show "Connected."
+Sync Planinio's three content types (Ideas, Content/Videos, Posts) into Menerio as notes, with a one-click "Open in Planinio" button to jump back and edit.
 
-## Flow
+## Planinio Data Model (from analysis)
+
+| Planinio Table | Key Fields | Menerio entity_type |
+|---|---|---|
+| `ideas` | working_title, core_concept, angle, format, maturity, hook_variations, constraints | `idea` |
+| `videos` | title, hook, teleprompter_script, content_type, orientation, production_status, on_screen_steps | `document` |
+| `posts` | headline, post_text, platform, content_type, status, hashtags, first_comment, scheduled_at, posted_at | `prompt` |
+
+Planinio Supabase URL: `https://suzqnyvfjbmnoipnlobk.supabase.co`
+Planinio published URL: `https://planino-design-harmony.lovable.app`
+
+Deep-link routes: `/dashboard/ideas`, `/dashboard/content`, `/dashboard/posts`
+
+## Changes in Menerio
+
+### 1. Add Planinio to KNOWN_APPS registry
+
+In `src/components/settings/AppIntegrations.tsx`, add a new entry:
 
 ```text
-Menerio                              Querino
-───────                              ───────
-1. User clicks "Connect Querino"
-2. Key generated, row inserted
-   with connection_status = 'pending'
-3. User copies key
-4. User pastes key in Querino settings
-                                     5. Querino calls POST /verify-connection
-                                        with x-api-key header
-6. Menerio validates key,
-   updates connection_status = 'active'
-7. Returns { ok: true, app: "menerio" }
-                                     8. Querino marks its side as connected
-9. Menerio UI polls/refetches,
-   shows "Connected" ✓
+id: "planinio"
+name: "Planinio"
+description: "Social media studio — syncs ideas, content & posts."
+supabaseUrl: "https://suzqnyvfjbmnoipnlobk.supabase.co"
+webhookPath: "/functions/v1/menerio-webhook"
+icon: "📱"
 ```
 
-## Changes
+### 2. Add PLANINIO_BRIDGE_KEY secret
 
-### 1. Database migration: Add `connection_status` column to `connected_apps`
+A shared secret for bridge calls. Will request via the secrets tool.
 
-Add a new column `connection_status` (text, default `'pending'`) with allowed values: `pending`, `active`, `revoked`. The existing `is_active` column controls pause/unpause; `connection_status` tracks whether the handshake completed.
+### 3. No new edge functions needed on Menerio side
 
-### 2. New edge function: `verify-connection`
+The existing `receive-note` endpoint already handles everything Planinio needs to push. It accepts `source_id`, `title`, `body`, `entity_type`, `tags`, `structured_fields`, and `source_url` — all sufficient for the three content types.
 
-**File: `supabase/functions/verify-connection/index.ts`**
+The `source_url` field will carry the deep link (e.g., `https://planino-design-harmony.lovable.app/dashboard/ideas`) and the existing `ExternalNotePanel` already renders "Open in Planinio" using `source_url`.
 
-- Accepts POST with `x-api-key` header (same as `receive-note`)
-- Looks up the key in `connected_apps`
-- If found and `connection_status` is `pending`: updates to `active`, returns `{ ok: true, app_name: "menerio", user_display_name: <profile display_name> }`
-- If already `active`: returns `{ ok: true, already_connected: true }`
-- If not found or revoked: returns 401
-- This is the "handshake" endpoint Querino calls immediately after the user pastes the key
+### 4. Markdown prompt for Planinio
 
-### 3. Update `AppIntegrations.tsx` UI
+Generate a copy-paste Markdown prompt file (`planinio-menerio-sync-prompt.md`) for the Planinio project to implement:
 
-- Show three visual states based on `connection_status`:
-  - `pending` → amber badge "Awaiting handshake" with a hint ("Paste the key in Querino to complete setup")
-  - `active` → green badge "Connected" (current behavior for `is_active`)
-  - Not connected → "Connect" button (current behavior)
-- Add `refetchInterval: 5000` to the query so it auto-refreshes while any app is in `pending` state (stops polling once all are `active` or disconnected)
-- The existing "Paused" badge remains for `is_active === false` on an `active` connection
+- **Connection handshake UI** in Settings: accept a Menerio API key, verify via `POST /verify-connection`
+- **`push-to-menerio` edge function**: calls Menerio's `receive-note` with the `x-api-key` header. Maps each content type:
 
-### 4. Update `receive-note` to also accept `pending` connections
+  **Ideas →**
+  ```text
+  source_id: "planinio-idea-{id}"
+  entity_type: "idea"
+  title: working_title
+  body: Markdown with core_concept, angle, format, maturity, hooks
+  source_url: "{PLANINIO_URL}/dashboard/ideas"
+  tags: ["planinio", "idea", maturity]
+  structured_fields: { format, maturity, angle, constraints }
+  ```
 
-Currently `receive-note` checks `is_active`. It should also allow `connection_status = 'pending'` keys — the first successful `receive-note` call could also upgrade `pending` → `active` as a fallback handshake path (so even if `verify-connection` isn't called explicitly, the first real sync completes the handshake).
+  **Videos (Content) →**
+  ```text
+  source_id: "planinio-video-{id}"
+  entity_type: "document"
+  title: title
+  body: Markdown with hook, teleprompter_script, on_screen_steps
+  source_url: "{PLANINIO_URL}/dashboard/content"
+  tags: ["planinio", "content", content_type]
+  structured_fields: { content_type, orientation, production_status }
+  ```
 
-### 5. Querino-side context (for when you work on Querino)
+  **Posts →**
+  ```text
+  source_id: "planinio-post-{id}"
+  entity_type: "prompt"
+  title: headline || first 60 chars of post_text
+  body: Markdown with post_text, first_comment, hashtags, platform details
+  source_url: "{PLANINIO_URL}/dashboard/posts"
+  tags: ["planinio", "post", platform, status]
+  structured_fields: { platform, content_type, status, scheduled_at, posted_at }
+  ```
 
-Querino needs to call `POST https://tjeapelvjlmbxafsmjef.supabase.co/functions/v1/verify-connection` with the `x-api-key` header when the user saves their Menerio key. If the response is `{ ok: true }`, Querino marks its integration as connected. This is a Querino change, noted here for reference.
+- **Trigger hooks**: call `push-to-menerio` on insert/update of ideas, videos, posts (via database webhook or in the mutation hooks)
 
-## Summary
+## Files touched
 
-No user-facing "webhook URL" fields. No manual "I'm connected" toggles. The user clicks Connect in Menerio, copies a key, pastes it in Querino, and both apps automatically confirm the link. Three files touched in Menerio: one migration, one new edge function, one UI component update.
+| File | Change |
+|---|---|
+| `src/components/settings/AppIntegrations.tsx` | Add Planinio to KNOWN_APPS |
+| `planinio-menerio-sync-prompt.md` (new) | Implementation prompt for Planinio project |
+| Secret: `PLANINIO_BRIDGE_KEY` | New secret for bridge auth |
+
+## What already works (no changes needed)
+
+- `receive-note` edge function handles the inbound upsert
+- `ExternalNotePanel` renders "Open in Planinio" via `source_url`
+- `NoteList` shows the orange external badge with `source_app`
+- `process-note` auto-triggers AI enrichment on received notes
 
