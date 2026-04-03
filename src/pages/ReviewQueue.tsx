@@ -176,8 +176,6 @@ export default function ReviewQueue() {
             }
           }}
           draft={eventDraft}
-          noteId={items.find((i) => i.id === activeItemId)?.source_note_id || undefined}
-          onSent={handleEventSent}
         />
       )}
     </div>
