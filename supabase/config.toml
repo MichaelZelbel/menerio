@@ -95,3 +95,9 @@ verify_jwt = false
 
 [functions.verify-connection]
 verify_jwt = false
+
+[functions.push-profile]
+verify_jwt = false
+
+[functions.receive-profile]
+verify_jwt = false
