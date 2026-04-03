@@ -44,6 +44,41 @@ export default function Profile() {
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
 
+  // Sync profile to connected apps (e.g. Clarinio)
+  const syncProfile = useMutation({
+    mutationFn: async (targetApp: string) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const resp = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/push-profile`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ target_app: targetApp }),
+        }
+      );
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Sync failed");
+      return result;
+    },
+    onSuccess: (result) => {
+      const cats = result.categories || {};
+      const ents = result.entries || {};
+      showToast.success(
+        `Profile synced! Categories: ${cats.created || 0} new, ${cats.updated || 0} updated. Entries: ${ents.created || 0} new, ${ents.updated || 0} updated.`
+      );
+    },
+    onError: (err: Error) => {
+      showToast.error(err.message || "Failed to sync profile");
+    },
+  });
+
   // Get note count for nudge logic
   const { data: noteCount = 0 } = useQuery({
     queryKey: ["note-count", user?.id],
