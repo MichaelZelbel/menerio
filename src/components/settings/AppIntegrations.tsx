@@ -81,6 +81,14 @@ const KNOWN_APPS: KnownApp[] = [
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "🪞",
   },
+  {
+    id: "planinio",
+    name: "Planinio",
+    description: "Social media studio — syncs ideas, content & posts.",
+    supabaseUrl: "https://suzqnyvfjbmnoipnlobk.supabase.co",
+    webhookPath: "/functions/v1/menerio-webhook",
+    icon: "📱",
+  },
 ];
 
 /* ────────────────────────────── Types ────────────────────────────── */
