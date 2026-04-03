@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { User, Plus } from "lucide-react";
+import { User, Plus, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,9 +13,10 @@ import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { showToast } from "@/lib/toast";
 
 export default function Profile() {
   const {
