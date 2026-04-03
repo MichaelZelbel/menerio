@@ -1,6 +1,6 @@
 # Menerio — End-to-End Test Scenarios
 
-> **Last updated:** 2026-04-02
+> **Last updated:** 2026-04-03
 > **App URL:** https://menerio.lovable.app
 > **Preview URL:** https://id-preview--d90589e3-d781-4fdd-bcab-2f98807b83a6.lovable.app
 
