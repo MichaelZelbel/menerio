@@ -672,6 +672,7 @@ export const allDocs: DocPage[] = [
   mediaAnalysis,
   contacts,
   actionItems,
+  reviewQueue,
   appIntegrations,
   messagingIntegrations,
   githubSync,
