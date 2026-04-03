@@ -1,370 +1,626 @@
 import { Callout, CodeBlock } from "@/components/docs/DocComponents";
 import type { DocPage, DocCategory } from "./types";
 
-// ── Content pages ──
+// ── Getting Started ──
 
 const quickStart: DocPage = {
   slug: "quick-start",
-  title: "Quick Start Guide",
-  description: "Get up and running with Menerio in under 5 minutes.",
+  title: "Quick Start",
+  description: "Get up and running with Menerio in five minutes.",
   category: "Getting Started",
   headings: [
-    { id: "prerequisites", title: "Prerequisites" },
-    { id: "create-account", title: "Create Your Account" },
-    { id: "first-project", title: "Your First Project" },
-    { id: "next-steps", title: "Next Steps" },
+    { id: "what-is-menerio", title: "What is Menerio?" },
+    { id: "sign-up", title: "Sign Up" },
+    { id: "capture-first-thought", title: "Capture Your First Thought" },
+    { id: "explore-your-dashboard", title: "Explore Your Dashboard" },
   ],
-  searchText: "quick start guide getting started sign up create account project setup install",
+  searchText: "quick start getting started sign up first note capture thought dashboard overview",
   content: () => (
     <>
-      <h2 id="prerequisites">Prerequisites</h2>
-      <p>Before you begin, make sure you have:</p>
+      <h2 id="what-is-menerio">What is Menerio?</h2>
+      <p>Menerio is your AI-powered personal knowledge system — a single place for every thought, meeting note, decision, and idea. Write naturally, and Menerio's AI automatically tags, connects, and enriches your notes so you never lose context again.</p>
+      <Callout type="tip" title="One Brain. Every AI.">Menerio follows the Open Brain philosophy: your knowledge stays yours, portable, and connected across every tool you use.</Callout>
+
+      <h2 id="sign-up">Sign Up</h2>
+      <p>Head to <strong>menerio.lovable.app/auth</strong> and create a free account with your email — or sign in instantly with Google or GitHub. No credit card required.</p>
+
+      <h2 id="capture-first-thought">Capture Your First Thought</h2>
+      <p>Once signed in, there are two ways to jot something down:</p>
       <ul>
-        <li>A modern web browser (Chrome, Firefox, Safari, or Edge)</li>
-        <li>An email address for account creation</li>
+        <li><strong>Quick Capture</strong> — press <code>⌘⇧K</code> (or <code>Ctrl+Shift+K</code>) anywhere in the app. A floating card appears. Type your thought and hit <code>⌘↵</code> to save. The AI processes it in the background.</li>
+        <li><strong>Notes page</strong> — click <strong>Notes</strong> in the sidebar, then <strong>"+ New Note"</strong>. You'll get a full rich-text editor with file uploads, wikilinks, and more.</li>
       </ul>
+      <Callout type="info">Every note you create is automatically processed by AI — it extracts tags, topics, people, and action items for you.</Callout>
 
-      <h2 id="create-account">Create Your Account</h2>
-      <p>Getting started is simple. Navigate to the sign-up page and create your account:</p>
-      <CodeBlock code={`1. Visit menerio.com/auth\n2. Click "Sign Up"\n3. Enter your email and password\n4. Verify your email address`} language="text" title="Steps" />
-      <Callout type="tip" title="Pro Tip">You can also sign up instantly using your Google or GitHub account.</Callout>
-
-      <h2 id="first-project">Your First Project</h2>
-      <p>Once signed in, you'll land on your dashboard. From here you can create your first project:</p>
-      <CodeBlock code={`// Navigate to the dashboard\n// Click "New Project"\n// Choose a template or start from scratch`} language="javascript" title="Creating a project" />
-
-      <h2 id="next-steps">Next Steps</h2>
-      <p>Now that you're set up, explore these guides to get the most out of Menerio:</p>
+      <h2 id="explore-your-dashboard">Explore Your Dashboard</h2>
+      <p>Your Dashboard is the home screen. It shows:</p>
       <ul>
-        <li>Learn about the Dashboard Overview</li>
-        <li>Set up your Profile Settings</li>
-        <li>Invite Team Members</li>
+        <li><strong>Today's Connections</strong> — notes the AI recently linked together</li>
+        <li><strong>Discovery Feed</strong> — resurfaced older notes you might want to revisit</li>
+        <li><strong>Quick stats</strong> — total notes, contacts, actions, and pending follow-ups</li>
       </ul>
+      <p>From here, you can jump into any section using the sidebar on the left.</p>
     </>
   ),
 };
 
-const creatingAccount: DocPage = {
-  slug: "creating-account",
-  title: "Creating Your Account",
-  description: "Step-by-step guide to creating and setting up your Menerio account.",
+const noteTaking: DocPage = {
+  slug: "note-taking",
+  title: "Taking Notes",
+  description: "Create, edit, and organise your notes with a powerful rich-text editor.",
   category: "Getting Started",
   headings: [
-    { id: "email-signup", title: "Email Sign Up" },
-    { id: "social-login", title: "Social Login" },
-    { id: "profile-setup", title: "Profile Setup" },
+    { id: "creating-a-note", title: "Creating a Note" },
+    { id: "rich-text-editor", title: "Rich Text Editor" },
+    { id: "file-attachments", title: "File Attachments" },
+    { id: "wikilinks", title: "Wikilinks" },
+    { id: "quick-capture", title: "Quick Capture" },
   ],
-  searchText: "create account sign up register email password social login google github profile",
+  searchText: "notes create edit rich text editor toolbar bold italic heading image upload attachment wikilink quick capture",
   content: () => (
     <>
-      <h2 id="email-signup">Email Sign Up</h2>
-      <p>Create an account using your email address and a secure password. Your password must be at least 8 characters and we recommend including uppercase letters, numbers, and special characters.</p>
-      <Callout type="info">We'll send you a verification email. Please check your inbox and click the confirmation link to activate your account.</Callout>
+      <h2 id="creating-a-note">Creating a Note</h2>
+      <p>Open the <strong>Notes</strong> page from the sidebar and click <strong>"+ New Note"</strong>. Give it a title and start writing. Your changes save automatically.</p>
 
-      <h2 id="social-login">Social Login</h2>
-      <p>For a faster experience, sign in with your existing Google or GitHub account. We'll automatically create your Menerio profile using your social account details.</p>
-
-      <h2 id="profile-setup">Profile Setup</h2>
-      <p>After signing in, visit your Settings page to complete your profile:</p>
+      <h2 id="rich-text-editor">Rich Text Editor</h2>
+      <p>The editor supports all the formatting you'd expect:</p>
       <ul>
-        <li><strong>Display Name</strong> — How others will see you</li>
-        <li><strong>Avatar</strong> — Upload a profile picture (max 2MB)</li>
-        <li><strong>Bio</strong> — A short description (up to 160 characters)</li>
-        <li><strong>Website</strong> — Your personal or company website</li>
+        <li><strong>Text formatting</strong> — bold, italic, underline, strikethrough, code</li>
+        <li><strong>Structure</strong> — headings (H1–H3), bullet lists, numbered lists, blockquotes</li>
+        <li><strong>Embeds</strong> — images, videos, audio files, and PDFs inline</li>
       </ul>
+      <Callout type="tip" title="Keyboard shortcuts">Use <code>⌘B</code> for bold, <code>⌘I</code> for italic, <code>⌘⇧7</code> for numbered lists, and more — just like any word processor.</Callout>
+
+      <h2 id="file-attachments">File Attachments</h2>
+      <p>Drag and drop images, PDFs, audio, or video files directly into the editor. They're uploaded to secure cloud storage and embedded inline. Menerio's AI automatically analyses media — it extracts text from PDFs, describes images, and transcribes audio.</p>
+
+      <h2 id="wikilinks">Wikilinks</h2>
+      <p>Type <code>[[</code> to create a link to another note. An autocomplete menu appears so you can find and link notes instantly. Wikilinks create visible connections in your Knowledge Graph and show up in the Backlinks panel.</p>
+      <Callout type="info">Wikilinks are bidirectional — if Note A links to Note B, Note B automatically shows Note A in its backlinks.</Callout>
+
+      <h2 id="quick-capture">Quick Capture</h2>
+      <p>Press <code>⌘⇧K</code> from anywhere in the app to open a floating capture card. Type your thought, press <code>⌘↵</code>, and it's saved as a new note with full AI processing. Perfect for fleeting ideas you don't want to lose.</p>
     </>
   ),
 };
 
-const dashboardOverview: DocPage = {
-  slug: "dashboard-overview",
-  title: "Dashboard Overview",
-  description: "Understanding the Menerio dashboard and its key components.",
+const searchAndOrganise: DocPage = {
+  slug: "search-organise",
+  title: "Search & Organise",
+  description: "Find any note in seconds with keyword and AI-powered semantic search.",
   category: "Getting Started",
   headings: [
-    { id: "layout", title: "Layout" },
-    { id: "sidebar", title: "Sidebar Navigation" },
-    { id: "metrics", title: "Key Metrics" },
+    { id: "keyword-search", title: "Keyword Search" },
+    { id: "smart-search", title: "Smart Search (Semantic)" },
+    { id: "filters", title: "Filters & Sorting" },
+    { id: "favourites-pins", title: "Favourites & Pins" },
+    { id: "trash", title: "Trash & Recovery" },
   ],
-  searchText: "dashboard overview layout sidebar navigation metrics cards analytics",
+  searchText: "search find filter sort favourite pin trash delete recover keyword semantic smart AI",
   content: () => (
     <>
-      <h2 id="layout">Layout</h2>
-      <p>The dashboard provides a clean, organized view of all your key information. It consists of a collapsible sidebar for navigation and a main content area displaying your data.</p>
+      <h2 id="keyword-search">Keyword Search</h2>
+      <p>The search bar at the top of the Notes page lets you instantly filter notes by title or content. Results update as you type.</p>
 
-      <h2 id="sidebar">Sidebar Navigation</h2>
-      <p>The sidebar gives you quick access to all major sections:</p>
+      <h2 id="smart-search">Smart Search (Semantic)</h2>
+      <p>Toggle <strong>"Smart Search"</strong> to switch from keyword matching to AI-powered semantic search. Instead of exact words, it finds notes by meaning. For example, searching "meeting outcomes" will surface notes about decisions made in meetings, even if those exact words don't appear.</p>
+      <Callout type="tip">Smart Search uses the same vector embeddings that power your Knowledge Graph — every note is automatically vectorised when created or updated.</Callout>
+
+      <h2 id="filters">Filters & Sorting</h2>
+      <p>Use the filter and sort controls to narrow results:</p>
       <ul>
-        <li><strong>Overview</strong> — Your main dashboard with key metrics</li>
-        <li><strong>Projects</strong> — Manage all your projects</li>
-        <li><strong>Analytics</strong> — Detailed analytics and reports</li>
-        <li><strong>Team</strong> — Manage team members and roles</li>
-        <li><strong>Settings</strong> — Account and profile settings</li>
+        <li><strong>Sort by</strong> — newest, oldest, recently updated, or alphabetical</li>
+        <li><strong>Filter by tags</strong> — click a tag to show only matching notes</li>
+        <li><strong>External vs. local</strong> — external notes from connected apps show an orange badge</li>
       </ul>
-      <Callout type="tip">Press <code>Ctrl+B</code> (or <code>⌘+B</code> on Mac) to toggle the sidebar.</Callout>
 
-      <h2 id="metrics">Key Metrics</h2>
-      <p>The overview page shows at-a-glance metrics including total projects, active tasks, and team member count. These update in real-time as your data changes.</p>
+      <h2 id="favourites-pins">Favourites & Pins</h2>
+      <p>Star a note to add it to your Favourites for quick access. Pin a note to keep it at the top of your list regardless of sorting. Both are available from the note actions menu.</p>
+
+      <h2 id="trash">Trash & Recovery</h2>
+      <p>Deleted notes move to the Trash instead of being removed permanently. You can restore them at any time, or empty the trash to free up space.</p>
     </>
   ),
 };
 
-const feature1: DocPage = {
-  slug: "ai-insights",
-  title: "AI-Powered Insights",
-  description: "Leverage machine learning for smarter decisions.",
-  category: "Features",
+// ── AI Features ──
+
+const aiProcessing: DocPage = {
+  slug: "ai-processing",
+  title: "AI Processing",
+  description: "How Menerio's AI automatically enriches every note you write.",
+  category: "AI Features",
+  headings: [
+    { id: "what-happens", title: "What Happens Automatically" },
+    { id: "smart-tags", title: "Smart Tags Panel" },
+    { id: "note-chat", title: "Chat with Your Note" },
+    { id: "ai-credits", title: "AI Credits" },
+  ],
+  searchText: "AI processing tags topics people entities action items auto tagging note chat credits tokens",
+  content: () => (
+    <>
+      <h2 id="what-happens">What Happens Automatically</h2>
+      <p>Every time you save a note, Menerio's AI runs in the background to:</p>
+      <ul>
+        <li><strong>Classify</strong> — assigns a type (Observation, Idea, Decision, Task, Meeting, etc.)</li>
+        <li><strong>Extract topics</strong> — identifies the main subjects</li>
+        <li><strong>Detect people</strong> — recognises names mentioned in the text</li>
+        <li><strong>Pull out action items</strong> — finds things you need to do</li>
+        <li><strong>Generate a summary</strong> — creates a one-line overview</li>
+        <li><strong>Create an embedding</strong> — vectorises the note for Smart Search and connection discovery</li>
+      </ul>
+      <Callout type="info">All AI processing happens on the server. Your notes are encrypted in transit and processed securely.</Callout>
+
+      <h2 id="smart-tags">Smart Tags Panel</h2>
+      <p>Open a note and look for the <strong>Smart Tags</strong> panel in the sidebar. It shows:</p>
+      <ul>
+        <li>The detected <strong>Type</strong> — which you can change via a dropdown</li>
+        <li><strong>Topics</strong> — removable pills you can edit</li>
+        <li><strong>People</strong> — names extracted from the note</li>
+        <li><strong>Summary</strong> and <strong>Action Items</strong> — read-only AI output</li>
+      </ul>
+      <p>You're always in control — adjust any tag the AI assigned.</p>
+
+      <h2 id="note-chat">Chat with Your Note</h2>
+      <p>Open the <strong>Chat</strong> panel in the note sidebar to ask questions about your note's content. The AI uses your note plus relevant context from your vault to answer. Great for brainstorming, rewriting, or exploring ideas.</p>
+
+      <h2 id="ai-credits">AI Credits</h2>
+      <p>AI features consume credits from your monthly allowance. Free accounts receive a generous starter allocation; Premium accounts get significantly more. You can check your remaining credits in <strong>Settings → AI Credits</strong>.</p>
+      <Callout type="tip">Credits reset monthly. Note processing, chat, media analysis, and connection discovery all count towards your usage.</Callout>
+    </>
+  ),
+};
+
+const knowledgeGraph: DocPage = {
+  slug: "knowledge-graph",
+  title: "Knowledge Graph",
+  description: "Visualise how your notes connect and discover hidden relationships.",
+  category: "AI Features",
   headings: [
     { id: "overview", title: "Overview" },
-    { id: "how-it-works", title: "How It Works" },
-    { id: "configuration", title: "Configuration" },
+    { id: "connection-types", title: "Connection Types" },
+    { id: "local-graph", title: "Local Graph" },
+    { id: "analytics", title: "Graph Analytics" },
+    { id: "export-graph", title: "Export" },
   ],
-  searchText: "ai insights machine learning analytics predictions smart data",
+  searchText: "knowledge graph connections network visualise links semantic wikilink clusters bridge orphan analytics export",
   content: () => (
     <>
       <h2 id="overview">Overview</h2>
-      <p>Menerio's AI engine analyzes your project data to surface actionable insights, predict bottlenecks, and recommend optimizations.</p>
-      <Callout type="info">AI features are available on Premium plans and above.</Callout>
+      <p>The Knowledge Graph is a visual map of every note in your vault and how they relate. Open it from the sidebar under <strong>Knowledge Graph</strong>. Each node is a note; each edge is a connection the AI discovered or you created manually.</p>
+      <Callout type="tip">Click any node to navigate to that note. Hover to highlight its direct connections.</Callout>
 
-      <h2 id="how-it-works">How It Works</h2>
-      <p>Our AI models process your project history, team activity patterns, and task completion rates to generate insights. All processing happens securely on our infrastructure — your data never leaves our platform.</p>
-      <CodeBlock code={`// Example: Fetching AI insights via API\nconst insights = await menerio.ai.getInsights({\n  projectId: "proj_123",\n  timeRange: "30d"\n});\n\nconsole.log(insights.predictions);`} language="typescript" title="API Example" />
-
-      <h2 id="configuration">Configuration</h2>
-      <p>Configure AI insights from your project settings. You can adjust sensitivity, enable/disable specific insight categories, and set notification preferences.</p>
-    </>
-  ),
-};
-
-const feature2: DocPage = {
-  slug: "collaboration",
-  title: "Seamless Collaboration",
-  description: "Work together with your team in real-time.",
-  category: "Features",
-  headings: [
-    { id: "real-time", title: "Real-Time Editing" },
-    { id: "comments", title: "Comments & Mentions" },
-    { id: "sharing", title: "Sharing & Permissions" },
-  ],
-  searchText: "collaboration real-time editing comments mentions sharing permissions team",
-  content: () => (
-    <>
-      <h2 id="real-time">Real-Time Editing</h2>
-      <p>Multiple team members can work on the same project simultaneously. Changes sync instantly across all connected clients.</p>
-
-      <h2 id="comments">Comments & Mentions</h2>
-      <p>Leave comments on any item and mention team members using @mentions. They'll receive instant notifications.</p>
-      <Callout type="tip">Use @channel to notify all project members at once.</Callout>
-
-      <h2 id="sharing">Sharing & Permissions</h2>
-      <p>Control who can view, edit, or manage your projects with granular permission settings. Share projects externally with read-only links.</p>
-    </>
-  ),
-};
-
-const feature3: DocPage = {
-  slug: "integrations",
-  title: "Integrations",
-  description: "Connect Menerio with your favourite tools.",
-  category: "Features",
-  headings: [
-    { id: "available", title: "Available Integrations" },
-    { id: "setup", title: "Setting Up" },
-    { id: "webhooks", title: "Webhooks" },
-  ],
-  searchText: "integrations connect tools slack github webhook api third-party",
-  content: () => (
-    <>
-      <h2 id="available">Available Integrations</h2>
-      <p>Menerio connects with 200+ tools including Slack, GitHub, Jira, Notion, and more. Browse the full catalog in your project settings.</p>
-
-      <h2 id="setup">Setting Up</h2>
-      <p>Most integrations require just a few clicks:</p>
-      <CodeBlock code={`1. Go to Settings → Integrations\n2. Find your tool\n3. Click "Connect"\n4. Authorize access\n5. Configure sync options`} language="text" title="Integration setup" />
-
-      <h2 id="webhooks">Webhooks</h2>
-      <p>For custom integrations, use webhooks to receive real-time notifications when events happen in Menerio.</p>
-      <CodeBlock code={`POST /api/webhooks\nContent-Type: application/json\n\n{\n  "url": "https://your-app.com/webhook",\n  "events": ["project.created", "task.completed"]\n}`} language="http" title="Webhook registration" />
-      <Callout type="warning" title="Security">Always verify the webhook signature header to ensure requests are authentic.</Callout>
-    </>
-  ),
-};
-
-const profileSettings: DocPage = {
-  slug: "profile-settings",
-  title: "Profile Settings",
-  description: "Manage your profile, avatar, and account security.",
-  category: "Account",
-  headings: [
-    { id: "profile-info", title: "Profile Information" },
-    { id: "avatar", title: "Avatar Upload" },
-    { id: "password", title: "Password Management" },
-    { id: "delete-account", title: "Delete Account" },
-  ],
-  searchText: "profile settings avatar upload password change delete account security",
-  content: () => (
-    <>
-      <h2 id="profile-info">Profile Information</h2>
-      <p>Update your display name, bio, and website from the Settings page in your dashboard. Changes are saved instantly and reflected across the platform.</p>
-
-      <h2 id="avatar">Avatar Upload</h2>
-      <p>Upload a profile picture in JPG, PNG, GIF, or WebP format (max 2MB). Click your avatar in the Avatar tab to open the file picker.</p>
-
-      <h2 id="password">Password Management</h2>
-      <p>Change your password from the Account tab. We recommend using a strong password with at least 8 characters including uppercase, numbers, and symbols.</p>
-      <Callout type="info">If you signed up with a social account, you can set a password to also enable email login.</Callout>
-
-      <h2 id="delete-account">Delete Account</h2>
-      <p>You can permanently delete your account from the Danger Zone tab. This action is irreversible and will remove all your data.</p>
-      <Callout type="warning" title="Warning">Account deletion is permanent. Please export any data you wish to keep before proceeding.</Callout>
-    </>
-  ),
-};
-
-const teamMembers: DocPage = {
-  slug: "team-members",
-  title: "Team Members",
-  description: "Invite and manage team members.",
-  category: "Account",
-  headings: [
-    { id: "inviting", title: "Inviting Members" },
-    { id: "roles", title: "Roles & Permissions" },
-    { id: "removing", title: "Removing Members" },
-  ],
-  searchText: "team members invite roles permissions manage remove",
-  content: () => (
-    <>
-      <h2 id="inviting">Inviting Members</h2>
-      <p>Invite team members by email from your Team page. They'll receive an invitation to join your workspace.</p>
-      <Callout type="info">Team management features are coming soon. Stay tuned for updates!</Callout>
-
-      <h2 id="roles">Roles & Permissions</h2>
-      <p>Assign roles to control what team members can access. Available roles include Admin, Member, and Viewer.</p>
-
-      <h2 id="removing">Removing Members</h2>
-      <p>Admins can remove team members at any time. Removed members lose access immediately but their contributions remain.</p>
-    </>
-  ),
-};
-
-const apiAuth: DocPage = {
-  slug: "api-authentication",
-  title: "Authentication",
-  description: "Authenticate with the Menerio API.",
-  category: "API Reference",
-  headings: [
-    { id: "api-keys", title: "API Keys" },
-    { id: "bearer-tokens", title: "Bearer Tokens" },
-    { id: "oauth", title: "OAuth 2.0" },
-  ],
-  searchText: "api authentication api key bearer token oauth authorization header",
-  content: () => (
-    <>
-      <h2 id="api-keys">API Keys</h2>
-      <p>Generate API keys from your Settings page. Each key has configurable permissions and can be revoked at any time.</p>
-      <CodeBlock code={`curl -H "Authorization: Bearer mk_live_abc123..." \\\n  https://api.menerio.com/v1/projects`} language="bash" title="Using an API key" />
-
-      <h2 id="bearer-tokens">Bearer Tokens</h2>
-      <p>Include your API key as a Bearer token in the Authorization header of every request.</p>
-      <Callout type="warning" title="Security">Never expose your API keys in client-side code. Use environment variables or a backend proxy.</Callout>
-
-      <h2 id="oauth">OAuth 2.0</h2>
-      <p>For applications that act on behalf of users, we support the OAuth 2.0 authorization code flow.</p>
-    </>
-  ),
-};
-
-const apiEndpoints: DocPage = {
-  slug: "api-endpoints",
-  title: "Endpoints",
-  description: "Available API endpoints and usage examples.",
-  category: "API Reference",
-  headings: [
-    { id: "base-url", title: "Base URL" },
-    { id: "projects-api", title: "Projects" },
-    { id: "tasks-api", title: "Tasks" },
-  ],
-  searchText: "api endpoints rest projects tasks crud create read update delete",
-  content: () => (
-    <>
-      <h2 id="base-url">Base URL</h2>
-      <CodeBlock code="https://api.menerio.com/v1" language="text" title="Base URL" />
-      <p>All API endpoints are relative to this base URL. Responses are returned in JSON format.</p>
-
-      <h2 id="projects-api">Projects</h2>
-      <CodeBlock code={`GET    /projects          # List all projects\nPOST   /projects          # Create a project\nGET    /projects/:id      # Get a project\nPATCH  /projects/:id      # Update a project\nDELETE /projects/:id      # Delete a project`} language="http" title="Project endpoints" />
-
-      <h2 id="tasks-api">Tasks</h2>
-      <CodeBlock code={`GET    /projects/:id/tasks       # List tasks\nPOST   /projects/:id/tasks       # Create a task\nPATCH  /projects/:id/tasks/:tid  # Update a task\nDELETE /projects/:id/tasks/:tid  # Delete a task`} language="http" title="Task endpoints" />
-    </>
-  ),
-};
-
-const apiRateLimits: DocPage = {
-  slug: "api-rate-limits",
-  title: "Rate Limits",
-  description: "Understanding API rate limits and quotas.",
-  category: "API Reference",
-  headings: [
-    { id: "limits", title: "Default Limits" },
-    { id: "headers", title: "Rate Limit Headers" },
-    { id: "handling", title: "Handling Limits" },
-  ],
-  searchText: "rate limits throttle quota api requests per minute second",
-  content: () => (
-    <>
-      <h2 id="limits">Default Limits</h2>
-      <p>API rate limits depend on your plan:</p>
+      <h2 id="connection-types">Connection Types</h2>
+      <p>Connections are created in three ways:</p>
       <ul>
-        <li><strong>Free</strong> — 60 requests/minute</li>
-        <li><strong>Premium</strong> — 600 requests/minute</li>
-        <li><strong>Enterprise</strong> — Custom limits</li>
+        <li><strong>Semantic</strong> — the AI detects similar meaning between two notes</li>
+        <li><strong>Metadata</strong> — shared tags, topics, or people</li>
+        <li><strong>Manual</strong> — you link notes with <code>[[wikilinks]]</code> or via the suggested links panel</li>
       </ul>
 
-      <h2 id="headers">Rate Limit Headers</h2>
-      <p>Every API response includes rate limit headers:</p>
-      <CodeBlock code={`X-RateLimit-Limit: 60\nX-RateLimit-Remaining: 45\nX-RateLimit-Reset: 1709827200`} language="http" title="Response headers" />
+      <h2 id="local-graph">Local Graph</h2>
+      <p>When editing a note, open the <strong>Local Graph</strong> panel to see only the connections around that specific note. This is a great way to explore related context without the noise of the full graph.</p>
 
-      <h2 id="handling">Handling Rate Limits</h2>
-      <p>When you exceed the limit, you'll receive a <code>429 Too Many Requests</code> response. Implement exponential backoff to handle this gracefully.</p>
-      <Callout type="tip">Use the <code>X-RateLimit-Reset</code> header to know when you can retry.</Callout>
+      <h2 id="analytics">Graph Analytics</h2>
+      <p>The analytics panel surfaces insights about your knowledge base:</p>
+      <ul>
+        <li><strong>Topic clusters</strong> — groups of notes that form natural communities</li>
+        <li><strong>Bridge notes</strong> — notes that connect otherwise separate clusters</li>
+        <li><strong>Orphan notes</strong> — notes with no connections (you can link them or mark as standalone)</li>
+      </ul>
+
+      <h2 id="export-graph">Export</h2>
+      <p>Export your graph data in JSON or CSV format for use in other tools or for backup.</p>
     </>
   ),
 };
+
+const mediaAnalysis: DocPage = {
+  slug: "media-analysis",
+  title: "Media & Attachments",
+  description: "Upload files and let AI extract insights from images, PDFs, audio, and video.",
+  category: "AI Features",
+  headings: [
+    { id: "supported-formats", title: "Supported Formats" },
+    { id: "ai-analysis", title: "AI Analysis" },
+    { id: "media-library", title: "Media Library" },
+  ],
+  searchText: "media images PDF audio video upload attachment analysis OCR transcription describe library",
+  content: () => (
+    <>
+      <h2 id="supported-formats">Supported Formats</h2>
+      <p>Drop files directly into the note editor to embed them inline:</p>
+      <ul>
+        <li><strong>Images</strong> — JPG, PNG, GIF, WebP, SVG</li>
+        <li><strong>Documents</strong> — PDF (multi-page supported)</li>
+        <li><strong>Audio</strong> — MP3, WAV, OGG, M4A</li>
+        <li><strong>Video</strong> — MP4, WebM</li>
+      </ul>
+
+      <h2 id="ai-analysis">AI Analysis</h2>
+      <p>Once uploaded, the AI automatically analyses each attachment:</p>
+      <ul>
+        <li><strong>Images</strong> — generates a description and extracts any visible text (OCR)</li>
+        <li><strong>PDFs</strong> — extracts text from every page and summarises the document</li>
+        <li><strong>Audio/Video</strong> — transcribes spoken content</li>
+      </ul>
+      <p>Extracted content is searchable via Smart Search — so you can find a note by what's inside an attached PDF or image.</p>
+      <Callout type="info">Analysis results appear in the <strong>Media Analysis</strong> panel in the sidebar. You can view descriptions, extracted text, and detected topics.</Callout>
+
+      <h2 id="media-library">Media Library</h2>
+      <p>The <strong>Media Library</strong> page (accessible from the sidebar) shows all attachments across your vault in one place, with filters by type, analysis status, and associated note.</p>
+    </>
+  ),
+};
+
+// ── People & Actions ──
+
+const contacts: DocPage = {
+  slug: "contacts-crm",
+  title: "People & Contacts",
+  description: "Keep track of the people in your life with Menerio's built-in CRM.",
+  category: "People & Actions",
+  headings: [
+    { id: "contact-list", title: "Contact List" },
+    { id: "auto-detection", title: "Auto-Detection from Notes" },
+    { id: "interactions", title: "Interaction Tracking" },
+    { id: "follow-ups", title: "Follow-Up Reminders" },
+  ],
+  searchText: "contacts people CRM relationships interactions follow up reminder auto detect names",
+  content: () => (
+    <>
+      <h2 id="contact-list">Contact List</h2>
+      <p>The <strong>People</strong> page is your personal CRM. Add contacts with their name, email, company, role, and relationship type. Tag them for easy filtering.</p>
+
+      <h2 id="auto-detection">Auto-Detection from Notes</h2>
+      <p>When the AI processes a note, it detects people mentioned in the text. These are surfaced in the Smart Tags panel so you can quickly link them to existing contacts or create new ones.</p>
+
+      <h2 id="interactions">Interaction Tracking</h2>
+      <p>Each contact has an interaction log — a timeline of meetings, messages, and shared notes. Interactions are created automatically when a note is linked to a contact, or you can add them manually.</p>
+
+      <h2 id="follow-ups">Follow-Up Reminders</h2>
+      <p>Set a <strong>contact frequency</strong> (e.g., every 14 days) and Menerio will remind you when it's been too long since your last interaction. These reminders appear in your Dashboard and in the Daily Digest email.</p>
+      <Callout type="tip">The "Today's Connections" widget on your Dashboard highlights contacts who are due for a follow-up.</Callout>
+    </>
+  ),
+};
+
+const actionItems: DocPage = {
+  slug: "action-items",
+  title: "Action Items",
+  description: "Track tasks and to-dos extracted from your notes.",
+  category: "People & Actions",
+  headings: [
+    { id: "how-actions-work", title: "How Actions Work" },
+    { id: "managing-actions", title: "Managing Actions" },
+    { id: "linking-contacts", title: "Linking to Contacts" },
+  ],
+  searchText: "action items tasks to-do extracted AI priority due date complete status contact link",
+  content: () => (
+    <>
+      <h2 id="how-actions-work">How Actions Work</h2>
+      <p>When you write something like "I need to send the proposal to Sarah by Friday", the AI extracts it as an action item with a due date and a linked person. You'll find all extracted actions on the <strong>Actions</strong> page.</p>
+
+      <h2 id="managing-actions">Managing Actions</h2>
+      <p>Each action has:</p>
+      <ul>
+        <li><strong>Status</strong> — open, in progress, or completed</li>
+        <li><strong>Priority</strong> — low, medium, high, or urgent</li>
+        <li><strong>Due date</strong> — set automatically or manually</li>
+        <li><strong>Source note</strong> — the note it was extracted from</li>
+      </ul>
+      <p>Click an action to edit it or jump to the source note for context.</p>
+
+      <h2 id="linking-contacts">Linking to Contacts</h2>
+      <p>Actions can be linked to a contact. This makes them show up in that contact's interaction timeline, so you always know what's pending with whom.</p>
+    </>
+  ),
+};
+
+// ── Integrations ──
+
+const appIntegrations: DocPage = {
+  slug: "app-integrations",
+  title: "App Integrations",
+  description: "Connect external apps like Querino, Clarinio, Planinio, and more.",
+  category: "Integrations",
+  headings: [
+    { id: "how-it-works", title: "How It Works" },
+    { id: "connected-apps", title: "Connected Apps" },
+    { id: "external-notes", title: "External Notes" },
+    { id: "open-in-app", title: "Open in Source App" },
+    { id: "duplicate-local", title: "Duplicate to Menerio" },
+  ],
+  searchText: "integrations apps external Querino Temerio Cherishly Clarinio Planinio sync bridge API connected open duplicate",
+  content: () => (
+    <>
+      <h2 id="how-it-works">How It Works</h2>
+      <p>Menerio acts as a central knowledge hub. External apps push their content (ideas, documents, posts) into your Menerio vault as read-only notes. This gives you one searchable place for everything without losing ownership in the original app.</p>
+      <Callout type="info">The sync is one-way: from each app into Menerio. Your locally created notes are never sent out unless you explicitly choose to.</Callout>
+
+      <h2 id="connected-apps">Connected Apps</h2>
+      <p>Go to <strong>Settings → Integrations</strong> to see which apps are connected. Menerio supports:</p>
+      <ul>
+        <li><strong>Querino</strong> — research and bookmarks</li>
+        <li><strong>Temerio</strong> — time-based entries</li>
+        <li><strong>Cherishly</strong> — relationship moments</li>
+        <li><strong>Clarinio</strong> — structured feedback</li>
+        <li><strong>Planinio</strong> — social media studio (Ideas, Content, Posts)</li>
+      </ul>
+      <p>Each connection uses a secure bridge key and auto-activates once verified.</p>
+
+      <h2 id="external-notes">External Notes</h2>
+      <p>Notes from external apps appear in your note list with an <strong>orange "External" badge</strong>. They're read-only — you can view them, search them, and connect them to other notes, but you can't edit the content directly.</p>
+
+      <h2 id="open-in-app">Open in Source App</h2>
+      <p>Each external note has an <strong>"Open in [App Name]"</strong> button in the action bar. Click it to jump straight to the original app and edit the content there. Changes sync back to Menerio automatically.</p>
+
+      <h2 id="duplicate-local">Duplicate to Menerio</h2>
+      <p>Want an editable copy? Click <strong>"Duplicate to Menerio"</strong> to create a local, fully editable version of the note. The original external note stays unchanged.</p>
+    </>
+  ),
+};
+
+const messagingIntegrations: DocPage = {
+  slug: "messaging-integrations",
+  title: "Telegram, Slack & Discord",
+  description: "Capture thoughts from your favourite messaging platforms.",
+  category: "Integrations",
+  headings: [
+    { id: "telegram", title: "Telegram" },
+    { id: "slack", title: "Slack" },
+    { id: "discord", title: "Discord" },
+  ],
+  searchText: "Telegram Slack Discord messaging bot capture chat integration",
+  content: () => (
+    <>
+      <h2 id="telegram">Telegram</h2>
+      <p>Connect a Telegram bot to capture messages directly into Menerio as notes. Set up your bot token in <strong>Settings → Telegram</strong>, pair it with a code, and start forwarding messages.</p>
+
+      <h2 id="slack">Slack</h2>
+      <p>Send messages to a Slack channel and have them appear as notes in Menerio. Configure your Slack workspace connection in <strong>Settings → Slack</strong>.</p>
+
+      <h2 id="discord">Discord</h2>
+      <p>Set up a Discord bot to capture messages from a specific channel. Configure it in <strong>Settings → Discord</strong> with your bot token and guild ID.</p>
+      <Callout type="tip">All captured messages go through AI processing — so they get tagged, connected, and searchable just like any other note.</Callout>
+    </>
+  ),
+};
+
+const githubSync: DocPage = {
+  slug: "github-sync",
+  title: "GitHub Vault Sync",
+  description: "Sync your notes with a GitHub repository as Markdown files.",
+  category: "Integrations",
+  headings: [
+    { id: "setup", title: "Setup" },
+    { id: "how-sync-works", title: "How Sync Works" },
+    { id: "import-vault", title: "Import an Existing Vault" },
+    { id: "conflict-resolution", title: "Conflict Resolution" },
+  ],
+  searchText: "GitHub sync vault Markdown backup export import Obsidian repository git",
+  content: () => (
+    <>
+      <h2 id="setup">Setup</h2>
+      <p>Go to <strong>Settings → GitHub Sync</strong> and enter your GitHub personal access token, repository owner, and repo name. Choose a branch and vault path.</p>
+
+      <h2 id="how-sync-works">How Sync Works</h2>
+      <p>When enabled, Menerio exports your notes as Markdown files to your GitHub repository. You can configure the sync direction (push only, pull only, or both) and it runs automatically or on-demand.</p>
+      <Callout type="info">This is perfect for keeping a Markdown backup or for interoperability with tools like Obsidian.</Callout>
+
+      <h2 id="import-vault">Import an Existing Vault</h2>
+      <p>Have an existing Obsidian vault or Markdown collection on GitHub? Use <strong>"Import Vault"</strong> to pull all files into Menerio as notes. Wikilinks and frontmatter are preserved.</p>
+
+      <h2 id="conflict-resolution">Conflict Resolution</h2>
+      <p>If a note has been changed in both Menerio and GitHub, the Sync Conflicts panel shows you both versions so you can choose which to keep.</p>
+    </>
+  ),
+};
+
+// ── Your Profile ──
+
+const profilePage: DocPage = {
+  slug: "profile",
+  title: "Your Profile",
+  description: "Build a structured personal profile that the AI uses to personalise your experience.",
+  category: "Your Profile",
+  headings: [
+    { id: "what-is-profile", title: "What It Is" },
+    { id: "categories", title: "Categories & Entries" },
+    { id: "scopes", title: "Visibility Scopes" },
+    { id: "completeness", title: "Profile Completeness" },
+    { id: "agent-instructions", title: "Agent Instructions" },
+  ],
+  searchText: "profile personal information categories entries scope visibility completeness agent instructions AI personalise",
+  content: () => (
+    <>
+      <h2 id="what-is-profile">What It Is</h2>
+      <p>Your Profile is more than a settings page — it's a structured overview of who you are, what you care about, and what context the AI should use when processing your notes. Think of it as your brain's "about me" page.</p>
+
+      <h2 id="categories">Categories & Entries</h2>
+      <p>Your profile is organised into categories (e.g., "Work", "Health", "Interests") each containing key-value entries. You can add custom categories and entries, and optionally link any entry to a note for deeper context.</p>
+
+      <h2 id="scopes">Visibility Scopes</h2>
+      <p>Each category has a visibility scope:</p>
+      <ul>
+        <li><strong>Private</strong> — only visible to you</li>
+        <li><strong>AI</strong> — shared with the AI for better personalisation</li>
+        <li><strong>Connected Apps</strong> — shared with apps you've connected</li>
+      </ul>
+
+      <h2 id="completeness">Profile Completeness</h2>
+      <p>A progress indicator shows how complete your profile is. A richer profile means better AI suggestions, more relevant connections, and smarter processing.</p>
+
+      <h2 id="agent-instructions">Agent Instructions</h2>
+      <p>In the <strong>Agent Instructions</strong> tab, write custom instructions for the AI. For example: "Always summarise meeting notes with bullet points" or "Focus on action items related to my startup". The AI follows these when processing your notes.</p>
+      <Callout type="tip">Agent Instructions are a powerful way to make Menerio truly yours — experiment with different instructions to shape how the AI works for you.</Callout>
+    </>
+  ),
+};
+
+// ── Workflows ──
+
+const dailyWorkflow: DocPage = {
+  slug: "daily-workflow",
+  title: "Daily Workflow",
+  description: "A typical day using Menerio for personal knowledge management.",
+  category: "Workflows",
+  headings: [
+    { id: "morning", title: "Morning: Review & Plan" },
+    { id: "throughout-day", title: "Throughout the Day: Capture" },
+    { id: "evening", title: "Evening: Reflect" },
+  ],
+  searchText: "workflow daily morning evening capture review plan routine habit",
+  content: () => (
+    <>
+      <h2 id="morning">Morning: Review & Plan</h2>
+      <p>Start your day on the <strong>Dashboard</strong>. Check your:</p>
+      <ul>
+        <li><strong>Daily Digest</strong> — a summary email of yesterday's activity (if enabled)</li>
+        <li><strong>Action Items</strong> — outstanding tasks from yesterday</li>
+        <li><strong>Follow-up reminders</strong> — contacts you should reach out to</li>
+        <li><strong>Discovery Feed</strong> — old notes the AI resurfaced that might be relevant today</li>
+      </ul>
+
+      <h2 id="throughout-day">Throughout the Day: Capture</h2>
+      <p>As thoughts come to you, capture them fast:</p>
+      <ul>
+        <li><strong>Quick Capture (⌘⇧K)</strong> — one-sentence thoughts, fleeting ideas</li>
+        <li><strong>Full notes</strong> — meeting notes, research, decisions</li>
+        <li><strong>Messaging bots</strong> — forward Telegram/Slack messages to your vault</li>
+      </ul>
+      <p>Don't worry about organising — the AI tags and connects everything for you.</p>
+
+      <h2 id="evening">Evening: Reflect</h2>
+      <p>Browse your Knowledge Graph to see how today's notes connect to older ones. Use the <strong>Weekly Review</strong> (available every Sunday) for a deeper retrospective on patterns, themes, and progress.</p>
+    </>
+  ),
+};
+
+const weeklyReview: DocPage = {
+  slug: "weekly-review",
+  title: "Weekly Review",
+  description: "Use the AI-generated weekly review to spot patterns and track progress.",
+  category: "Workflows",
+  headings: [
+    { id: "what-it-includes", title: "What It Includes" },
+    { id: "how-to-access", title: "How to Access" },
+    { id: "making-the-most", title: "Making the Most of It" },
+  ],
+  searchText: "weekly review summary patterns themes progress retrospective reflect",
+  content: () => (
+    <>
+      <h2 id="what-it-includes">What It Includes</h2>
+      <p>Every week, Menerio generates a review of your activity:</p>
+      <ul>
+        <li><strong>Notes created</strong> — a count and summary of what you wrote</li>
+        <li><strong>Themes & patterns</strong> — recurring topics the AI noticed</li>
+        <li><strong>Connections made</strong> — new links between notes</li>
+        <li><strong>Open actions</strong> — tasks still pending</li>
+      </ul>
+
+      <h2 id="how-to-access">How to Access</h2>
+      <p>Navigate to the <strong>Weekly Review</strong> page from the sidebar. Past reviews are stored so you can look back over weeks or months.</p>
+
+      <h2 id="making-the-most">Making the Most of It</h2>
+      <p>Use the weekly review as a reflection tool. Ask yourself: What surprised me? What patterns am I noticing? Are there action items I keep postponing? This practice turns Menerio from a note-taking app into a genuine thinking partner.</p>
+      <Callout type="tip">Pair the weekly review with your Agent Instructions — tell the AI what to focus on in future reviews.</Callout>
+    </>
+  ),
+};
+
+// ── Settings & Account ──
+
+const settingsAccount: DocPage = {
+  slug: "settings",
+  title: "Settings & Account",
+  description: "Manage your account, preferences, API keys, and subscription.",
+  category: "Settings",
+  headings: [
+    { id: "general", title: "General Settings" },
+    { id: "notifications", title: "Notifications" },
+    { id: "api-keys", title: "API Keys" },
+    { id: "subscription", title: "Subscription & Credits" },
+    { id: "data-export", title: "Data Export" },
+    { id: "delete-account", title: "Delete Account" },
+  ],
+  searchText: "settings account preferences notifications API keys subscription premium credits export delete",
+  content: () => (
+    <>
+      <h2 id="general">General Settings</h2>
+      <p>Update your display name, avatar, bio, and website from <strong>Settings → Profile</strong>. Theme switching (light/dark mode) is available from the toggle in the header.</p>
+
+      <h2 id="notifications">Notifications</h2>
+      <p>Configure what notifications you receive:</p>
+      <ul>
+        <li><strong>Daily Digest</strong> — an email summary of your activity</li>
+        <li><strong>Contact follow-ups</strong> — reminders when contacts are overdue</li>
+        <li><strong>Stale actions</strong> — alerts for long-open tasks</li>
+        <li><strong>Pattern detection</strong> — when the AI spots emerging themes</li>
+        <li><strong>Weekly Review</strong> — notification when your review is ready</li>
+      </ul>
+
+      <h2 id="api-keys">API Keys</h2>
+      <p>Generate API keys in <strong>Settings → API Keys</strong> to access Menerio's Hub API. Each key has configurable scopes (notes, contacts, actions, stats) and can be revoked at any time.</p>
+      <CodeBlock code={`curl -H "Authorization: Bearer mb_abc123..." \\\n  https://your-project.supabase.co/functions/v1/hub-api-notes`} language="bash" title="Using the Hub API" />
+
+      <h2 id="subscription">Subscription & Credits</h2>
+      <p>View your current plan and AI credit usage in <strong>Settings → Subscription</strong>. Free accounts include a monthly AI credit allowance; upgrade to Premium for more credits and features.</p>
+
+      <h2 id="data-export">Data Export</h2>
+      <p>Export all your notes as JSON or Markdown from <strong>Settings → Export</strong>. Your data is always yours.</p>
+
+      <h2 id="delete-account">Delete Account</h2>
+      <p>If you need to leave, go to <strong>Settings → Danger Zone</strong> to permanently delete your account and all associated data. This action cannot be undone.</p>
+      <Callout type="warning" title="Before deleting">Export your data first. Once deleted, your notes, contacts, and profile cannot be recovered.</Callout>
+    </>
+  ),
+};
+
+// ── FAQ ──
 
 const faq: DocPage = {
   slug: "faq",
   title: "Frequently Asked Questions",
-  description: "Common questions about Menerio.",
+  description: "Answers to common questions about Menerio.",
   category: "FAQ",
   headings: [
     { id: "general", title: "General" },
-    { id: "billing", title: "Billing" },
+    { id: "ai-privacy", title: "AI & Privacy" },
+    { id: "pricing", title: "Pricing" },
     { id: "technical", title: "Technical" },
   ],
-  searchText: "faq questions answers help support billing pricing free trial data export",
+  searchText: "faq questions answers help support pricing free premium privacy data open source self-host export",
   content: () => (
     <>
       <h2 id="general">General</h2>
       <h3>What is Menerio?</h3>
-      <p>Menerio is a modern platform for project management, team collaboration, and workflow automation — powered by AI.</p>
-      <h3>Is there a free plan?</h3>
-      <p>Yes! Our free plan includes all core features with generous limits. No credit card required.</p>
-      <h3>Can I self-host Menerio?</h3>
-      <p>We're exploring self-hosting options. Join our community to stay updated on the roadmap.</p>
+      <p>Menerio is an open-source, AI-powered personal knowledge system. It's a single place for your thoughts, notes, contacts, and actions — with AI that connects everything automatically.</p>
+      <h3>Is Menerio open source?</h3>
+      <p>Yes. Menerio is licensed under AGPL-3.0. You can inspect the source code, contribute, or self-host.</p>
+      <h3>Can I use it on mobile?</h3>
+      <p>Menerio is a responsive web app that works in any mobile browser. A native mobile app is on the roadmap.</p>
 
-      <h2 id="billing">Billing</h2>
-      <h3>How do I upgrade to Premium?</h3>
-      <p>Visit the Subscription tab in your Settings to upgrade. We accept all major credit cards.</p>
-      <h3>Can I cancel anytime?</h3>
-      <p>Yes, you can cancel your subscription at any time. You'll retain access until the end of your billing period.</p>
+      <h2 id="ai-privacy">AI & Privacy</h2>
+      <h3>Is my data used to train AI models?</h3>
+      <p>No. Your notes are processed to generate tags and connections for <em>your</em> account only. They are never used to train foundation models.</p>
+      <h3>Where is my data stored?</h3>
+      <p>Your data is stored securely in a Supabase-hosted PostgreSQL database with row-level security. Attachments are stored in encrypted cloud storage.</p>
+
+      <h2 id="pricing">Pricing</h2>
+      <h3>Is there a free plan?</h3>
+      <p>Yes. The free plan includes all core features — notes, AI processing, Knowledge Graph, contacts, and integrations — with a monthly AI credit limit.</p>
+      <h3>What does Premium include?</h3>
+      <p>Premium unlocks higher AI credit limits, priority processing, and early access to new features. You can upgrade from Settings → Subscription.</p>
 
       <h2 id="technical">Technical</h2>
       <h3>What browsers are supported?</h3>
-      <p>We support the latest versions of Chrome, Firefox, Safari, and Edge.</p>
+      <p>Chrome, Firefox, Safari, and Edge (latest versions). The app works best on Chromium-based browsers.</p>
       <h3>Can I export my data?</h3>
-      <p>Yes, you can export all your data in JSON or CSV format from your Settings page.</p>
-      <Callout type="info">Data export is available on all plans, including the free tier.</Callout>
+      <p>Yes. Export all notes as JSON or Markdown anytime from Settings → Export. Your data is always yours to take with you.</p>
+      <h3>Can I import from Obsidian?</h3>
+      <p>Yes. Use the GitHub Vault Sync feature to import a Markdown vault from GitHub, preserving wikilinks and frontmatter.</p>
+      <Callout type="info">Have a question not answered here? Reach out via the community or open an issue on GitHub.</Callout>
     </>
   ),
 };
@@ -373,16 +629,20 @@ const faq: DocPage = {
 
 export const allDocs: DocPage[] = [
   quickStart,
-  creatingAccount,
-  dashboardOverview,
-  feature1,
-  feature2,
-  feature3,
-  profileSettings,
-  teamMembers,
-  apiAuth,
-  apiEndpoints,
-  apiRateLimits,
+  noteTaking,
+  searchAndOrganise,
+  aiProcessing,
+  knowledgeGraph,
+  mediaAnalysis,
+  contacts,
+  actionItems,
+  appIntegrations,
+  messagingIntegrations,
+  githubSync,
+  profilePage,
+  dailyWorkflow,
+  weeklyReview,
+  settingsAccount,
   faq,
 ];
 
@@ -391,35 +651,57 @@ export const docCategories: DocCategory[] = [
     name: "Getting Started",
     slug: "getting-started",
     pages: [
-      { slug: "quick-start", title: "Quick Start Guide" },
-      { slug: "creating-account", title: "Creating Your Account" },
-      { slug: "dashboard-overview", title: "Dashboard Overview" },
+      { slug: "quick-start", title: "Quick Start" },
+      { slug: "note-taking", title: "Taking Notes" },
+      { slug: "search-organise", title: "Search & Organise" },
     ],
   },
   {
-    name: "Features",
-    slug: "features",
+    name: "AI Features",
+    slug: "ai-features",
     pages: [
-      { slug: "ai-insights", title: "AI-Powered Insights" },
-      { slug: "collaboration", title: "Seamless Collaboration" },
-      { slug: "integrations", title: "Integrations" },
+      { slug: "ai-processing", title: "AI Processing" },
+      { slug: "knowledge-graph", title: "Knowledge Graph" },
+      { slug: "media-analysis", title: "Media & Attachments" },
     ],
   },
   {
-    name: "Account",
-    slug: "account",
+    name: "People & Actions",
+    slug: "people-actions",
     pages: [
-      { slug: "profile-settings", title: "Profile Settings" },
-      { slug: "team-members", title: "Team Members" },
+      { slug: "contacts-crm", title: "People & Contacts" },
+      { slug: "action-items", title: "Action Items" },
     ],
   },
   {
-    name: "API Reference",
-    slug: "api-reference",
+    name: "Integrations",
+    slug: "integrations",
     pages: [
-      { slug: "api-authentication", title: "Authentication" },
-      { slug: "api-endpoints", title: "Endpoints" },
-      { slug: "api-rate-limits", title: "Rate Limits" },
+      { slug: "app-integrations", title: "App Integrations" },
+      { slug: "messaging-integrations", title: "Telegram, Slack & Discord" },
+      { slug: "github-sync", title: "GitHub Vault Sync" },
+    ],
+  },
+  {
+    name: "Your Profile",
+    slug: "profile",
+    pages: [
+      { slug: "profile", title: "Your Profile" },
+    ],
+  },
+  {
+    name: "Workflows",
+    slug: "workflows",
+    pages: [
+      { slug: "daily-workflow", title: "Daily Workflow" },
+      { slug: "weekly-review", title: "Weekly Review" },
+    ],
+  },
+  {
+    name: "Settings",
+    slug: "settings",
+    pages: [
+      { slug: "settings", title: "Settings & Account" },
     ],
   },
   {
