@@ -142,11 +142,23 @@ export default function Profile() {
     <>
       <SEOHead title="My Profile — Menerio" description="Your personal profile for AI agents" />
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold">My Profile</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your personal context layer for AI agents. Fill in what matters — everything is optional.
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">My Profile</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Your personal context layer for AI agents. Fill in what matters — everything is optional.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 shrink-0"
+            onClick={() => syncProfile.mutate("clarinio")}
+            disabled={syncProfile.isPending}
+          >
+            <RefreshCw className={`h-4 w-4 ${syncProfile.isPending ? "animate-spin" : ""}`} />
+            Sync to Clarinio
+          </Button>
         </div>
 
         <Tabs defaultValue="profile">
