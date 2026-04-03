@@ -17,6 +17,7 @@ import {
   Network,
   Image,
   BookOpen,
+  ClipboardList,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { useProfileSummary } from "@/hooks/useProfileSummary";
+import { useReviewQueue } from "@/hooks/useReviewQueue";
 import {
   Sidebar,
   SidebarContent,
@@ -48,6 +50,7 @@ export function DashboardSidebar() {
   const { role } = useAuth();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const { completeness } = useProfileSummary();
+  const { pendingCount } = useReviewQueue();
 
   const profileDotColor =
     completeness < 30 ? "bg-destructive" : completeness < 70 ? "bg-yellow-500" : "bg-green-500";
@@ -62,6 +65,7 @@ export function DashboardSidebar() {
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     { title: "Actions", url: "/dashboard/actions", icon: ListChecks },
+    { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
     { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
     { title: "Media Library", url: "/dashboard/media", icon: Image },
@@ -100,6 +104,11 @@ export function DashboardSidebar() {
                     <NavLink to={item.url} end={item.url === "/dashboard"}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.title === "Review" && !collapsed && pendingCount > 0 && (
+                        <Badge variant="default" className="ml-auto text-[10px] px-1.5 py-0 min-w-[1.25rem] justify-center">
+                          {pendingCount}
+                        </Badge>
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

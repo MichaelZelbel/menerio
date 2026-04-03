@@ -317,6 +317,42 @@ const actionItems: DocPage = {
   ),
 };
 
+const reviewQueue: DocPage = {
+  slug: "review-queue",
+  title: "Review Queue",
+  description: "A central inbox for AI-generated suggestions from your notes.",
+  category: "People & Actions",
+  headings: [
+    { id: "what-is-the-review-queue", title: "What is the Review Queue?" },
+    { id: "suggestion-types", title: "Suggestion Types" },
+    { id: "accepting-and-dismissing", title: "Accepting & Dismissing" },
+  ],
+  searchText: "review queue suggestions AI events temerio cherishly contacts accept dismiss inbox",
+  content: () => (
+    <>
+      <h2 id="what-is-the-review-queue">What is the Review Queue?</h2>
+      <p>Every time you save a note, the AI scans it for actionable patterns — events with dates and people, new contacts, and cross-app opportunities. Instead of acting silently, it places <strong>suggestions</strong> into your Review Queue so you stay in control.</p>
+      <Callout type="tip" title="No extra credits">Suggestions are generated from metadata the AI already extracted — no additional LLM calls, no extra credits.</Callout>
+
+      <h2 id="suggestion-types">Suggestion Types</h2>
+      <ul>
+        <li><strong>Add Event to Temerio</strong> — a date and people were detected, and you have Temerio connected. The event dialog opens pre-filled so you just confirm.</li>
+        <li><strong>Add Event to Cherishly</strong> — same detection, but for saving a cherished memory in Cherishly.</li>
+        <li><strong>Add to People</strong> — a person was mentioned who isn't in your contacts yet. Accepting takes you to the People page with the name pre-filled.</li>
+      </ul>
+      <p>Only suggestions relevant to your connected apps appear. If you haven't connected Temerio, you won't see Temerio suggestions.</p>
+
+      <h2 id="accepting-and-dismissing">Accepting & Dismissing</h2>
+      <p>Each suggestion card has two buttons:</p>
+      <ul>
+        <li><strong>Accept</strong> — opens the appropriate dialog or navigates to the right page with data pre-filled.</li>
+        <li><strong>Dismiss</strong> — hides the suggestion permanently. You can always create the event or contact manually later.</li>
+      </ul>
+      <p>The pending count badge in the sidebar lets you know at a glance how many suggestions are waiting.</p>
+    </>
+  ),
+};
+
 // ── Integrations ──
 
 const appIntegrations: DocPage = {
@@ -636,6 +672,7 @@ export const allDocs: DocPage[] = [
   mediaAnalysis,
   contacts,
   actionItems,
+  reviewQueue,
   appIntegrations,
   messagingIntegrations,
   githubSync,
@@ -671,6 +708,7 @@ export const docCategories: DocCategory[] = [
     pages: [
       { slug: "contacts-crm", title: "People & Contacts" },
       { slug: "action-items", title: "Action Items" },
+      { slug: "review-queue", title: "Review Queue" },
     ],
   },
   {
