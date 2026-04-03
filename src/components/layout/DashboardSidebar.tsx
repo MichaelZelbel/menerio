@@ -65,6 +65,7 @@ export function DashboardSidebar() {
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     { title: "Actions", url: "/dashboard/actions", icon: ListChecks },
+    { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
     { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
     { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
     { title: "Media Library", url: "/dashboard/media", icon: Image },
