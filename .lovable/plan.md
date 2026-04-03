@@ -1,36 +1,27 @@
 
 
-# Read-Only Notes: Simplified Toolbar UX
+# Fix: Smart Search Not Returning Results
 
-## Problem
-External (read-only) notes still show the full editor toolbar (bold, italic, headings, etc.) even though the editor is not editable. This is confusing and wastes space.
+## Root Cause
 
-## Solution
-When a note is external (`note.is_external`), replace the `EditorToolbar` with a minimal read-only bar containing:
-1. **"Open in {source_app}"** button — opens the note in the originating app via `source_url`
-2. **"Duplicate to Menerio"** button — creates a new local, editable copy of the note
+The `search-notes-semantic` edge function is **missing from `supabase/config.toml`**. Without an entry, it deploys with the default `verify_jwt = true`. Supabase's gateway rejects the request before any code runs, returning a 401. The frontend silently falls back to ILIKE search (or shows no results if the error isn't caught cleanly).
 
-## Changes
+All other edge functions that need in-code auth have `verify_jwt = false` entries in the config.
 
-### `src/components/notes/NoteEditor.tsx`
+## Fix
 
-**Line 596** — Replace the toolbar conditional:
-- Currently: `{!note.is_trashed && !sourceMode && <EditorToolbar editor={editor} />}`
-- New logic: if `note.is_external`, render a simple bar with two buttons instead of `EditorToolbar`
+### `supabase/config.toml`
 
-**Duplicate handler** (new function in the component):
-- Creates a new note via `createNote.mutateAsync({ title: note.title, content: editor.getHTML() })` with the same tags
-- Navigates to the new note
-- Shows a success toast
+Add one entry:
 
-**Read-only bar layout:**
-```text
-┌──────────────────────────────────────────────────────┐
-│ 🔒 Read-only · Synced from {source_app}   [Open in {app}] [Duplicate] │
-└──────────────────────────────────────────────────────┘
+```toml
+[functions.search-notes-semantic]
+verify_jwt = false
 ```
 
-### No other files need changes
-- `EditorToolbar.tsx` — unchanged
-- `ExternalNotePanel.tsx` — unchanged (still available in the collapsible details section below)
+This is the only change needed. The function already validates the JWT in code via `supabase.auth.getUser(token)`.
+
+## Verification
+
+After deploying, semantic search should return vector-matched results instead of silently failing. Many notes already have embeddings (confirmed ~12 of 20 sampled notes have `embedding IS NOT NULL`), so results should appear immediately.
 
