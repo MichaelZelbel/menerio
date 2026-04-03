@@ -50,8 +50,19 @@ export default function ReviewQueue() {
     }
 
     if (type === "add_contact") {
+      const name = (item.payload.name as string) || "";
+      if (!name) {
+        showToast.error("No name found in suggestion");
+        return;
+      }
+      // Insert the contact directly
+      const { error } = await supabase.from("contacts").insert({ name });
+      if (error) {
+        showToast.error("Failed to add contact: " + error.message);
+        return;
+      }
       updateStatus.mutate({ id: item.id, status: "accepted" });
-      navigate(`/dashboard/people?prefill=${encodeURIComponent(item.payload.name || "")}`);
+      showToast.success(`Added "${name}" to your People`);
       return;
     }
 
