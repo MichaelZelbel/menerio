@@ -170,11 +170,7 @@ export default function ReviewQueue() {
         <CreateEventDialog
           open={eventDialogOpen}
           onOpenChange={(open) => {
-            if (!open) {
-              setEventDialogOpen(false);
-              setEventDraft(null);
-              setActiveItemId(null);
-            }
+            if (!open) handleEventDialogClose();
           }}
           draft={eventDraft}
         />
