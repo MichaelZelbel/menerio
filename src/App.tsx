@@ -72,6 +72,7 @@ const App = () => (
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/cookies" element={<Cookies />} />
                     <Route path="/impressum" element={<Impressum />} />
+                    <Route path="/community-guidelines" element={<CommunityGuidelines />} />
                   </Route>
 
                   <Route path="/shared/:token" element={<SharedNote />} />
