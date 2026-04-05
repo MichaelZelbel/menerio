@@ -2,12 +2,25 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { moderateContent, ModerationResult } from "@/lib/moderateContent";
 
 interface SharedNote {
   id: string;
   note_id: string;
   share_token: string;
   is_active: boolean;
+}
+
+export interface ShareNoteInput {
+  noteId: string;
+  title: string;
+  content: string;
+}
+
+export interface ShareNoteResult {
+  url?: string;
+  blocked?: boolean;
+  moderation?: ModerationResult;
 }
 
 export function useSharedNote(noteId: string) {
@@ -41,8 +54,20 @@ export function useShareNote() {
   const qc = useQueryClient();
   const { user } = useAuth();
 
-  return useMutation({
-    mutationFn: async (noteId: string) => {
+  return useMutation<ShareNoteResult, Error, ShareNoteInput>({
+    mutationFn: async ({ noteId, title, content }) => {
+      // Run moderation check first
+      const modResult = await moderateContent(
+        { title, content },
+        "share_note",
+        "note",
+        noteId
+      );
+
+      if (!modResult.approved) {
+        return { blocked: true, moderation: modResult };
+      }
+
       const token = generateToken();
       const { data, error } = await supabase
         .from("shared_notes" as any)
@@ -56,11 +81,13 @@ export function useShareNote() {
       const shareToken = (data as any).share_token;
       const url = getShareUrl(shareToken);
       await navigator.clipboard.writeText(url);
-      return url;
+      return { url };
     },
-    onSuccess: (_, noteId) => {
-      qc.invalidateQueries({ queryKey: ["shared-note", noteId] });
-      showToast.success("Public link copied to clipboard");
+    onSuccess: (result, { noteId }) => {
+      if (!result.blocked) {
+        qc.invalidateQueries({ queryKey: ["shared-note", noteId] });
+        showToast.success("Public link copied to clipboard");
+      }
     },
     onError: () => showToast.error("Failed to share note"),
   });

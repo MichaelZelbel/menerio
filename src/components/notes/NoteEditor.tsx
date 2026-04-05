@@ -24,7 +24,9 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
-import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink } from "@/hooks/useNoteSharing";
+import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink, ShareNoteResult } from "@/hooks/useNoteSharing";
+import { ModerationResult } from "@/lib/moderateContent";
+import { ModerationBlockDialog } from "@/components/moderation/ModerationBlockDialog";
 import { useGitHubConnection, useGitHubSyncExport, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { ExternalNotePanel } from "./ExternalNotePanel";
@@ -197,6 +199,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
   const chatMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
@@ -538,7 +541,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                   </DropdownMenuItem>
                 </>
               ) : (
-                <DropdownMenuItem onClick={() => shareNote.mutate(note.id)} disabled={shareNote.isPending}>
+                <DropdownMenuItem onClick={() => shareNote.mutate({ noteId: note.id, title, content: editor?.getHTML() || note.content }, { onSuccess: (result: ShareNoteResult) => { if (result.blocked && result.moderation) setModerationBlock(result.moderation); } })} disabled={shareNote.isPending}>
                   <Share2 className="mr-2 h-4 w-4" /> Share Note
                 </DropdownMenuItem>
               )}
@@ -859,6 +862,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }}
       />
     )}
+    <ModerationBlockDialog
+      isOpen={!!moderationBlock}
+      onClose={() => setModerationBlock(null)}
+      reason={moderationBlock?.reason}
+      category={moderationBlock?.category}
+      supportHint={moderationBlock?.support_hint}
+    />
     </div>
   );
 }
