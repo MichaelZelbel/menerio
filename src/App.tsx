@@ -28,6 +28,7 @@ const Privacy = lazy(() => import("./pages/Privacy"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Cookies = lazy(() => import("./pages/Cookies"));
 const Impressum = lazy(() => import("./pages/Impressum"));
+const CommunityGuidelines = lazy(() => import("./pages/CommunityGuidelines"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Wizard = lazy(() => import("./pages/Wizard"));
 const Admin = lazy(() => import("./pages/Admin"));
