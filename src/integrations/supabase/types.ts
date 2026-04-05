@@ -703,6 +703,120 @@ export type Database = {
           },
         ]
       }
+      moderation_events: {
+        Row: {
+          action: string
+          category: string | null
+          created_at: string
+          flagged_content: string | null
+          id: string
+          item_id: string | null
+          item_type: string
+          matched_words: string[] | null
+          result: string
+          tier: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          category?: string | null
+          created_at?: string
+          flagged_content?: string | null
+          id?: string
+          item_id?: string | null
+          item_type: string
+          matched_words?: string[] | null
+          result?: string
+          tier?: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          category?: string | null
+          created_at?: string
+          flagged_content?: string | null
+          id?: string
+          item_id?: string | null
+          item_type?: string
+          matched_words?: string[] | null
+          result?: string
+          tier?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      moderation_review_queue: {
+        Row: {
+          ai_category: string | null
+          ai_confidence: number | null
+          ai_reason: string | null
+          content_snapshot: string
+          created_at: string
+          id: string
+          item_id: string
+          item_type: string
+          retry_count: number
+          reviewed_at: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          ai_category?: string | null
+          ai_confidence?: number | null
+          ai_reason?: string | null
+          content_snapshot: string
+          created_at?: string
+          id?: string
+          item_id: string
+          item_type: string
+          retry_count?: number
+          reviewed_at?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          ai_category?: string | null
+          ai_confidence?: number | null
+          ai_reason?: string | null
+          content_snapshot?: string
+          created_at?: string
+          id?: string
+          item_id?: string
+          item_type?: string
+          retry_count?: number
+          reviewed_at?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      moderation_stopwords: {
+        Row: {
+          category: string
+          created_at: string
+          created_by: string | null
+          id: string
+          severity: string
+          word: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          severity?: string
+          word: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          severity?: string
+          word?: string
+        }
+        Relationships: []
+      }
       note_connections: {
         Row: {
           connection_type: string
@@ -1236,6 +1350,39 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_suspensions: {
+        Row: {
+          created_at: string
+          id: string
+          strike_count: number
+          suspended: boolean
+          suspended_at: string | null
+          suspended_until: string | null
+          suspension_reason: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          strike_count?: number
+          suspended?: boolean
+          suspended_at?: string | null
+          suspended_until?: string | null
+          suspension_reason?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          strike_count?: number
+          suspended?: boolean
+          suspended_at?: string | null
+          suspended_until?: string | null
+          suspension_reason?: string | null
           user_id?: string
         }
         Relationships: []
