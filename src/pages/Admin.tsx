@@ -117,10 +117,11 @@ export default function Admin() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="overview" className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" /> Overview</TabsTrigger>
           <TabsTrigger value="users" className="gap-1.5"><Users className="h-3.5 w-3.5" /> Users</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Credits</TabsTrigger>
+          <TabsTrigger value="moderation" className="gap-1.5"><Shield className="h-3.5 w-3.5" /> Moderation</TabsTrigger>
           <TabsTrigger value="system" className="gap-1.5"><Settings className="h-3.5 w-3.5" /> System</TabsTrigger>
         </TabsList>
 
@@ -132,6 +133,11 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="credits">
           <CreditsSettingsTab />
+        </TabsContent>
+        <TabsContent value="moderation">
+          <Suspense fallback={<div className="py-8 text-center text-muted-foreground">Loading…</div>}>
+            <ModerationPanel />
+          </Suspense>
         </TabsContent>
         <TabsContent value="system">
           <SystemTab />
