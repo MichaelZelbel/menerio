@@ -199,6 +199,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
   const chatMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
