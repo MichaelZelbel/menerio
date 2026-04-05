@@ -862,6 +862,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }}
       />
     )}
+    <ModerationBlockDialog
+      isOpen={!!moderationBlock}
+      onClose={() => setModerationBlock(null)}
+      reason={moderationBlock?.reason}
+      category={moderationBlock?.category}
+      supportHint={moderationBlock?.support_hint}
+    />
     </div>
   );
 }
