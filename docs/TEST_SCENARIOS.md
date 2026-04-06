@@ -1,20 +1,20 @@
 # Menerio — End-to-End Test Scenarios
 
 > **Last updated:** 2026-04-03
-> **App URL:** https://menerio.lovable.app
-> **Preview URL:** https://id-preview--d90589e3-d781-4fdd-bcab-2f98807b83a6.lovable.app
+
+> **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
 ---
 
 ## Test Personas
 
-| Persona | Email | Password | Role | Purpose |
-|---------|-------|----------|------|---------|
-| **Free User** | `test-free@menerio.test` | `TestFree!2026` | `free` | Validates core features and premium gates |
-| **Premium User** | `test-premium@menerio.test` | `TestPrem!2026` | `premium` | Validates premium/AI features |
-| **Admin User** | `test-admin@menerio.test` | `TestAdmin!2026` | `admin` | Validates admin dashboard and user management |
+| Persona | Email (example) | Role | Purpose |
+|---------|-----------------|------|---------|
+| **Free User** | `free@example.test` | `free` | Validates core features and premium gates |
+| **Premium User** | `premium@example.test` | `premium` | Validates premium/AI features |
+| **Admin User** | `admin@example.test` | `admin` | Validates admin dashboard and user management |
 
-> **Setup:** Create these users via `/auth` signup, then assign roles via Supabase SQL Editor or the Admin panel.
+> **Setup:** Create these users via `/auth` signup, then assign roles via Supabase SQL Editor or the Admin panel. Choose strong passwords and store them in your local password manager — never commit them.
 
 ---
 
@@ -27,11 +27,11 @@
 - **Steps:**
   1. Navigate to `/auth`
   2. Click the "Sign Up" tab
-  3. Enter display name "Test Free User"
-  4. Enter email `test-free@menerio.test`
-  5. Enter password `TestFree!2026` — observe password strength indicator updates
-  6. Check "I agree to the Terms of Service and Privacy Policy"
-  7. Click "Create Account"
+   3. Enter display name "Test Free User"
+   4. Enter a test email and a strong password
+   5. Observe password strength indicator updates
+   6. Check "I agree to the Terms of Service and Privacy Policy"
+   7. Click "Create Account"
 - **Expected Outcome:** Toast "Account created!" appears with instruction to check email. Password strength shows "Strong" (4 bars).
 - **Variations:** Try weak password (< 8 chars) — strength indicator shows "Too short"
 
@@ -1137,9 +1137,9 @@
 
 | Entity | Created In | Name / Description | Persona |
 |--------|-----------|-------------------|---------|
-| User | TS-AUTH-001 | test-free@menerio.test | Free |
-| User | Setup | test-premium@menerio.test | Premium |
-| User | Setup | test-admin@menerio.test | Admin |
+| User | TS-AUTH-001 | Free test account | Free |
+| User | Setup | Premium test account | Premium |
+| User | Setup | Admin test account | Admin |
 | Note | TS-NOTES-001 | "E2E Test Note" | Free |
 | Note | TS-NOTES-002 | "E2E Test Note — Updated" | Free |
 | Shared Note | TS-SHARE-001 | Public link for test note | Free |
