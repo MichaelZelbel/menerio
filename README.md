@@ -3,6 +3,9 @@
 ## What it is
 Menerio is a central event hub for personal data.
 
+> **Project status: Alpha**
+> Menerio is usable but still evolving. APIs, data structures, and UI may change without notice. Some features are partially implemented or experimental. We recommend it for early adopters and contributors who are comfortable with rough edges.
+
 It connects multiple apps into a single system by capturing and distributing events. Instead of isolated tools with their own data silos, Menerio acts as the backbone that keeps everything in sync.
 
 Each connected app remains the owner of its data, while Menerio ensures that relevant changes are shared across the system.
