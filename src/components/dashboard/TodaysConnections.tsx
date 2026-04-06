@@ -29,7 +29,7 @@ export function TodaysConnections() {
     if (lastFetch === today) {
       const cached = localStorage.getItem("menerio-daily-connections");
       if (cached) {
-        try { setData(JSON.parse(cached)); } catch {}
+        try { setData(JSON.parse(cached)); } catch { /* ignore malformed cache */ }
         return;
       }
     }
