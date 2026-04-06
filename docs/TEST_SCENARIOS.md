@@ -1,20 +1,20 @@
 # Menerio — End-to-End Test Scenarios
 
 > **Last updated:** 2026-04-03
-> **App URL:** https://menerio.lovable.app
-> **Preview URL:** https://id-preview--d90589e3-d781-4fdd-bcab-2f98807b83a6.lovable.app
+
+> **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
 ---
 
 ## Test Personas
 
-| Persona | Email | Password | Role | Purpose |
-|---------|-------|----------|------|---------|
-| **Free User** | `test-free@menerio.test` | `TestFree!2026` | `free` | Validates core features and premium gates |
-| **Premium User** | `test-premium@menerio.test` | `TestPrem!2026` | `premium` | Validates premium/AI features |
-| **Admin User** | `test-admin@menerio.test` | `TestAdmin!2026` | `admin` | Validates admin dashboard and user management |
+| Persona | Email (example) | Role | Purpose |
+|---------|-----------------|------|---------|
+| **Free User** | `free@example.test` | `free` | Validates core features and premium gates |
+| **Premium User** | `premium@example.test` | `premium` | Validates premium/AI features |
+| **Admin User** | `admin@example.test` | `admin` | Validates admin dashboard and user management |
 
-> **Setup:** Create these users via `/auth` signup, then assign roles via Supabase SQL Editor or the Admin panel.
+> **Setup:** Create these users via `/auth` signup, then assign roles via Supabase SQL Editor or the Admin panel. Choose strong passwords and store them in your local password manager — never commit them.
 
 ---
 
