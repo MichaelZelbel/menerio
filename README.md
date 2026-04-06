@@ -70,6 +70,4 @@ The goal is to build Menerio in public as a foundational system for connecting p
 
 ## Contributing
 
-Contributions are welcome.
-
-If you want to improve the system, fix issues, or explore new integrations, feel free to open an issue or submit a pull request.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
