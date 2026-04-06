@@ -114,7 +114,7 @@ function generateApiKey(): string {
 /* ────────────────────────────── Component ────────────────────────────── */
 
 export function AppIntegrations() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const qc = useQueryClient();
 
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
@@ -275,7 +275,7 @@ export function AppIntegrations() {
             </div>
           ) : (
             <div className="space-y-3">
-              {KNOWN_APPS.map((known) => {
+              {(role === "admin" ? KNOWN_APPS : KNOWN_APPS.filter((k) => k.id === "querino")).map((known) => {
                 const existing = apps.find((a) => a.app_name === known.id);
                 return (
                   <div
