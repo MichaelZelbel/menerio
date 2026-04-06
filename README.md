@@ -47,6 +47,14 @@ Changes made in one app propagate back to the owning app through Menerio, ensuri
 - Lovable (frontend and application scaffolding)
 - Supabase (database, auth, backend services)
 
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — app layers, frontend and backend structure
+- [Project Structure](docs/PROJECT_STRUCTURE.md) — root folders and conventions
+- [Data Model](docs/DATA_MODEL.md) — main database entities explained in plain English
+- [Test Scenarios](docs/TEST_SCENARIOS.md) — end-to-end test coverage
+- [Open Source Philosophy](OPEN_SOURCE.md) — principles and licensing rationale
+
 ## Getting Started
 
 1. Clone the repository
