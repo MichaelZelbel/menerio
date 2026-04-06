@@ -27,11 +27,11 @@
 - **Steps:**
   1. Navigate to `/auth`
   2. Click the "Sign Up" tab
-  3. Enter display name "Test Free User"
-  4. Enter email `test-free@menerio.test`
-  5. Enter password `TestFree!2026` — observe password strength indicator updates
-  6. Check "I agree to the Terms of Service and Privacy Policy"
-  7. Click "Create Account"
+   3. Enter display name "Test Free User"
+   4. Enter a test email and a strong password
+   5. Observe password strength indicator updates
+   6. Check "I agree to the Terms of Service and Privacy Policy"
+   7. Click "Create Account"
 - **Expected Outcome:** Toast "Account created!" appears with instruction to check email. Password strength shows "Strong" (4 bars).
 - **Variations:** Try weak password (< 8 chars) — strength indicator shows "Too short"
 
