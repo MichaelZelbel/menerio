@@ -50,7 +50,8 @@ export function DashboardSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const { role } = useAuth();
+  const { role, signOut } = useAuth();
+  const navigate = useNavigate();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const { completeness } = useProfileSummary();
   const { pendingCount } = useReviewQueue();
