@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { MailCheck } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
