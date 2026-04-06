@@ -1,3 +1,4 @@
+
 import {
   LayoutDashboard,
   FileText,
@@ -18,11 +19,13 @@ import {
   Image,
   BookOpen,
   ClipboardList,
+  LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
@@ -47,7 +50,8 @@ export function DashboardSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const { role } = useAuth();
+  const { role, signOut } = useAuth();
+  const navigate = useNavigate();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const { completeness } = useProfileSummary();
   const { pendingCount } = useReviewQueue();
@@ -172,8 +176,20 @@ export function DashboardSidebar() {
           <>
             <SidebarSeparator />
             <CreditsDisplay compact />
-            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
           </>
+        )}
+        <Button
+          variant="ghost"
+          size={collapsed ? "icon" : "sm"}
+          className="w-full justify-start text-muted-foreground hover:text-destructive"
+          onClick={async () => { await signOut(); navigate("/"); }}
+          title="Sign Out"
+        >
+          <LogOut className="h-4 w-4" />
+          {!collapsed && <span className="ml-2">Sign Out</span>}
+        </Button>
+        {!collapsed && (
+          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
         )}
       </SidebarFooter>
     </Sidebar>
