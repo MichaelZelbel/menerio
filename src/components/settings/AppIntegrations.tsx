@@ -275,7 +275,7 @@ export function AppIntegrations() {
             </div>
           ) : (
             <div className="space-y-3">
-              {KNOWN_APPS.map((known) => {
+              {(role === "admin" ? KNOWN_APPS : KNOWN_APPS.filter((k) => k.id === "querino")).map((known) => {
                 const existing = apps.find((a) => a.app_name === known.id);
                 return (
                   <div

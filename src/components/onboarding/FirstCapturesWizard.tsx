@@ -372,10 +372,11 @@ export function FirstCapturesWizard({ onComplete }: { onComplete: () => void }) 
 
 export function useShowFirstCaptures() {
   const [show, setShow] = useState(false);
-  const { user } = useAuth();
+  const { user, role } = useAuth();
 
   useEffect(() => {
     if (!user) return;
+    if (role !== "admin") return; // Only show wizard to admins
     if (localStorage.getItem(ONBOARDING_KEY) === "true") return;
 
     // Check note count
@@ -389,7 +390,7 @@ export function useShowFirstCaptures() {
           setShow(true);
         }
       });
-  }, [user]);
+  }, [user, role]);
 
   return { show, dismiss: () => setShow(false) };
 }
