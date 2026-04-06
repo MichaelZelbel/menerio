@@ -4,7 +4,7 @@ import logoImg from "@/assets/logo.png";
 
 const productLinks = [
   { label: "Docs", to: "/docs" },
-  { label: "Changelog", to: "/changelog" },
+  { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true },
 ];
 
 const companyLinks = [
@@ -48,12 +48,23 @@ export function Footer() {
             <ul className="space-y-3">
               {productLinks.map((link) => (
                 <li key={link.to}>
-                  <Link
-                    to={link.to}
-                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
+                  {"external" in link && link.external ? (
+                    <a
+                      href={link.to}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link
+                      to={link.to}
+                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {link.label}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
