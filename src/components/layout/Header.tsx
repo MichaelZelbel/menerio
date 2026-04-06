@@ -120,7 +120,7 @@ export function Header() {
           ) : (
             <>
               <Button variant="ghost" size="sm" onClick={() => navigate("/auth")}>Sign In</Button>
-              <Button size="sm" onClick={() => navigate("/auth")}>Get Started</Button>
+              <Button size="sm" onClick={() => navigate("/auth?tab=signup")}>Get Started</Button>
             </>
           )}
         </div>
