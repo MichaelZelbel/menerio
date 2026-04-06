@@ -126,7 +126,7 @@ const Index = () => {
               custom={3}
               className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row"
             >
-              <Button size="xl" onClick={() => navigate("/auth")} className="gap-2 text-base px-8 shadow-lg shadow-primary/25">
+              <Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="gap-2 text-base px-8 shadow-lg shadow-primary/25">
                 Start Your Brain <ArrowRight className="h-4 w-4" />
               </Button>
               <Button variant="outline" size="lg" onClick={() => navigate("/features")} className="gap-2 text-base">
