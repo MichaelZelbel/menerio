@@ -165,7 +165,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       .eq("note_id", noteId)
       .eq("analysis_status", "complete");
 
-    let mediaTopics: string[] = [];
+    const mediaTopics: string[] = [];
     if (mediaEntries && mediaEntries.length > 0) {
       const mediaTexts = mediaEntries.map((m: any) => {
         if (m.topics) mediaTopics.push(...m.topics);
