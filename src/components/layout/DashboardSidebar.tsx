@@ -75,9 +75,7 @@ export function DashboardSidebar() {
     { title: "Media Library", url: "/dashboard/media", icon: Image },
   ];
 
-  const premiumItems = [
-    { title: "Team", url: "/dashboard/team", icon: Users },
-  ];
+  const premiumItems: typeof mainItems = [];
 
   const systemItems = [
     { title: "My Profile", url: "/dashboard/profile", icon: User },
