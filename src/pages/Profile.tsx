@@ -36,7 +36,7 @@ export default function Profile() {
     deleteView,
   } = useProfile();
 
-  const { user } = useAuth();
+  const { user, role } = useAuth();
 
   const [seeded, setSeeded] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
