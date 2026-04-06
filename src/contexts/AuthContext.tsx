@@ -20,7 +20,7 @@ interface AuthContextType {
   role: AppRole | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string) => Promise<void>;
+  signUp: (email: string, password: string, displayName: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   signInWithOAuth: (provider: "google" | "github") => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
