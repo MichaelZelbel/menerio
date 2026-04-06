@@ -38,6 +38,10 @@ npm run test      # Vitest (unit tests)
 npm run build     # Verify the production build compiles
 ```
 
+## CI
+
+A GitHub Actions workflow runs automatically on every pull request and push to `main`. It executes the same three checks listed above (`lint`, `test`, `build`). All checks must pass before a PR can be merged.
+
 ## Secrets & Environment
 
 - **Never commit `.env` or any file containing real secrets.**
