@@ -48,7 +48,7 @@ export function DashboardSearch() {
       // Fire semantic in background
       setMode("semantic");
       try {
-        const res = await semanticSearch.mutateAsync({ query, limit: 8 });
+        const res = await semanticSearch.mutateAsync({ query, limit: 8, threshold: 0.25 });
         setSemanticResults(res.results.slice(0, 8));
       } catch { /* ignore */ }
     }, 250);

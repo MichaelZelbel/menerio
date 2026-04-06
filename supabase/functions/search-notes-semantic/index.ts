@@ -62,7 +62,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const query = (body.query || "").trim();
     if (!query) return json({ error: "query required" }, 400);
 
-    const threshold = body.threshold ?? 0.5;
+    const threshold = body.threshold ?? 0.25;
     const limit = Math.min(body.limit ?? 20, 50);
     const scope = body.scope || "all"; // "all" | "notes" | "media"
 
