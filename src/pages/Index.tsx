@@ -297,7 +297,7 @@ const Index = () => {
               Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
             </motion.p>
             <motion.div variants={fadeUp} custom={2} className="mt-10">
-              <Button size="xl" onClick={() => navigate("/auth")} className="gap-2 text-base px-10 shadow-lg shadow-primary/20">
+              <Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="gap-2 text-base px-10 shadow-lg shadow-primary/20">
                 Start Your Brain <ArrowRight className="h-4 w-4" />
               </Button>
             </motion.div>
