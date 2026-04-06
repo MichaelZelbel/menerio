@@ -72,7 +72,7 @@ export default function ActivityPage() {
 
   const fetchEvents = useCallback(async (append = false) => {
     if (!user) return;
-    append ? setLoadingMore(true) : setLoading(true);
+    if (append) { setLoadingMore(true); } else { setLoading(true); }
 
     let query = supabase
       .from("activity_events" as any)

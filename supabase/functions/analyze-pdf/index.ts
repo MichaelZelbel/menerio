@@ -93,7 +93,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // @ts-ignore EdgeRuntime
+    // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(
       processPdf(note_id, storage_path, original_filename ?? null, user.id, authHeader)
     );

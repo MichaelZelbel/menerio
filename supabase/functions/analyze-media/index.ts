@@ -275,7 +275,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Process in background
-    // @ts-ignore EdgeRuntime available in Supabase
+    // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(
       processMedia(
         note_id,

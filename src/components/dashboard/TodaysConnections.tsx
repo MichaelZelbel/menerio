@@ -49,7 +49,7 @@ export function TodaysConnections() {
         localStorage.setItem("menerio-daily-connections", JSON.stringify(res.data));
         localStorage.setItem("menerio-daily-connections-date", today);
       }
-    } catch {}
+    } catch { /* network errors are non-fatal */ }
     setLoading(false);
   }, [user]);
 
