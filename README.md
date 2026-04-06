@@ -1,73 +1,67 @@
-# Welcome to your Lovable project
+# Menerio
 
-## Project info
+## What it is
+Menerio is a central event hub for personal data.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+It connects multiple apps into a single system by capturing and distributing events. Instead of isolated tools with their own data silos, Menerio acts as the backbone that keeps everything in sync.
 
-## How can I edit this code?
+Each connected app remains the owner of its data, while Menerio ensures that relevant changes are shared across the system.
 
-There are several ways of editing your application.
+## Why it exists
+Most apps today operate in isolation. Data is fragmented, duplicated, and quickly becomes inconsistent.
 
-**Use Lovable**
+Menerio solves this by introducing a simple principle:
+- Every record has one clear owner
+- All changes are emitted as events
+- All connected apps stay in sync through a central event bus
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+This enables a system where:
+- Data remains consistent across apps
+- Ownership is always clear
+- Integrations become simple and scalable
 
-Changes made via Lovable will be committed automatically to this repo.
+The goal is not to replace apps, but to connect them into a coherent system.
 
-**Use your preferred IDE**
+## Core Concepts
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Single Source of Truth
+Each piece of data belongs to exactly one app. Other apps receive synchronized copies but never become the source of truth.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Event-Based Architecture
+All changes are emitted as events (e.g. `event.created`, `event.updated`). Menerio stores and distributes these events to subscribed apps.
 
-Follow these steps:
+### Hub-and-Spoke Model
+Apps do not communicate directly with each other. All communication flows through Menerio as the central hub.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Synchronization with Ownership
+Changes made in one app propagate back to the owning app through Menerio, ensuring consistency without conflicts.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## Features (Current State)
+- Central event ingestion and storage
+- Event distribution to connected applications
+- Basic data synchronization model
+- Supabase-backed data layer
+- Lovable-based frontend and application structure
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Tech Stack
+- Lovable (frontend and application scaffolding)
+- Supabase (database, auth, backend services)
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## Getting Started
 
-**Edit a file directly in GitHub**
+1. Clone the repository
+2. Copy `.env.example` to `.env`
+3. Fill in your environment variables
+4. Start the development environment
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Open Source
 
-**Use GitHub Codespaces**
+This project is open source under the AGPL-3.0 license.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+The goal is to build Menerio in public as a foundational system for connecting personal data and applications.
 
-## What technologies are used for this project?
+## Contributing
 
-This project is built with:
+Contributions are welcome.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+If you want to improve the system, fix issues, or explore new integrations, feel free to open an issue or submit a pull request.
