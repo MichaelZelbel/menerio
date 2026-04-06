@@ -4,7 +4,7 @@ import logoImg from "@/assets/logo.png";
 
 const productLinks = [
   { label: "Docs", to: "/docs" },
-  { label: "Changelog", to: "/changelog" },
+  { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true },
 ];
 
 const companyLinks = [
