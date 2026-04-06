@@ -176,8 +176,20 @@ export function DashboardSidebar() {
           <>
             <SidebarSeparator />
             <CreditsDisplay compact />
-            <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
           </>
+        )}
+        <Button
+          variant="ghost"
+          size={collapsed ? "icon" : "sm"}
+          className="w-full justify-start text-muted-foreground hover:text-destructive"
+          onClick={async () => { await signOut(); navigate("/"); }}
+          title="Sign Out"
+        >
+          <LogOut className="h-4 w-4" />
+          {!collapsed && <span className="ml-2">Sign Out</span>}
+        </Button>
+        {!collapsed && (
+          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
         )}
       </SidebarFooter>
     </Sidebar>
