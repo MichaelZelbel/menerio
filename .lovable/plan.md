@@ -1,24 +1,35 @@
 
 
-## Plan: Hide wizard and non-Querino apps from regular users
+## Fix: Semantic search missing conceptually related notes
 
-Two changes, both using the existing `role` from `useAuth()`:
+### Problem
+Searching "Italy" returns no results, even though the note "Xihui Rome Visit" exists with a valid embedding. The semantic similarity between "Italy" and a note about "Rome" falls below the default threshold of 0.5, so it gets filtered out by the `match_notes` RPC.
 
-### 1. Hide "Your First Captures" wizard from non-admin users
+### Root cause
+The default `threshold` of 0.5 in both `DashboardSearch.tsx` and `search-notes-semantic/index.ts` is too aggressive for short conceptual queries. Embeddings for a single word like "Italy" vs. a note about "Rome travel plans" may score ~0.3–0.45 similarity — valid semantic matches that get discarded.
 
-**File: `src/components/onboarding/FirstCapturesWizard.tsx`**
+### Fix
 
-In the `useShowFirstCaptures` hook, add an early return when `role !== "admin"`. The hook already has access to `useAuth()` — just destructure `role` alongside `user` and skip showing the wizard for non-admins.
+**1. Lower the default threshold in `DashboardSearch.tsx`**
+- Pass `threshold: 0.25` when calling `semanticSearch.mutateAsync()` from the search bar
 
-### 2. Hide Temerio, Cherishly, Clarinio, Planinio from non-admin users in Settings > Apps
+**2. Lower the default threshold in `search-notes-semantic/index.ts`**
+- Change `const threshold = body.threshold ?? 0.5` to `body.threshold ?? 0.25`
+- This ensures all callers (search bar, API, etc.) benefit from the improved default
 
-**File: `src/components/settings/AppIntegrations.tsx`**
+**3. Redeploy the edge function**
 
-- Import `useAuth` (already imported) and destructure `role`
-- Filter the `KNOWN_APPS` array before rendering: non-admin users only see Querino; admins see all five
-- This applies only to the catalog cards — any already-connected custom apps remain visible regardless of role
+### Why 0.25?
+- 0.5 is a common starting point but assumes queries closely match document content
+- Short, conceptual queries (single words, related concepts) routinely score 0.25–0.45
+- Results are still sorted by similarity, so lower-quality matches appear last
+- The UI already caps at 8 results, providing a natural quality filter
 
 ### Files changed
-- `src/components/onboarding/FirstCapturesWizard.tsx` — 2-line change in `useShowFirstCaptures`
-- `src/components/settings/AppIntegrations.tsx` — add role check + filter before the `.map()`
+- `src/components/layout/DashboardSearch.tsx` — pass `threshold: 0.25`
+- `supabase/functions/search-notes-semantic/index.ts` — change default threshold from 0.5 to 0.25
+
+### Validation
+- Search "Italy" should now return "Xihui Rome Visit"
+- Search quality for precise queries remains good (high-similarity results still sort first)
 
