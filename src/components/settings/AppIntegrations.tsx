@@ -114,7 +114,7 @@ function generateApiKey(): string {
 /* ────────────────────────────── Component ────────────────────────────── */
 
 export function AppIntegrations() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const qc = useQueryClient();
 
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
