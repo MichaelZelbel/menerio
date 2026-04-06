@@ -14,3 +14,11 @@
 | `@tiptap/extension-task-item` | `^2.11.5` | `^3.20.1` |
 
 **Validation:** `npm ci`, `npm run build`, and `npm test` all pass cleanly without `--legacy-peer-deps`.
+
+## Lint: `no-explicit-any` downgraded to warning (April 2026)
+
+**Problem:** 370+ `any` usages across `src/` and `supabase/functions/` caused `npm run lint` to fail. Most are in Edge Functions and dynamic Supabase query results where adding precise types requires significant effort and runtime knowledge.
+
+**Resolution:** Downgraded `@typescript-eslint/no-explicit-any` to `"warn"` in `eslint.config.js`. All other lint errors (17 total: `prefer-const`, `no-empty`, `no-useless-escape`, `ban-ts-comment`, `no-require-imports`, `no-empty-object-type`, `no-unused-expressions`, `no-this-alias`) were fixed directly.
+
+**Plan:** Contributors are encouraged to replace `any` with real types when touching a file. The warning count should decrease over time.
