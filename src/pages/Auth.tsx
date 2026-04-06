@@ -51,6 +51,7 @@ export default function Auth() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
+  const defaultTab = searchParams.get("tab") === "signup" ? "signup" : "signin";
 
   // Redirect if already logged in
   if (session) {
@@ -70,7 +71,7 @@ export default function Auth() {
         </div>
 
         <Card>
-          <Tabs defaultValue="signin">
+          <Tabs defaultValue={defaultTab}>
             <CardHeader className="pb-2">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="signin">Sign In</TabsTrigger>

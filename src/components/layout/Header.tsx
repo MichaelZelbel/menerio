@@ -120,7 +120,7 @@ export function Header() {
           ) : (
             <>
               <Button variant="ghost" size="sm" onClick={() => navigate("/auth")}>Sign In</Button>
-              <Button size="sm" onClick={() => navigate("/auth")}>Get Started</Button>
+              <Button size="sm" onClick={() => navigate("/auth?tab=signup")}>Get Started</Button>
             </>
           )}
         </div>
@@ -158,7 +158,7 @@ export function Header() {
               ) : (
                 <>
                   <Button variant="ghost" onClick={() => { navigate("/auth"); setMobileOpen(false); }}>Sign In</Button>
-                  <Button onClick={() => { navigate("/auth"); setMobileOpen(false); }}>Get Started</Button>
+                  <Button onClick={() => { navigate("/auth?tab=signup"); setMobileOpen(false); }}>Get Started</Button>
                 </>
               )}
             </div>
