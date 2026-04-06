@@ -1137,9 +1137,9 @@
 
 | Entity | Created In | Name / Description | Persona |
 |--------|-----------|-------------------|---------|
-| User | TS-AUTH-001 | test-free@menerio.test | Free |
-| User | Setup | test-premium@menerio.test | Premium |
-| User | Setup | test-admin@menerio.test | Admin |
+| User | TS-AUTH-001 | Free test account | Free |
+| User | Setup | Premium test account | Premium |
+| User | Setup | Admin test account | Admin |
 | Note | TS-NOTES-001 | "E2E Test Note" | Free |
 | Note | TS-NOTES-002 | "E2E Test Note — Updated" | Free |
 | Shared Note | TS-SHARE-001 | Public link for test note | Free |
