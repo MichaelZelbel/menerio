@@ -237,7 +237,7 @@ async function processInBackground(noteId: string, authHeader: string) {
     const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
     if (actionItems.length > 0) {
       const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
-      let contactMap: Record<string, string> = {};
+      const contactMap: Record<string, string> = {};
       if (people.length > 0) {
         const { data: contacts } = await supabase
           .from("contacts")
