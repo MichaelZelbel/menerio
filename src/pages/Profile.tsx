@@ -149,16 +149,18 @@ export default function Profile() {
               Your personal context layer for AI agents. Fill in what matters — everything is optional.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 shrink-0"
-            onClick={() => syncProfile.mutate("clarinio")}
-            disabled={syncProfile.isPending}
-          >
-            <RefreshCw className={`h-4 w-4 ${syncProfile.isPending ? "animate-spin" : ""}`} />
-            Sync to Clarinio
-          </Button>
+          {role === "admin" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={() => syncProfile.mutate("clarinio")}
+              disabled={syncProfile.isPending}
+            >
+              <RefreshCw className={`h-4 w-4 ${syncProfile.isPending ? "animate-spin" : ""}`} />
+              Sync to Clarinio
+            </Button>
+          )}
         </div>
 
         <Tabs defaultValue="profile">
