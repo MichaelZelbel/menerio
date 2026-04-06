@@ -1177,7 +1177,7 @@ server.registerTool(
 
       // Agent instructions
       if (include_instructions) {
-        let instQuery = supabase
+        const instQuery = supabase
           .from("agent_instructions")
           .select("instruction, applies_to")
           .eq("user_id", BRAIN_OWNER_USER_ID)

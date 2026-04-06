@@ -29,7 +29,7 @@ export function TodaysConnections() {
     if (lastFetch === today) {
       const cached = localStorage.getItem("menerio-daily-connections");
       if (cached) {
-        try { setData(JSON.parse(cached)); } catch {}
+        try { setData(JSON.parse(cached)); } catch { /* ignore malformed cache */ }
         return;
       }
     }
@@ -49,7 +49,7 @@ export function TodaysConnections() {
         localStorage.setItem("menerio-daily-connections", JSON.stringify(res.data));
         localStorage.setItem("menerio-daily-connections-date", today);
       }
-    } catch {}
+    } catch { /* network errors are non-fatal */ }
     setLoading(false);
   }, [user]);
 

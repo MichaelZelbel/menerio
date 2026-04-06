@@ -165,7 +165,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       .eq("note_id", noteId)
       .eq("analysis_status", "complete");
 
-    let mediaTopics: string[] = [];
+    const mediaTopics: string[] = [];
     if (mediaEntries && mediaEntries.length > 0) {
       const mediaTexts = mediaEntries.map((m: any) => {
         if (m.topics) mediaTopics.push(...m.topics);
@@ -237,7 +237,7 @@ async function processInBackground(noteId: string, authHeader: string) {
     const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
     if (actionItems.length > 0) {
       const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
-      let contactMap: Record<string, string> = {};
+      const contactMap: Record<string, string> = {};
       if (people.length > 0) {
         const { data: contacts } = await supabase
           .from("contacts")
@@ -314,7 +314,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // @ts-ignore EdgeRuntime is available in Supabase edge functions
+    // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
 
     return new Response(JSON.stringify({ ok: true, processing: true }), {

@@ -90,6 +90,7 @@ export const WikilinkExtension = Node.create<WikilinkOptions>({
   },
 
   addProseMirrorPlugins() {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- Tiptap plugin callback needs outer reference
     const extension = this;
 
     return [

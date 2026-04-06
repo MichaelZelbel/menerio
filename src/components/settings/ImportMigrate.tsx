@@ -24,7 +24,7 @@ interface ImportResult {
 function splitIntoItems(text: string): string[] {
   return text
     .split(/\n/)
-    .map((line) => line.replace(/^[\s•\-\*\d+\.]+/, "").trim())
+    .map((line) => line.replace(/^[\s•\-*\d+.]+/, "").trim())
     .filter((line) => line.length > 5);
 }
 

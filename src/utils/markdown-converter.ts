@@ -535,7 +535,7 @@ export function noteToFilePath(note: NoteForExport, vaultPath = "/"): string {
   const meta = (note.metadata || {}) as Record<string, unknown>;
 
   // Sanitise title for filesystem
-  let fileName = sanitizeFileName(note.title || "Untitled");
+  const fileName = sanitizeFileName(note.title || "Untitled");
 
   // Determine subdirectory
   let subDir = "";

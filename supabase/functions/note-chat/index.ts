@@ -365,7 +365,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     };
 
     // Build messages array: system + user conversation
-    let llmMessages = [systemMessage, ...chatMessages];
+    const llmMessages = [systemMessage, ...chatMessages];
 
     // Call LLM with tools (agentic loop for tool calls)
     let iterations = 0;
