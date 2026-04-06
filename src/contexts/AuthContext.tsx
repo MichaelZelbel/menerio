@@ -119,13 +119,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) { handleAuthError(error); throw error; }
   };
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = async (email: string, password: string, displayName: string): Promise<boolean> => {
     const { error } = await supabase.auth.signUp({
       email, password,
       options: { emailRedirectTo: window.location.origin, data: { full_name: displayName } },
     });
     if (error) { handleAuthError(error); throw error; }
-    toast({ title: "Account created!", description: "Please check your email to confirm your account." });
+    return true;
   };
 
   const signOut = async () => {

@@ -202,6 +202,7 @@ function SignUpForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,12 +211,33 @@ function SignUpForm() {
     setLoading(true);
     try {
       await signUp(email, password, displayName);
+      setSubmitted(true);
     } catch {
       // Error handled in context
     } finally {
       setLoading(false);
     }
   };
+
+  if (submitted) {
+    return (
+      <div className="flex flex-col items-center text-center py-6 space-y-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+          <MailCheck className="h-7 w-7 text-primary" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-semibold font-display">Check your email</h3>
+          <p className="text-sm text-muted-foreground max-w-xs">
+            We've sent a confirmation link to <span className="font-medium text-foreground">{email}</span>. Click the link in that email to activate your account.
+          </p>
+        </div>
+        <div className="rounded-lg border bg-muted/50 p-3 text-xs text-muted-foreground space-y-1 max-w-xs">
+          <p>Didn't receive it? Check your spam folder.</p>
+          <p>The link expires after 24 hours.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSignUp} className="space-y-4">
