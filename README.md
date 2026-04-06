@@ -3,6 +3,9 @@
 ## What it is
 Menerio is a central event hub for personal data.
 
+> **Project status: Alpha**
+> Menerio is usable but still evolving. APIs, data structures, and UI may change without notice. Some features are partially implemented or experimental. We recommend it for early adopters and contributors who are comfortable with rough edges.
+
 It connects multiple apps into a single system by capturing and distributing events. Instead of isolated tools with their own data silos, Menerio acts as the backbone that keeps everything in sync.
 
 Each connected app remains the owner of its data, while Menerio ensures that relevant changes are shared across the system.
@@ -42,6 +45,13 @@ Changes made in one app propagate back to the owning app through Menerio, ensuri
 - Basic data synchronization model
 - Supabase-backed data layer
 - Lovable-based frontend and application structure
+
+## Known Limitations
+- Some integrations (Discord, Telegram, Slack) require manual setup and are lightly tested.
+- AI-powered features depend on external API keys and credit allowances that may not be configured in every environment.
+- GitHub sync is functional but edge cases around conflict resolution are still maturing.
+- The moderation system exists but has not been stress-tested at scale.
+- Documentation covers the current state but may lag behind rapid changes.
 
 ## Tech Stack
 - Lovable (frontend and application scaffolding)
