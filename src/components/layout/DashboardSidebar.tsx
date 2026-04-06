@@ -23,8 +23,9 @@ import {
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
