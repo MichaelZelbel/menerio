@@ -19,6 +19,7 @@ import {
   Image,
   BookOpen,
   ClipboardList,
+  LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import logoImg from "@/assets/logo.png";
