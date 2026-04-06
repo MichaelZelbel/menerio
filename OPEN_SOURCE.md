@@ -25,8 +25,14 @@ The AGPL license ensures that:
 - The infrastructure cannot be closed off and resold as a proprietary backend
 - The ecosystem stays accessible to builders
 
-## Status
+## Status: Alpha
 
-Menerio is in an early public stage.
+Menerio is in an early public Alpha stage. The core system works and is actively used, but it is not yet stable in the traditional sense.
 
-Expect rapid iteration, breaking changes, and evolving architecture.
+What Alpha means in practice:
+- The architecture and data model may change between releases.
+- Some features are partially implemented or experimental.
+- Breaking changes can happen without a deprecation cycle.
+- Documentation is maintained but may not always reflect the latest state.
+
+We publish this openly because we believe useful software is built in the open, not behind closed doors. Contributions, feedback, and patience are all equally welcome.

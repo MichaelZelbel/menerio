@@ -46,6 +46,13 @@ Changes made in one app propagate back to the owning app through Menerio, ensuri
 - Supabase-backed data layer
 - Lovable-based frontend and application structure
 
+## Known Limitations
+- Some integrations (Discord, Telegram, Slack) require manual setup and are lightly tested.
+- AI-powered features depend on external API keys and credit allowances that may not be configured in every environment.
+- GitHub sync is functional but edge cases around conflict resolution are still maturing.
+- The moderation system exists but has not been stress-tested at scale.
+- Documentation covers the current state but may lag behind rapid changes.
+
 ## Tech Stack
 - Lovable (frontend and application scaffolding)
 - Supabase (database, auth, backend services)
