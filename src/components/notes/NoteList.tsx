@@ -257,7 +257,7 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
                 </>
               )}
             </div>
-          </button>
+          </a>
         );
       })}
     </div>
