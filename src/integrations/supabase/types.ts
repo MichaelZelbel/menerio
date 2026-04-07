@@ -297,6 +297,8 @@ export type Database = {
       }
       contacts: {
         Row: {
+          aliases: string[] | null
+          app_mappings: Json | null
           company: string | null
           contact_frequency_days: number | null
           created_at: string | null
@@ -314,6 +316,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          aliases?: string[] | null
+          app_mappings?: Json | null
           company?: string | null
           contact_frequency_days?: number | null
           created_at?: string | null
@@ -331,6 +335,8 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          aliases?: string[] | null
+          app_mappings?: Json | null
           company?: string | null
           contact_frequency_days?: number | null
           created_at?: string | null
