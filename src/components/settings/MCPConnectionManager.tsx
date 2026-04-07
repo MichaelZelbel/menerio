@@ -152,7 +152,7 @@ export function MCPConnectionManager() {
   }
 }`;
 
-  const cursorSnippet = claudeDesktopSnippet;
+  const cursorSnippet = claudeSnippet;
 
   const claudeCodeCommand = `claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: ${keyOrPlaceholder}"`;
 
