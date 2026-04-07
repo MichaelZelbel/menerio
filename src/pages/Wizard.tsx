@@ -120,7 +120,6 @@ export default function Wizard() {
     if (!user) return;
     await supabase.from("profiles").update({
       display_name: displayName || null,
-      bio: bio || null,
       avatar_url: avatarUrl,
     }).eq("id", user.id);
     await refreshProfile();
