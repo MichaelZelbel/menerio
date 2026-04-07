@@ -74,7 +74,7 @@ export default function Settings() {
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const defaultTab = searchParams.get("tab") || "profile";
+  const defaultTab = searchParams.get("tab") || "account";
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
