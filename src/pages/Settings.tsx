@@ -109,13 +109,13 @@ export default function Settings() {
     setProfileLoading(true);
     const { error } = await supabase
       .from("profiles")
-      .update({ display_name: displayName, bio, website })
+      .update({ display_name: displayName })
       .eq("id", user.id);
     if (error) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });
     } else {
       await refreshProfile();
-      logActivity("profile_update", "profile", user.id, { fields: ["display_name", "bio", "website"] });
+      logActivity("profile_update", "profile", user.id, { fields: ["display_name"] });
       toast({ title: "Profile updated", description: "Your changes have been saved." });
     }
     setProfileLoading(false);
