@@ -409,8 +409,42 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (noteErr || !note)
       return json({ error: "Note not found" }, 404);
 
+    // Fetch media analysis (OCR, descriptions) for this note
+    const { data: mediaData } = await db
+      .from("media_analysis")
+      .select("storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
+      .eq("note_id", note_id)
+      .eq("analysis_status", "complete")
+      .order("original_filename", { ascending: true })
+      .order("page_number", { ascending: true, nullsFirst: true });
+
+    // Build media context string
+    let mediaContext = "";
+    if (mediaData && mediaData.length > 0) {
+      mediaContext = "\n\n--- MEDIA ANALYSIS (OCR & image descriptions) ---";
+      // Group by filename
+      const grouped = new Map<string, typeof mediaData>();
+      for (const m of mediaData) {
+        const key = m.original_filename || m.storage_path;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(m);
+      }
+      for (const [filename, entries] of grouped) {
+        mediaContext += `\nFile: ${filename} (${entries[0].media_type})`;
+        if (entries[0].description) mediaContext += `\n  Description: ${entries[0].description}`;
+        if (entries[0].topics?.length) mediaContext += `\n  Topics: ${entries[0].topics.join(", ")}`;
+        for (const entry of entries) {
+          if (entry.extracted_text) {
+            const pageLabel = entry.page_number ? `Page ${entry.page_number}` : "Extracted";
+            mediaContext += `\n  ${pageLabel} text:\n    ${entry.extracted_text}`;
+          }
+        }
+      }
+      mediaContext += "\n--- END MEDIA ANALYSIS ---";
+    }
+
     // Build system message with note context
-    const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---`;
+    const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---${mediaContext}`;
 
     const systemMessage = {
       role: "system",
