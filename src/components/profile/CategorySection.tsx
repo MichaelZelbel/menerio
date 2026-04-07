@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Link, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Trash2, Link, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,12 +8,14 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { ProfileIcon } from "./ProfileIcon";
 import { ScopeBadge, SCOPE_OPTIONS } from "./ScopeBadge";
 import { EntryForm } from "./EntryForm";
+import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
 import { useNavigate } from "react-router-dom";
 
 interface CategorySectionProps {
   category: ProfileCategory;
   entries: ProfileEntry[];
+  defaultExpanded?: boolean;
   onSaveEntry: (data: any) => void;
   onDeleteEntry: (id: string) => void;
   onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
@@ -23,13 +25,13 @@ interface CategorySectionProps {
 export function CategorySection({
   category,
   entries,
+  defaultExpanded = false,
   onSaveEntry,
   onDeleteEntry,
   onUpdateCategory,
   onDeleteCategory,
 }: CategorySectionProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [addingEntry, setAddingEntry] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editName, setEditName] = useState(category.name);
@@ -37,9 +39,11 @@ export function CategorySection({
   const [editScope, setEditScope] = useState(category.visibility_scope);
   const navigate = useNavigate();
 
+  const suggestedLabels = CATEGORY_SUGGESTED_LABELS[category.slug] ?? [];
+  const existingLabels = entries.map((e) => e.label);
+
   const handleSaveEntry = (data: any) => {
     onSaveEntry(data);
-    setAddingEntry(false);
     setEditingEntryId(null);
   };
 
@@ -138,17 +142,14 @@ export function CategorySection({
       {/* Entries */}
       {expanded && (
         <div className="border-t border-border">
-          {entries.length === 0 && !addingEntry && (
-            <p className="px-4 py-4 text-sm text-muted-foreground italic">
-              No entries yet — click + to add one
-            </p>
-          )}
           {entries.map((entry) =>
             editingEntryId === entry.id ? (
               <div key={entry.id} className="px-4 py-3 border-b border-border last:border-b-0">
                 <EntryForm
                   initial={entry}
                   categoryId={category.id}
+                  suggestedLabels={suggestedLabels}
+                  existingLabels={existingLabels}
                   onSave={handleSaveEntry}
                   onCancel={() => setEditingEntryId(null)}
                 />
@@ -189,21 +190,16 @@ export function CategorySection({
             )
           )}
 
-          {addingEntry ? (
-            <div className="px-4 py-3">
-              <EntryForm
-                categoryId={category.id}
-                onSave={handleSaveEntry}
-                onCancel={() => setAddingEntry(false)}
-              />
-            </div>
-          ) : (
-            <div className="px-4 py-2">
-              <Button variant="ghost" size="sm" className="text-xs" onClick={() => setAddingEntry(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add entry
-              </Button>
-            </div>
-          )}
+          {/* Always-visible entry form */}
+          <div className="px-4 py-3">
+            <EntryForm
+              categoryId={category.id}
+              suggestedLabels={suggestedLabels}
+              existingLabels={existingLabels}
+              onSave={handleSaveEntry}
+              onCancel={() => setExpanded(false)}
+            />
+          </div>
         </div>
       )}
     </div>
