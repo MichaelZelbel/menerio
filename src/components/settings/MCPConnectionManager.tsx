@@ -138,7 +138,7 @@ export function MCPConnectionManager() {
     </Button>
   );
 
-  const claudeDesktopSnippet = `{
+  const claudeSnippet = `{
   "mcpServers": {
     "menerio": {
       "command": "npx",
