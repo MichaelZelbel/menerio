@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+const useIsAdmin = () => { const { role } = useAuth(); return role === "admin"; };
 import { showToast } from "@/lib/toast";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,7 @@ export default function People() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const isAdmin = useIsAdmin();
 
   // Inline editing state for detail view
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
@@ -304,7 +306,8 @@ export default function People() {
             </CardHeader>
           </Card>
 
-          {/* App Identity Mapping */}
+          {/* App Identity Mapping — admin only */}
+          {isAdmin && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -342,6 +345,7 @@ export default function People() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {/* Notes */}
           <Card>
