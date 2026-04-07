@@ -64,6 +64,7 @@ export default function ReviewQueue() {
         showToast.error("Failed to add contact: " + error.message);
         return;
       }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
       updateStatus.mutate({ id: item.id, status: "accepted" });
       showToast.success(`Added "${name}" to your People`);
       return;
