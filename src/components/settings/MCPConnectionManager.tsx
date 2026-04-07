@@ -14,7 +14,7 @@ import { Brain, Copy, Check, Terminal, Monitor, Code2, Sparkles, Eye, EyeOff, Ke
 import { toast } from "sonner";
 
 const SUPABASE_PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
-const MCP_URL = `https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/open-brain-mcp`;
+const MCP_URL = "https://mcp.menerio.com";
 const LOCAL_STORAGE_KEY = "menerio_mcp_key";
 
 const MCP_KEY_NAME = "MCP Connection";
