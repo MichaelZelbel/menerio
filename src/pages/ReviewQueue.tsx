@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
 
 export default function ReviewQueue() {
   const { items, isLoading, updateStatus } = useReviewQueue();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
@@ -62,6 +64,7 @@ export default function ReviewQueue() {
         showToast.error("Failed to add contact: " + error.message);
         return;
       }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
       updateStatus.mutate({ id: item.id, status: "accepted" });
       showToast.success(`Added "${name}" to your People`);
       return;
