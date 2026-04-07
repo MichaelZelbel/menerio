@@ -9,8 +9,6 @@ export interface Profile {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
-  bio: string | null;
-  website: string | null;
 }
 
 interface AuthContextType {
