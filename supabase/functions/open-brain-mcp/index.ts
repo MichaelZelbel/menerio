@@ -10,7 +10,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 // Legacy static key — kept for backward compatibility
 const LEGACY_MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY") || "";
-const LEGACY_BRAIN_OWNER_USER_ID = Deno.env.get("BRAIN_OWNER_USER_ID") || "";
+const LEGACY_BRAIN_OWNER_USER_ID = Deno.env.get("currentUserId") || "";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -152,7 +152,7 @@ server.registerTool(
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: limit,
-        p_user_id: BRAIN_OWNER_USER_ID,
+        p_user_id: currentUserId,
       });
 
       if (error) {
@@ -198,7 +198,7 @@ server.registerTool(
         .from("notes")
         .select("id, title, content, metadata, created_at")
         .eq("is_trashed", false)
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -257,7 +257,7 @@ server.registerTool(
       const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
       const { error } = await supabase.from("notes").insert({
-        user_id: BRAIN_OWNER_USER_ID,
+        user_id: currentUserId,
         content,
         title,
         embedding,
@@ -299,13 +299,13 @@ server.registerTool(
         .from("notes")
         .select("*", { count: "exact", head: true })
         .eq("is_trashed", false)
-        .eq("user_id", BRAIN_OWNER_USER_ID);
+        .eq("user_id", currentUserId);
 
       const { data } = await supabase
         .from("notes")
         .select("metadata, created_at")
         .eq("is_trashed", false)
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .order("created_at", { ascending: false });
 
       const types: Record<string, number> = {};
@@ -378,7 +378,7 @@ server.registerTool(
       let q = supabase
         .from("action_items")
         .select("id, content, status, priority, due_date, created_at, updated_at, source_note_id, contact_id")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .order("created_at", { ascending: false });
 
       if (status) {
@@ -447,7 +447,7 @@ server.registerTool(
           .from("notes")
           .select("id, title, content, metadata, created_at")
           .eq("is_trashed", false)
-          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("user_id", currentUserId)
           .contains("metadata", { people: [name] })
           .order("created_at", { ascending: false })
           .limit(limit),
@@ -457,7 +457,7 @@ server.registerTool(
             query_embedding: emb,
             match_threshold: 0.5,
             match_count: limit,
-            p_user_id: BRAIN_OWNER_USER_ID,
+            p_user_id: currentUserId,
           });
         })(),
       ]);
@@ -522,7 +522,7 @@ server.registerTool(
       let q = supabase
         .from("contacts")
         .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .order("name")
         .limit(limit);
 
@@ -568,7 +568,7 @@ server.registerTool(
       const { data: contacts } = await supabase
         .from("contacts")
         .select("*")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .ilike("name", `%${name}%`)
         .limit(1);
 
@@ -612,7 +612,7 @@ server.registerTool(
       const { data: notes } = await supabase
         .from("notes")
         .select("title, content, created_at")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
         .order("created_at", { ascending: false })
@@ -652,7 +652,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("user_id", currentUserId)
           .ilike("title", `%${note}%`)
           .limit(1);
         if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
@@ -662,7 +662,7 @@ server.registerTool(
       const { data: connections } = await supabase
         .from("note_connections")
         .select("*")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .or(`source_note_id.eq.${noteId},target_note_id.eq.${noteId}`)
         .order("strength", { ascending: false })
         .limit(limit);
@@ -714,7 +714,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("user_id", currentUserId)
           .ilike("title", `%${query}%`)
           .limit(1);
         return data?.[0]?.id || null;
@@ -728,7 +728,7 @@ server.registerTool(
       const { data: allConns } = await supabase
         .from("note_connections")
         .select("source_note_id, target_note_id, connection_type, strength")
-        .eq("user_id", BRAIN_OWNER_USER_ID);
+        .eq("user_id", currentUserId);
 
       if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
@@ -810,7 +810,7 @@ server.registerTool(
       const { data: allConns } = await supabase
         .from("note_connections")
         .select("source_note_id, target_note_id")
-        .eq("user_id", BRAIN_OWNER_USER_ID);
+        .eq("user_id", currentUserId);
 
       if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
@@ -913,7 +913,7 @@ server.registerTool(
       const { data: contacts } = await supabase
         .from("contacts")
         .select("id, name")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .ilike("name", `%${contact_name}%`)
         .limit(1);
 
@@ -926,7 +926,7 @@ server.registerTool(
 
       const { error: intError } = await supabase.from("contact_interactions").insert({
         contact_id: contact.id,
-        user_id: BRAIN_OWNER_USER_ID,
+        user_id: currentUserId,
         type,
         summary: summary || null,
         action_items: action_items || [],
@@ -968,7 +968,7 @@ server.registerTool(
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: limit,
-        p_user_id: BRAIN_OWNER_USER_ID,
+        p_user_id: currentUserId,
       });
 
       if (error) {
@@ -1023,7 +1023,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("user_id", currentUserId)
           .ilike("title", `%${note}%`)
           .limit(1);
         if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
@@ -1034,7 +1034,7 @@ server.registerTool(
         .from("media_analysis")
         .select("storage_path, media_type, page_number, original_filename, description, extracted_text, topics, analysis_status, raw_analysis")
         .eq("note_id", noteId)
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .order("created_at", { ascending: true });
 
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -1084,7 +1084,7 @@ server.registerTool(
       let catQuery = supabase
         .from("profile_categories")
         .select("id, name, slug, visibility_scope, sort_order")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .neq("visibility_scope", "private")
         .order("sort_order");
 
@@ -1114,7 +1114,7 @@ server.registerTool(
       const { data: entries } = await supabase
         .from("profile_entries")
         .select("category_id, label, value, linked_note_id, sort_order")
-        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("user_id", currentUserId)
         .in("category_id", catIds)
         .order("sort_order");
 
@@ -1184,7 +1184,7 @@ server.registerTool(
         const instQuery = supabase
           .from("agent_instructions")
           .select("instruction, applies_to")
-          .eq("user_id", BRAIN_OWNER_USER_ID)
+          .eq("user_id", currentUserId)
           .eq("is_active", true)
           .order("sort_order");
 
