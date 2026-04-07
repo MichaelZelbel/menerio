@@ -47,6 +47,7 @@ interface KnownApp {
   /** Path appended to supabaseUrl to form the webhook */
   webhookPath: string;
   icon: string;
+  iconImage?: string;
 }
 
 const KNOWN_APPS: KnownApp[] = [
