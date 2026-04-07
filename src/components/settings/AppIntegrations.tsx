@@ -286,7 +286,11 @@ export function AppIntegrations() {
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{known.icon}</span>
+                      {known.iconImage ? (
+                        <img src={known.iconImage} alt={known.name} className="h-7 w-7 rounded" />
+                      ) : (
+                        <span className="text-2xl">{known.icon}</span>
+                      )}
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{known.name}</span>
