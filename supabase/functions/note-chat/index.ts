@@ -125,6 +125,25 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_media_text",
+      description:
+        "Search across OCR-extracted text and descriptions from images and PDFs in ALL of the user's notes. Use this when looking for text that might appear in scanned documents, photos, or PDF attachments.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The text to search for in media extracted text and descriptions",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "add_wikilink",
       description:
         "Create a wikilink connection from the current note to another note by its ID.",
@@ -151,14 +170,17 @@ const SYSTEM_PROMPT = `You are an AI assistant embedded in a note-taking applica
 
 You have access to tools to:
 1. Search the user's notes semantically (vector search) or by text (ILIKE)
-2. Append text to the current note
-3. Update note metadata (topics, type, sentiment, people, summary, action_items, dates_mentioned)
-4. Update note tags
-5. Add wikilinks to connect the current note to other notes
+2. Search across OCR-extracted text and descriptions from images and PDFs in all notes
+3. Append text to the current note
+4. Update note metadata (topics, type, sentiment, people, summary, action_items, dates_mentioned)
+5. Update note tags
+6. Add wikilinks to connect the current note to other notes
 
 Guidelines:
 - When the user asks about their notes or knowledge, use search tools to find relevant information
 - Use semantic search for conceptual queries, text search for specific names/phrases
+- The current note's media analysis (OCR text, image descriptions) is included in the context below — check it before searching
+- Use search_media_text to find text in images/PDFs across OTHER notes
 - When modifying the note, confirm what you did
 - Keep responses concise and helpful
 - You can chain multiple tool calls if needed (e.g., search then link)
@@ -290,10 +312,44 @@ async function executeTool(
       });
     }
 
+    case "search_media_text": {
+      const q = (args.query as string).toLowerCase();
+      const { data, error } = await db
+        .from("media_analysis")
+        .select("id, note_id, storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
+        .eq("user_id", userId)
+        .eq("analysis_status", "complete")
+        .or(`extracted_text.ilike.%${q}%,description.ilike.%${q}%`)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (error) return JSON.stringify({ error: error.message });
+      // Also fetch note titles for context
+      const noteIds = [...new Set((data || []).map((m: any) => m.note_id))];
+      let noteTitles: Record<string, string> = {};
+      if (noteIds.length > 0) {
+        const { data: notes } = await db
+          .from("notes")
+          .select("id, title")
+          .in("id", noteIds);
+        noteTitles = Object.fromEntries((notes || []).map((n: any) => [n.id, n.title]));
+      }
+      const results = (data || []).map((m: any) => ({
+        id: m.id,
+        note_id: m.note_id,
+        note_title: noteTitles[m.note_id] || "Unknown",
+        filename: m.original_filename,
+        media_type: m.media_type,
+        page_number: m.page_number,
+        description: m.description?.substring(0, 300),
+        extracted_text: m.extracted_text?.substring(0, 500),
+        topics: m.topics,
+      }));
+      return JSON.stringify({ results, count: results.length });
+    }
+
     case "add_wikilink": {
       const targetId = args.target_note_id as string;
       const targetTitle = args.target_note_title as string;
-      // Create a note_connection
       const { error } = await db.from("note_connections").insert({
         user_id: userId,
         source_note_id: noteId,
@@ -356,8 +412,42 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (noteErr || !note)
       return json({ error: "Note not found" }, 404);
 
+    // Fetch media analysis (OCR, descriptions) for this note
+    const { data: mediaData } = await db
+      .from("media_analysis")
+      .select("storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
+      .eq("note_id", note_id)
+      .eq("analysis_status", "complete")
+      .order("original_filename", { ascending: true })
+      .order("page_number", { ascending: true, nullsFirst: true });
+
+    // Build media context string
+    let mediaContext = "";
+    if (mediaData && mediaData.length > 0) {
+      mediaContext = "\n\n--- MEDIA ANALYSIS (OCR & image descriptions) ---";
+      // Group by filename
+      const grouped = new Map<string, typeof mediaData>();
+      for (const m of mediaData) {
+        const key = m.original_filename || m.storage_path;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(m);
+      }
+      for (const [filename, entries] of grouped) {
+        mediaContext += `\nFile: ${filename} (${entries[0].media_type})`;
+        if (entries[0].description) mediaContext += `\n  Description: ${entries[0].description}`;
+        if (entries[0].topics?.length) mediaContext += `\n  Topics: ${entries[0].topics.join(", ")}`;
+        for (const entry of entries) {
+          if (entry.extracted_text) {
+            const pageLabel = entry.page_number ? `Page ${entry.page_number}` : "Extracted";
+            mediaContext += `\n  ${pageLabel} text:\n    ${entry.extracted_text}`;
+          }
+        }
+      }
+      mediaContext += "\n--- END MEDIA ANALYSIS ---";
+    }
+
     // Build system message with note context
-    const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---`;
+    const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---${mediaContext}`;
 
     const systemMessage = {
       role: "system",
