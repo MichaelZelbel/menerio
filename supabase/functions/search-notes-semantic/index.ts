@@ -143,18 +143,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
           const noteId = m.note_id;
           const existing = noteMap.get(noteId);
           if (existing) {
-            // Note already matched — mark as "both", keep higher similarity
             existing.match_source = "both";
             if (m.similarity > (existing.similarity || 0)) {
               existing.similarity = m.similarity;
             }
-            // Attach media details
             existing.media_description = m.description;
             existing.media_storage_path = m.storage_path;
             existing.media_type = m.media_type;
             existing.media_topics = m.topics;
           } else {
-            // Media-only match — create a note-like result
             noteMap.set(noteId, {
               id: noteId,
               title: m.note_title,
@@ -171,6 +168,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
               media_filename: m.original_filename,
               created_at: m.created_at,
             });
+          }
+        }
+
+        // Always run ILIKE to catch notes without embeddings
+        const textResults = await ilikeFallback(user.id, query, limit);
+        for (const t of textResults) {
+          if (!noteMap.has(t.id)) {
+            noteMap.set(t.id, t);
           }
         }
 
