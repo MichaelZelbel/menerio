@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+const useIsAdmin = () => { const { role } = useAuth(); return role === "admin"; };
 import { showToast } from "@/lib/toast";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
