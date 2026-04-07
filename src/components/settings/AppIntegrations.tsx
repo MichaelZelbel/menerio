@@ -1,4 +1,5 @@
 import { useState } from "react";
+import querinoLogo from "@/assets/querino-logo.png";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -46,6 +47,7 @@ interface KnownApp {
   /** Path appended to supabaseUrl to form the webhook */
   webhookPath: string;
   icon: string;
+  iconImage?: string;
 }
 
 const KNOWN_APPS: KnownApp[] = [
@@ -56,6 +58,7 @@ const KNOWN_APPS: KnownApp[] = [
     supabaseUrl: "https://bqsovmbjnkftsjfwdlia.supabase.co",
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "🔬",
+    iconImage: querinoLogo,
   },
   {
     id: "temerio",
@@ -283,7 +286,11 @@ export function AppIntegrations() {
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{known.icon}</span>
+                      {known.iconImage ? (
+                        <img src={known.iconImage} alt={known.name} className="h-7 w-7 rounded" />
+                      ) : (
+                        <span className="text-2xl">{known.icon}</span>
+                      )}
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-foreground">{known.name}</span>
