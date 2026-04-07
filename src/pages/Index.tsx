@@ -19,6 +19,7 @@ import {
   Sparkles,
   MessageSquare,
   Layers,
+  Code2,
 } from "lucide-react";
 
 const fadeUp = {
