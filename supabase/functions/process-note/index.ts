@@ -130,20 +130,46 @@ async function generateReviewItems(
       }
     }
 
-    // Deduplicate against existing pending/accepted suggestions
+    // Deduplicate against existing pending/accepted/dismissed suggestions
     if (suggestions.length > 0) {
       const { data: existing } = await supabase
         .from("review_queue")
-        .select("suggestion_type, source_note_id, title")
+        .select("id, suggestion_type, source_note_id, title, status")
         .eq("user_id", userId)
-        .in("status", ["pending", "accepted"]);
+        .in("status", ["pending", "accepted", "dismissed", "skipped"]);
 
       const existingSet = new Set(
-        (existing || []).map((e: any) => `${e.suggestion_type}|${e.title}`),
+        (existing || [])
+          .filter((e: any) => e.status !== "skipped")
+          .map((e: any) => `${e.suggestion_type}|${e.title}`),
       );
 
+      // Re-pending: reset skipped items that match new suggestions back to pending
+      const skippedItems = (existing || []).filter((e: any) => e.status === "skipped");
+      for (const suggestion of suggestions) {
+        const key = `${suggestion.suggestion_type}|${suggestion.title}`;
+        const skippedMatch = skippedItems.find(
+          (e: any) => `${e.suggestion_type}|${e.title}` === key,
+        );
+        if (skippedMatch) {
+          await supabase
+            .from("review_queue")
+            .update({ status: "pending", reviewed_at: null })
+            .eq("id", skippedMatch.id);
+          console.log(`Re-pending skipped suggestion: ${skippedMatch.title}`);
+        }
+      }
+
       const newSuggestions = suggestions.filter(
-        (s) => !existingSet.has(`${s.suggestion_type}|${s.title}`),
+        (s) => {
+          const key = `${s.suggestion_type}|${s.title}`;
+          // Skip if already exists in any non-skipped state, or was just re-pended
+          const alreadyExists = existingSet.has(key);
+          const wasSkipped = skippedItems.some(
+            (e: any) => `${e.suggestion_type}|${e.title}` === key,
+          );
+          return !alreadyExists && !wasSkipped;
+        },
       );
 
       if (newSuggestions.length > 0) {
