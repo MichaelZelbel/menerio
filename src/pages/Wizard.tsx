@@ -71,7 +71,6 @@ export default function Wizard() {
 
   // Profile fields
   const [displayName, setDisplayName] = useState("");
-  const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
