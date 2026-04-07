@@ -279,24 +279,25 @@ export function MCPConnectionManager() {
         </CardHeader>
         <CardContent>
           <Accordion type="single" collapsible className="w-full">
-            {/* Claude Desktop */}
-            <AccordionItem value="claude-desktop">
+            {/* Claude */}
+            <AccordionItem value="claude">
               <AccordionTrigger>
                 <div className="flex items-center gap-2">
                   <Monitor className="h-4 w-4" />
-                  <span>Claude Desktop</span>
+                  <span>Claude</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>Open Claude Desktop → <strong>Settings</strong></li>
-                  <li>Go to <strong>Developer</strong> → <strong>Edit Config</strong></li>
-                  <li>Add the following to your <code className="text-xs bg-muted px-1 rounded">claude_desktop_config.json</code>:</li>
+                  <li>Open the Claude app (desktop or web)</li>
+                  <li>Go to <strong>Settings</strong> → <strong>Integrations</strong></li>
+                  <li>Click <strong>Add Integration</strong> and choose <strong>Custom MCP</strong></li>
+                  <li>Paste the JSON config below</li>
                 </ol>
                 <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeDesktopSnippet}</pre>
+                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton text={claudeDesktopSnippet} id="claude-desktop" />
+                    <CopyButton text={claudeSnippet} id="claude" />
                   </div>
                 </div>
                 {!mcpKey && (
