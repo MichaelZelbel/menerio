@@ -149,7 +149,7 @@ const aiProcessing: DocPage = {
         <li><strong>Generate a summary</strong> — creates a one-line overview</li>
         <li><strong>Create an embedding</strong> — vectorises the note for Smart Search and connection discovery</li>
       </ul>
-      <Callout type="info">All AI processing happens on the server. Your notes are encrypted in transit and processed securely.</Callout>
+      <Callout type="info"><Callout type="info">AI processing is handled via GDPR-compliant services. Your data is transmitted securely over HTTPS and processed in accordance with our Privacy Policy.</Callout></Callout>
 
       <h2 id="smart-tags">Smart Tags Panel</h2>
       <p>Open a note and look for the <strong>Smart Tags</strong> panel in the sidebar. It shows:</p>
