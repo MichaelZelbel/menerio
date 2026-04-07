@@ -1,25 +1,49 @@
 
-## Open Notes in Separate Tabs
 
-### Current state
-Routes already exist: `/dashboard/notes/:noteId` loads the Notes page and auto-selects the note. So opening a note URL in a new tab already works.
+## Add OCR/Media Analysis Context to AI Chat
 
-### What's missing
-There's no UI affordance to open a note in a new tab. Users would need to manually copy the URL.
+### Problem
+The `note-chat` edge function builds note context from `notes.title`, `notes.content`, `notes.tags`, and `notes.metadata` only. It does not query the `media_analysis` table, so the AI has no access to OCR-extracted text, image descriptions, or topics from embedded media. When a user asks about text visible in an image or PDF, the AI cannot answer.
 
-### Plan
+### Change
 
-**1. Add "Open in new tab" option to NoteList items** (`src/components/notes/NoteList.tsx`)
-- Add a right-click context menu (or a small icon button) on each note item with an "Open in new tab" option
-- Use `window.open(\`/dashboard/notes/\${note.id}\`, '_blank')` to open in a new browser tab
-- Alternatively, wrap note titles in `<a href="/dashboard/notes/${note.id}">` links so users can naturally right-click → "Open in new tab" or Ctrl/Cmd+click
+**File: `supabase/functions/note-chat/index.ts`**
 
-**2. Add "Open in new tab" to NoteEditor toolbar** (`src/components/notes/NoteEditor.tsx`)
-- Add a small external-link icon button in the editor header that opens the current note in a new tab
+After fetching the note (line ~347), add a query to fetch all `media_analysis` entries for the note:
 
-### Recommended approach
-The simplest and most native approach: render each note list item as an `<a>` tag with the proper href. This gives users standard browser behavior (right-click menu, Ctrl+click, middle-click) for free, with no extra UI needed. The `onClick` handler would call `e.preventDefault()` for normal clicks to keep the current SPA navigation behavior.
+```sql
+SELECT storage_path, media_type, page_number, original_filename,
+       extracted_text, description, topics
+FROM media_analysis
+WHERE note_id = $note_id
+ORDER BY page_number ASC NULLS FIRST
+```
+
+Then append the media analysis data to the `noteContext` string that gets injected into the system prompt. Format it as a readable block:
+
+```
+--- MEDIA ANALYSIS ---
+File: marriage-certificate.pdf (pdf)
+  Description: A German marriage certificate...
+  Topics: Marriage, Legal Documents, Germany
+  Page 1 extracted text:
+    3. Kinder: ...
+  Page 2 extracted text:
+    ...
+--- END MEDIA ANALYSIS ---
+```
+
+This way the LLM sees all OCR text and descriptions alongside the note content, enabling it to answer questions about text in images/PDFs.
+
+### Also add a `search_media_text` tool
+
+Add a new tool definition that lets the AI search across `media_analysis.extracted_text` for all of the user's notes — not just the current one. This enables cross-note OCR search when the current note's media doesn't contain the answer.
+
+Tool implementation: query `media_analysis` joined with `notes` filtering by `user_id`, using `ILIKE` on `extracted_text` and `description`.
 
 ### Files to change
-- `src/components/notes/NoteList.tsx` — wrap note items in `<a href>` tags
-- `src/components/notes/NoteEditor.tsx` — add "Open in new tab" icon button in the header
+- `supabase/functions/note-chat/index.ts` — fetch media_analysis for current note context + add search_media_text tool
+
+### Scope
+Single file change, one edge function redeploy.
+
