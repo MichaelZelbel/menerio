@@ -71,9 +71,14 @@ export default function ReviewQueue() {
     showToast.success("Suggestion accepted");
   };
 
-  const handleDismiss = (id: string) => {
+  const handleSkip = (id: string) => {
+    updateStatus.mutate({ id, status: "skipped" });
+    showToast.info("Skipped for now");
+  };
+
+  const handleNever = (id: string) => {
     updateStatus.mutate({ id, status: "dismissed" });
-    showToast.info("Suggestion dismissed");
+    showToast.info("Won't suggest again");
   };
 
   const handleEventDialogClose = () => {
