@@ -309,10 +309,44 @@ async function executeTool(
       });
     }
 
+    case "search_media_text": {
+      const q = (args.query as string).toLowerCase();
+      const { data, error } = await db
+        .from("media_analysis")
+        .select("id, note_id, storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
+        .eq("user_id", userId)
+        .eq("analysis_status", "complete")
+        .or(`extracted_text.ilike.%${q}%,description.ilike.%${q}%`)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (error) return JSON.stringify({ error: error.message });
+      // Also fetch note titles for context
+      const noteIds = [...new Set((data || []).map((m: any) => m.note_id))];
+      let noteTitles: Record<string, string> = {};
+      if (noteIds.length > 0) {
+        const { data: notes } = await db
+          .from("notes")
+          .select("id, title")
+          .in("id", noteIds);
+        noteTitles = Object.fromEntries((notes || []).map((n: any) => [n.id, n.title]));
+      }
+      const results = (data || []).map((m: any) => ({
+        id: m.id,
+        note_id: m.note_id,
+        note_title: noteTitles[m.note_id] || "Unknown",
+        filename: m.original_filename,
+        media_type: m.media_type,
+        page_number: m.page_number,
+        description: m.description?.substring(0, 300),
+        extracted_text: m.extracted_text?.substring(0, 500),
+        topics: m.topics,
+      }));
+      return JSON.stringify({ results, count: results.length });
+    }
+
     case "add_wikilink": {
       const targetId = args.target_note_id as string;
       const targetTitle = args.target_note_title as string;
-      // Create a note_connection
       const { error } = await db.from("note_connections").insert({
         user_id: userId,
         source_note_id: noteId,
