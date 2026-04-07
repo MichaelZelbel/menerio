@@ -1208,7 +1208,7 @@ server.registerTool(
   }
 );
 
-
+const app = new Hono();
 
 app.all("*", async (c) => {
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
