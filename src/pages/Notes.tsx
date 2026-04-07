@@ -493,7 +493,7 @@ export default function Notes() {
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <div className="mb-4">
-              <img src="/favicon.png" alt="Menerio" className="h-16 w-16 rounded-2xl" />
+              <img src="/favicon.png" alt="Menerio" className="h-16 w-16 object-contain" />
             </div>
             <h3 className="text-lg font-semibold font-display mb-2">
               Your Open Knowledge System
