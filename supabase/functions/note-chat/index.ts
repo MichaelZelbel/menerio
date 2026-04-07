@@ -125,6 +125,25 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_media_text",
+      description:
+        "Search across OCR-extracted text and descriptions from images and PDFs in ALL of the user's notes. Use this when looking for text that might appear in scanned documents, photos, or PDF attachments.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The text to search for in media extracted text and descriptions",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "add_wikilink",
       description:
         "Create a wikilink connection from the current note to another note by its ID.",
