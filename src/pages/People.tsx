@@ -306,7 +306,8 @@ export default function People() {
             </CardHeader>
           </Card>
 
-          {/* App Identity Mapping */}
+          {/* App Identity Mapping — admin only */}
+          {isAdmin && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -344,6 +345,7 @@ export default function People() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {/* Notes */}
           <Card>
