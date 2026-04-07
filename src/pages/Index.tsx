@@ -143,6 +143,14 @@ const Index = () => {
               <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> Free to start</span>
               <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> AI-powered</span>
               <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> MCP-ready</span>
+              <a
+                href="https://github.com/MichaelZelbel/menerio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 transition-colors hover:text-foreground"
+              >
+                <Code2 className="h-4 w-4 text-primary" /> AGPL-3.0 · Open Source
+              </a>
             </motion.div>
           </motion.div>
 
