@@ -1,82 +1,37 @@
 
 
-## Expose MCP Server at mcp.menerio.com via Cloudflare
+## Fix: MCP Search Can't Find Notes Without Embeddings
 
-### How it works
+### Root Cause
+The note containing "Adobe" (id: `33792dc0-...`) has **no embedding vector**. The MCP `search_thoughts` tool uses only semantic search (`match_notes` RPC), which skips notes without embeddings entirely. There is no text-based fallback.
 
-Cloudflare Workers can act as a reverse proxy, forwarding requests from `mcp.menerio.com` to the Supabase Edge Function URL. This is a simple proxy — no logic changes needed on the Supabase side.
+### Two problems to fix
 
-### Steps
+**1. Add a text fallback to `search_thoughts`**
 
-**1. Create a Cloudflare Worker (done in Cloudflare dashboard or Wrangler CLI)**
+In `supabase/functions/open-brain-mcp/index.ts`, after the semantic search returns results, also run an ILIKE text search and merge results. This ensures notes without embeddings (or notes where the exact word matters more than meaning) are still found.
 
-Create a Worker bound to the route `mcp.menerio.com/*` that proxies all requests to the Supabase function:
+Logic:
+- Run semantic search as before
+- Also run ILIKE search: `title.ilike.%query%,content.ilike.%query%`
+- Merge results, deduplicating by note ID (semantic results take priority for ordering)
+- Return combined results
 
-```text
-Worker: menerio-mcp-proxy
-Route:  mcp.menerio.com/*
-Logic:  Forward request to https://tjeapelvjlmbxafsmjef.supabase.co/functions/v1/open-brain-mcp
-        Preserve all headers, method, body, and query params
-        Return the upstream response as-is
-```
+**2. Backfill the missing embedding for this note**
 
-Worker code (paste into Cloudflare dashboard → Workers & Pages → Create → Quick Edit):
+The note should have had an embedding generated when it was created/updated. This is a data issue — either the `process-note` function wasn't triggered, or it failed silently. We can trigger a re-process, but the text fallback is the real fix since embeddings can always be missing for various reasons.
 
-```javascript
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const target = "https://tjeapelvjlmbxafsmjef.supabase.co/functions/v1/open-brain-mcp" + url.pathname + url.search;
-    
-    const headers = new Headers(request.headers);
-    headers.set("Host", "tjeapelvjlmbxafsmjef.supabase.co");
-    
-    return fetch(target, {
-      method: request.method,
-      headers,
-      body: request.body,
-    });
-  }
-};
-```
+### Implementation
 
-**2. Add DNS record in Cloudflare (DNS → Records)**
+**File: `supabase/functions/open-brain-mcp/index.ts`**
 
-- Type: `AAAA`
-- Name: `mcp`
-- Content: `100::` (Cloudflare placeholder for Worker-only routes)
-- Proxy: ON (orange cloud)
+Modify the `search_thoughts` tool handler (~lines 148-177):
+- After semantic search completes, run an additional ILIKE query for `title` and `content` matching the raw query string
+- Merge ILIKE results into the semantic results, skipping duplicates
+- If semantic search fails entirely (e.g., embedding API error), fall back to ILIKE-only results instead of returning an error
 
-Or use a CNAME pointing anywhere with proxy ON — the Worker intercepts before DNS resolves.
-
-**3. Add Worker Route (Workers Routes in Cloudflare)**
-
-- Route pattern: `mcp.menerio.com/*`
-- Worker: the one you created above
-
-**4. Update Menerio codebase**
-
-One line change in `src/components/settings/MCPConnectionManager.tsx`:
-
-```typescript
-// Change from:
-const MCP_URL = `https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/open-brain-mcp`;
-
-// Change to:
-const MCP_URL = "https://mcp.menerio.com";
-```
-
-That's it. All config snippets, ChatGPT URLs, and Claude configs will automatically show the clean `mcp.menerio.com` domain.
-
-### Summary
-
-| Step | Where | What |
-|------|-------|------|
-| 1 | Cloudflare Workers | Create proxy worker (~10 lines) |
-| 2 | Cloudflare DNS | Add `mcp` AAAA record with proxy ON |
-| 3 | Cloudflare Workers Routes | Bind `mcp.menerio.com/*` to the worker |
-| 4 | Codebase | Change `MCP_URL` to `https://mcp.menerio.com` |
+This mirrors what `note-chat`'s `search_notes_semantic` tool already does (it has an ILIKE fallback on line ~183 of note-chat).
 
 ### Files to change
-- `src/components/settings/MCPConnectionManager.tsx` — update `MCP_URL` constant
+- `supabase/functions/open-brain-mcp/index.ts` — add ILIKE fallback to `search_thoughts` tool
 
