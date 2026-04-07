@@ -49,7 +49,7 @@ export function useReviewQueue() {
   });
 
   const updateStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: "accepted" | "dismissed" }) => {
+    mutationFn: async ({ id, status }: { id: string; status: "accepted" | "skipped" | "dismissed" }) => {
       const { error } = await supabase
         .from("review_queue" as any)
         .update({ status, reviewed_at: new Date().toISOString() } as any)
