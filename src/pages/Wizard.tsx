@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -71,7 +71,6 @@ export default function Wizard() {
 
   // Profile fields
   const [displayName, setDisplayName] = useState("");
-  const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -89,7 +88,6 @@ export default function Wizard() {
   useEffect(() => {
     if (profile) {
       setDisplayName(profile.display_name || "");
-      setBio(profile.bio || "");
       setAvatarUrl(profile.avatar_url);
     }
   }, [profile]);
@@ -122,7 +120,6 @@ export default function Wizard() {
     if (!user) return;
     await supabase.from("profiles").update({
       display_name: displayName || null,
-      bio: bio || null,
       avatar_url: avatarUrl,
     }).eq("id", user.id);
     await refreshProfile();
@@ -273,10 +270,6 @@ export default function Wizard() {
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-foreground">Display Name</label>
                       <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="How should we call you?" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-foreground">Bio <span className="text-muted-foreground font-normal">(optional)</span></label>
-                      <Textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="A short intro about you" rows={3} />
                     </div>
                   </div>
 

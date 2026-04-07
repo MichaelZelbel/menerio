@@ -8,7 +8,7 @@ import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -74,12 +74,10 @@ export default function Settings() {
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const defaultTab = searchParams.get("tab") || "profile";
+  const defaultTab = searchParams.get("tab") || "account";
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
-  const [bio, setBio] = useState(profile?.bio || "");
-  const [website, setWebsite] = useState(profile?.website || "");
   const [profileLoading, setProfileLoading] = useState(false);
 
   // Avatar state
@@ -111,13 +109,13 @@ export default function Settings() {
     setProfileLoading(true);
     const { error } = await supabase
       .from("profiles")
-      .update({ display_name: displayName, bio, website })
+      .update({ display_name: displayName })
       .eq("id", user.id);
     if (error) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });
     } else {
       await refreshProfile();
-      logActivity("profile_update", "profile", user.id, { fields: ["display_name", "bio", "website"] });
+      logActivity("profile_update", "profile", user.id, { fields: ["display_name"] });
       toast({ title: "Profile updated", description: "Your changes have been saved." });
     }
     setProfileLoading(false);
@@ -220,8 +218,6 @@ export default function Settings() {
 
       <Tabs defaultValue={defaultTab} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
-          <TabsTrigger value="profile" className="gap-1.5 text-xs"><User className="h-3.5 w-3.5 hidden sm:block" /> Profile</TabsTrigger>
-          <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Avatar</TabsTrigger>
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
@@ -236,45 +232,6 @@ export default function Settings() {
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
         </TabsList>
-
-        {/* ── Profile Tab ── */}
-        <TabsContent value="profile">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Information</CardTitle>
-              <CardDescription>Update your public profile details.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4 mb-2">
-                <Avatar className="h-16 w-16">
-                  {avatarPublicUrl && <AvatarImage src={avatarPublicUrl} />}
-                  <AvatarFallback className="bg-primary text-primary-foreground text-lg">{initials}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium text-foreground">{profile?.display_name || "No name set"}</p>
-                  <p className="text-sm text-muted-foreground">{user?.email}</p>
-                </div>
-              </div>
-              <Separator />
-              <div className="space-y-2">
-                <Label htmlFor="displayName">Display Name</Label>
-                <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="bio">Bio <span className="text-muted-foreground">({bio.length}/160)</span></Label>
-                <Textarea id="bio" value={bio} onChange={(e) => setBio(e.target.value.slice(0, 160))} placeholder="Tell us about yourself" rows={3} maxLength={160} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="website">Website</Label>
-                <Input id="website" type="url" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" />
-              </div>
-              <Button onClick={handleSaveProfile} disabled={profileLoading}>
-                {profileLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* ── Avatar Tab ── */}
         <TabsContent value="avatar">
@@ -316,10 +273,19 @@ export default function Settings() {
         <TabsContent value="account">
           <Card>
             <CardHeader>
-              <CardTitle>Account Security</CardTitle>
-              <CardDescription>Manage your email and password.</CardDescription>
+              <CardTitle>Account</CardTitle>
+              <CardDescription>Update your display name and manage your account.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="displayName">Display Name</Label>
+                <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" />
+              </div>
+              <Button onClick={handleSaveProfile} disabled={profileLoading} size="sm">
+                {profileLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Name
+              </Button>
+              <Separator />
               <div className="space-y-2">
                 <Label>Email</Label>
                 <Input value={user?.email || ""} disabled className="bg-muted" />
