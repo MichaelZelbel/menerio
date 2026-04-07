@@ -1247,6 +1247,14 @@ server.registerTool(
 
 const app = new Hono();
 
+// Serve favicon so Claude/ChatGPT show the Menerio logo
+app.get("/favicon.ico", (c) => {
+  return c.redirect("https://menerio.com/favicon.png", 302);
+});
+app.get("/favicon.png", (c) => {
+  return c.redirect("https://menerio.com/favicon.png", 302);
+});
+
 app.all("*", async (c) => {
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
 
