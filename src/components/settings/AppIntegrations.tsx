@@ -58,6 +58,7 @@ const KNOWN_APPS: KnownApp[] = [
     supabaseUrl: "https://bqsovmbjnkftsjfwdlia.supabase.co",
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "🔬",
+    iconImage: querinoLogo,
   },
   {
     id: "temerio",
