@@ -1,21 +1,24 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Brain, Copy, Check, Terminal, Monitor, Code2, Sparkles, Eye, EyeOff } from "lucide-react";
+import { Brain, Copy, Check, Terminal, Monitor, Code2, Sparkles, Eye, EyeOff, Key, RefreshCw, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const SUPABASE_PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
 const MCP_URL = `https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/open-brain-mcp`;
-const LOCAL_STORAGE_KEY = "menerio_mcp_access_key";
+const LOCAL_STORAGE_KEY = "menerio_mcp_key";
+
+const MCP_KEY_NAME = "MCP Connection";
+const MCP_SCOPES = ["profile", "notes", "contacts", "actions", "graph", "media", "stats"];
 
 const TOOLS = [
   { name: "search_thoughts", desc: "Semantic search across all your captured thoughts by meaning" },
@@ -30,26 +33,92 @@ const TOOLS = [
 ];
 
 export function MCPConnectionManager() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [copied, setCopied] = useState<string | null>(null);
-  const [accessKey, setAccessKey] = useState("");
+  const [mcpKey, setMcpKey] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [existingKeyInfo, setExistingKeyInfo] = useState<{ key_prefix: string; is_active: boolean; created_at: string } | null>(null);
 
+  // Load key from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) setAccessKey(stored);
+    if (stored) setMcpKey(stored);
   }, []);
 
-  const handleKeyChange = (value: string) => {
-    setAccessKey(value);
-    if (value) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, value);
-    } else {
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
+  // Check if an MCP key already exists on the server
+  useEffect(() => {
+    if (!session?.access_token) return;
+    (async () => {
+      const { data, error } = await supabase.functions.invoke("hub-api-keys", {
+        method: "GET",
+      });
+      if (!error && data?.keys) {
+        const existing = data.keys.find((k: any) => k.name === MCP_KEY_NAME && k.is_active);
+        if (existing) {
+          setExistingKeyInfo({ key_prefix: existing.key_prefix, is_active: existing.is_active, created_at: existing.created_at });
+        }
+      }
+    })();
+  }, [session?.access_token]);
+
+  const generateKey = async () => {
+    if (!session?.access_token) {
+      toast.error("You must be logged in to generate a key.");
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("hub-api-keys/generate", {
+        method: "POST",
+        body: { name: MCP_KEY_NAME, scopes: MCP_SCOPES },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const newKey = data.api_key;
+      setMcpKey(newKey);
+      localStorage.setItem(LOCAL_STORAGE_KEY, newKey);
+      setShowKey(true);
+      setExistingKeyInfo({ key_prefix: data.key_prefix, is_active: true, created_at: data.created_at });
+      toast.success("MCP key generated! Copy it now — you won't see it again.");
+    } catch (err: any) {
+      toast.error(`Failed to generate key: ${err.message}`);
+    } finally {
+      setGenerating(false);
     }
   };
 
-  const keyOrPlaceholder = accessKey || "YOUR_ACCESS_KEY";
+  const regenerateKey = async () => {
+    if (!session?.access_token) return;
+
+    setGenerating(true);
+    try {
+      // Revoke existing MCP keys first
+      const { data: listData } = await supabase.functions.invoke("hub-api-keys", {
+        method: "GET",
+      });
+      if (listData?.keys) {
+        for (const key of listData.keys) {
+          if (key.name === MCP_KEY_NAME && key.is_active) {
+            await supabase.functions.invoke(`hub-api-keys/${key.id}`, {
+              method: "DELETE",
+            });
+          }
+        }
+      }
+
+      // Generate new one
+      await generateKey();
+    } catch (err: any) {
+      toast.error(`Failed to regenerate key: ${err.message}`);
+      setGenerating(false);
+    }
+  };
+
+  const keyOrPlaceholder = mcpKey || "YOUR_MCP_KEY";
   const chatGptUrl = `${MCP_URL}?key=${keyOrPlaceholder}`;
 
   const handleCopy = async (text: string, key: string) => {
@@ -87,6 +156,8 @@ export function MCPConnectionManager() {
 
   const claudeCodeCommand = `claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: ${keyOrPlaceholder}"`;
 
+  const maskedKey = mcpKey ? `${mcpKey.slice(0, 8)}${"•".repeat(20)}${mcpKey.slice(-4)}` : "";
+
   return (
     <div className="space-y-6">
       {/* Profile tip */}
@@ -99,57 +170,78 @@ export function MCPConnectionManager() {
         </p>
       </div>
 
-      {/* Connection URL */}
+      {/* MCP Key + Connection URL */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Brain className="h-5 w-5" /> MCP Connection
+            <Key className="h-5 w-5" /> MCP Access Key
           </CardTitle>
           <CardDescription>
-            Connect any AI tool to your Menerio brain via the Model Context Protocol.
+            Generate a personal access key to connect AI tools to your Menerio brain.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>MCP Server URL</Label>
+          {!mcpKey ? (
+            <div className="space-y-3">
+              {existingKeyInfo ? (
+                <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+                  <p className="text-muted-foreground">
+                    You have an active MCP key (<code className="text-xs">{existingKeyInfo.key_prefix}…</code>), but the full key is no longer available.
+                  </p>
+                  <p className="text-muted-foreground">
+                    If you've lost it, generate a new one below. The old key will be revoked.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Click the button below to generate your personal MCP access key. You'll need it to connect Claude, ChatGPT, Cursor, and other AI tools.
+                </p>
+              )}
+              <Button onClick={existingKeyInfo ? regenerateKey : generateKey} disabled={generating}>
+                {generating ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                ) : existingKeyInfo ? (
+                  <><RefreshCw className="h-4 w-4 mr-2" /> Regenerate Key</>
+                ) : (
+                  <><Key className="h-4 w-4 mr-2" /> Generate MCP Key</>
+                )}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
+                  {showKey ? mcpKey : maskedKey}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowKey(!showKey)}
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton text={mcpKey} id="mcp-key" />
+              </div>
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                ⚠ Copy this key now — you won't be able to see it again after leaving this page.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={regenerateKey} disabled={generating}>
+                  {generating ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1.5" />}
+                  Regenerate
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2 border-t">
+            <p className="text-sm font-medium">MCP Server URL</p>
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
                 {MCP_URL}
               </code>
               <CopyButton text={MCP_URL} id="url" />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Access Key</Label>
-            <p className="text-xs text-muted-foreground mb-1.5">
-              Paste the value you set as <code className="text-xs">MCP_ACCESS_KEY</code> in your Supabase project secrets. It will be stored locally in your browser and used to populate the config snippets below.
-            </p>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type={showKey ? "text" : "password"}
-                  value={accessKey}
-                  onChange={(e) => handleKeyChange(e.target.value)}
-                  placeholder="Paste your MCP_ACCESS_KEY here"
-                  className="pr-10 font-mono text-xs"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => setShowKey(!showKey)}
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <CopyButton text={accessKey} id="access-key" />
-            </div>
-            {accessKey && (
-              <p className="text-xs text-green-600 dark:text-green-400">
-                ✓ Key saved — config snippets below are ready to copy.
-              </p>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -210,9 +302,9 @@ export function MCPConnectionManager() {
                     <CopyButton text={claudeDesktopSnippet} id="claude-desktop" />
                   </div>
                 </div>
-                {!accessKey && (
+                {!mcpKey && (
                   <p className="text-xs text-muted-foreground">
-                    Enter your access key above to auto-populate the config.
+                    Generate your MCP key above to auto-populate the config.
                   </p>
                 )}
               </AccordionContent>
@@ -242,9 +334,9 @@ export function MCPConnectionManager() {
                     <CopyButton text={chatGptUrl} id="chatgpt" />
                   </div>
                 </div>
-                {!accessKey && (
+                {!mcpKey && (
                   <p className="text-xs text-muted-foreground">
-                    Enter your access key above to get a ready-to-paste URL.
+                    Generate your MCP key above to get a ready-to-paste URL.
                   </p>
                 )}
               </AccordionContent>
@@ -268,9 +360,9 @@ export function MCPConnectionManager() {
                     <CopyButton text={claudeCodeCommand} id="claude-code" />
                   </div>
                 </div>
-                {!accessKey && (
+                {!mcpKey && (
                   <p className="text-xs text-muted-foreground">
-                    Enter your access key above to auto-populate the command.
+                    Generate your MCP key above to auto-populate the command.
                   </p>
                 )}
               </AccordionContent>
@@ -294,9 +386,9 @@ export function MCPConnectionManager() {
                     <CopyButton text={cursorSnippet} id="cursor" />
                   </div>
                 </div>
-                {!accessKey && (
+                {!mcpKey && (
                   <p className="text-xs text-muted-foreground">
-                    Enter your access key above to auto-populate the config.
+                    Generate your MCP key above to auto-populate the config.
                   </p>
                 )}
               </AccordionContent>
