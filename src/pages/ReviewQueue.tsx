@@ -29,6 +29,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
 
 export default function ReviewQueue() {
   const { items, isLoading, updateStatus } = useReviewQueue();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
