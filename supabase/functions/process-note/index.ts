@@ -130,11 +130,29 @@ async function generateReviewItems(
       }
     }
 
-    // Insert all suggestions
+    // Deduplicate against existing pending/accepted suggestions
     if (suggestions.length > 0) {
-      const { error } = await supabase.from("review_queue").insert(suggestions);
-      if (error) console.error("review_queue insert error:", error);
-      else console.log(`Created ${suggestions.length} review suggestions for note ${noteId}`);
+      const { data: existing } = await supabase
+        .from("review_queue")
+        .select("suggestion_type, source_note_id, title")
+        .eq("user_id", userId)
+        .in("status", ["pending", "accepted"]);
+
+      const existingSet = new Set(
+        (existing || []).map((e: any) => `${e.suggestion_type}|${e.title}`),
+      );
+
+      const newSuggestions = suggestions.filter(
+        (s) => !existingSet.has(`${s.suggestion_type}|${s.title}`),
+      );
+
+      if (newSuggestions.length > 0) {
+        const { error } = await supabase.from("review_queue").insert(newSuggestions);
+        if (error) console.error("review_queue insert error:", error);
+        else console.log(`Created ${newSuggestions.length} review suggestions for note ${noteId} (${suggestions.length - newSuggestions.length} duplicates skipped)`);
+      } else {
+        console.log(`All ${suggestions.length} suggestions already exist for note ${noteId}, skipping`);
+      }
     }
   } catch (err) {
     console.error("generateReviewItems error:", err);
