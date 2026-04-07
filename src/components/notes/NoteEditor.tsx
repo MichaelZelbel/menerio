@@ -531,6 +531,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
                 <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}>
+                <ExternalLink className="mr-2 h-4 w-4" /> Open in New Tab
+              </DropdownMenuItem>
               {sharedNote?.is_active ? (
                 <>
                   <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
