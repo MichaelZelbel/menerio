@@ -1,37 +1,31 @@
 
 
-## Fix: MCP Search Can't Find Notes Without Embeddings
+## Fix: MCP Semantic Search Threshold Too High
 
-### Root Cause
-The note containing "Adobe" (id: `33792dc0-...`) has **no embedding vector**. The MCP `search_thoughts` tool uses only semantic search (`match_notes` RPC), which skips notes without embeddings entirely. There is no text-based fallback.
+### Problem
+When searching for "wedding," the MCP server finds nothing because:
+1. **Semantic threshold is 0.5** — too strict for conceptually related terms like "wedding" vs "marriage papers" (similarity likely ~0.3-0.45)
+2. **ILIKE fallback** only matches exact substrings, so "wedding" won't match text containing "marriage"
 
-### Two problems to fix
+The in-app semantic search already uses a threshold of **0.25** and works well. The MCP server should match this.
 
-**1. Add a text fallback to `search_thoughts`**
-
-In `supabase/functions/open-brain-mcp/index.ts`, after the semantic search returns results, also run an ILIKE text search and merge results. This ensures notes without embeddings (or notes where the exact word matters more than meaning) are still found.
-
-Logic:
-- Run semantic search as before
-- Also run ILIKE search: `title.ilike.%query%,content.ilike.%query%`
-- Merge results, deduplicating by note ID (semantic results take priority for ordering)
-- Return combined results
-
-**2. Backfill the missing embedding for this note**
-
-The note should have had an embedding generated when it was created/updated. This is a data issue — either the `process-note` function wasn't triggered, or it failed silently. We can trigger a re-process, but the text fallback is the real fix since embeddings can always be missing for various reasons.
-
-### Implementation
+### Fix
 
 **File: `supabase/functions/open-brain-mcp/index.ts`**
 
-Modify the `search_thoughts` tool handler (~lines 148-177):
-- After semantic search completes, run an additional ILIKE query for `title` and `content` matching the raw query string
-- Merge ILIKE results into the semantic results, skipping duplicates
-- If semantic search fails entirely (e.g., embedding API error), fall back to ILIKE-only results instead of returning an error
+1. Change the default threshold from `0.5` to `0.25` (line 145)
+2. This matches the tuned threshold already used in the app's `search-notes-semantic` function
 
-This mirrors what `note-chat`'s `search_notes_semantic` tool already does (it has an ILIKE fallback on line ~183 of note-chat).
+One-line change:
+```
+threshold: z.number().optional().default(0.25)
+```
+
+### Why this works
+- "Wedding" and "marriage" have high semantic similarity (~0.3-0.4) — above 0.25 but below 0.5
+- The in-app search uses 0.25 and successfully finds conceptually related notes
+- Lower threshold may return slightly more results, but the semantic ranking ensures the best matches appear first
 
 ### Files to change
-- `supabase/functions/open-brain-mcp/index.ts` — add ILIKE fallback to `search_thoughts` tool
+- `supabase/functions/open-brain-mcp/index.ts` — lower default threshold from 0.5 to 0.25
 
