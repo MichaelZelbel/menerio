@@ -1,49 +1,74 @@
 
 
-## Add OCR/Media Analysis Context to AI Chat
+## Deduplicate Review Queue Suggestions
 
 ### Problem
-The `note-chat` edge function builds note context from `notes.title`, `notes.content`, `notes.tags`, and `notes.metadata` only. It does not query the `media_analysis` table, so the AI has no access to OCR-extracted text, image descriptions, or topics from embedded media. When a user asks about text visible in an image or PDF, the AI cannot answer.
+Every time a note is processed (saved/updated), `process-note` generates new review queue entries without checking if identical suggestions already exist. This produces duplicates like the five "Add Nate Jones" entries visible in the screenshot.
 
-### Change
+### Solution — Two-part fix
 
-**File: `supabase/functions/note-chat/index.ts`**
+**1. Prevent future duplicates (edge function change)**
 
-After fetching the note (line ~347), add a query to fetch all `media_analysis` entries for the note:
+**File: `supabase/functions/process-note/index.ts`**
+
+Before inserting suggestions, query existing pending/accepted entries for the same `(user_id, suggestion_type, source_note_id, title)` combination and filter them out:
+
+```typescript
+// After building suggestions[], before insert:
+const { data: existing } = await supabase
+  .from("review_queue")
+  .select("suggestion_type, source_note_id, title")
+  .eq("user_id", userId)
+  .in("status", ["pending", "accepted"]);
+
+const existingSet = new Set(
+  (existing || []).map((e: any) => `${e.suggestion_type}|${e.source_note_id}|${e.title}`)
+);
+
+const newSuggestions = suggestions.filter(
+  s => !existingSet.has(`${s.suggestion_type}|${s.source_note_id}|${s.title}`)
+);
+```
+
+For `add_contact` suggestions specifically, also deduplicate across notes — if there's already a pending "Add Nate Jones" from any note, don't create another one. This uses `suggestion_type + payload.name` as the dedup key.
+
+**2. Clean up existing duplicates (migration)**
+
+Add a migration that removes duplicate pending rows, keeping only the oldest entry per `(user_id, suggestion_type, title)` group:
 
 ```sql
-SELECT storage_path, media_type, page_number, original_filename,
-       extracted_text, description, topics
-FROM media_analysis
-WHERE note_id = $note_id
-ORDER BY page_number ASC NULLS FIRST
+DELETE FROM public.review_queue
+WHERE id NOT IN (
+  SELECT DISTINCT ON (user_id, suggestion_type, title)
+         id
+  FROM public.review_queue
+  WHERE status = 'pending'
+  ORDER BY user_id, suggestion_type, title, created_at ASC
+)
+AND status = 'pending'
+AND id IN (
+  SELECT id FROM public.review_queue
+  WHERE (user_id, suggestion_type, title) IN (
+    SELECT user_id, suggestion_type, title
+    FROM public.review_queue
+    WHERE status = 'pending'
+    GROUP BY user_id, suggestion_type, title
+    HAVING count(*) > 1
+  )
+);
 ```
 
-Then append the media analysis data to the `noteContext` string that gets injected into the system prompt. Format it as a readable block:
+**3. Add unique constraint (migration)**
 
+Add a partial unique index to prevent duplicates at the database level as a safety net:
+
+```sql
+CREATE UNIQUE INDEX uq_review_queue_pending
+  ON public.review_queue (user_id, suggestion_type, title)
+  WHERE status = 'pending';
 ```
---- MEDIA ANALYSIS ---
-File: marriage-certificate.pdf (pdf)
-  Description: A German marriage certificate...
-  Topics: Marriage, Legal Documents, Germany
-  Page 1 extracted text:
-    3. Kinder: ...
-  Page 2 extracted text:
-    ...
---- END MEDIA ANALYSIS ---
-```
-
-This way the LLM sees all OCR text and descriptions alongside the note content, enabling it to answer questions about text in images/PDFs.
-
-### Also add a `search_media_text` tool
-
-Add a new tool definition that lets the AI search across `media_analysis.extracted_text` for all of the user's notes — not just the current one. This enables cross-note OCR search when the current note's media doesn't contain the answer.
-
-Tool implementation: query `media_analysis` joined with `notes` filtering by `user_id`, using `ILIKE` on `extracted_text` and `description`.
 
 ### Files to change
-- `supabase/functions/note-chat/index.ts` — fetch media_analysis for current note context + add search_media_text tool
-
-### Scope
-Single file change, one edge function redeploy.
+- `supabase/functions/process-note/index.ts` — dedup check before insert
+- New migration — clean existing duplicates + add unique index
 
