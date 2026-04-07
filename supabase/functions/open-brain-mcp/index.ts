@@ -147,29 +147,66 @@ server.registerTool(
   },
   async ({ query, limit, threshold }) => {
     try {
-      const qEmb = await getEmbedding(query);
-      const { data, error } = await supabase.rpc("match_notes", {
-        query_embedding: qEmb,
-        match_threshold: threshold,
-        match_count: limit,
-        p_user_id: currentUserId,
-      });
+      // Run semantic search and ILIKE text search in parallel
+      let semanticResults: any[] = [];
+      let semanticOk = false;
 
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Search error: ${error.message}` }], isError: true };
+      try {
+        const qEmb = await getEmbedding(query);
+        const { data, error } = await supabase.rpc("match_notes", {
+          query_embedding: qEmb,
+          match_threshold: threshold,
+          match_count: limit,
+          p_user_id: currentUserId,
+        });
+        if (!error && data) {
+          semanticResults = data;
+          semanticOk = true;
+        }
+      } catch (_embErr) {
+        console.warn("Semantic search failed, using text fallback only:", _embErr);
       }
 
-      if (!data || data.length === 0) {
+      // ILIKE text fallback — always run to catch notes without embeddings
+      const q = query.replace(/'/g, "''"); // escape single quotes
+      const { data: textResults } = await supabase
+        .from("notes")
+        .select("id, title, content, metadata, tags, created_at")
+        .eq("user_id", currentUserId)
+        .eq("is_trashed", false)
+        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .order("updated_at", { ascending: false })
+        .limit(limit);
+
+      // Merge: semantic results first, then text results (deduplicated)
+      const seenIds = new Set<string>();
+      const merged: any[] = [];
+
+      for (const r of semanticResults) {
+        seenIds.add(r.id);
+        merged.push(r);
+      }
+      for (const r of (textResults || [])) {
+        if (!seenIds.has(r.id)) {
+          seenIds.add(r.id);
+          merged.push({ ...r, similarity: null });
+        }
+      }
+
+      const limited = merged.slice(0, limit);
+
+      if (limited.length === 0) {
         return { content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }] };
       }
 
       // Enrich with media
-      const noteIds = data.map((t: any) => t.id);
+      const noteIds = limited.map((t: any) => t.id);
       const mediaMap = await getMediaForNotes(noteIds);
-      const results = data.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
+      const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
 
+      const mode = semanticOk ? "semantic+text" : "text_only";
       return {
-        content: [{ type: "text" as const, text: `Found ${data.length} thought(s):\n\n${results.join("\n\n")}` }],
+        content: [{ type: "text" as const, text: `Found ${limited.length} thought(s) [${mode}]:\n\n${results.join("\n\n")}` }],
       };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
