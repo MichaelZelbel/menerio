@@ -78,8 +78,6 @@ export default function Settings() {
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
-  const [bio, setBio] = useState(profile?.bio || "");
-  const [website, setWebsite] = useState(profile?.website || "");
   const [profileLoading, setProfileLoading] = useState(false);
 
   // Avatar state
