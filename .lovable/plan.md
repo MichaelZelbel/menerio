@@ -1,16 +1,25 @@
 
+## Open Notes in Separate Tabs
 
-## Fix inaccurate AI processing claim in documentation
+### Current state
+Routes already exist: `/dashboard/notes/:noteId` loads the Notes page and auto-selects the note. So opening a note URL in a new tab already works.
 
-### Change
+### What's missing
+There's no UI affordance to open a note in a new tab. Users would need to manually copy the URL.
 
-**File: `src/content/docs/registry.tsx` (~line 152)**
+### Plan
 
-Replace:
-> "All AI processing happens on the server. Your notes are encrypted in transit and processed securely."
+**1. Add "Open in new tab" option to NoteList items** (`src/components/notes/NoteList.tsx`)
+- Add a right-click context menu (or a small icon button) on each note item with an "Open in new tab" option
+- Use `window.open(\`/dashboard/notes/\${note.id}\`, '_blank')` to open in a new browser tab
+- Alternatively, wrap note titles in `<a href="/dashboard/notes/${note.id}">` links so users can naturally right-click → "Open in new tab" or Ctrl/Cmd+click
 
-With:
-> "AI processing is handled via GDPR-compliant services. Your data is transmitted securely over HTTPS and processed in accordance with our Privacy Policy."
+**2. Add "Open in new tab" to NoteEditor toolbar** (`src/components/notes/NoteEditor.tsx`)
+- Add a small external-link icon button in the editor header that opens the current note in a new tab
 
-Single line change, one file.
+### Recommended approach
+The simplest and most native approach: render each note list item as an `<a>` tag with the proper href. This gives users standard browser behavior (right-click menu, Ctrl+click, middle-click) for free, with no extra UI needed. The `onClick` handler would call `e.preventDefault()` for normal clicks to keep the current SPA navigation behavior.
 
+### Files to change
+- `src/components/notes/NoteList.tsx` — wrap note items in `<a href>` tags
+- `src/components/notes/NoteEditor.tsx` — add "Open in new tab" icon button in the header
