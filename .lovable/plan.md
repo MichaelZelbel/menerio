@@ -1,31 +1,49 @@
 
 
-## Fix: MCP Semantic Search Threshold Too High
+## Fix: Case-Sensitive Search Behavior — "Adobe" vs "adobe"
 
-### Problem
-When searching for "wedding," the MCP server finds nothing because:
-1. **Semantic threshold is 0.5** — too strict for conceptually related terms like "wedding" vs "marriage papers" (similarity likely ~0.3-0.45)
-2. **ILIKE fallback** only matches exact substrings, so "wedding" won't match text containing "marriage"
+### Root Cause
 
-The in-app semantic search already uses a threshold of **0.25** and works well. The MCP server should match this.
+The note "Gamsgo" (containing "Adobe") has **no embedding vector**. This means semantic search can never find it. The only way to find it is via ILIKE text search.
 
-### Fix
+The bug is in **how results are combined**:
 
-**File: `supabase/functions/open-brain-mcp/index.ts`**
+**DashboardSearch (in-app):** Line 59 does `semanticResults.length > 0 ? semanticResults : ilikeResults` — when semantic returns ANY results (even unrelated), it completely discards the ILIKE results. With "adobe", the embedding happens to return no results above threshold, so ILIKE results show through. With "Adobe", the slightly different embedding returns some unrelated results, which then replace the correct ILIKE match.
 
-1. Change the default threshold from `0.5` to `0.25` (line 145)
-2. This matches the tuned threshold already used in the app's `search-notes-semantic` function
+**search-notes-semantic (edge function):** The ILIKE fallback on lines 181-190 only runs when the embedding API call *fails entirely*. When it succeeds but the target note has no embedding, that note is simply invisible.
 
-One-line change:
+### Fix — Two changes
+
+**1. `src/components/layout/DashboardSearch.tsx`**
+
+Merge ILIKE and semantic results instead of replacing one with the other. Deduplicate by note ID, with semantic results taking priority for ordering:
+
+```typescript
+// Instead of: semanticResults.length > 0 ? semanticResults : ilikeResults
+// Merge: start with semantic, append ILIKE results not already present
+const mergedResults = useMemo(() => {
+  if (semanticResults.length === 0) return ilikeResults;
+  const seenIds = new Set(semanticResults.map(r => r.id));
+  const extra = ilikeResults.filter(r => !seenIds.has(r.id));
+  return [...semanticResults, ...extra].slice(0, 8);
+}, [semanticResults, ilikeResults]);
 ```
-threshold: z.number().optional().default(0.25)
-```
 
-### Why this works
-- "Wedding" and "marriage" have high semantic similarity (~0.3-0.4) — above 0.25 but below 0.5
-- The in-app search uses 0.25 and successfully finds conceptually related notes
-- Lower threshold may return slightly more results, but the semantic ranking ensures the best matches appear first
+**2. `supabase/functions/search-notes-semantic/index.ts`**
+
+After the successful semantic search (line 84-180), also run the ILIKE query and merge results — same pattern already used in the MCP `search_thoughts` tool. Add text results for notes that semantic search missed (no embedding):
+
+```typescript
+// After semantic results are built, also run ILIKE and merge
+const textResults = await ilikeFallback(user.id, query, limit);
+for (const t of textResults) {
+  if (!noteMap.has(t.id)) {
+    noteMap.set(t.id, t);
+  }
+}
+```
 
 ### Files to change
-- `supabase/functions/open-brain-mcp/index.ts` — lower default threshold from 0.5 to 0.25
+- `src/components/layout/DashboardSearch.tsx` — merge ILIKE + semantic instead of replacing
+- `supabase/functions/search-notes-semantic/index.ts` — always run ILIKE alongside semantic, merge results
 
