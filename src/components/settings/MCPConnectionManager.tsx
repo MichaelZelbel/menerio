@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,11 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Brain, Copy, Check, RefreshCw, Terminal, Monitor, Code2, Sparkles } from "lucide-react";
+import { Brain, Copy, Check, Terminal, Monitor, Code2, Sparkles, Eye, EyeOff } from "lucide-react";
 
 const SUPABASE_PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
 const MCP_URL = `https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/open-brain-mcp`;
+const LOCAL_STORAGE_KEY = "menerio_mcp_access_key";
 
 const TOOLS = [
   { name: "search_thoughts", desc: "Semantic search across all your captured thoughts by meaning" },
@@ -31,6 +32,25 @@ const TOOLS = [
 export function MCPConnectionManager() {
   const { user } = useAuth();
   const [copied, setCopied] = useState<string | null>(null);
+  const [accessKey, setAccessKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (stored) setAccessKey(stored);
+  }, []);
+
+  const handleKeyChange = (value: string) => {
+    setAccessKey(value);
+    if (value) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, value);
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+    }
+  };
+
+  const keyOrPlaceholder = accessKey || "YOUR_ACCESS_KEY";
+  const chatGptUrl = `${MCP_URL}?key=${keyOrPlaceholder}`;
 
   const handleCopy = async (text: string, key: string) => {
     await navigator.clipboard.writeText(text);
@@ -48,6 +68,24 @@ export function MCPConnectionManager() {
       {copied === id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
     </Button>
   );
+
+  const claudeDesktopSnippet = `{
+  "mcpServers": {
+    "menerio": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "${MCP_URL}",
+        "--header",
+        "x-brain-key: ${keyOrPlaceholder}"
+      ]
+    }
+  }
+}`;
+
+  const cursorSnippet = claudeDesktopSnippet;
+
+  const claudeCodeCommand = `claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: ${keyOrPlaceholder}"`;
 
   return (
     <div className="space-y-6">
@@ -84,13 +122,34 @@ export function MCPConnectionManager() {
 
           <div className="space-y-2">
             <Label>Access Key</Label>
-            <p className="text-xs text-muted-foreground">
-              Your MCP access key is configured as a server-side secret (<code className="text-xs">MCP_ACCESS_KEY</code>).
-              It must be sent as the <code className="text-xs">x-brain-key</code> header or as a <code className="text-xs">?key=</code> query parameter.
+            <p className="text-xs text-muted-foreground mb-1.5">
+              Paste the value you set as <code className="text-xs">MCP_ACCESS_KEY</code> in your Supabase project secrets. It will be stored locally in your browser and used to populate the config snippets below.
             </p>
-            <p className="text-xs text-muted-foreground">
-              To change it, update the <code className="text-xs">MCP_ACCESS_KEY</code> secret in your Supabase project settings.
-            </p>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type={showKey ? "text" : "password"}
+                  value={accessKey}
+                  onChange={(e) => handleKeyChange(e.target.value)}
+                  placeholder="Paste your MCP_ACCESS_KEY here"
+                  className="pr-10 font-mono text-xs"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3"
+                  onClick={() => setShowKey(!showKey)}
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              <CopyButton text={accessKey} id="access-key" />
+            </div>
+            {accessKey && (
+              <p className="text-xs text-green-600 dark:text-green-400">
+                ✓ Key saved — config snippets below are ready to copy.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -146,29 +205,16 @@ export function MCPConnectionManager() {
                   <li>Add the following to your <code className="text-xs bg-muted px-1 rounded">claude_desktop_config.json</code>:</li>
                 </ol>
                 <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{`{
-  "mcpServers": {
-    "menerio": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote",
-        "${MCP_URL}",
-        "--header",
-        "x-brain-key: YOUR_ACCESS_KEY"
-      ]
-    }
-  }
-}`}</pre>
+                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeDesktopSnippet}</pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton
-                      text={`{\n  "mcpServers": {\n    "menerio": {\n      "command": "npx",\n      "args": [\n        "-y", "mcp-remote",\n        "${MCP_URL}",\n        "--header",\n        "x-brain-key: YOUR_ACCESS_KEY"\n      ]\n    }\n  }\n}`}
-                      id="claude-desktop"
-                    />
+                    <CopyButton text={claudeDesktopSnippet} id="claude-desktop" />
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Replace <code className="text-xs">YOUR_ACCESS_KEY</code> with your MCP access key.
-                </p>
+                {!accessKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Enter your access key above to auto-populate the config.
+                  </p>
+                )}
               </AccordionContent>
             </AccordionItem>
 
@@ -182,20 +228,25 @@ export function MCPConnectionManager() {
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>Go to <strong>Settings</strong> → <strong>Apps & Connectors</strong></li>
-                  <li>Enable <strong>Developer mode</strong></li>
-                  <li>Click <strong>Create</strong> → <strong>MCP Server</strong></li>
-                  <li>Paste the MCP URL (with <code className="text-xs bg-muted px-1 rounded">?key=YOUR_ACCESS_KEY</code> appended)</li>
-                  <li>Save and start using tools in any conversation</li>
+                  <li>Go to <strong>Settings</strong> → <strong>Apps</strong> → <strong>Advanced Settings</strong></li>
+                  <li>Enable the <strong>Developer</strong> toggle</li>
+                  <li>Click <strong>Create App</strong></li>
+                  <li>For Authentication, select <strong>None</strong> (the key is embedded in the URL)</li>
+                  <li>Paste the URL below and save</li>
                 </ol>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
-                    {`${MCP_URL}?key=YOUR_ACCESS_KEY`}
+                    {chatGptUrl}
                   </pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton text={`${MCP_URL}?key=YOUR_ACCESS_KEY`} id="chatgpt" />
+                    <CopyButton text={chatGptUrl} id="chatgpt" />
                   </div>
                 </div>
+                {!accessKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Enter your access key above to get a ready-to-paste URL.
+                  </p>
+                )}
               </AccordionContent>
             </AccordionItem>
 
@@ -211,15 +262,17 @@ export function MCPConnectionManager() {
                 <p className="text-sm text-muted-foreground">Run this command in your terminal:</p>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
-                    {`claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: YOUR_ACCESS_KEY"`}
+                    {claudeCodeCommand}
                   </pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton
-                      text={`claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: YOUR_ACCESS_KEY"`}
-                      id="claude-code"
-                    />
+                    <CopyButton text={claudeCodeCommand} id="claude-code" />
                   </div>
                 </div>
+                {!accessKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Enter your access key above to auto-populate the command.
+                  </p>
+                )}
               </AccordionContent>
             </AccordionItem>
 
@@ -236,26 +289,16 @@ export function MCPConnectionManager() {
                   Add this to your <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or VS Code MCP settings:
                 </p>
                 <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{`{
-  "mcpServers": {
-    "menerio": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote",
-        "${MCP_URL}",
-        "--header",
-        "x-brain-key: YOUR_ACCESS_KEY"
-      ]
-    }
-  }
-}`}</pre>
+                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{cursorSnippet}</pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton
-                      text={`{\n  "mcpServers": {\n    "menerio": {\n      "command": "npx",\n      "args": [\n        "-y", "mcp-remote",\n        "${MCP_URL}",\n        "--header",\n        "x-brain-key: YOUR_ACCESS_KEY"\n      ]\n    }\n  }\n}`}
-                      id="cursor"
-                    />
+                    <CopyButton text={cursorSnippet} id="cursor" />
                   </div>
                 </div>
+                {!accessKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Enter your access key above to auto-populate the config.
+                  </p>
+                )}
               </AccordionContent>
             </AccordionItem>
           </Accordion>
