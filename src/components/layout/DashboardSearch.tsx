@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, FileText, Loader2, Sparkles, Image } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -56,7 +56,12 @@ export function DashboardSearch() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const results = semanticResults.length > 0 ? semanticResults : ilikeResults;
+  const results = useMemo(() => {
+    if (semanticResults.length === 0) return ilikeResults;
+    const seenIds = new Set(semanticResults.map(r => r.id));
+    const extra = ilikeResults.filter(r => !seenIds.has(r.id));
+    return [...semanticResults, ...extra].slice(0, 8);
+  }, [semanticResults, ilikeResults]);
   const isSearching = ilikeSearch.isPending || semanticSearch.isPending;
 
   const selectNote = useCallback((noteId: string) => {
