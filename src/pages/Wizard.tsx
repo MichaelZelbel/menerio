@@ -88,7 +88,6 @@ export default function Wizard() {
   useEffect(() => {
     if (profile) {
       setDisplayName(profile.display_name || "");
-      setBio(profile.bio || "");
       setAvatarUrl(profile.avatar_url);
     }
   }, [profile]);
