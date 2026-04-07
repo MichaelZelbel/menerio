@@ -1,36 +1,38 @@
 
 
-## Fix ChatGPT Guide + Show Access Key in URLs
+## Auto-Generate MCP Access Key Using Hub API Keys
 
-### Problems
-1. ChatGPT connection steps are outdated/incorrect
-2. User has no way to see or copy the access key from the UI
-3. All config snippets say "YOUR_ACCESS_KEY" — user must manually replace
+### Problem
+The MCP settings page asks users to "paste the value you set as MCP_ACCESS_KEY in your Supabase project secrets" — but regular users have no access to Supabase and don't know what that means. The MCP server also uses a single static env var (`MCP_ACCESS_KEY`) shared across all users, tied to a hardcoded `BRAIN_OWNER_USER_ID`.
 
-### Solution
+### Solution — Use the existing Hub API Keys system
 
-**1. Add Access Key input field (stored in localStorage)**
+The project already has a per-user API key system (`hub_api_keys` table + `hub-api-keys` edge function + `hub-auth.ts` shared helper). We should:
 
-Add a text input at the top of the MCP Connection card where the user pastes their `MCP_ACCESS_KEY` once. Store it in `localStorage`. Once set, all config snippets and URLs automatically include the real key instead of "YOUR_ACCESS_KEY".
+1. **Let users generate an MCP key with one click** from the MCP settings page
+2. **Update the MCP server** to authenticate via `hub_api_keys` (hash lookup) instead of the static env var, resolving the `user_id` from the key
 
-- Input with show/hide toggle and copy button
-- Hint: "Paste the value you set as MCP_ACCESS_KEY in your Supabase project secrets"
-- All snippets dynamically use the stored key or fall back to "YOUR_ACCESS_KEY" placeholder
+### Changes
 
-**2. Fix ChatGPT guide steps**
+**1. `src/components/settings/MCPConnectionManager.tsx`**
+- Remove the manual "paste your access key" input
+- Add a "Generate MCP Key" button that calls `hub-api-keys/generate` with `name: "MCP Connection"` and `scopes: ["profile", "notes", "contacts", "actions", "graph", "media", "stats"]` (all scopes)
+- Show the generated key once, store it in localStorage for snippet population
+- If a key already exists in localStorage, show it masked with a "Regenerate" option
+- Also fetch existing hub API keys and check if one named "MCP Connection" exists — if so, show its prefix and status
+- All config snippets use the generated `mnr_...` key directly
 
-Update to match actual ChatGPT UI:
-1. Go to **Settings** → **Apps** → **Advanced Settings**
-2. Enable the **Developer** toggle
-3. Click **Create App**
-4. For Authentication, select **None** (the key is embedded in the URL)
-5. Paste the MCP URL (with `?key=...` already included)
-6. Save and start using tools
+**2. `supabase/functions/open-brain-mcp/index.ts`**
+- Replace the static `MCP_ACCESS_KEY` / `BRAIN_OWNER_USER_ID` auth with the shared `hub-auth.ts` helper
+- In the `app.all("*")` handler: extract the key from `x-brain-key` header or `?key=` query param, hash it with SHA-256, look up in `hub_api_keys`, get the `user_id` from the key row
+- Pass the resolved `user_id` to all tool handlers instead of the hardcoded `BRAIN_OWNER_USER_ID`
+- Keep backward compatibility: if the old `MCP_ACCESS_KEY` env var is set and matches, fall back to `BRAIN_OWNER_USER_ID` (so existing setups don't break immediately)
 
-**3. Pre-build the full URL for ChatGPT**
+**3. UX flow**
+- User visits MCP settings → clicks "Generate Key" → sees the `mnr_...` key once → copies it or copies the pre-populated config snippets → done
+- No mention of Supabase, env vars, or secrets anywhere in the UI
 
-Show the ready-to-copy URL as `{MCP_URL}?key={storedKey}` when the user has entered their key, so they can just copy and paste it directly.
-
-### Files to change
-- `src/components/settings/MCPConnectionManager.tsx` — add key input, fix ChatGPT steps, dynamically populate all snippets
+### Files
+- `src/components/settings/MCPConnectionManager.tsx` — one-click key generation, remove manual input
+- `supabase/functions/open-brain-mcp/index.ts` — authenticate via hub_api_keys, resolve user_id per request
 
