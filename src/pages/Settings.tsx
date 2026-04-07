@@ -233,45 +233,6 @@ export default function Settings() {
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
         </TabsList>
 
-        {/* ── Profile Tab ── */}
-        <TabsContent value="profile">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Information</CardTitle>
-              <CardDescription>Update your public profile details.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4 mb-2">
-                <Avatar className="h-16 w-16">
-                  {avatarPublicUrl && <AvatarImage src={avatarPublicUrl} />}
-                  <AvatarFallback className="bg-primary text-primary-foreground text-lg">{initials}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium text-foreground">{profile?.display_name || "No name set"}</p>
-                  <p className="text-sm text-muted-foreground">{user?.email}</p>
-                </div>
-              </div>
-              <Separator />
-              <div className="space-y-2">
-                <Label htmlFor="displayName">Display Name</Label>
-                <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="bio">Bio <span className="text-muted-foreground">({bio.length}/160)</span></Label>
-                <Textarea id="bio" value={bio} onChange={(e) => setBio(e.target.value.slice(0, 160))} placeholder="Tell us about yourself" rows={3} maxLength={160} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="website">Website</Label>
-                <Input id="website" type="url" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" />
-              </div>
-              <Button onClick={handleSaveProfile} disabled={profileLoading}>
-                {profileLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* ── Avatar Tab ── */}
         <TabsContent value="avatar">
           <Card>
