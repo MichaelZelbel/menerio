@@ -30,7 +30,7 @@ import {
   Plus,
   Search,
   X,
-  Brain,
+  
   FileText,
   Star,
   Trash2,
