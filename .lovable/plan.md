@@ -1,35 +1,55 @@
 
 
-## Fix: Semantic search missing conceptually related notes
+## Guided Profile Entry UX
 
 ### Problem
-Searching "Italy" returns no results, even though the note "Xihui Rome Visit" exists with a valid embedding. The semantic similarity between "Italy" and a note about "Rome" falls below the default threshold of 0.5, so it gets filtered out by the `match_notes` RPC.
+Currently, all category sections are collapsed by default. Users must click to expand, then click "+ Add entry", then figure out what label to type. There's no guidance on what to fill in next.
 
-### Root cause
-The default `threshold` of 0.5 in both `DashboardSearch.tsx` and `search-notes-semantic/index.ts` is too aggressive for short conceptual queries. Embeddings for a single word like "Italy" vs. a note about "Rome travel plans" may score ~0.3–0.45 similarity — valid semantic matches that get discarded.
+### Design
 
-### Fix
+**1. Auto-expand the neediest section**
+- On page load, compute which category has the fewest entries (prioritizing "Identity & Basics" as tiebreaker via sort_order)
+- Pass a `defaultExpanded` prop to `CategorySection` for that category
+- That section renders open with the entry form already visible
 
-**1. Lower the default threshold in `DashboardSearch.tsx`**
-- Pass `threshold: 0.25` when calling `semanticSearch.mutateAsync()` from the search bar
+**2. Replace free-text label input with a guided dropdown**
+- Each default category gets a curated list of ~10 suggested labels (e.g., Identity: "Full name", "Pronouns", "Date of birth", "Nationality", "Languages spoken", "Nickname", "Time zone", "Preferred name", "Phone number", "Email")
+- The `EntryForm` receives these suggestions and filters out labels already used
+- Render a `Select` dropdown with the next unused suggestions + a "Custom entry" option at the bottom
+- The first unused suggestion is pre-selected, so the user only needs to type their value and hit Save
 
-**2. Lower the default threshold in `search-notes-semantic/index.ts`**
-- Change `const threshold = body.threshold ?? 0.5` to `body.threshold ?? 0.25`
-- This ensures all callers (search bar, API, etc.) benefit from the improved default
+**3. Always-visible entry form in expanded sections**
+- Instead of requiring a "+ Add entry" click, the entry form is always shown at the bottom of an expanded section (as long as there are unused suggestions or the user picks "Custom entry")
 
-**3. Redeploy the edge function**
+### Files to change
 
-### Why 0.25?
-- 0.5 is a common starting point but assumes queries closely match document content
-- Short, conceptual queries (single words, related concepts) routinely score 0.25–0.45
-- Results are still sorted by similarity, so lower-quality matches appear last
-- The UI already caps at 8 results, providing a natural quality filter
+**New file: `src/lib/profile-suggestions.ts`**
+- Export a `CATEGORY_SUGGESTED_LABELS` map: `Record<string, string[]>` keyed by category slug
+- Contains 10 suggested labels per default category
 
-### Files changed
-- `src/components/layout/DashboardSearch.tsx` — pass `threshold: 0.25`
-- `supabase/functions/search-notes-semantic/index.ts` — change default threshold from 0.5 to 0.25
+**`src/components/profile/EntryForm.tsx`**
+- Add optional `suggestedLabels?: string[]` and `existingLabels?: string[]` props
+- Replace the free-text label `Input` with a `Select` dropdown when suggestions are available
+- Pre-select the first available (unused) suggestion
+- Include a "Custom entry" option that switches to free-text input
+- Keep the value `Textarea` and note-link as-is
 
-### Validation
-- Search "Italy" should now return "Xihui Rome Visit"
-- Search quality for precise queries remains good (high-similarity results still sort first)
+**`src/components/profile/CategorySection.tsx`**
+- Accept `defaultExpanded?: boolean` prop, use it as initial state for `expanded`
+- Always show the `EntryForm` at the bottom when expanded (remove the `addingEntry` toggle)
+- Pass `suggestedLabels` and `existingLabels` (derived from current entries) to `EntryForm`
+- After saving, the form resets with the next suggestion pre-selected
+
+**`src/pages/Profile.tsx`**
+- Compute the "neediest" category: category with fewest entries, using sort_order as tiebreaker
+- Pass `defaultExpanded={cat.id === neediestCategoryId}` to each `CategorySection`
+
+### UX flow after implementation
+1. User navigates to Profile
+2. "Identity & Basics" (or whichever section needs most attention) is already open
+3. The entry form is visible with "Full name" pre-selected in the label dropdown
+4. User types their name, hits Save
+5. Form resets, now showing "Pronouns" pre-selected
+6. User can switch the dropdown to any other suggestion or pick "Custom entry" for free-text
+7. Once all suggestions for a category are filled, the dropdown shows only "Custom entry"
 
