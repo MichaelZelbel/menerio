@@ -69,11 +69,17 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
           : null;
 
         return (
-          <button
+          <a
             key={note.id}
-            onClick={() => onSelect(note.id)}
+            href={`/dashboard/notes/${note.id}`}
+            onClick={(e) => {
+              if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                e.preventDefault();
+                onSelect(note.id);
+              }
+            }}
             className={cn(
-              "group w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
+              "group block w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
               selectedId === note.id && "bg-accent"
             )}
           >
