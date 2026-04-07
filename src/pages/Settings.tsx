@@ -218,8 +218,6 @@ export default function Settings() {
 
       <Tabs defaultValue={defaultTab} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
-          <TabsTrigger value="profile" className="gap-1.5 text-xs"><User className="h-3.5 w-3.5 hidden sm:block" /> Profile</TabsTrigger>
-          <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Avatar</TabsTrigger>
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
