@@ -160,11 +160,20 @@ export default function ReviewQueue() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleDismiss(item.id)}
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleNever(item.id)}
                         disabled={updateStatus.isPending}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Dismiss
+                        Never
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleSkip(item.id)}
+                        disabled={updateStatus.isPending}
+                      >
+                        Skip
                       </Button>
                       <Button
                         size="sm"
