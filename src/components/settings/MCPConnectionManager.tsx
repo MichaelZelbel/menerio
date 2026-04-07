@@ -222,9 +222,6 @@ export function MCPConnectionManager() {
                 </Button>
                 <CopyButton text={mcpKey} id="mcp-key" />
               </div>
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                ⚠ Copy this key now — you won't be able to see it again after leaving this page.
-              </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={regenerateKey} disabled={generating}>
                   {generating ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1.5" />}
