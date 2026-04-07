@@ -55,7 +55,7 @@ const Dashboard = () => {
     setShowChecklist(false);
   };
 
-  const hasProfile = !!(profile?.display_name && profile?.bio);
+  const hasProfile = !!profile?.display_name;
   const hasNotes = notes.length > 0;
 
   const checklistItems = [

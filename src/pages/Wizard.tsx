@@ -271,10 +271,6 @@ export default function Wizard() {
                       <label className="text-sm font-medium text-foreground">Display Name</label>
                       <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="How should we call you?" />
                     </div>
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-foreground">Bio <span className="text-muted-foreground font-normal">(optional)</span></label>
-                      <Textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="A short intro about you" rows={3} />
-                    </div>
                   </div>
 
                   <div className="flex gap-3">

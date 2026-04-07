@@ -273,10 +273,19 @@ export default function Settings() {
         <TabsContent value="account">
           <Card>
             <CardHeader>
-              <CardTitle>Account Security</CardTitle>
-              <CardDescription>Manage your email and password.</CardDescription>
+              <CardTitle>Account</CardTitle>
+              <CardDescription>Update your display name and manage your account.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="displayName">Display Name</Label>
+                <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" />
+              </div>
+              <Button onClick={handleSaveProfile} disabled={profileLoading} size="sm">
+                {profileLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Name
+              </Button>
+              <Separator />
               <div className="space-y-2">
                 <Label>Email</Label>
                 <Input value={user?.email || ""} disabled className="bg-muted" />
