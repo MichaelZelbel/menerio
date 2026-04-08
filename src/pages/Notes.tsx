@@ -57,6 +57,20 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
+type SortField = "updated_at" | "created_at" | "title";
+type SortDirection = "asc" | "desc";
+
+const sortLabels: Record<SortField, string> = {
+  updated_at: "Last Edited",
+  created_at: "Date Created",
+  title: "Title",
+};
+
+const defaultDirections: Record<SortField, SortDirection> = {
+  updated_at: "desc",
+  created_at: "desc",
+  title: "asc",
+};
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
