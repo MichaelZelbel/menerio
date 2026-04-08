@@ -267,10 +267,18 @@ async function processInBackground(noteId: string, authHeader: string) {
       metadata.topics = merged;
     }
 
-    // Update the note with both embedding and metadata
+    // Use AI-generated title if available
+    const aiTitle = typeof metadata.title === "string" && metadata.title.trim()
+      ? metadata.title.trim()
+      : null;
+
+    // Update the note with embedding, metadata, and optionally a smarter title
+    const updatePayload: Record<string, unknown> = { embedding, metadata };
+    if (aiTitle) updatePayload.title = aiTitle;
+
     const { error: updateErr } = await supabase
       .from("notes")
-      .update({ embedding, metadata })
+      .update(updatePayload)
       .eq("id", noteId);
 
     if (updateErr) {
