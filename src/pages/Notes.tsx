@@ -41,6 +41,9 @@ import {
   Type,
   Tags,
   Image,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -54,6 +57,20 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
+type SortField = "updated_at" | "created_at" | "title";
+type SortDirection = "asc" | "desc";
+
+const sortLabels: Record<SortField, string> = {
+  updated_at: "Last Edited",
+  created_at: "Date Created",
+  title: "Title",
+};
+
+const defaultDirections: Record<SortField, SortDirection> = {
+  updated_at: "desc",
+  created_at: "desc",
+  title: "asc",
+};
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -80,6 +97,8 @@ export default function Notes() {
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
   const [showSmartTags, setShowSmartTags] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("updated_at");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -176,8 +195,22 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
-    return notes;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter]);
+    // Sort: pinned first, then by selected field/direction
+    const sorted = [...notes].sort((a, b) => {
+      const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
+      const bPinned = "is_pinned" in b && b.is_pinned ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+
+      const dir = sortDirection === "asc" ? 1 : -1;
+      if (sortField === "title") {
+        return dir * (a.title || "").localeCompare(b.title || "");
+      }
+      const aVal = a[sortField] || "";
+      const bVal = b[sortField] || "";
+      return dir * aVal.localeCompare(bVal);
+    });
+    return sorted;
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -284,6 +317,42 @@ export default function Notes() {
                 <DropdownMenuItem key={t} onClick={() => setEntityFilter(t)} className="gap-2">
                   <span className="flex-1 capitalize">{t}</span>
                   {entityFilter === t && <Check className="h-3 w-3" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="Sort notes"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              {(Object.keys(sortLabels) as SortField[]).map((field) => (
+                <DropdownMenuItem
+                  key={field}
+                  onClick={() => {
+                    if (sortField === field) {
+                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                    } else {
+                      setSortField(field);
+                      setSortDirection(defaultDirections[field]);
+                    }
+                  }}
+                  className="gap-2"
+                >
+                  {sortField === field ? (
+                    sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                  ) : (
+                    <span className="w-3" />
+                  )}
+                  <span className="flex-1">{sortLabels[field]}</span>
+                  {sortField === field && <Check className="h-3 w-3" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
