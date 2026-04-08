@@ -218,9 +218,11 @@ export default function Notes() {
       allNotes.find((n) => n.id === selectedId) ||
       trashNotes.find((n) => n.id === selectedId) ||
       favNotes.find((n) => n.id === selectedId) ||
+      // Also check current search results (semantic/ilike may return notes not yet in cache)
+      (searchResults ?? []).find((n) => n.id === selectedId) ||
       null
     );
-  }, [selectedId, allNotes, trashNotes, favNotes]);
+  }, [selectedId, allNotes, trashNotes, favNotes, searchResults]);
 
   const activeFilter = filterConfig.find((f) => f.key === filter)!;
 
