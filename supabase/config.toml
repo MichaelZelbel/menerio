@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.search-notes-semantic]
 verify_jwt = false
+
+[functions.notify-admin]
+verify_jwt = false
