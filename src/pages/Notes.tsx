@@ -321,6 +321,42 @@ export default function Notes() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="Sort notes"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              {(Object.keys(sortLabels) as SortField[]).map((field) => (
+                <DropdownMenuItem
+                  key={field}
+                  onClick={() => {
+                    if (sortField === field) {
+                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+                    } else {
+                      setSortField(field);
+                      setSortDirection(defaultDirections[field]);
+                    }
+                  }}
+                  className="gap-2"
+                >
+                  {sortField === field ? (
+                    sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                  ) : (
+                    <span className="w-3" />
+                  )}
+                  <span className="flex-1">{sortLabels[field]}</span>
+                  {sortField === field && <Check className="h-3 w-3" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <div className="flex-1" />
 
