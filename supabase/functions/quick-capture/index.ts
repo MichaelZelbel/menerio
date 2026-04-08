@@ -81,7 +81,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!content) return json({ error: "content is required" }, 400);
 
     const source = body.source || sourceName;
-    const title = content.slice(0, 50).replace(/\n/g, " ") + (content.length > 50 ? "…" : "");
+    let title = content.slice(0, 50).replace(/\n/g, " ") + (content.length > 50 ? "…" : "");
 
     // Create the note first
     const { data: note, error: insertErr } = await supabase
