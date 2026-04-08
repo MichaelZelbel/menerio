@@ -25,6 +25,7 @@ function json(body: unknown, status = 200) {
 }
 
 const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
+- "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
@@ -80,7 +81,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!content) return json({ error: "content is required" }, 400);
 
     const source = body.source || sourceName;
-    const title = content.slice(0, 50).replace(/\n/g, " ") + (content.length > 50 ? "…" : "");
+    let title = content.slice(0, 50).replace(/\n/g, " ") + (content.length > 50 ? "…" : "");
 
     // Create the note first
     const { data: note, error: insertErr } = await supabase
@@ -122,10 +123,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       metadata = { ...extracted, is_quick_capture: true, source };
       credits = chatResult.credits;
 
-      const updatePayload: Record<string, unknown> = { metadata };
+      // Use AI-generated title if available
+      const aiTitle = typeof extracted.title === "string" && extracted.title.trim()
+        ? extracted.title.trim()
+        : title;
+
+      const updatePayload: Record<string, unknown> = { metadata, title: aiTitle };
       if (embResult) updatePayload.embedding = embResult.embedding;
 
       await supabase.from("notes").update(updatePayload).eq("id", note.id);
+      title = aiTitle;
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         // Note was created but AI processing skipped due to credits
