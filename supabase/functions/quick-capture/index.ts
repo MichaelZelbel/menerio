@@ -123,10 +123,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       metadata = { ...extracted, is_quick_capture: true, source };
       credits = chatResult.credits;
 
-      const updatePayload: Record<string, unknown> = { metadata };
+      // Use AI-generated title if available
+      const aiTitle = typeof extracted.title === "string" && extracted.title.trim()
+        ? extracted.title.trim()
+        : title;
+
+      const updatePayload: Record<string, unknown> = { metadata, title: aiTitle };
       if (embResult) updatePayload.embedding = embResult.embedding;
 
       await supabase.from("notes").update(updatePayload).eq("id", note.id);
+      title = aiTitle;
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         // Note was created but AI processing skipped due to credits
