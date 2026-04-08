@@ -97,6 +97,8 @@ export default function Notes() {
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
   const [showSmartTags, setShowSmartTags] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("updated_at");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
