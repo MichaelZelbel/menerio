@@ -52,11 +52,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsErr } = await supabase.auth.getClaims(token);
-    if (claimsErr || !claimsData?.claims?.sub) return json({ error: "Unauthorized" }, 401);
-
-    const user = { id: claimsData.claims.sub as string };
+    // Validate JWT via anon-key client with user's token
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
     const query = (body.query || "").trim();
