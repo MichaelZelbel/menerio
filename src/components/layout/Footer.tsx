@@ -7,11 +7,6 @@ const productLinks = [
   { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true },
 ];
 
-const companyLinks = [
-  { label: "About", to: "/about" },
-  { label: "Blog", to: "/blog" },
-  { label: "Contact", to: "/contact" },
-];
 
 const legalLinks = [
   { label: "Privacy Policy", to: "/privacy" },
