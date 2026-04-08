@@ -61,6 +61,27 @@ serve(async (req) => {
       });
     }
 
+    // Notify admin before deletion (best-effort, never blocks deletion)
+    try {
+      console.log("[DELETE-ACCOUNT] Sending delete_account notification for", user.email);
+      const notifyRes = await fetch(`${supabaseUrl}/functions/v1/notify-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          eventType: "delete_account",
+          userEmail: user.email,
+          userId: user.id,
+          displayName: user.user_metadata?.full_name || user.user_metadata?.name || "Unknown",
+        }),
+      });
+      console.log("[DELETE-ACCOUNT] Notification response status:", notifyRes.status);
+    } catch (notifyErr) {
+      console.error("[DELETE-ACCOUNT] Notification failed (continuing with deletion):", notifyErr);
+    }
+
     // Use service role client for deletion
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
