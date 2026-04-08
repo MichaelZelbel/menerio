@@ -7,11 +7,6 @@ const productLinks = [
   { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true },
 ];
 
-const companyLinks = [
-  { label: "About", to: "/about" },
-  { label: "Blog", to: "/blog" },
-  { label: "Contact", to: "/contact" },
-];
 
 const legalLinks = [
   { label: "Privacy Policy", to: "/privacy" },
@@ -30,7 +25,7 @@ export function Footer() {
   return (
     <footer className="border-t bg-card">
       <div className="container py-16">
-        <div className="grid gap-12 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-12 md:grid-cols-2 lg:grid-cols-4">
           {/* Brand + Newsletter */}
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-4">
@@ -70,22 +65,6 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Company */}
-          <div>
-            <h4 className="mb-4 text-sm font-semibold text-foreground">Company</h4>
-            <ul className="space-y-3">
-              {companyLinks.map((link) => (
-                <li key={link.to}>
-                  <Link
-                    to={link.to}
-                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
 
           {/* Legal */}
           <div>
