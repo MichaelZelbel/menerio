@@ -1,29 +1,32 @@
 
 
-## Remove the Profile Tab from Settings
+## Current State
 
-The "Profile" tab currently contains three fields: Display Name, Bio, and Website. Bio and website are not used anywhere in the app. Display Name is used in the sidebar, admin panel, and wizard — but it can be moved into the existing "Account" tab.
+Notes are ordered by **pinned first**, then **last edited (newest first)**. There is no UI to change sort order.
+
+## Plan: Add Sort Options to Notes List
+
+### Sort Options
+- **Last Edited** (updated_at) — ascending / descending
+- **Date Created** (created_at) — ascending / descending  
+- **Title** (alphabetical) — A-Z / Z-A
+
+Pinned notes always stay at the top regardless of sort choice.
 
 ### Changes
 
-**1. `src/pages/Settings.tsx`**
-- Remove the "Profile" `TabsTrigger` and `TabsContent` entirely (lines 223, 240-277)
-- Remove `bio` and `website` state variables (lines 81-82)
-- Move the Display Name field into the "Account" tab (above the password section), along with the avatar preview and save handler
-- Simplify `handleSaveProfile` to only update `display_name`
-- Change `defaultTab` fallback from `"profile"` to `"account"`
-- Remove unused `Textarea` import if no longer needed
+**1. `src/pages/Notes.tsx`**
+- Add state: `sortField` (`"updated_at" | "created_at" | "title"`) defaulting to `"updated_at"`, and `sortDirection` (`"asc" | "desc"`) defaulting to `"desc"`.
+- In the `currentNotes` useMemo, after filtering, sort client-side based on the selected field and direction (pinned notes remain first).
+- Add a sort dropdown button in the toolbar area (next to the existing filter/search controls). Use `ArrowUpDown` or `SortAsc`/`SortDesc` icon from lucide. The dropdown shows the three sort fields, each with an asc/desc toggle. Active sort gets a checkmark.
 
-**2. `src/contexts/AuthContext.tsx`**
-- Remove `bio` and `website` from the `Profile` interface and the `fetchProfile` select query
+**2. `src/hooks/useNotes.ts`**
+- No changes needed — keep the default DB ordering as-is. Client-side re-sorting in the page is sufficient since all notes are already fetched.
 
-**3. `src/pages/Dashboard.tsx`**
-- Line 58: Change `hasProfile` from `profile?.display_name && profile?.bio` to `!!profile?.display_name`
+**3. UI Design**
+- Small dropdown button labeled with current sort (e.g. "Last Edited ↓") placed in the notes list header bar, next to the filter dropdown.
+- Clicking the already-active sort field toggles direction. Clicking a different field selects it with its default direction.
 
-**4. `src/pages/Wizard.tsx`**
-- Remove `bio` state variable and bio input field
-- Remove `bio` from the `saveProfile` update call
-- Keep display name and avatar steps
-
-The `bio` and `website` columns stay in the database (no migration needed) — they just become unused.
+### Files Modified
+- `src/pages/Notes.tsx` — add sort state, sort logic, and sort dropdown UI
 
