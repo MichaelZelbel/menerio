@@ -18,6 +18,7 @@ const corsHeaders = {
 };
 
 const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
+- "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
@@ -266,10 +267,18 @@ async function processInBackground(noteId: string, authHeader: string) {
       metadata.topics = merged;
     }
 
-    // Update the note with both embedding and metadata
+    // Use AI-generated title if available
+    const aiTitle = typeof metadata.title === "string" && metadata.title.trim()
+      ? metadata.title.trim()
+      : null;
+
+    // Update the note with embedding, metadata, and optionally a smarter title
+    const updatePayload: Record<string, unknown> = { embedding, metadata };
+    if (aiTitle) updatePayload.title = aiTitle;
+
     const { error: updateErr } = await supabase
       .from("notes")
-      .update({ embedding, metadata })
+      .update(updatePayload)
       .eq("id", noteId);
 
     if (updateErr) {
