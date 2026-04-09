@@ -57,6 +57,19 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
   const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
+  const navigate = useNavigate();
+
+  // Build a lookup from person name (lowercase) -> matched contact info
+  const matchedLookup = useMemo(() => {
+    const map = new Map<string, { contact_id: string; canonical_name: string }>();
+    const mp = Array.isArray(metadata?.matched_people)
+      ? (metadata.matched_people as Array<{ name: string; contact_id: string; canonical_name: string }>)
+      : [];
+    for (const m of mp) {
+      map.set(m.name.toLowerCase(), { contact_id: m.contact_id, canonical_name: m.canonical_name });
+    }
+    return map;
+  }, [metadata?.matched_people]);
 
   const topics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
   const people = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
@@ -209,21 +222,29 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
           {/* People */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-muted-foreground font-medium shrink-0">People:</span>
-            {people.map((person) => (
-              <Badge
-                key={person}
-                variant="outline"
-                className="text-[10px] gap-0.5 pr-0.5 h-5 bg-primary/5 border-primary/20"
-              >
-                @{person}
-                <button
-                  onClick={() => removePerson(person)}
-                  className="hover:text-destructive ml-0.5"
+            {people.map((person) => {
+              const matched = matchedLookup.get(person.toLowerCase());
+              return (
+                <Badge
+                  key={person}
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] gap-0.5 pr-0.5 h-5 bg-primary/5 border-primary/20",
+                    matched && "cursor-pointer hover:bg-primary/15"
+                  )}
+                  onClick={matched ? () => navigate("/dashboard/people") : undefined}
+                  title={matched ? `Linked to ${matched.canonical_name} — click to view` : undefined}
                 >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </Badge>
-            ))}
+                  @{matched ? matched.canonical_name : person}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removePerson(person); }}
+                    className="hover:text-destructive ml-0.5"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              );
+            })}
             <div className="flex items-center">
               <Input
                 value={personInput}
