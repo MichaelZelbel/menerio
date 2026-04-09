@@ -97,7 +97,7 @@ const Index = () => {
           >
             <motion.div variants={fadeUp} custom={0}>
               <Badge variant="info" className="mb-6 px-4 py-1.5 text-sm font-medium">
-                <Brain className="mr-1.5 h-3.5 w-3.5" /> Your AI-powered second brain
+                <Brain className="mr-1.5 h-3.5 w-3.5" /> Your Personal AI Memory
               </Badge>
             </motion.div>
 
