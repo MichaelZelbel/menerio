@@ -259,6 +259,57 @@ export default function Notes() {
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
+  // Vault insights aggregation
+  const TYPE_LABELS: Record<string, string> = {
+    observation: "Observation", task: "Task", idea: "Idea", reference: "Reference",
+    person_note: "Person Note", meeting_note: "Meeting Note", decision: "Decision", project: "Project",
+  };
+  const TYPE_COLORS: Record<string, string> = {
+    observation: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
+    task: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+    reference: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+    person_note: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+    meeting_note: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+    decision: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+    project: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
+  };
+
+  const { topicCounts, peopleCounts, typeCounts, unclassifiedCount } = useMemo(() => {
+    const topics: Record<string, number> = {};
+    const people: Record<string, number> = {};
+    const types: Record<string, number> = {};
+    let unclassified = 0;
+    for (const note of allNotes) {
+      const meta = note.metadata as Record<string, unknown> | null;
+      if (!meta || !meta.type) { unclassified++; continue; }
+      if (Array.isArray(meta.topics)) for (const t of meta.topics as string[]) topics[t] = (topics[t] || 0) + 1;
+      if (Array.isArray(meta.people)) for (const p of meta.people as string[]) people[p] = (people[p] || 0) + 1;
+      if (typeof meta.type === "string") types[meta.type] = (types[meta.type] || 0) + 1;
+    }
+    return {
+      topicCounts: Object.entries(topics).sort((a, b) => b[1] - a[1]),
+      peopleCounts: Object.entries(people).sort((a, b) => b[1] - a[1]),
+      typeCounts: Object.entries(types).sort((a, b) => b[1] - a[1]),
+      unclassifiedCount: unclassified,
+    };
+  }, [allNotes]);
+
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const handleBackfill = useCallback(async () => {
+    setIsBackfilling(true);
+    try {
+      const res = await supabase.functions.invoke("backfill-metadata", { body: {} });
+      if (res.error) throw res.error;
+      const data = res.data as { processed: number; total: number; message: string };
+      showToast.success(data.message);
+    } catch (err: any) {
+      showToast.error(err.message || "Backfill failed");
+    } finally {
+      setIsBackfilling(false);
+    }
+  }, []);
+
   return (
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
