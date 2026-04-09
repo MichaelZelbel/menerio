@@ -22,10 +22,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Plus,
   Search,
@@ -35,6 +47,7 @@ import {
   Star,
   Trash2,
   ChevronDown,
+  ChevronRight,
   Filter,
   Check,
   Sparkles,
@@ -43,10 +56,15 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Hash,
+  User,
+  LayoutGrid,
+  Loader2,
 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { showToast } from "@/lib/toast";
 
 const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
   { key: "all", label: "All Notes", icon: FileText },
