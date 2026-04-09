@@ -94,6 +94,7 @@ import {
   ChevronRight,
   Tags,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
