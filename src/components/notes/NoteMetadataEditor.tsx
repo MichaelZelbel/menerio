@@ -40,10 +40,22 @@ interface NoteMetadataEditorProps {
   onUpdate: (metadata: Record<string, unknown>) => void;
 }
 
+const NOTE_METADATA_STORAGE_KEY = "menerio-note-metadata-expanded";
+
+function getStoredExpanded(): boolean {
+  try {
+    const v = localStorage.getItem(NOTE_METADATA_STORAGE_KEY);
+    if (v === "true") return true;
+    return false; // default collapsed
+  } catch {
+    return false;
+  }
+}
+
 export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
-  const [isOpen, setIsOpen] = useState(!!metadata?.type);
+  const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
 
   const topics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
   const people = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
@@ -92,7 +104,10 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
   if (!hasMetadata) return null;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open);
+      try { localStorage.setItem(NOTE_METADATA_STORAGE_KEY, String(open)); } catch {}
+    }}>
       <CollapsibleTrigger asChild>
         <button className="flex items-center gap-1.5 px-4 py-1.5 w-full text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border-b border-border">
           <ChevronRight
