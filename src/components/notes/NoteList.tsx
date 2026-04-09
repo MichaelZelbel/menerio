@@ -135,14 +135,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
               <span className="text-[10px] text-muted-foreground/70">
                 {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
               </span>
-              {note.entity_type && (
-                <span className={cn(
-                  "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
-                  ENTITY_COLORS[note.entity_type] || "bg-muted text-muted-foreground"
-                )}>
-                  {note.entity_type}
-                </span>
-              )}
               {/* Slack source badge */}
               {(() => {
                 const m = note.metadata as Record<string, unknown> | null;
