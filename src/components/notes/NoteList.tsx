@@ -58,11 +58,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
         const mediaPath = "media_storage_path" in note ? (note as SemanticSearchResult).media_storage_path : undefined;
         const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
         const meta = note.metadata as Record<string, unknown> | null;
-        const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
-        const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
-        const actionItems = Array.isArray(meta?.action_items) ? (meta.action_items as string[]) : [];
-        const metaType = typeof meta?.type === "string" ? meta.type : null;
-        const hasMetadata = topics.length > 0 || people.length > 0 || actionItems.length > 0 || metaType;
         const isMediaMatch = matchSource === "media" || matchSource === "both";
         const thumbnailUrl = mediaPath && mediaPath.includes("note-attachments")
           ? `https://tjeapelvjlmbxafsmjef.supabase.co/storage/v1/object/public/note-attachments/${mediaPath}`
