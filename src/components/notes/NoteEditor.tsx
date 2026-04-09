@@ -658,15 +658,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </div>
       )}
 
-      {/* Smart Tags / Metadata editor */}
-      {!note.is_trashed && (
-        <NoteMetadataEditor
-          metadata={metadata}
-          onUpdate={(updated) => {
-            updateNote.mutate({ id: note.id, metadata: updated } as any);
-          }}
-        />
-      )}
+      {/* Note Metadata editor — moved below text, rendered before Vault Insights */}
 
       {/* Editor */}
       <div
@@ -761,7 +753,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </details>
       )}
 
-      {/* Smart Tags — collapsible, state persisted in localStorage */}
+      {/* Note Metadata editor */}
+      {!note.is_trashed && (
+        <NoteMetadataEditor
+          metadata={metadata}
+          onUpdate={(updated) => {
+            updateNote.mutate({ id: note.id, metadata: updated } as any);
+          }}
+        />
+      )}
+
+      {/* Vault Insights — collapsible, state persisted in localStorage */}
       {allNotes && allNotes.length > 0 && (
         <SmartTagsCollapsible
           allNotes={allNotes}
