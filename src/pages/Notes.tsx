@@ -339,21 +339,6 @@ export default function Notes() {
           </DropdownMenu>
 
           <div className="flex-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={showSmartTags ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setShowSmartTags(!showSmartTags)}
-                title="Smart Tags"
-              >
-                <Tags className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Smart Tags</TooltipContent>
-          </Tooltip>
           <Button
             variant="ghost"
             size="icon"
