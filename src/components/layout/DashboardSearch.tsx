@@ -67,7 +67,7 @@ export function DashboardSearch() {
   const selectNote = useCallback((noteId: string) => {
     setOpen(false);
     setQuery("");
-    navigate(`/dashboard/notes?note=${noteId}`);
+    navigate(`/dashboard/notes/${noteId}`);
   }, [navigate]);
 
   // Keyboard shortcut: Cmd/Ctrl+K
