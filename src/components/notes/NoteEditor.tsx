@@ -579,32 +579,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </div>
       )}
 
-      {/* Tags */}
-      {(showTagInput || (note.tags && note.tags.length > 0)) && (
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border flex-wrap shrink-0">
-          {note.tags?.map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-xs gap-1 pr-1">
-              {tag}
-              <button onClick={() => removeTag(tag)} className="hover:text-destructive">
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-          {showTagInput && (
-            <Input
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); addTag(); }
-                if (e.key === "Escape") setShowTagInput(false);
-              }}
-              placeholder="Add tag…"
-              className="h-6 w-24 text-xs border-none shadow-none focus-visible:ring-0 px-1"
-              autoFocus
-            />
-          )}
-        </div>
-      )}
 
       {/* Rich text formatting toolbar — hidden for external read-only notes */}
       {!note.is_trashed && !sourceMode && !note.is_external && <EditorToolbar editor={editor} />}
@@ -755,6 +729,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           onUpdate={(updated) => {
             updateNote.mutate({ id: note.id, metadata: updated } as any);
           }}
+          tags={note.tags || []}
+          onAddTag={(tag) => {
+            if (!note.tags?.includes(tag)) {
+              updateNote.mutate({ id: note.id, tags: [...(note.tags || []), tag] });
+            }
+          }}
+          onRemoveTag={removeTag}
+          showTagInput={showTagInput}
         />
       )}
 
