@@ -48,7 +48,7 @@ function getStoredExpanded(): boolean {
     const v = localStorage.getItem(NOTE_METADATA_STORAGE_KEY);
     if (v === "true") return true;
     return false; // default collapsed
-  } catch {
+  } catch { /* ignored */
     return false;
   }
 }
