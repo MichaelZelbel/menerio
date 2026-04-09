@@ -102,7 +102,7 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
             )}
           />
           <Sparkles className="h-3 w-3" />
-          Smart Tags
+          Note Metadata
           {!isOpen && topics.length > 0 && (
             <span className="ml-1 text-muted-foreground/60">
               · {topics.slice(0, 3).map((t) => `#${t}`).join(" ")}
