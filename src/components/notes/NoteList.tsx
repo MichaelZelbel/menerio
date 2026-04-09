@@ -1,6 +1,6 @@
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, CheckSquare, User, Hash, MessageSquare, Zap, Link2, Send, Gamepad2, Network, Image, FileText as FileTextIcon } from "lucide-react";
+import { Star, Pin, Trash2, ExternalLink, MessageSquare, Zap, Link2, Send, Gamepad2, Image, FileText as FileTextIcon } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
@@ -58,11 +58,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
         const mediaPath = "media_storage_path" in note ? (note as SemanticSearchResult).media_storage_path : undefined;
         const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
         const meta = note.metadata as Record<string, unknown> | null;
-        const topics = Array.isArray(meta?.topics) ? (meta.topics as string[]) : [];
-        const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
-        const actionItems = Array.isArray(meta?.action_items) ? (meta.action_items as string[]) : [];
-        const metaType = typeof meta?.type === "string" ? meta.type : null;
-        const hasMetadata = topics.length > 0 || people.length > 0 || actionItems.length > 0 || metaType;
         const isMediaMatch = matchSource === "media" || matchSource === "both";
         const thumbnailUrl = mediaPath && mediaPath.includes("note-attachments")
           ? `https://tjeapelvjlmbxafsmjef.supabase.co/storage/v1/object/public/note-attachments/${mediaPath}`
@@ -135,46 +130,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
             )}
 
             {/* Metadata pills */}
-            {hasMetadata && (
-              <div className="flex items-center gap-1 flex-wrap mb-1.5">
-                {metaType && (
-                  <span className={cn(
-                    "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
-                    TYPE_COLORS[metaType] || "bg-muted text-muted-foreground"
-                  )}>
-                    {metaType.replace("_", " ")}
-                  </span>
-                )}
-                {topics.slice(0, 3).map((topic) => (
-                  <span
-                    key={topic}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTopicClick?.(topic);
-                    }}
-                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium cursor-pointer hover:bg-primary/20 inline-flex items-center gap-0.5"
-                  >
-                    <Hash className="h-2 w-2" />
-                    {topic}
-                  </span>
-                ))}
-                {people.slice(0, 2).map((person) => (
-                  <span
-                    key={person}
-                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-400 font-medium inline-flex items-center gap-0.5"
-                  >
-                    <User className="h-2 w-2" />
-                    {person}
-                  </span>
-                ))}
-                {actionItems.length > 0 && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium inline-flex items-center gap-0.5">
-                    <CheckSquare className="h-2 w-2" />
-                    {actionItems.length} to-do{actionItems.length > 1 ? "s" : ""}
-                  </span>
-                )}
-              </div>
-            )}
 
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] text-muted-foreground/70">
