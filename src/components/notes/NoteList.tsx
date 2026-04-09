@@ -130,46 +130,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
             )}
 
             {/* Metadata pills */}
-            {hasMetadata && (
-              <div className="flex items-center gap-1 flex-wrap mb-1.5">
-                {metaType && (
-                  <span className={cn(
-                    "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
-                    TYPE_COLORS[metaType] || "bg-muted text-muted-foreground"
-                  )}>
-                    {metaType.replace("_", " ")}
-                  </span>
-                )}
-                {topics.slice(0, 3).map((topic) => (
-                  <span
-                    key={topic}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTopicClick?.(topic);
-                    }}
-                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium cursor-pointer hover:bg-primary/20 inline-flex items-center gap-0.5"
-                  >
-                    <Hash className="h-2 w-2" />
-                    {topic}
-                  </span>
-                ))}
-                {people.slice(0, 2).map((person) => (
-                  <span
-                    key={person}
-                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-400 font-medium inline-flex items-center gap-0.5"
-                  >
-                    <User className="h-2 w-2" />
-                    {person}
-                  </span>
-                ))}
-                {actionItems.length > 0 && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium inline-flex items-center gap-0.5">
-                    <CheckSquare className="h-2 w-2" />
-                    {actionItems.length} to-do{actionItems.length > 1 ? "s" : ""}
-                  </span>
-                )}
-              </div>
-            )}
 
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] text-muted-foreground/70">
