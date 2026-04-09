@@ -11,7 +11,7 @@ import {
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
-import { SmartTagsPanel } from "@/components/notes/SmartTagsPanel";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
