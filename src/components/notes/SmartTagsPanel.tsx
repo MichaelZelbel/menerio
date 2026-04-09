@@ -255,7 +255,7 @@ export function SmartTagsPanel({
               disabled={isBackfilling}
             >
               {isBackfilling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              Classify all notes ({unclassifiedCount})
+              Classify unclassified vault notes ({unclassifiedCount})
             </Button>
             {backfillProgress && (
               <p className="text-[10px] text-muted-foreground mt-1 text-center">{backfillProgress}</p>

@@ -943,7 +943,7 @@ function SmartTagsCollapsible({
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Tags className="h-3 w-3" />
-        Smart Tags
+        Vault Insights
       </button>
       {expanded && (
         <div className="max-h-[40vh] overflow-y-auto">
