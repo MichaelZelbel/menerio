@@ -10,15 +10,16 @@ import {
   Brain,
   Search,
   Globe,
-  Plug,
   Zap,
   Shield,
   ArrowRight,
   CheckCircle2,
   FileText,
   Sparkles,
-  MessageSquare,
-  Layers,
+  Lightbulb,
+  Link2,
+  Bot,
+  PenLine,
   Code2,
 } from "lucide-react";
 
@@ -35,19 +36,54 @@ const stagger = {
   visible: { transition: { staggerChildren: 0.08 } },
 };
 
-const features = [
-  { icon: Brain, title: "AI-Powered Memory", description: "Every note is automatically embedded and classified. Your AI understands your thoughts by meaning, not just keywords." },
-  { icon: Search, title: "Semantic Search", description: "Find anything by what it means, not just what it says. Ask questions and get relevant results from your entire knowledge base." },
-  { icon: FileText, title: "Rich Note-Taking", description: "Capture thoughts, ideas, meeting notes, and references. Tag, pin, and organize everything your way." },
-  { icon: Plug, title: "MCP-Ready", description: "Connect any AI tool — Claude, ChatGPT, Cursor — to your brain via the Model Context Protocol. One brain, every AI." },
-  { icon: Globe, title: "Open & Portable", description: "Your knowledge lives in your database. No vendor lock-in, no SaaS middlemen. Export anytime." },
-  { icon: Shield, title: "Private & Secure", description: "Row-level security ensures only you can access your thoughts. Your brain belongs to you." },
+const useCases = [
+  {
+    icon: Lightbulb,
+    title: "Save ideas before you forget them",
+    description: "Quick-capture thoughts from any device — your phone, browser, Slack, or Telegram. Just write and move on.",
+  },
+  {
+    icon: Search,
+    title: "Find that thing you read last month",
+    description: "Search by what you meant, not exact words. Ask "that article about pricing strategy" and find it instantly.",
+  },
+  {
+    icon: Link2,
+    title: "Connect the dots between your notes",
+    description: "AI automatically surfaces related thoughts you'd never find on your own. Your ideas start building on each other.",
+  },
+  {
+    icon: Bot,
+    title: "Use your notes in any AI tool",
+    description: "Feed your knowledge into ChatGPT, Claude, or Cursor. Your personal brain becomes every AI's context.",
+  },
 ];
 
 const steps = [
-  { icon: Zap, title: "Sign Up", description: "Create your free account in seconds. Your personal brain database is set up instantly." },
-  { icon: FileText, title: "Capture Thoughts", description: "Write notes, capture ideas, save references. Every entry is automatically processed by AI." },
-  { icon: Brain, title: "Let AI Connect", description: "AI embeds, classifies, and surfaces connections between your thoughts — automatically." },
+  {
+    icon: PenLine,
+    title: "Write or paste anything",
+    description: "Notes, links, meeting summaries, voice memos, Slack messages — capture from wherever you are.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI organizes it for you",
+    description: "Every note gets auto-tagged, embedded by meaning, and connected to related thoughts — no manual work.",
+  },
+  {
+    icon: Search,
+    title: "Search and use anywhere",
+    description: "Find anything by meaning, not keywords. Plug your knowledge into any AI tool you use.",
+  },
+];
+
+const features = [
+  { icon: Brain, title: "Never forget anything", description: "Every note is embedded and classified by AI. Your memory becomes permanent and searchable." },
+  { icon: Search, title: "Search by meaning", description: "Find notes by concept, even when you can't remember the exact words you used." },
+  { icon: FileText, title: "Rich note-taking", description: "Capture thoughts, ideas, meeting notes, and references. Tag, pin, and organize your way." },
+  { icon: Bot, title: "Works with any AI tool", description: "Connect ChatGPT, Claude, Cursor, or any AI via a simple protocol. One brain, every tool." },
+  { icon: Globe, title: "Open & portable", description: "Your data lives in your database. No vendor lock-in. Export anytime, own everything." },
+  { icon: Shield, title: "Private & secure", description: "Row-level security ensures only you can access your thoughts. Your brain belongs to you." },
 ];
 
 const Index = () => {
@@ -66,16 +102,20 @@ const Index = () => {
     return <Navigate to="/dashboard" replace />;
   }
 
+  const scrollToHowItWorks = () => {
+    document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
     <div className="overflow-hidden">
       <SEOHead
-        title="Menerio — AI-Powered Knowledge System"
-        description="One brain, every AI. Capture, embed, and search your thoughts with semantic AI. Your personal knowledge system that any AI tool can plug into."
+        title="Menerio — Remember Everything, Find Anything"
+        description="Your personal knowledge base powered by AI. Write down thoughts, ideas, and notes — and find them by meaning, not just keywords. Free and open source."
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "WebApplication",
           name: "Menerio",
-          description: "AI-Powered Knowledge System",
+          description: "Personal knowledge base powered by AI",
           applicationCategory: "ProductivityApplication",
         }}
       />
@@ -95,102 +135,90 @@ const Index = () => {
             animate="visible"
             variants={stagger}
           >
-            <motion.div variants={fadeUp} custom={0}>
-              <Badge variant="info" className="mb-6 px-4 py-1.5 text-sm font-medium">
-                <Brain className="mr-1.5 h-3.5 w-3.5" /> Your AI-powered second brain
-              </Badge>
-            </motion.div>
-
             <motion.h1
               variants={fadeUp}
-              custom={1}
+              custom={0}
               className="text-5xl font-extrabold font-display tracking-tight sm:text-6xl lg:text-8xl"
             >
-              One Brain.
+              Remember everything.
               <br />
               <span className="bg-gradient-to-r from-primary via-info to-primary bg-[length:200%_auto] animate-[gradient-shift_6s_ease_infinite] bg-clip-text text-transparent">
-                Every AI.
+                Find anything.
               </span>
             </motion.h1>
 
             <motion.p
               variants={fadeUp}
-              custom={2}
+              custom={1}
               className="mx-auto mt-8 max-w-2xl text-lg text-muted-foreground sm:text-xl leading-relaxed"
             >
-              Menerio is your personal knowledge system where every thought is embedded,
-              classified, and searchable by meaning — accessible from any AI tool you use.
+              Menerio is your personal knowledge base. Write down thoughts, ideas,
+              meeting notes, or links — and AI makes them searchable by meaning,
+              not just keywords.
             </motion.p>
 
             <motion.div
               variants={fadeUp}
-              custom={3}
+              custom={2}
               className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row"
             >
               <Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="gap-2 text-base px-8 shadow-lg shadow-primary/25">
-                Start Your Brain <ArrowRight className="h-4 w-4" />
+                Get Started Free <ArrowRight className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="lg" onClick={() => navigate("/features")} className="gap-2 text-base">
+              <Button variant="outline" size="lg" onClick={scrollToHowItWorks} className="gap-2 text-base">
                 See How It Works
               </Button>
             </motion.div>
 
             <motion.div
               variants={fadeUp}
-              custom={4}
-              className="mt-8 flex items-center justify-center gap-6 text-sm text-muted-foreground"
+              custom={3}
+              className="mt-8 flex items-center justify-center gap-6 text-sm text-muted-foreground flex-wrap"
             >
               <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> Free to start</span>
-              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> AI-powered</span>
-              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> MCP-ready</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" /> No credit card needed</span>
               <a
                 href="https://github.com/MichaelZelbel/menerio"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 transition-colors hover:text-foreground"
               >
-                <Code2 className="h-4 w-4 text-primary" /> AGPL-3.0 · Open Source
+                <Code2 className="h-4 w-4 text-primary" /> Open Source
               </a>
             </motion.div>
           </motion.div>
 
-          {/* Floating capability cards instead of dead box */}
+          {/* Mini demo illustration */}
           <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-            className="mx-auto mt-20 max-w-4xl"
+            className="mx-auto mt-20 max-w-3xl"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                { icon: MessageSquare, label: "Capture from Slack", desc: "Auto-save thoughts from chat" },
-                { icon: Sparkles, label: "AI Embeddings", desc: "Semantic understanding built-in" },
-                { icon: Layers, label: "Connect Any Tool", desc: "MCP protocol for all AIs" },
-              ].map((item, i) => (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+              <Card className="p-5 bg-card/80 backdrop-blur-sm border-dashed">
+                <p className="text-xs font-medium text-muted-foreground mb-1">You write:</p>
+                <p className="text-sm font-medium">"Had a great call with Sarah about the Q3 pricing model…"</p>
+              </Card>
+              <div className="hidden sm:flex justify-center">
                 <motion.div
-                  key={item.label}
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8 + i * 0.15, duration: 0.5 }}
+                  animate={{ x: [0, 8, 0] }}
+                  transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
                 >
-                  <Card className="group relative overflow-hidden p-5 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30 bg-card/80 backdrop-blur-sm">
-                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="relative">
-                      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                        <item.icon className="h-5 w-5" />
-                      </div>
-                      <p className="font-semibold font-display text-sm">{item.label}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
-                    </div>
-                  </Card>
+                  <ArrowRight className="h-6 w-6 text-primary" />
                 </motion.div>
-              ))}
+              </div>
+              <Card className="p-5 bg-card/80 backdrop-blur-sm border-primary/30">
+                <p className="text-xs font-medium text-muted-foreground mb-1">You search later:</p>
+                <p className="text-sm font-medium">"pricing discussion with Sarah"</p>
+                <p className="text-xs text-success mt-2 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Found instantly</p>
+              </Card>
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* ── Features ── */}
+      {/* ── Use Cases ── */}
       <section className="border-t bg-card/50">
         <div className="container py-24 lg:py-32">
           <motion.div
@@ -201,13 +229,13 @@ const Index = () => {
             className="text-center mb-16"
           >
             <motion.div variants={fadeUp} custom={0}>
-              <Badge variant="secondary" className="mb-4">Features</Badge>
+              <Badge variant="secondary" className="mb-4">Use Cases</Badge>
             </motion.div>
             <motion.h2 variants={fadeUp} custom={1} className="text-3xl font-bold font-display sm:text-4xl">
-              Your thoughts, supercharged by AI
+              What people use Menerio for
             </motion.h2>
             <motion.p variants={fadeUp} custom={2} className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">
-              Not just another notes app. A database-backed knowledge system built for the age of AI agents.
+              Whether you're a founder, researcher, student, or creative — if you think a lot, Menerio helps you keep track.
             </motion.p>
           </motion.div>
 
@@ -216,18 +244,20 @@ const Index = () => {
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
             variants={stagger}
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-6 sm:grid-cols-2"
           >
-            {features.map((f, i) => (
-              <motion.div key={f.title} variants={fadeUp} custom={i}>
+            {useCases.map((uc, i) => (
+              <motion.div key={uc.title} variants={fadeUp} custom={i}>
                 <Card className="group relative h-full overflow-hidden p-6 transition-all duration-300 hover:shadow-lg hover:border-primary/20 hover:-translate-y-1">
                   <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <div className="relative">
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                      <f.icon className="h-6 w-6" />
+                  <div className="relative flex gap-4">
+                    <div className="flex-shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                      <uc.icon className="h-6 w-6" />
                     </div>
-                    <h3 className="text-lg font-semibold font-display mb-2">{f.title}</h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{f.description}</p>
+                    <div>
+                      <h3 className="text-lg font-semibold font-display mb-1">{uc.title}</h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed">{uc.description}</p>
+                    </div>
                   </div>
                 </Card>
               </motion.div>
@@ -237,7 +267,7 @@ const Index = () => {
       </section>
 
       {/* ── How It Works ── */}
-      <section className="border-t">
+      <section id="how-it-works" className="border-t">
         <div className="container py-24 lg:py-32">
           <motion.div
             initial="hidden"
@@ -250,7 +280,7 @@ const Index = () => {
               <Badge variant="secondary" className="mb-4">How It Works</Badge>
             </motion.div>
             <motion.h2 variants={fadeUp} custom={1} className="text-3xl font-bold font-display sm:text-4xl">
-              Three steps to a smarter brain
+              Three steps. Zero effort.
             </motion.h2>
             <motion.p variants={fadeUp} custom={2} className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">
               From thought to searchable knowledge in seconds.
@@ -286,6 +316,49 @@ const Index = () => {
         </div>
       </section>
 
+      {/* ── Features ── */}
+      <section className="border-t bg-card/50">
+        <div className="container py-24 lg:py-32">
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-100px" }}
+            variants={stagger}
+            className="text-center mb-16"
+          >
+            <motion.div variants={fadeUp} custom={0}>
+              <Badge variant="secondary" className="mb-4">Features</Badge>
+            </motion.div>
+            <motion.h2 variants={fadeUp} custom={1} className="text-3xl font-bold font-display sm:text-4xl">
+              Everything you need, nothing you don't
+            </motion.h2>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+            variants={stagger}
+            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            {features.map((f, i) => (
+              <motion.div key={f.title} variants={fadeUp} custom={i}>
+                <Card className="group relative h-full overflow-hidden p-6 transition-all duration-300 hover:shadow-lg hover:border-primary/20 hover:-translate-y-1">
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="relative">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                      <f.icon className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-lg font-semibold font-display mb-2">{f.title}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{f.description}</p>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+      </section>
+
       {/* ── Final CTA ── */}
       <section className="relative border-t">
         <div className="absolute inset-0 -z-10 overflow-hidden">
@@ -300,14 +373,14 @@ const Index = () => {
             variants={stagger}
           >
             <motion.h2 variants={fadeUp} custom={0} className="text-3xl font-bold font-display sm:text-4xl lg:text-5xl">
-              Ready to build your brain?
+              Start capturing your thoughts
             </motion.h2>
             <motion.p variants={fadeUp} custom={1} className="mt-4 text-lg text-muted-foreground max-w-xl mx-auto">
-              Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
+              Stop losing ideas every time you switch tools. Build a knowledge base that grows smarter with every note.
             </motion.p>
             <motion.div variants={fadeUp} custom={2} className="mt-10">
               <Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="gap-2 text-base px-10 shadow-lg shadow-primary/20">
-                Start Your Brain <ArrowRight className="h-4 w-4" />
+                Get Started Free <ArrowRight className="h-4 w-4" />
               </Button>
             </motion.div>
           </motion.div>
