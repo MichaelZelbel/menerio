@@ -106,6 +106,13 @@ interface NoteEditorProps {
   onNoteDeleted?: () => void;
   showLocalGraph?: boolean;
   onToggleLocalGraph?: () => void;
+  allNotes?: Note[];
+  onTopicClick?: (topic: string) => void;
+  onPersonClick?: (person: string) => void;
+  onTypeClick?: (type: string) => void;
+  onNoteSelect?: (noteId: string) => void;
+  activeTopicFilter?: string | null;
+  activeTypeFilter?: string | null;
 }
 
 /** Extract all wikilink noteIds from editor JSON content */
