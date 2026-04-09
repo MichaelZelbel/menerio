@@ -244,18 +244,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
               >
                 <Link2 className="h-2.5 w-2.5" />
               </button>
-              {note.tags?.length > 0 && (
-                <>
-                  {note.tags.slice(0, 2).map((tag) => (
-                    <span
-                      key={tag}
-                      className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </>
-              )}
             </div>
           </a>
         );

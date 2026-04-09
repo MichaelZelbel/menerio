@@ -11,7 +11,7 @@ import {
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
-import { SmartTagsPanel } from "@/components/notes/SmartTagsPanel";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,7 +39,6 @@ import {
   Check,
   Sparkles,
   Type,
-  Tags,
   Image,
   ArrowUpDown,
   ArrowUp,
@@ -96,7 +95,7 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
-  const [showSmartTags, setShowSmartTags] = useState(false);
+  
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -246,28 +245,6 @@ export default function Notes() {
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
-      {/* Smart Tags panel */}
-      {showSmartTags && (
-        <div className="w-64 shrink-0 border-r border-border bg-background flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-            <span className="text-xs font-semibold flex items-center gap-1.5">
-              <Tags className="h-3.5 w-3.5" /> Smart Tags
-            </span>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSmartTags(false)}>
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-          <SmartTagsPanel
-            notes={allNotes}
-            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
-            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
-            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
-            onNoteSelect={selectNote}
-            activeTopicFilter={topicFilter}
-            activeTypeFilter={metaTypeFilter}
-          />
-        </div>
-      )}
 
       {/* Note list panel */}
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
@@ -361,21 +338,6 @@ export default function Notes() {
           </DropdownMenu>
 
           <div className="flex-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={showSmartTags ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setShowSmartTags(!showSmartTags)}
-                title="Smart Tags"
-              >
-                <Tags className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Smart Tags</TooltipContent>
-          </Tooltip>
           <Button
             variant="ghost"
             size="icon"
@@ -560,6 +522,13 @@ export default function Notes() {
             onNoteDeleted={() => selectNote(null)}
             showLocalGraph={showLocalGraph}
             onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
+            allNotes={allNotes}
+            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
+            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
+            onNoteSelect={selectNote}
+            activeTopicFilter={topicFilter}
+            activeTypeFilter={metaTypeFilter}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
