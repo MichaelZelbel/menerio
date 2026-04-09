@@ -1,13 +1,25 @@
 
 
-## Hide Metadata Pills from Note List
+## Rename and Clean Up the Two "Smart Tags" Sections
 
-### What changes
-In `src/components/notes/NoteList.tsx`, remove or hide the entire metadata pills block (the `{hasMetadata && (...)}` section) that renders type, topics, people, and action item count pills.
+### Problem
+Two sections in the note editor are both labeled "Smart Tags," causing confusion. Additionally, the vault-wide "Classify all notes" button inside the single-note editor is misleading.
+
+### Proposed Changes
+
+**1. Rename the top section from "Smart Tags" to "Note Metadata"**
+- File: `src/components/notes/NoteMetadataEditor.tsx`
+- Change the collapsible trigger label from "Smart Tags" to "Note Metadata"
+
+**2. Rename the bottom section from "Smart Tags" to "Vault Insights"**
+- File: `src/components/notes/NoteEditor.tsx` — update the `SmartTagsCollapsible` header text from "Smart Tags" to "Vault Insights"
+
+**3. Move "Classify all notes" button out of note editor context (optional)**
+- Either keep it in "Vault Insights" but clarify the label to "Classify all unclassified notes in vault (10)" so users understand it's vault-wide
+- Or remove it from the note editor entirely and place it only on the Notes list page header
 
 ### Files Modified
-- `src/components/notes/NoteList.tsx` — remove the metadata pills rendering block (lines ~119-148), and optionally the `hasMetadata` variable since it's no longer used. The source badges (Slack/Telegram/Discord/Quick) and entity type badge at the bottom can remain or be removed too — user preference.
-
-### Question
-Should I also hide the **source badges** (Slack, Telegram, Discord, Quick) and the **entity type badge** (person, event, idea, etc.) at the bottom of each entry, or keep those?
+- `src/components/notes/NoteMetadataEditor.tsx` — rename label
+- `src/components/notes/NoteEditor.tsx` — rename collapsible header
+- Optionally: `src/components/notes/SmartTagsPanel.tsx` — clarify backfill button label
 
