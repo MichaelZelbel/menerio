@@ -758,6 +758,19 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </details>
       )}
 
+      {/* Smart Tags — collapsible, state persisted in localStorage */}
+      {allNotes && allNotes.length > 0 && (
+        <SmartTagsCollapsible
+          allNotes={allNotes}
+          onTopicClick={onTopicClick}
+          onPersonClick={onPersonClick}
+          onTypeClick={onTypeClick}
+          onNoteSelect={onNoteSelect}
+          activeTopicFilter={activeTopicFilter}
+          activeTypeFilter={activeTypeFilter}
+        />
+      )}
+
       {/* Backlinks panel */}
       <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
 
