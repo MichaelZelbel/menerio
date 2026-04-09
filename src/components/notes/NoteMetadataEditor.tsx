@@ -40,10 +40,22 @@ interface NoteMetadataEditorProps {
   onUpdate: (metadata: Record<string, unknown>) => void;
 }
 
+const NOTE_METADATA_STORAGE_KEY = "menerio-note-metadata-expanded";
+
+function getStoredExpanded(): boolean {
+  try {
+    const v = localStorage.getItem(NOTE_METADATA_STORAGE_KEY);
+    if (v === "true") return true;
+    return false; // default collapsed
+  } catch {
+    return false;
+  }
+}
+
 export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
-  const [isOpen, setIsOpen] = useState(!!metadata?.type);
+  const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
 
   const topics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
   const people = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
