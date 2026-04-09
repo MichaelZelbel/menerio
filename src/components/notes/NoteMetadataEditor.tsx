@@ -154,10 +154,10 @@ export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, on
           />
           <Sparkles className="h-3 w-3" />
           Note Metadata
-          {!isOpen && topics.length > 0 && (
+          {!isOpen && allTopics.length > 0 && (
             <span className="ml-1 text-muted-foreground/60">
-              · {topics.slice(0, 3).map((t) => `#${t}`).join(" ")}
-              {topics.length > 3 && ` +${topics.length - 3}`}
+              · {allTopics.slice(0, 3).map((t) => `#${t}`).join(" ")}
+              {allTopics.length > 3 && ` +${allTopics.length - 3}`}
             </span>
           )}
         </button>
@@ -197,7 +197,7 @@ export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, on
           {/* Topics */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-muted-foreground font-medium shrink-0">Topics:</span>
-            {topics.map((topic) => (
+            {allTopics.map((topic) => (
               <Badge
                 key={topic}
                 variant="secondary"
@@ -214,6 +214,7 @@ export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, on
             ))}
             <div className="flex items-center">
               <Input
+                ref={topicInputRef}
                 value={topicInput}
                 onChange={(e) => setTopicInput(e.target.value)}
                 onKeyDown={(e) => {
