@@ -45,7 +45,7 @@ const useCases = [
   {
     icon: Search,
     title: "Find that thing you read last month",
-    description: "Search by what you meant, not exact words. Ask "that article about pricing strategy" and find it instantly.",
+    description: "Search by what you meant, not exact words. Ask \"that article about pricing strategy\" and find it instantly.",
   },
   {
     icon: Link2,
