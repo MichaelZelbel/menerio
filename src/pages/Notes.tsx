@@ -523,6 +523,13 @@ export default function Notes() {
             onNoteDeleted={() => selectNote(null)}
             showLocalGraph={showLocalGraph}
             onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
+            allNotes={allNotes}
+            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
+            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
+            onNoteSelect={selectNote}
+            activeTopicFilter={topicFilter}
+            activeTypeFilter={metaTypeFilter}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
