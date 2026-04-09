@@ -34,7 +34,7 @@ import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
-import { SmartTagsPanel } from "./SmartTagsPanel";
+
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
@@ -110,13 +110,7 @@ interface NoteEditorProps {
   onNoteDeleted?: () => void;
   showLocalGraph?: boolean;
   onToggleLocalGraph?: () => void;
-  allNotes?: Note[];
-  onTopicClick?: (topic: string) => void;
-  onPersonClick?: (person: string) => void;
-  onTypeClick?: (type: string) => void;
   onNoteSelect?: (noteId: string) => void;
-  activeTopicFilter?: string | null;
-  activeTypeFilter?: string | null;
 }
 
 /** Extract all wikilink noteIds from editor JSON content */
@@ -175,7 +169,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
-export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, allNotes, onTopicClick, onPersonClick, onTypeClick, onNoteSelect, activeTopicFilter, activeTypeFilter }: NoteEditorProps) {
+export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
