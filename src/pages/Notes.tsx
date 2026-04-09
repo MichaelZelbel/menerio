@@ -203,7 +203,17 @@ export default function Notes() {
       notes = notes.filter((n) => {
         const meta = n.metadata as Record<string, unknown> | null;
         const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
-        return people.includes(personFilter);
+        // Check raw names and canonical names from matched_people
+        const matchedMap = new Map<string, string>();
+        if (Array.isArray(meta?.matched_people)) {
+          for (const m of meta.matched_people as Array<{ name: string; canonical_name: string }>) {
+            matchedMap.set(m.name.toLowerCase(), m.canonical_name);
+          }
+        }
+        return people.some((p) => {
+          const canonical = matchedMap.get(p.toLowerCase()) || p;
+          return canonical === personFilter || p === personFilter;
+        });
       });
     }
     if (metaTypeFilter) {
@@ -284,7 +294,19 @@ export default function Notes() {
       const meta = note.metadata as Record<string, unknown> | null;
       if (!meta || !meta.type) { unclassified++; continue; }
       if (Array.isArray(meta.topics)) for (const t of meta.topics as string[]) topics[t] = (topics[t] || 0) + 1;
-      if (Array.isArray(meta.people)) for (const p of meta.people as string[]) people[p] = (people[p] || 0) + 1;
+      // Normalize people names: use canonical_name from matched_people when available
+      const matchedMap = new Map<string, string>();
+      if (Array.isArray(meta.matched_people)) {
+        for (const m of meta.matched_people as Array<{ name: string; canonical_name: string }>) {
+          matchedMap.set(m.name.toLowerCase(), m.canonical_name);
+        }
+      }
+      if (Array.isArray(meta.people)) {
+        for (const p of meta.people as string[]) {
+          const canonical = matchedMap.get(p.toLowerCase()) || p;
+          people[canonical] = (people[canonical] || 0) + 1;
+        }
+      }
       if (typeof meta.type === "string") types[meta.type] = (types[meta.type] || 0) + 1;
     }
     return {

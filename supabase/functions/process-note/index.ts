@@ -105,19 +105,25 @@ async function generateReviewItems(
       }
     }
 
-    // Person detection: check if mentioned people exist as contacts
+    // Person detection: check if mentioned people exist as contacts (alias-aware)
     if (people.length > 0) {
       const { data: existingContacts } = await supabase
         .from("contacts")
-        .select("name")
+        .select("id, name, aliases")
         .eq("user_id", userId);
 
-      const existingNames = new Set(
-        (existingContacts || []).map((c: any) => c.name.toLowerCase()),
-      );
+      const nameToContact = new Map<string, { id: string; name: string }>();
+      for (const c of (existingContacts || []) as any[]) {
+        nameToContact.set(c.name.toLowerCase(), { id: c.id, name: c.name });
+        if (Array.isArray(c.aliases)) {
+          for (const alias of c.aliases) {
+            if (alias) nameToContact.set(alias.toLowerCase(), { id: c.id, name: c.name });
+          }
+        }
+      }
 
       for (const person of people) {
-        if (!existingNames.has(person.toLowerCase())) {
+        if (!nameToContact.has(person.toLowerCase())) {
           suggestions.push({
             user_id: userId,
             source_note_id: noteId,
@@ -267,6 +273,44 @@ async function processInBackground(noteId: string, authHeader: string) {
       metadata.topics = merged;
     }
 
+    // Auto-link metadata people to contacts (alias-aware)
+    const metadataPeople = Array.isArray(metadata.people) ? metadata.people as string[] : [];
+    if (metadataPeople.length > 0) {
+      const { data: allContacts } = await supabase
+        .from("contacts")
+        .select("id, name, aliases")
+        .eq("user_id", note.user_id);
+
+      const nameToContact = new Map<string, { id: string; name: string }>();
+      for (const c of (allContacts || []) as any[]) {
+        nameToContact.set(c.name.toLowerCase(), { id: c.id, name: c.name });
+        if (Array.isArray(c.aliases)) {
+          for (const alias of c.aliases) {
+            if (alias) nameToContact.set(alias.toLowerCase(), { id: c.id, name: c.name });
+          }
+        }
+      }
+
+      const matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }> = [];
+      for (const person of metadataPeople) {
+        const match = nameToContact.get(person.toLowerCase());
+        if (match) {
+          matchedPeople.push({ name: person, contact_id: match.id, canonical_name: match.name });
+        }
+      }
+      if (matchedPeople.length > 0) {
+        metadata.matched_people = matchedPeople;
+      }
+
+      // Build contact map for action items (reuse the same alias-aware map)
+      var contactMap: Record<string, string> = {};
+      for (const [name, contact] of nameToContact) {
+        contactMap[name] = contact.id;
+      }
+    } else {
+      var contactMap: Record<string, string> = {};
+    }
+
     // Use AI-generated title if available
     const aiTitle = typeof metadata.title === "string" && metadata.title.trim()
       ? metadata.title.trim()
@@ -289,20 +333,6 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Insert extracted action items into the action_items table
     const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
     if (actionItems.length > 0) {
-      const people = Array.isArray(metadata.people) ? metadata.people as string[] : [];
-      const contactMap: Record<string, string> = {};
-      if (people.length > 0) {
-        const { data: contacts } = await supabase
-          .from("contacts")
-          .select("id, name")
-          .eq("user_id", note.user_id);
-        if (contacts) {
-          for (const c of contacts as any[]) {
-            contactMap[c.name.toLowerCase()] = c.id;
-          }
-        }
-      }
-
       const rows = actionItems.map((content: string) => {
         let contact_id: string | null = null;
         for (const [name, id] of Object.entries(contactMap)) {
