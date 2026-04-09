@@ -275,6 +275,7 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Auto-link metadata people to contacts (alias-aware)
     const metadataPeople = Array.isArray(metadata.people) ? metadata.people as string[] : [];
+    const contactMap: Record<string, string> = {};
     if (metadataPeople.length > 0) {
       const { data: allContacts } = await supabase
         .from("contacts")
