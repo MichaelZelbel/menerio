@@ -39,6 +39,10 @@ const SENTIMENT_EMOJI: Record<string, string> = {
 interface NoteMetadataEditorProps {
   metadata: Record<string, unknown> | null;
   onUpdate: (metadata: Record<string, unknown>) => void;
+  tags?: string[];
+  onAddTag?: (tag: string) => void;
+  onRemoveTag?: (tag: string) => void;
+  showTagInput?: boolean;
 }
 
 const NOTE_METADATA_STORAGE_KEY = "menerio-note-metadata-expanded";
