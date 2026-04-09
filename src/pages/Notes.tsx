@@ -697,13 +697,7 @@ export default function Notes() {
             onNoteDeleted={() => selectNote(null)}
             showLocalGraph={showLocalGraph}
             onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
-            allNotes={allNotes}
-            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
-            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
-            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
             onNoteSelect={selectNote}
-            activeTopicFilter={topicFilter}
-            activeTypeFilter={metaTypeFilter}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -723,5 +717,21 @@ export default function Notes() {
         )}
       </div>
     </div>
+  );
+}
+
+function VaultSection({ label, icon: Icon, defaultOpen = false, children }: { label: string; icon: any; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 w-full py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Icon className="h-3.5 w-3.5" />
+        <span>{label}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pb-1">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
