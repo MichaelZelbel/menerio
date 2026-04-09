@@ -39,7 +39,6 @@ import {
   Check,
   Sparkles,
   Type,
-  Tags,
   Image,
   ArrowUpDown,
   ArrowUp,
@@ -96,7 +95,7 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
-  const [showSmartTags, setShowSmartTags] = useState(false);
+  
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
