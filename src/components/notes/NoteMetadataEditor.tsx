@@ -57,11 +57,14 @@ function getStoredExpanded(): boolean {
   }
 }
 
-export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorProps) {
+export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
   const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
   const navigate = useNavigate();
+  const topicInputRef = useCallback((node: HTMLInputElement | null) => {
+    if (node && showTagInput) node.focus();
+  }, [showTagInput]);
 
   // Build a lookup from person name (lowercase) -> matched contact info
   const matchedLookup = useMemo(() => {
@@ -75,7 +78,15 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
     return map;
   }, [metadata?.matched_people]);
 
-  const topics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
+  const metaTopics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
+  // Deduplicated union of metadata.topics + note.tags
+  const allTopics = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of metaTopics) set.add(t.toLowerCase());
+    for (const t of tags) set.add(t.toLowerCase());
+    return Array.from(set);
+  }, [metaTopics, tags]);
+
   const people = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
   const matchedPeople = Array.isArray(metadata?.matched_people)
     ? (metadata.matched_people as Array<{ name: string; contact_id: string; canonical_name: string }>)
@@ -85,7 +96,7 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
   const summary = metadata?.summary ? String(metadata.summary) : "";
   const actionItems = Array.isArray(metadata?.action_items) ? (metadata.action_items as string[]) : [];
 
-  const hasMetadata = !!(type || topics.length || people.length || summary || actionItems.length);
+  const hasMetadata = !!(type || allTopics.length || people.length || summary || actionItems.length || showTagInput);
 
   const update = useCallback(
     (patch: Record<string, unknown>) => {
@@ -96,16 +107,20 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
 
   const addTopic = () => {
     const t = topicInput.trim().toLowerCase();
-    if (!t || topics.includes(t)) {
+    if (!t || allTopics.includes(t)) {
       setTopicInput("");
       return;
     }
-    update({ topics: [...topics, t] });
+    // Add to both metadata.topics and note.tags
+    update({ topics: [...metaTopics, t] });
+    onAddTag?.(t);
     setTopicInput("");
   };
 
   const removeTopic = (topic: string) => {
-    update({ topics: topics.filter((t) => t !== topic) });
+    // Remove from both metadata.topics and note.tags
+    update({ topics: metaTopics.filter((t) => t.toLowerCase() !== topic.toLowerCase()) });
+    onRemoveTag?.(topic);
   };
 
   const addPerson = () => {
