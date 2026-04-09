@@ -246,28 +246,6 @@ export default function Notes() {
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
-      {/* Smart Tags panel */}
-      {showSmartTags && (
-        <div className="w-64 shrink-0 border-r border-border bg-background flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-            <span className="text-xs font-semibold flex items-center gap-1.5">
-              <Tags className="h-3.5 w-3.5" /> Smart Tags
-            </span>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSmartTags(false)}>
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-          <SmartTagsPanel
-            notes={allNotes}
-            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
-            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
-            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
-            onNoteSelect={selectNote}
-            activeTopicFilter={topicFilter}
-            activeTypeFilter={metaTypeFilter}
-          />
-        </div>
-      )}
 
       {/* Note list panel */}
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
