@@ -90,6 +90,9 @@ import {
   Unlink,
   Lock,
   ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  Tags,
 } from "lucide-react";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
