@@ -1,46 +1,54 @@
 
 
-## Move Vault Insights from Note Editor to Notes List Column
+## Auto-Link Metadata People to Contacts (with Alias Matching)
 
-### What's changing
-Remove the "Vault Insights" collapsible from the note editor panel and integrate it into the left "All Notes" column as a compact filter toolbar, using Evernote-style flyout menus (dropdown/popover) for Topics, Types, People, and Actions.
+### Problem
+AI extracts `metadata.people` names from notes, but these are raw strings disconnected from the curated People (contacts) list. The contact matching in `process-note` only checks canonical `name`, ignoring `aliases`. New names go to the Review Queue, but there's no auto-linking for known people.
 
-### Design
-The existing Filter icon button row in the Notes list header already has dropdowns for entity type and sort. We'll add new dropdown buttons for **Topics**, **People**, and **Type** (metadata type) — each opening a scrollable checklist popover. The "Classify unclassified vault notes" button and "Weekly Digest" can go into an overflow menu (the `...` or a Sparkles icon).
+### What Changes
 
-```text
-┌─────────────────────────────┐
-│ All Notes  [Filter▾][Tags▾] │  ← Tags = new dropdown with Topics/People/Type sub-menus
-│            [Sort▾][🔍][+]   │
-├─────────────────────────────┤
-│ Active filters: #ai  ×      │  ← existing filter indicator bar
-├─────────────────────────────┤
-│ Note list...                 │
-```
+**1. Improve alias matching in `process-note` edge function**
+- When checking if a mentioned person already exists as a contact, also check against `aliases` (not just `name`)
+- If a match is found (by name or alias), auto-link: store the contact ID in `metadata.matched_people` so the UI can link mentions to People
+- Only create Review Queue "add_contact" suggestions for genuinely unknown names
 
-Each flyout dropdown shows a scrollable list of checkboxes (topics sorted by count, people sorted by count, types with colored pills). Selecting one sets the existing `topicFilter`/`personFilter`/`metaTypeFilter` state that already filters `currentNotes`.
+**2. Same fix in action items contact matching**
+- The action items section (lines 293-304) already builds a `contactMap` but only by `name` — extend it to include aliases too
+
+**3. Update the NoteMetadataEditor UI**
+- In the People row, if a person name matches a contact (via `matched_people` in metadata), make it a clickable link to `/dashboard/people` with that person selected
+- Unmatched names remain as plain text badges
+
+**4. Update the Tags popover aggregation in Notes.tsx**
+- The People filter section should merge metadata people with contacts where possible, showing canonical names when an alias match exists
 
 ### Files Modified
 
-1. **`src/pages/Notes.tsx`**
-   - Add a new "Tags" dropdown button in the header toolbar (next to existing Filter and Sort buttons)
-   - Inside: three sub-sections (or a tabbed popover) for Topics, People, and Types — each computed from `allNotes` metadata (reuse the aggregation logic from SmartTagsPanel)
-   - Add a "Classify vault" button in the dropdown or as a small action
-   - Remove `onTopicClick`, `onPersonClick`, `onTypeClick`, `activeTopicFilter`, `activeTypeFilter` props from the `NoteEditor` call (no longer needed there)
+| File | Change |
+|------|--------|
+| `supabase/functions/process-note/index.ts` | Fetch contacts with `name, aliases` instead of just `name`. Match extracted people against both canonical name and aliases. Store matched contact IDs in metadata. Only queue unmatched names for review. |
+| `supabase/functions/backfill-metadata/index.ts` | Same alias-aware matching if it has similar logic (will check). |
+| `src/components/notes/NoteMetadataEditor.tsx` | Render matched people as links to People page; unmatched as plain badges. |
+| `src/pages/Notes.tsx` | In the Tags popover, normalize people names using contact aliases when aggregating counts. |
 
-2. **`src/components/notes/NoteEditor.tsx`**
-   - Remove the `SmartTagsCollapsible` component and its usage
-   - Remove the related props (`onTopicClick`, `onPersonClick`, `onTypeClick`, `activeTopicFilter`, `activeTypeFilter`, `allNotes` for vault insights)
-   - Clean up imports (SmartTagsPanel, Tags icon, etc.)
+### Technical Details
 
-3. **`src/components/notes/SmartTagsPanel.tsx`**
-   - Either repurpose into a reusable hook/utility that just computes the aggregated data (topics, people, types, action items, digest), or inline the aggregation logic directly in `Notes.tsx`
+In `process-note`, the contact lookup changes from:
+```typescript
+// Before: only checks name
+const existingNames = new Set(contacts.map(c => c.name.toLowerCase()));
+```
+to:
+```typescript
+// After: checks name + all aliases
+const nameToContact = new Map();
+for (const c of contacts) {
+  nameToContact.set(c.name.toLowerCase(), c);
+  for (const alias of (c.aliases || [])) {
+    nameToContact.set(alias.toLowerCase(), c);
+  }
+}
+```
 
-### Approach Details
-- Use a `Popover` (from shadcn) triggered by a "Tags" button with `Hash` icon
-- Inside the popover: three collapsible sections (Topics, People, Types) with scrollable lists and counts
-- Each item is clickable to toggle the filter (reusing existing `topicFilter`/`personFilter`/`metaTypeFilter` state)
-- The backfill "Classify" button goes at the bottom of the popover
-- Weekly digest can become a small summary at the top of the popover or be removed from this view entirely
-- Action items section can stay or move — since it's vault-wide, it fits better in the popover too
+A matched person gets stored as `{ name, contact_id }` in `metadata.matched_people`, enabling the UI to link directly.
 
