@@ -406,6 +406,112 @@ export default function Notes() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Tags / Vault Insights popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={hasActiveMetaFilter ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                title="Tags & Insights"
+              >
+                <Hash className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-0 max-h-[70vh] overflow-hidden">
+              <ScrollArea className="max-h-[70vh]">
+                <div className="p-3 space-y-1">
+                  {/* By Type */}
+                  <VaultSection label="By Type" icon={LayoutGrid} defaultOpen>
+                    <div className="flex flex-wrap gap-1">
+                      {typeCounts.map(([type, count]) => (
+                        <button
+                          key={type}
+                          onClick={() => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
+                          className={cn(
+                            "text-[10px] px-2 py-1 rounded-full font-medium transition-all",
+                            TYPE_COLORS[type] || "bg-muted text-muted-foreground",
+                            metaTypeFilter === type && "ring-2 ring-primary ring-offset-1 ring-offset-background"
+                          )}
+                        >
+                          {TYPE_LABELS[type] || type} ({count})
+                        </button>
+                      ))}
+                      {typeCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">No classified notes yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  <Separator />
+
+                  {/* Topics */}
+                  <VaultSection label="Topics" icon={Hash} defaultOpen>
+                    <div className="flex flex-wrap gap-1">
+                      {topicCounts.slice(0, 30).map(([topic, count]) => (
+                        <button
+                          key={topic}
+                          onClick={() => setTopicFilter(topicFilter === topic ? null : topic)}
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium transition-all hover:bg-primary/20",
+                            topicFilter === topic && "ring-2 ring-primary ring-offset-1 ring-offset-background bg-primary/20"
+                          )}
+                        >
+                          {topic} <span className="opacity-60">{count}</span>
+                        </button>
+                      ))}
+                      {topicCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">No topics extracted yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  <Separator />
+
+                  {/* People */}
+                  <VaultSection label="People" icon={User}>
+                    <div className="space-y-0.5">
+                      {peopleCounts.slice(0, 20).map(([person, count]) => (
+                        <button
+                          key={person}
+                          onClick={() => setPersonFilter(personFilter === person ? null : person)}
+                          className={cn(
+                            "flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-accent/50 transition-colors",
+                            personFilter === person && "bg-accent"
+                          )}
+                        >
+                          <User className="h-3 w-3 text-violet-500 shrink-0" />
+                          <span className="flex-1 truncate">{person}</span>
+                          <span className="text-[10px] text-muted-foreground">{count}</span>
+                        </button>
+                      ))}
+                      {peopleCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground px-2">No people mentioned yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  {/* Classify button */}
+                  {unclassifiedCount > 0 && (
+                    <>
+                      <Separator />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-1.5 text-xs h-8"
+                        onClick={handleBackfill}
+                        disabled={isBackfilling}
+                      >
+                        {isBackfilling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        Classify unclassified vault notes ({unclassifiedCount})
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </ScrollArea>
+            </PopoverContent>
+          </Popover>
+
           <div className="flex-1" />
           <Button
             variant="ghost"
