@@ -332,7 +332,7 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Insert extracted action items into the action_items table
     const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
-
+    if (actionItems.length > 0) {
       const rows = actionItems.map((content: string) => {
         let contact_id: string | null = null;
         for (const [name, id] of Object.entries(contactMap)) {

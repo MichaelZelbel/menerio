@@ -59,6 +59,9 @@ export function NoteMetadataEditor({ metadata, onUpdate }: NoteMetadataEditorPro
 
   const topics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
   const people = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
+  const matchedPeople = Array.isArray(metadata?.matched_people)
+    ? (metadata.matched_people as Array<{ name: string; contact_id: string; canonical_name: string }>)
+    : [];
   const type = metadata?.type ? String(metadata.type) : "";
   const sentiment = metadata?.sentiment ? String(metadata.sentiment) : "";
   const summary = metadata?.summary ? String(metadata.summary) : "";
