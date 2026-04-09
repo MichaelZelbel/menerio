@@ -22,10 +22,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Plus,
   Search,
@@ -35,6 +47,7 @@ import {
   Star,
   Trash2,
   ChevronDown,
+  ChevronRight,
   Filter,
   Check,
   Sparkles,
@@ -43,10 +56,15 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Hash,
+  User,
+  LayoutGrid,
+  Loader2,
 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { showToast } from "@/lib/toast";
 
 const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
   { key: "all", label: "All Notes", icon: FileText },
@@ -241,6 +259,57 @@ export default function Notes() {
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
+  // Vault insights aggregation
+  const TYPE_LABELS: Record<string, string> = {
+    observation: "Observation", task: "Task", idea: "Idea", reference: "Reference",
+    person_note: "Person Note", meeting_note: "Meeting Note", decision: "Decision", project: "Project",
+  };
+  const TYPE_COLORS: Record<string, string> = {
+    observation: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
+    task: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+    reference: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+    person_note: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+    meeting_note: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+    decision: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+    project: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
+  };
+
+  const { topicCounts, peopleCounts, typeCounts, unclassifiedCount } = useMemo(() => {
+    const topics: Record<string, number> = {};
+    const people: Record<string, number> = {};
+    const types: Record<string, number> = {};
+    let unclassified = 0;
+    for (const note of allNotes) {
+      const meta = note.metadata as Record<string, unknown> | null;
+      if (!meta || !meta.type) { unclassified++; continue; }
+      if (Array.isArray(meta.topics)) for (const t of meta.topics as string[]) topics[t] = (topics[t] || 0) + 1;
+      if (Array.isArray(meta.people)) for (const p of meta.people as string[]) people[p] = (people[p] || 0) + 1;
+      if (typeof meta.type === "string") types[meta.type] = (types[meta.type] || 0) + 1;
+    }
+    return {
+      topicCounts: Object.entries(topics).sort((a, b) => b[1] - a[1]),
+      peopleCounts: Object.entries(people).sort((a, b) => b[1] - a[1]),
+      typeCounts: Object.entries(types).sort((a, b) => b[1] - a[1]),
+      unclassifiedCount: unclassified,
+    };
+  }, [allNotes]);
+
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const handleBackfill = useCallback(async () => {
+    setIsBackfilling(true);
+    try {
+      const res = await supabase.functions.invoke("backfill-metadata", { body: {} });
+      if (res.error) throw res.error;
+      const data = res.data as { processed: number; total: number; message: string };
+      showToast.success(data.message);
+    } catch (err: any) {
+      showToast.error(err.message || "Backfill failed");
+    } finally {
+      setIsBackfilling(false);
+    }
+  }, []);
+
   return (
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
@@ -336,6 +405,112 @@ export default function Notes() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Tags / Vault Insights popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={hasActiveMetaFilter ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                title="Tags & Insights"
+              >
+                <Hash className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-0 max-h-[70vh] overflow-hidden">
+              <ScrollArea className="max-h-[70vh]">
+                <div className="p-3 space-y-1">
+                  {/* By Type */}
+                  <VaultSection label="By Type" icon={LayoutGrid} defaultOpen>
+                    <div className="flex flex-wrap gap-1">
+                      {typeCounts.map(([type, count]) => (
+                        <button
+                          key={type}
+                          onClick={() => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
+                          className={cn(
+                            "text-[10px] px-2 py-1 rounded-full font-medium transition-all",
+                            TYPE_COLORS[type] || "bg-muted text-muted-foreground",
+                            metaTypeFilter === type && "ring-2 ring-primary ring-offset-1 ring-offset-background"
+                          )}
+                        >
+                          {TYPE_LABELS[type] || type} ({count})
+                        </button>
+                      ))}
+                      {typeCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">No classified notes yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  <Separator />
+
+                  {/* Topics */}
+                  <VaultSection label="Topics" icon={Hash} defaultOpen>
+                    <div className="flex flex-wrap gap-1">
+                      {topicCounts.slice(0, 30).map(([topic, count]) => (
+                        <button
+                          key={topic}
+                          onClick={() => setTopicFilter(topicFilter === topic ? null : topic)}
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium transition-all hover:bg-primary/20",
+                            topicFilter === topic && "ring-2 ring-primary ring-offset-1 ring-offset-background bg-primary/20"
+                          )}
+                        >
+                          {topic} <span className="opacity-60">{count}</span>
+                        </button>
+                      ))}
+                      {topicCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">No topics extracted yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  <Separator />
+
+                  {/* People */}
+                  <VaultSection label="People" icon={User}>
+                    <div className="space-y-0.5">
+                      {peopleCounts.slice(0, 20).map(([person, count]) => (
+                        <button
+                          key={person}
+                          onClick={() => setPersonFilter(personFilter === person ? null : person)}
+                          className={cn(
+                            "flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-accent/50 transition-colors",
+                            personFilter === person && "bg-accent"
+                          )}
+                        >
+                          <User className="h-3 w-3 text-violet-500 shrink-0" />
+                          <span className="flex-1 truncate">{person}</span>
+                          <span className="text-[10px] text-muted-foreground">{count}</span>
+                        </button>
+                      ))}
+                      {peopleCounts.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground px-2">No people mentioned yet</p>
+                      )}
+                    </div>
+                  </VaultSection>
+
+                  {/* Classify button */}
+                  {unclassifiedCount > 0 && (
+                    <>
+                      <Separator />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-1.5 text-xs h-8"
+                        onClick={handleBackfill}
+                        disabled={isBackfilling}
+                      >
+                        {isBackfilling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        Classify unclassified vault notes ({unclassifiedCount})
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </ScrollArea>
+            </PopoverContent>
+          </Popover>
 
           <div className="flex-1" />
           <Button
@@ -522,13 +697,7 @@ export default function Notes() {
             onNoteDeleted={() => selectNote(null)}
             showLocalGraph={showLocalGraph}
             onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
-            allNotes={allNotes}
-            onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
-            onPersonClick={(person) => setPersonFilter(personFilter === person ? null : person)}
-            onTypeClick={(type) => setMetaTypeFilter(metaTypeFilter === type ? null : type)}
             onNoteSelect={selectNote}
-            activeTopicFilter={topicFilter}
-            activeTypeFilter={metaTypeFilter}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -548,5 +717,21 @@ export default function Notes() {
         )}
       </div>
     </div>
+  );
+}
+
+function VaultSection({ label, icon: Icon, defaultOpen = false, children }: { label: string; icon: any; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 w-full py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Icon className="h-3.5 w-3.5" />
+        <span>{label}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pb-1">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

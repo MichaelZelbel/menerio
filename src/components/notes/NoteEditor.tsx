@@ -34,7 +34,7 @@ import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
-import { SmartTagsPanel } from "./SmartTagsPanel";
+
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
@@ -94,6 +94,7 @@ import {
   ChevronRight,
   Tags,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
@@ -110,13 +111,7 @@ interface NoteEditorProps {
   onNoteDeleted?: () => void;
   showLocalGraph?: boolean;
   onToggleLocalGraph?: () => void;
-  allNotes?: Note[];
-  onTopicClick?: (topic: string) => void;
-  onPersonClick?: (person: string) => void;
-  onTypeClick?: (type: string) => void;
   onNoteSelect?: (noteId: string) => void;
-  activeTopicFilter?: string | null;
-  activeTypeFilter?: string | null;
 }
 
 /** Extract all wikilink noteIds from editor JSON content */
@@ -175,7 +170,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
-export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, allNotes, onTopicClick, onPersonClick, onTypeClick, onNoteSelect, activeTopicFilter, activeTypeFilter }: NoteEditorProps) {
+export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
@@ -763,18 +758,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         />
       )}
 
-      {/* Vault Insights — collapsible, state persisted in localStorage */}
-      {allNotes && allNotes.length > 0 && (
-        <SmartTagsCollapsible
-          allNotes={allNotes}
-          onTopicClick={onTopicClick}
-          onPersonClick={onPersonClick}
-          onTypeClick={onTypeClick}
-          onNoteSelect={onNoteSelect}
-          activeTopicFilter={activeTopicFilter}
-          activeTypeFilter={activeTypeFilter}
-        />
-      )}
 
       {/* Backlinks panel */}
       <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
@@ -902,68 +885,3 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   );
 }
 
-const SMART_TAGS_STORAGE_KEY = "menerio-smart-tags-expanded";
-
-function SmartTagsCollapsible({
-  allNotes,
-  onTopicClick,
-  onPersonClick,
-  onTypeClick,
-  onNoteSelect,
-  activeTopicFilter,
-  activeTypeFilter,
-}: {
-  allNotes: Note[];
-  onTopicClick?: (topic: string) => void;
-  onPersonClick?: (person: string) => void;
-  onTypeClick?: (type: string) => void;
-  onNoteSelect?: (noteId: string) => void;
-  activeTopicFilter?: string | null;
-  activeTypeFilter?: string | null;
-}) {
-  const [expanded, setExpanded] = useState(() => {
-    try {
-      return localStorage.getItem(SMART_TAGS_STORAGE_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const toggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    try {
-      localStorage.setItem(SMART_TAGS_STORAGE_KEY, String(next));
-    } catch {}
-  };
-
-  return (
-    <div className="border-t border-border">
-      <button
-        onClick={toggle}
-        className="flex items-center gap-1.5 px-4 py-2 w-full text-left text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <Tags className="h-3 w-3" />
-        Vault Insights
-      </button>
-      {expanded && (
-        <div className="max-h-[40vh] overflow-y-auto">
-          <SmartTagsPanel
-            notes={allNotes}
-            onTopicClick={onTopicClick ?? (() => {})}
-            onPersonClick={onPersonClick ?? (() => {})}
-            onTypeClick={onTypeClick ?? (() => {})}
-            onNoteSelect={onNoteSelect ?? (() => {})}
-            activeTopicFilter={activeTopicFilter ?? null}
-            activeTypeFilter={activeTypeFilter ?? null}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
