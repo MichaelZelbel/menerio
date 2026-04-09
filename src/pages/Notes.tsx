@@ -203,7 +203,17 @@ export default function Notes() {
       notes = notes.filter((n) => {
         const meta = n.metadata as Record<string, unknown> | null;
         const people = Array.isArray(meta?.people) ? (meta.people as string[]) : [];
-        return people.includes(personFilter);
+        // Check raw names and canonical names from matched_people
+        const matchedMap = new Map<string, string>();
+        if (Array.isArray(meta?.matched_people)) {
+          for (const m of meta.matched_people as Array<{ name: string; canonical_name: string }>) {
+            matchedMap.set(m.name.toLowerCase(), m.canonical_name);
+          }
+        }
+        return people.some((p) => {
+          const canonical = matchedMap.get(p.toLowerCase()) || p;
+          return canonical === personFilter || p === personFilter;
+        });
       });
     }
     if (metaTypeFilter) {
