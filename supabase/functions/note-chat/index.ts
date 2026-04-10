@@ -391,7 +391,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const body = await req.json();
     const { note_id, messages: chatMessages } = body;
 
-    if (!note_id) return json({ error: "note_id required" }, 400);
     if (!chatMessages || !Array.isArray(chatMessages))
       return json({ error: "messages required" }, 400);
 
@@ -399,60 +398,88 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const balance = await checkBalance(db, user.id);
     if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
 
-    // Fetch current note for context
-    const { data: note, error: noteErr } = await db
-      .from("notes")
-      .select(
-        "id, title, content, tags, metadata, entity_type, related, structured_fields"
-      )
-      .eq("id", note_id)
-      .eq("user_id", user.id)
-      .single();
+    // Determine mode: note-specific or general knowledge base
+    const isNoteMode = !!note_id;
+    let systemMessage: { role: string; content: string };
+    let activeTools: typeof TOOLS;
 
-    if (noteErr || !note)
-      return json({ error: "Note not found" }, 404);
+    if (isNoteMode) {
+      // Fetch current note for context
+      const { data: note, error: noteErr } = await db
+        .from("notes")
+        .select(
+          "id, title, content, tags, metadata, entity_type, related, structured_fields"
+        )
+        .eq("id", note_id)
+        .eq("user_id", user.id)
+        .single();
 
-    // Fetch media analysis (OCR, descriptions) for this note
-    const { data: mediaData } = await db
-      .from("media_analysis")
-      .select("storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
-      .eq("note_id", note_id)
-      .eq("analysis_status", "complete")
-      .order("original_filename", { ascending: true })
-      .order("page_number", { ascending: true, nullsFirst: true });
+      if (noteErr || !note)
+        return json({ error: "Note not found" }, 404);
 
-    // Build media context string
-    let mediaContext = "";
-    if (mediaData && mediaData.length > 0) {
-      mediaContext = "\n\n--- MEDIA ANALYSIS (OCR & image descriptions) ---";
-      // Group by filename
-      const grouped = new Map<string, typeof mediaData>();
-      for (const m of mediaData) {
-        const key = m.original_filename || m.storage_path;
-        if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key)!.push(m);
-      }
-      for (const [filename, entries] of grouped) {
-        mediaContext += `\nFile: ${filename} (${entries[0].media_type})`;
-        if (entries[0].description) mediaContext += `\n  Description: ${entries[0].description}`;
-        if (entries[0].topics?.length) mediaContext += `\n  Topics: ${entries[0].topics.join(", ")}`;
-        for (const entry of entries) {
-          if (entry.extracted_text) {
-            const pageLabel = entry.page_number ? `Page ${entry.page_number}` : "Extracted";
-            mediaContext += `\n  ${pageLabel} text:\n    ${entry.extracted_text}`;
+      // Fetch media analysis (OCR, descriptions) for this note
+      const { data: mediaData } = await db
+        .from("media_analysis")
+        .select("storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
+        .eq("note_id", note_id)
+        .eq("analysis_status", "complete")
+        .order("original_filename", { ascending: true })
+        .order("page_number", { ascending: true, nullsFirst: true });
+
+      // Build media context string
+      let mediaContext = "";
+      if (mediaData && mediaData.length > 0) {
+        mediaContext = "\n\n--- MEDIA ANALYSIS (OCR & image descriptions) ---";
+        const grouped = new Map<string, typeof mediaData>();
+        for (const m of mediaData) {
+          const key = m.original_filename || m.storage_path;
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(m);
+        }
+        for (const [filename, entries] of grouped) {
+          mediaContext += `\nFile: ${filename} (${entries[0].media_type})`;
+          if (entries[0].description) mediaContext += `\n  Description: ${entries[0].description}`;
+          if (entries[0].topics?.length) mediaContext += `\n  Topics: ${entries[0].topics.join(", ")}`;
+          for (const entry of entries) {
+            if (entry.extracted_text) {
+              const pageLabel = entry.page_number ? `Page ${entry.page_number}` : "Extracted";
+              mediaContext += `\n  ${pageLabel} text:\n    ${entry.extracted_text}`;
+            }
           }
         }
+        mediaContext += "\n--- END MEDIA ANALYSIS ---";
       }
-      mediaContext += "\n--- END MEDIA ANALYSIS ---";
+
+      const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---${mediaContext}`;
+
+      systemMessage = {
+        role: "system",
+        content: SYSTEM_PROMPT + noteContext,
+      };
+      activeTools = TOOLS;
+    } else {
+      // General knowledge base mode — search-only tools
+      const GENERAL_SYSTEM_PROMPT = `You are an AI assistant for Menerio (also known as "Open Brain"), a personal knowledge management application. You help the user explore and search their knowledge base.
+
+You have access to tools to:
+1. Search the user's notes semantically (vector search) or by text (ILIKE)
+2. Search across OCR-extracted text and descriptions from images and PDFs in all notes
+
+Guidelines:
+- When the user asks about their notes or knowledge, use search tools to find relevant information
+- Use semantic search for conceptual queries, text search for specific names/phrases
+- Keep responses concise and helpful
+- You can chain multiple search tool calls if needed
+- Present search results in a clear, organized way`;
+
+      systemMessage = {
+        role: "system",
+        content: GENERAL_SYSTEM_PROMPT,
+      };
+
+      const SEARCH_TOOL_NAMES = ["search_notes_semantic", "search_notes_text", "search_media_text"];
+      activeTools = TOOLS.filter((t) => SEARCH_TOOL_NAMES.includes(t.function.name));
     }
-
-    // Build system message with note context
-    const noteContext = `\n\n--- CURRENT NOTE ---\nTitle: ${note.title}\nTags: ${(note.tags || []).join(", ") || "none"}\nMetadata: ${JSON.stringify(note.metadata || {})}\nContent:\n${note.content}\n--- END NOTE ---${mediaContext}`;
-
-    const systemMessage = {
-      role: "system",
-      content: SYSTEM_PROMPT + noteContext,
-    };
 
     // Build messages array: system + user conversation
     const llmMessages = [systemMessage, ...chatMessages];
