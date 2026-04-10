@@ -104,7 +104,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 const AUTO_PROCESS_DELAY = 10_000;
-const MIN_WORDS_FOR_PROCESSING = 50;
+const MIN_WORDS_FOR_PROCESSING = 15;
 
 interface NoteEditorProps {
   note: Note;
