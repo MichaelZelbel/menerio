@@ -2,7 +2,7 @@ import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "./DashboardSidebar";
 import { DashboardSearch } from "./DashboardSearch";
-import { QuickCapture } from "@/components/notes/QuickCapture";
+import { GlobalAIChatFAB } from "@/components/chat/GlobalAIChatFAB";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -24,7 +24,7 @@ export function DashboardLayout() {
             <Outlet />
           </main>
         </div>
-        <QuickCapture />
+        <GlobalAIChatFAB />
       </div>
     </SidebarProvider>
   );
