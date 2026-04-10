@@ -504,7 +504,7 @@ Guidelines:
           {
             model: "minimax/minimax-m2.7",
             messages: llmMessages,
-            tools: TOOLS,
+            tools: activeTools,
           }
         );
         result = llmResult.result;
