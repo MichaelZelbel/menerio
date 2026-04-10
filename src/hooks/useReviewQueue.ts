@@ -32,6 +32,7 @@ export function useReviewQueue() {
       return (data || []) as unknown as ReviewItem[];
     },
     enabled: !!user,
+    refetchInterval: 60_000,
   });
 
   const { data: pendingCount = 0 } = useQuery({
