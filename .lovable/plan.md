@@ -1,25 +1,47 @@
 
 
-## Merge `note.tags` with `metadata.topics` in Note Metadata Section
+## Replace Quick Capture FAB with Global AI Chat Button
 
-### What's changing
-- Remove the tags pills row from above the note text (lines 582-606 in NoteEditor.tsx)
-- In the NoteMetadataEditor, merge `note.tags` into the Topics row alongside AI-extracted topics
-- The "add topic" input in Note Metadata will also add to `note.tags` (and vice versa)
-- Removing a merged tag removes it from both `note.tags` and `metadata.topics`
-- The toolbar Tag button will still work — it will scroll to / focus the topic input in Note Metadata
+### Overview
+Replace the QuickCapture floating action button with an AI Chat button that opens a chat panel. On note pages, it provides note-specific context. On all other pages, it acts as a general knowledge base assistant (search-only tools, no note-modifying tools).
 
-### Files Modified
+### Changes
+
+#### 1. New component: `src/components/chat/GlobalAIChatFAB.tsx`
+- A FAB button (bottom-right, same position as QuickCapture) with a Bot icon
+- Clicking opens a chat panel (slide-up card, similar to QuickCapture's overlay style but taller)
+- Uses `useLocation` to detect if on `/dashboard/notes/:noteId` -- if so, passes `noteId` to the edge function
+- On non-note pages, calls `note-chat` with `note_id: null`
+- Maintains conversation state internally; resets when navigating to a different page context
+- Keyboard shortcut: reuse Cmd+Shift+K
+- The chat panel UI reuses the same message rendering pattern from `NoteChatPanel` (markdown, tool results indicators)
+
+#### 2. Update edge function: `supabase/functions/note-chat/index.ts`
+- Make `note_id` optional (currently required, returns 400 if missing)
+- When `note_id` is null/missing:
+  - Use a different system prompt: general knowledge base assistant (no "current note" context, no note-modifying tools)
+  - Only expose search tools: `search_notes_semantic`, `search_notes_text`, `search_media_text`
+  - Remove `append_to_note`, `update_note_metadata`, `update_note_tags`, `add_wikilink` from available tools
+  - Skip fetching note content and media analysis
+- When `note_id` is provided: existing behavior unchanged
+
+#### 3. Update `DashboardLayout.tsx`
+- Replace `<QuickCapture />` with `<GlobalAIChatFAB />`
+
+#### 4. No changes to existing `NoteChatPanel.tsx`
+The in-editor AI chat panel (opened from the note sidebar) remains as-is. The global FAB is a separate, independent chat interface.
+
+### Technical Details
 
 | File | Change |
 |------|--------|
-| `src/components/notes/NoteEditor.tsx` | Remove the tags display block (lines 582-606). Pass `note.tags`, `addTag`, `removeTag` as props to `NoteMetadataEditor`. Keep `showTagInput` state and pass it too, so the Tag toolbar button opens the input in Note Metadata. |
-| `src/components/notes/NoteMetadataEditor.tsx` | Accept new props: `tags`, `onAddTag`, `onRemoveTag`, `showTagInput`. In the Topics row, render a unified list: AI topics as `#topic` badges + user tags as `#tag` badges (visually identical). The "add topic" input adds to both `metadata.topics` and calls `onAddTag`. Removing a badge removes from both sources. |
-| `src/pages/SharedNote.tsx` | No change needed — shared notes can keep showing tags as-is since they don't have the metadata editor. |
+| `src/components/chat/GlobalAIChatFAB.tsx` | New component: FAB + overlay chat panel |
+| `supabase/functions/note-chat/index.ts` | Make `note_id` optional; conditional tools & prompt |
+| `src/components/layout/DashboardLayout.tsx` | Swap `QuickCapture` for `GlobalAIChatFAB` |
 
-### Behavior details
-- Duplicate entries (tag exists in both `note.tags` and `metadata.topics`) are deduplicated in display
-- Adding a topic via the input adds it to both `metadata.topics` and `note.tags`
-- Removing a topic removes it from both
-- The Note Metadata section now always shows if there are tags OR metadata (so tags alone will make it appear)
+### UX
+- FAB: Bot icon, same styling/position as current QuickCapture button
+- Panel: slides up from bottom-right, ~420px wide, ~500px tall, with message list + input
+- Empty state: "Ask me anything about your knowledge base" (general) or "Ask me about this note" (note context)
+- Close via X button, Escape key, or clicking backdrop
 
