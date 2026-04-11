@@ -79,9 +79,6 @@ const Dashboard = () => {
             Your personal knowledge system at a glance.
           </p>
         </div>
-        <Button onClick={() => navigate("/dashboard/notes?action=create")} className="gap-2">
-          <Plus className="h-4 w-4" /> New Note
-        </Button>
       </div>
 
       {/* Stats */}

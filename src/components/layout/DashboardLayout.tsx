@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "./DashboardSidebar";
 import { DashboardSearch } from "./DashboardSearch";
+import { GlobalCreateButton } from "./GlobalCreateButton";
 import { GlobalAIChatFAB } from "@/components/chat/GlobalAIChatFAB";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -15,6 +16,7 @@ export function DashboardLayout() {
           <header className="h-14 flex items-center gap-4 border-b bg-background px-4">
             <SidebarTrigger />
             <DashboardSearch />
+            <GlobalCreateButton />
             <div className="ml-auto flex items-center gap-1">
               <NotificationCenter />
               <ThemeToggle />
