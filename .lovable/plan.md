@@ -1,26 +1,44 @@
 
 
-## Fix: Notes Under 50 Words Never Get AI-Processed
+## Add Global "New" Split Button to Dashboard Header
 
-### Root Cause
-The auto-processing in `NoteEditor.tsx` only triggers when a note has **50+ words** (`MIN_WORDS_FOR_PROCESSING = 50`). The Sebastian Logemann note has ~40 words, so `process-note` never ran — no metadata was extracted, no people were detected, and no review queue item was created.
+### What's changing
+Move the "New Note" button from the Dashboard page into the dashboard header bar (next to the search box), making it visible on every page. Convert it into a **split button**: clicking the main area creates a new note instantly, while a small dropdown chevron reveals additional creation options.
 
-### Solution
-Lower the threshold and add a fallback so shorter notes still get processed.
+### UX Pattern: Split Button
+```text
+┌──────────────┬───┐
+│  + New Note  │ ▾ │   ← main click = new note
+└──────────────┴───┘
+                 │
+                 ▼
+          ┌─────────────────────┐
+          │ 📝 New Note         │
+          │ 👤 New Person       │
+          │ ─────────────────── │
+          │ 🔮 New Prompt       │  ← if Querino connected
+          │ 📅 New Event        │  ← future, if Temerio connected
+          └─────────────────────┘
+```
+
+The main button click always creates a new note (the most common action). The chevron opens a dropdown with all creation options. This is a well-established pattern (GitHub, Google Drive, Figma, etc.) -- very intuitive.
 
 ### Changes
 
-**File: `src/components/notes/NoteEditor.tsx`**
-- Lower `MIN_WORDS_FOR_PROCESSING` from `50` to `15`. A 15-word note has enough content for meaningful metadata extraction (title, people, topics). This ensures short but substantive notes like the Sebastian one get processed.
+| File | Change |
+|------|--------|
+| **`src/components/layout/GlobalCreateButton.tsx`** | New component: split button with `DropdownMenu`. Primary click navigates to `/dashboard/notes?action=create`. Dropdown items: New Note, New Person (navigates to `/dashboard/people` with a create action), New Prompt (conditionally shown), New Event (conditionally shown, disabled/coming soon). |
+| **`src/components/layout/DashboardLayout.tsx`** | Add `<GlobalCreateButton />` in the header bar, between `<DashboardSearch />` and the right-side icons. |
+| **`src/pages/Dashboard.tsx`** | Remove the "New Note" button from the welcome section (line 82-84), since it now lives in the header globally. |
 
-### Why 15?
-- Notes under ~15 words are typically titles-only or stubs with nothing meaningful to extract
-- 15 words is enough to mention a person, a topic, and some context
-- The AI cost per short note is minimal (small input → small token usage)
+### Behavior
+- **New Note**: navigates to `/dashboard/notes?action=create` (existing mechanism)
+- **New Person**: navigates to `/dashboard/people?action=create` (will need a small handler in People page, similar to Notes)
+- **New Prompt / New Event**: shown conditionally based on integration status; New Event shows as "Coming soon" for now
+- Keyboard shortcut: could reuse or add `Cmd+N` for new note
 
-### Scope
-One constant changed in one file. No backend changes needed — the edge function already handles short content fine.
-
-### Immediate Fix for This Note
-After deploying, the user can click the "Classify" button (sparkle icon) in the note toolbar to manually trigger processing for this existing note, or simply make a small edit to trigger the auto-process timer.
+### Technical details
+- Uses existing `DropdownMenu` component from `@/components/ui/dropdown-menu`
+- The split button is two elements side by side: a `Button` for the primary action and a `DropdownMenuTrigger` styled as a connected chevron button
+- Responsive: on mobile, shows just the `+` icon without text
 
