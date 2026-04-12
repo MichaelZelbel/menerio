@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +52,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
 };
 
 export default function ReviewQueue() {
+  const { user } = useAuth();
   const { items, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -78,6 +80,7 @@ export default function ReviewQueue() {
         // Seed default categories for this contact
         const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
           ...c,
+          user_id: user!.id,
           contact_id,
           is_default: true,
         } as any));
@@ -105,6 +108,7 @@ export default function ReviewQueue() {
             name: catDef?.name || category_slug,
             slug: category_slug,
             icon: catDef?.icon || "folder",
+            user_id: user!.id,
             contact_id,
             is_default: false,
             sort_order: 99,
