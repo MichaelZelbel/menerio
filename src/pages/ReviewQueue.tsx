@@ -72,7 +72,7 @@ export default function ReviewQueue() {
           ...c,
           contact_id,
           is_default: true,
-        }));
+        } as any));
         const { data: seeded, error: seedErr } = await supabase
           .from("profile_categories")
           .insert(rows)
@@ -101,7 +101,7 @@ export default function ReviewQueue() {
             is_default: false,
             sort_order: 99,
             visibility_scope: "all",
-          })
+          } as any)
           .select("id")
           .single();
         if (catErr) {
@@ -118,6 +118,7 @@ export default function ReviewQueue() {
         label,
         value,
         sort_order: 0,
+        user_id: item.user_id,
       });
 
       if (entryErr) {
