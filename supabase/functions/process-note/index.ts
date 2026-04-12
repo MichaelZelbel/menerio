@@ -12,6 +12,46 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+/* ── Levenshtein distance (lightweight, no deps) ── */
+function levenshtein(a: string, b: string): number {
+  const la = a.length, lb = b.length;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  const dp: number[] = Array.from({ length: lb + 1 }, (_, i) => i);
+  for (let i = 1; i <= la; i++) {
+    let prev = i - 1;
+    dp[0] = i;
+    for (let j = 1; j <= lb; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[lb];
+}
+
+/** Returns true if two names are "close enough" to be the same person */
+function isFuzzyMatch(a: string, b: string): boolean {
+  const la = a.toLowerCase(), lb = b.toLowerCase();
+  if (la === lb) return true;
+  const dist = levenshtein(la, lb);
+  const maxLen = Math.max(la.length, lb.length);
+  // For short names (≤5 chars) allow distance 1; otherwise allow 2 or normalized < 0.3
+  if (maxLen <= 5) return dist <= 1;
+  return dist <= 2 || dist / maxLen < 0.3;
+}
+
+/** Check if a name appears (approximately) in the source text */
+function nameAppearsInText(name: string, text: string): boolean {
+  const lower = text.toLowerCase();
+  const nameLower = name.toLowerCase();
+  // Direct substring check
+  if (lower.includes(nameLower)) return true;
+  // Check individual words of the name against text words
+  const nameWords = nameLower.split(/\s+/);
+  return nameWords.some((w) => w.length >= 3 && lower.includes(w));
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
