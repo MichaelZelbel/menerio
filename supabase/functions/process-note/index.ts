@@ -132,7 +132,8 @@ async function generateReviewItems(
       const { data: existingContacts } = await supabase
         .from("contacts")
         .select("id, name, aliases")
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .is("merged_into", null);
 
       const nameToContact = new Map<string, { id: string; name: string }>();
       for (const c of (existingContacts || []) as any[]) {
