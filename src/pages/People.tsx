@@ -33,9 +33,12 @@ import {
   X,
   FileText,
   Link2,
+  Merge,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
+import { MergePersonDialog } from "@/components/people/MergePersonDialog";
+import { DuplicateHints } from "@/components/people/DuplicateHints";
 
 interface Person {
   id: string;
