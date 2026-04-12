@@ -458,7 +458,7 @@ async function processInBackground(noteId: string, authHeader: string) {
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id")
+      .select("id, title, content, user_id, metadata")
       .eq("id", noteId)
       .single();
 
@@ -583,7 +583,8 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Only use AI-generated title for quick-capture notes (where the user didn't write the title).
     // Never overwrite a user-authored title.
-    const isQuickCapture = noteRow.metadata?.is_quick_capture === true;
+    const existingMeta = note.metadata as Record<string, unknown> | null;
+    const isQuickCapture = existingMeta?.is_quick_capture === true;
     const aiTitle = isQuickCapture && typeof metadata.title === "string" && metadata.title.trim()
       ? metadata.title.trim()
       : null;
