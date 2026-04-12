@@ -1,32 +1,26 @@
 
 
-## Add Table Management Controls
+## Fix: People Profile Not Working
 
-### Problem
-After inserting a table, users have no way to add/remove rows or columns, merge/split cells, or delete the table. The TipTap table commands exist but aren't exposed in the UI.
+### Root Cause
+The `profile_categories` table has a unique constraint on `(user_id, slug)`. When a contact profile tries to seed default categories (e.g., "identity", "location"), the insert fails because the user's own profile already has rows with those same slugs under the same `user_id`. The mutation fails silently, so the UI stays stuck on "Initialize Profile".
 
-### Solution
-Add a **contextual table toolbar** that appears in the main toolbar area when the cursor is inside a table. This is a horizontal row of small icon buttons for table operations.
+### Fix
 
-### Changes
+**1. Migration: Update the unique constraint to include `contact_id`**
 
-**File: `src/components/notes/EditorToolbar.tsx`**
-- Detect when the cursor is inside a table: `editor.isActive("table")`
-- When active, render an additional row of table-specific buttons:
-  - **Add row above** / **Add row below**
-  - **Add column before** / **Add column after**
-  - **Delete row** / **Delete column**
-  - **Merge cells** / **Split cell** (when selection spans multiple cells)
-  - **Toggle header row** / **Toggle header column**
-  - **Delete table** (destructive, styled accordingly)
-- All use existing TipTap commands like `editor.chain().focus().addRowAfter().run()`
+Drop the existing `(user_id, slug)` constraint and replace it with a unique index on `(user_id, COALESCE(contact_id, '00000000-0000-0000-0000-000000000000'), slug)`. This allows the same slug to exist for the user's own profile (where `contact_id` is null) and for each contact.
 
-### UX
-- The table controls appear as an additional toolbar row below the main toolbar, only when the cursor is inside a table
-- Grouped logically: Row ops | Column ops | Cell ops | Delete table
-- Uses lucide icons where available, text labels for clarity on less obvious actions
-- Disappears when the cursor moves outside the table
+**2. `ContactProfileTab.tsx`: Auto-seed without a button**
 
-### Scope
-One file changed: `EditorToolbar.tsx`. No new dependencies — all commands come from the already-installed `@tiptap/extension-table`.
+Remove the "Initialize Profile" fallback button. Instead, after seeding, show a loading state. If seeding has been triggered but categories are still empty (due to query refetch timing), just show the loader. Once categories arrive, render the full profile editor immediately -- same as the user's own profile.
+
+**3. `useContactProfile.ts`: Add error handling to seedDefaults**
+
+Add `onError` to the `seedDefaults` mutation so failures surface as toasts instead of failing silently.
+
+### Files Changed
+- 1 new migration (alter unique constraint)
+- `src/components/people/ContactProfileTab.tsx` (remove initialize button, auto-seed cleanly)
+- `src/hooks/useContactProfile.ts` (add error toast on seed failure)
 
