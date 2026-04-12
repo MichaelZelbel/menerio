@@ -351,13 +351,40 @@ async function generateProfileSuggestions(
       const rawContent = result.result.choices[0].message.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
-      // Handle any wrapper key: { facts: [...] }, { results: [...] }, etc.
+
+      // Normalize three possible response shapes
+      let parseShape: string;
       if (Array.isArray(parsed)) {
         extractedFacts = parsed;
-      } else {
+        parseShape = "array";
+      } else if (typeof parsed === "object" && parsed !== null) {
+        // Check for wrapper key: { facts: [...] }, { results: [...] }, etc.
         const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
-        extractedFacts = arrayVal || [];
+        if (arrayVal) {
+          extractedFacts = arrayVal;
+          parseShape = "wrapped-array";
+        } else if (parsed.contact_name && parsed.value) {
+          // Single fact object returned directly
+          extractedFacts = [parsed];
+          parseShape = "single-object";
+        } else {
+          extractedFacts = [];
+          parseShape = "invalid-object";
+        }
+      } else {
+        extractedFacts = [];
+        parseShape = "invalid";
       }
+
+      // Normalize string fields
+      extractedFacts = extractedFacts.map((f: any) => ({
+        contact_name: (f.contact_name || "").trim(),
+        category_slug: (f.category_slug || "").trim().toLowerCase(),
+        label: (f.label || "").trim(),
+        value: (f.value || "").trim(),
+      }));
+
+      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during profile extraction for note ${noteId}`);
@@ -368,7 +395,7 @@ async function generateProfileSuggestions(
     }
 
     if (extractedFacts.length === 0) {
-      console.log(`No profile facts extracted from note ${noteId}`);
+      console.log(`No profile facts extracted from note ${noteId} (0 after parsing)`);
       return;
     }
 
@@ -381,17 +408,30 @@ async function generateProfileSuggestions(
       nameToContact.set(p.name.toLowerCase(), p);
     }
 
-    const validFacts = extractedFacts.filter((f) =>
-      f.contact_name &&
-      f.category_slug &&
-      f.label &&
-      f.value &&
-      PROFILE_CATEGORY_SLUGS.includes(f.category_slug) &&
-      nameToContact.has(f.contact_name.toLowerCase())
-    );
+    const validFacts = extractedFacts.filter((f) => {
+      if (!f.contact_name || !f.category_slug || !f.label || !f.value) return false;
+      if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
+        console.log(`[profile-extract] Dropping fact: invalid category_slug="${f.category_slug}"`);
+        return false;
+      }
+      // Fuzzy match contact name against known contacts
+      const exactMatch = nameToContact.has(f.contact_name.toLowerCase());
+      if (exactMatch) return true;
+      // Try fuzzy matching
+      for (const [key, contact] of nameToContact) {
+        if (isFuzzyMatch(f.contact_name, key)) {
+          // Rewrite contact_name to canonical for downstream matching
+          f.contact_name = contact.canonical_name;
+          return true;
+        }
+      }
+      console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
+      return false;
+    });
+
+    console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
 
     if (validFacts.length === 0) {
-      console.log(`No valid profile facts after filtering for note ${noteId}`);
       return;
     }
 
