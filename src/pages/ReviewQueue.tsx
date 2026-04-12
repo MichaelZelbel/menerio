@@ -38,6 +38,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
   add_event_temerio: { icon: CalendarDays, label: "Add Event to Temerio", color: "text-blue-500" },
   add_event_cherishly: { icon: Heart, label: "Add Event to Cherishly", color: "text-pink-500" },
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
+  add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
 };
@@ -154,6 +155,39 @@ export default function ReviewQueue() {
       setEventDraft(draft);
       setActiveItemId(item.id);
       setEventDialogOpen(true);
+      return;
+    }
+
+    if (type === "add_alias") {
+      const { contact_id, alias } = item.payload as any;
+      if (!contact_id || !alias) {
+        showToast.error("Missing alias data");
+        return;
+      }
+      // Fetch current aliases, append, update
+      const { data: contact, error: fetchErr } = await supabase
+        .from("contacts")
+        .select("aliases")
+        .eq("id", contact_id)
+        .single();
+      if (fetchErr || !contact) {
+        showToast.error("Contact not found");
+        return;
+      }
+      const currentAliases: string[] = Array.isArray(contact.aliases) ? contact.aliases : [];
+      if (!currentAliases.some((a: string) => a.toLowerCase() === alias.toLowerCase())) {
+        const { error: updateErr } = await supabase
+          .from("contacts")
+          .update({ aliases: [...currentAliases, alias] })
+          .eq("id", contact_id);
+        if (updateErr) {
+          showToast.error("Failed to add alias: " + updateErr.message);
+          return;
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      updateStatus.mutate({ id: item.id, status: "accepted" });
+      showToast.success(`Added "${alias}" as alternate spelling`);
       return;
     }
 
