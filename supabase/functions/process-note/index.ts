@@ -132,7 +132,8 @@ async function generateReviewItems(
       const { data: existingContacts } = await supabase
         .from("contacts")
         .select("id, name, aliases")
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .is("merged_into", null);
 
       const nameToContact = new Map<string, { id: string; name: string }>();
       for (const c of (existingContacts || []) as any[]) {
@@ -470,7 +471,8 @@ async function processInBackground(noteId: string, authHeader: string) {
       const { data: allContacts } = await supabase
         .from("contacts")
         .select("id, name, aliases")
-        .eq("user_id", note.user_id);
+        .eq("user_id", note.user_id)
+        .is("merged_into", null);
 
       const nameToContact = new Map<string, { id: string; name: string }>();
       for (const c of (allContacts || []) as any[]) {

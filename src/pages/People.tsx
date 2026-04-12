@@ -33,9 +33,12 @@ import {
   X,
   FileText,
   Link2,
+  Merge,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
+import { MergePersonDialog } from "@/components/people/MergePersonDialog";
+import { DuplicateHints } from "@/components/people/DuplicateHints";
 
 interface Person {
   id: string;
@@ -46,6 +49,7 @@ interface Person {
   aliases: string[];
   app_mappings: Record<string, { display_name?: string }>;
   metadata: Record<string, unknown>;
+  merged_into: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -64,7 +68,7 @@ export default function People() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const isAdmin = useIsAdmin();
-
+  const [mergeOpen, setMergeOpen] = useState(false);
   // Inline editing state for detail view
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
@@ -78,8 +82,9 @@ export default function People() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("id, user_id, name, notes, tags, aliases, app_mappings, metadata, created_at, updated_at")
+        .select("id, user_id, name, notes, tags, aliases, app_mappings, metadata, merged_into, created_at, updated_at")
         .eq("user_id", user!.id)
+        .is("merged_into", null)
         .order("name");
       if (error) throw error;
       return (data || []).map((d: any) => ({
@@ -292,9 +297,14 @@ export default function People() {
 
                 <div className="flex gap-1">
                   {!isEditing ? (
-                    <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
-                      Edit
-                    </Button>
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
+                        <Merge className="h-3.5 w-3.5 mr-1" /> Merge
+                      </Button>
+                    </>
                   ) : (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }}>
@@ -313,6 +323,13 @@ export default function People() {
               </div>
             </CardHeader>
           </Card>
+
+          {/* Duplicate detection */}
+          <DuplicateHints
+            person={selectedPerson}
+            allPeople={people}
+            onMergeSuggested={() => setMergeOpen(true)}
+          />
 
           {/* App Identity Mapping — admin only */}
           {isAdmin && (
@@ -415,6 +432,14 @@ export default function People() {
             <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
           </TabsContent>
         </Tabs>
+
+        <MergePersonDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          sourcePerson={selectedPerson}
+          allPeople={people}
+          onMergeComplete={() => setSelectedPersonId(null)}
+        />
       </div>
     );
   }
