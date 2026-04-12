@@ -12,9 +12,15 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-/** Strip HTML tags and decode common entities to produce plain text */
-function stripHtml(html: string): string {
-  return html
+/** Strip HTML tags and decode common entities to produce plain text.
+ *  Also handles markdown content (passes through mostly as-is). */
+function stripHtmlIfNeeded(content: string): string {
+  // If content doesn't look like HTML, it's already markdown — return as-is
+  if (!/<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content)) {
+    return content;
+  }
+  // Legacy HTML content — strip tags
+  return content
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<[^>]*>/g, " ")

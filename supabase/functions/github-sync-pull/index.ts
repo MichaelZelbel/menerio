@@ -6,7 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ─── Markdown → HTML (same as import-vault) ──────────────────────────
+// ─── Markdown → HTML (kept for legacy compatibility) ──────────────────────
+/** Returns true when content looks like HTML (has block-level tags) */
+function looksLikeHtml(content: string): boolean {
+  return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
+}
 
 function markdownToHtml(md: string): string {
   if (!md) return "";
