@@ -1,36 +1,32 @@
 
 
-## Wire Up Querino & Temerio in GlobalCreateButton
+## Add Table Management Controls
 
-### What's changing
-Update `GlobalCreateButton` to query `connected_apps` for active querino/temerio connections, conditionally show the menu items, and wire real actions.
+### Problem
+After inserting a table, users have no way to add/remove rows or columns, merge/split cells, or delete the table. The TipTap table commands exist but aren't exposed in the UI.
+
+### Solution
+Add a **contextual table toolbar** that appears in the main toolbar area when the cursor is inside a table. This is a horizontal row of small icon buttons for table operations.
 
 ### Changes
 
-**File: `src/components/layout/GlobalCreateButton.tsx`**
-- Add a `useQuery` call to fetch active connected apps: `select("app_name, webhook_url").eq("user_id", user.id).eq("is_active", true)`
-- Derive `querinoApp` and `temerioApp` from the results
-- **Querino item**: Only shown when connected. On click, opens a new tab to `{querinoApp.webhook_url}/create-from-menerio?title=&body=&entity_type=prompt&menerio_callback={SUPABASE_URL}/functions/v1/link-note`. No `menerio_note_id` since this is a blank prompt (not from a specific note).
-- **Temerio item**: Only shown when connected. On click, opens the `CreateEventDialog` with an empty draft.
-- The separator before integration items only renders when at least one integration is connected.
-- Remove the hardcoded disabled placeholders.
+**File: `src/components/notes/EditorToolbar.tsx`**
+- Detect when the cursor is inside a table: `editor.isActive("table")`
+- When active, render an additional row of table-specific buttons:
+  - **Add row above** / **Add row below**
+  - **Add column before** / **Add column after**
+  - **Delete row** / **Delete column**
+  - **Merge cells** / **Split cell** (when selection spans multiple cells)
+  - **Toggle header row** / **Toggle header column**
+  - **Delete table** (destructive, styled accordingly)
+- All use existing TipTap commands like `editor.chain().focus().addRowAfter().run()`
 
-**File: `src/components/layout/GlobalCreateButton.tsx`** (imports)
-- Add: `useQuery` from tanstack, `supabase` client, `useAuth`, `useState` for dialog state, `CreateEventDialog`
-
-### Querino URL construction
-```text
-https://{querino_webhook_url}/create-from-menerio
-  ?title=
-  &body=
-  &entity_type=prompt
-  &menerio_callback=https://tjeapelvjlmbxafsmjef.supabase.co/functions/v1/link-note
-```
-The `webhook_url` stored in `connected_apps` for querino points to the Querino base URL. We append `/create-from-menerio` and the callback parameter.
-
-### Temerio flow
-Opens `CreateEventDialog` with `draft = null` (empty form). The dialog already handles the full submission to Temerio via the `send-to-temerio` edge function.
+### UX
+- The table controls appear as an additional toolbar row below the main toolbar, only when the cursor is inside a table
+- Grouped logically: Row ops | Column ops | Cell ops | Delete table
+- Uses lucide icons where available, text labels for clarity on less obvious actions
+- Disappears when the cursor moves outside the table
 
 ### Scope
-One file changed: `GlobalCreateButton.tsx`. No backend changes needed -- `link-note` edge function already handles the callback from Querino.
+One file changed: `EditorToolbar.tsx`. No new dependencies — all commands come from the already-installed `@tiptap/extension-table`.
 
