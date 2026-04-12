@@ -1,62 +1,47 @@
 
 
-## Auto-Extract People Profile Facts During Note Processing
+## Fix: AI Suggests Adding People Who Already Exist (Spelling Variations)
 
-### What happens today
-`process-note` already:
-1. Extracts metadata (people, topics, action items) via LLM
-2. Matches people names to existing contacts (alias-aware)
-3. Creates review queue items for events and unknown contacts
+### Root Cause
+The contact matching in `process-note` uses **exact string match** only. The AI extracted "Gaujie" from the note title, but the actual contact is stored as "Gaojie". Since `"gaujie" !== "gaojie"`, the system treats it as a new person and suggests adding them.
 
-### What we add
-After the existing people-matching step, for each **matched** contact, ask the LLM to extract profile-worthy facts from the note. Each fact becomes a review queue item with `suggestion_type: "add_profile_entry"`. When accepted, it inserts into `profile_entries`.
+This will happen for any spelling variation, typo, or transliteration difference (common with non-English names).
 
-### Changes
+### Fix: Add Fuzzy Name Matching
 
-**1. `supabase/functions/process-note/index.ts`**
+**File: `supabase/functions/process-note/index.ts`**
 
-Add a new function `generateProfileSuggestions()` called after `generateReviewItems()`. For each matched person in the note:
+1. Add a lightweight fuzzy matching function (Levenshtein distance or similar) directly in the file -- no new dependencies needed. A simple implementation is ~15 lines.
 
-- Call the LLM with a prompt like: "Given this note and that it mentions [Person], extract any profile-worthy facts about them. Return JSON array of `{category_slug, label, value}` where category_slug is one of the existing profile categories (identity, location, work, interests, preferences, communication, health, relationships, goals, routines)."
-- One LLM call per note (not per person) -- pass all matched people at once
-- For each extracted fact, check if a similar entry already exists in `profile_entries` for that contact (by category slug + similar label/value)
-- If new, insert into `review_queue` with `suggestion_type: "add_profile_entry"` and payload containing `{contact_id, contact_name, category_slug, label, value}`
+2. When a person name doesn't match exactly, check all existing contact names/aliases for close matches (e.g., edit distance <= 2, or normalized distance < 0.3 for short names).
 
-**2. `src/pages/ReviewQueue.tsx`**
+3. If a close match is found:
+   - Treat it as a match to the existing contact (same as exact match)
+   - Add the extracted spelling as a suggested alias via a new review queue item (`suggestion_type: "add_alias"`) so the user can confirm
 
-Add handling for `suggestion_type: "add_profile_entry"`:
-- Show it with a person icon and the contact name
-- On accept: look up the matching `profile_categories` row for that contact (by slug), insert a `profile_entries` row, and mark accepted
-- If the contact doesn't have categories seeded yet, seed them first (same logic as ContactProfileTab)
+4. If no close match is found either, proceed with the current "add_contact" suggestion as before.
 
-**3. `src/hooks/useReviewQueue.ts`**
+**File: `src/pages/ReviewQueue.tsx`**
 
-No changes needed -- the existing generic structure handles any suggestion_type.
+5. Add a handler for the new `"add_alias"` suggestion type. On accept, append the alias to the contact's `aliases` array.
 
-### Deduplication
-- Before inserting suggestions, check existing `profile_entries` for that contact + category + similar label to avoid suggesting what's already known
-- Check existing review_queue for duplicate `add_profile_entry` suggestions (same contact + label + value)
-
-### Credit usage
-- One additional LLM call per note (only when matched people exist)
-- Uses the existing `chatWithCredits` system, so credits are tracked
-- Skipped if credits are exhausted
-
-### Flow
+### Matching Logic (pseudocode)
 ```text
-Note saved → process-note fires
-  → extract metadata (existing)
-  → match people to contacts (existing)
-  → generate event/contact suggestions (existing)
-  → NEW: extract profile facts for matched people
-     → check existing profile entries to avoid duplicates
-     → insert new suggestions into review_queue
-  → user sees "Add to John's profile: Loves climbing" in Review Queue
-  → user clicks Accept → profile_entries row created
+for each extracted person name:
+  1. exact match against contacts + aliases → matched
+  2. fuzzy match (edit distance ≤ 2) → matched + suggest alias
+  3. no match → suggest add_contact
 ```
 
-### Files changed
-- `supabase/functions/process-note/index.ts` -- add profile fact extraction
-- `src/pages/ReviewQueue.tsx` -- add accept handler for `add_profile_entry` type
-- `src/components/people/ContactProfileTab.tsx` -- minor: export the default categories list for reuse
+### Additional Hardening
+
+6. **Validate extracted names against source text**: Before suggesting "add_contact", verify the extracted name actually appears in the note content. If the LLM hallucinated a name that isn't in the text at all, skip it entirely. This catches pure hallucinations.
+
+### Scope
+- `supabase/functions/process-note/index.ts` -- add fuzzy matching + source text validation
+- `src/pages/ReviewQueue.tsx` -- add "add_alias" accept handler
+- Deploy updated edge function
+
+### Immediate Fix for Current Item
+- Dismiss the current "Gaujie" suggestion and add "Gaujie" as an alias to the existing "Gaojie" contact (can be done manually or we can clean it up in the migration)
 
