@@ -432,6 +432,14 @@ export default function People() {
             <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
           </TabsContent>
         </Tabs>
+
+        <MergePersonDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          sourcePerson={selectedPerson}
+          allPeople={people}
+          onMergeComplete={() => setSelectedPersonId(null)}
+        />
       </div>
     );
   }
