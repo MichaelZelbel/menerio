@@ -107,3 +107,6 @@ verify_jwt = false
 
 [functions.notify-admin]
 verify_jwt = false
+
+[functions.backfill-markdown]
+verify_jwt = false
