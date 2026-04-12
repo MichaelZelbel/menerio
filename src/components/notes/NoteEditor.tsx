@@ -313,10 +313,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
-      const html = e.getHTML();
+      const md = (e.storage as any).markdown?.getMarkdown?.() ?? e.getHTML();
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, content: html });
+        updateNote.mutate({ id: note.id, content: md });
         triggerGitHubSync(note.id);
 
         // Sync manual_link connections
@@ -445,7 +445,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       // trigger save
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, content: editor.getHTML() });
+        const md = (editor.storage as any).markdown?.getMarkdown?.() ?? editor.getHTML();
+        updateNote.mutate({ id: note.id, content: md });
         triggerGitHubSync(note.id);
       }, 800);
       setSourceMode(false);

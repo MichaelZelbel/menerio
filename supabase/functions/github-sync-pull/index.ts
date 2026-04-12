@@ -6,7 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ─── Markdown → HTML (same as import-vault) ──────────────────────────
+// ─── Markdown → HTML (kept for legacy compatibility) ──────────────────────
+/** Returns true when content looks like HTML (has block-level tags) */
+function looksLikeHtml(content: string): boolean {
+  return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
+}
 
 function markdownToHtml(md: string): string {
   if (!md) return "";
@@ -284,7 +288,8 @@ Deno.serve(async (req) => {
           if (!content) { results.errors++; continue; }
 
           const { data: fm, body: mdBody } = parseFrontmatter(content);
-          const htmlContent = markdownToHtml(mdBody);
+          // Store markdown directly — no HTML conversion
+          const noteContent = mdBody;
 
           let metadata: Record<string, unknown> = {};
           if (fm.menerio_metadata && typeof fm.menerio_metadata === "string") {
@@ -297,7 +302,7 @@ Deno.serve(async (req) => {
 
           await serviceClient.from("notes").update({
             title: (fm.title as string) || note.title,
-            content: htmlContent,
+            content: noteContent,
             metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             tags: tags.length > 0 ? [...new Set(tags)] : undefined,
           }).eq("id", note.id);
@@ -328,7 +333,8 @@ Deno.serve(async (req) => {
 
         const { data: fm, body: mdBody } = parseFrontmatter(content);
         const title = (fm.title as string) || filePathToNoteTitle(path);
-        const htmlContent = markdownToHtml(mdBody);
+        // Store markdown directly
+        const noteContent = mdBody;
 
         let metadata: Record<string, unknown> = {};
         if (fm.menerio_metadata && typeof fm.menerio_metadata === "string") {
@@ -343,7 +349,7 @@ Deno.serve(async (req) => {
         const { data: inserted, error: insertErr } = await serviceClient.from("notes").insert({
           user_id: userId,
           title,
-          content: htmlContent,
+          content: noteContent,
           metadata,
           tags: [...new Set(tags)],
           source_app: "obsidian",
@@ -415,7 +421,9 @@ Deno.serve(async (req) => {
         if (note.is_pinned) frontmatterLines.push("pinned: true");
         frontmatterLines.push("---");
 
-        const mdBody = htmlToMarkdownServer(String(note.content || ""));
+        // Content is now stored as Markdown; only convert if legacy HTML detected
+        const rawContent = String(note.content || "");
+        const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdownServer(rawContent) : rawContent;
         const fullContent = frontmatterLines.join("\n") + "\n\n" + mdBody;
 
         const existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
@@ -500,7 +508,8 @@ async function resolveConflict(
     if (Object.keys(meta).length > 0) frontmatterLines.push(`menerio_metadata: ${btoa(JSON.stringify(meta))}`);
     frontmatterLines.push("---");
 
-    const mdBody = htmlToMarkdownServer(String(note.content || ""));
+    const rawContent = String(note.content || "");
+    const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdownServer(rawContent) : rawContent;
     const fullContent = frontmatterLines.join("\n") + "\n\n" + mdBody;
 
     const existing = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
@@ -521,7 +530,8 @@ async function resolveConflict(
     }
 
     const { data: fm, body: mdBody } = parseFrontmatter(content);
-    const htmlContent = markdownToHtml(mdBody);
+    // Store markdown directly — no HTML conversion
+    const noteContent = mdBody;
 
     let metadata: Record<string, unknown> = {};
     if (fm.menerio_metadata && typeof fm.menerio_metadata === "string") {
@@ -530,7 +540,7 @@ async function resolveConflict(
 
     await supabase.from("notes").update({
       title: (fm.title as string) || note.title,
-      content: htmlContent,
+      content: noteContent,
       metadata: Object.keys(metadata).length > 0 ? metadata : note.metadata,
     }).eq("id", note_id);
 
@@ -549,13 +559,13 @@ async function resolveConflict(
     }
 
     const { data: fm, body: mdBody } = parseFrontmatter(content);
-    const htmlContent = markdownToHtml(mdBody);
+    const noteContent = mdBody;
 
     const newTitle = `${note.title} (conflict copy)`;
     await supabase.from("notes").insert({
       user_id: userId,
       title: newTitle,
-      content: htmlContent,
+      content: noteContent,
       metadata: note.metadata,
       tags: note.tags,
       source_app: "obsidian",
@@ -565,7 +575,8 @@ async function resolveConflict(
     const meta = (note.metadata || {}) as Record<string, unknown>;
     const existing = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
     const frontmatterLines = ["---", `id: ${note.id}`, `title: "${note.title}"`, "---"];
-    const mdBody2 = htmlToMarkdownServer(String(note.content || ""));
+    const rawContent2 = String(note.content || "");
+    const mdBody2 = looksLikeHtml(rawContent2) ? htmlToMarkdownServer(rawContent2) : rawContent2;
     const result = await githubPutFile(ghToken, owner, repo, syncEntry.github_path, frontmatterLines.join("\n") + "\n\n" + mdBody2, `Resolve conflict (keep both): ${note.title}`, branch, existing?.sha);
 
     await supabase.from("github_sync_log").update({

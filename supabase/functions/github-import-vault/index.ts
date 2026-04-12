@@ -328,8 +328,8 @@ Deno.serve(async (req) => {
           metadata.imported_from = "obsidian";
           metadata.original_path = file.path;
 
-          // Convert markdown body to HTML (wikilinks stay as text for now — resolved in pass 2)
-          const htmlContent = markdownToHtml(mdBody);
+          // Store markdown directly — no HTML conversion
+          const noteContent = mdBody;
 
           // Tags
           const tags: string[] = [];
@@ -339,7 +339,7 @@ Deno.serve(async (req) => {
           const noteData: Record<string, unknown> = {
             user_id: userId,
             title,
-            content: htmlContent,
+            content: noteContent,
             metadata,
             tags: [...new Set(tags)],
             source_app: "obsidian",
