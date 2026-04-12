@@ -49,6 +49,7 @@ interface Person {
   aliases: string[];
   app_mappings: Record<string, { display_name?: string }>;
   metadata: Record<string, unknown>;
+  merged_into: string | null;
   created_at: string;
   updated_at: string;
 }
