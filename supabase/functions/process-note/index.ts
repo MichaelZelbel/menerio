@@ -343,6 +343,12 @@ async function generateProfileSuggestions(
       label: string;
       value: string;
     }> = [];
+    let extractedRelationships: Array<{
+      person_a: string;
+      person_b: string;
+      label_a_to_b: string;
+      label_b_to_a: string;
+    }> = [];
 
     try {
       const result = await chatWithCredits(
@@ -358,24 +364,40 @@ async function generateProfileSuggestions(
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
 
-      // Normalize three possible response shapes
+      // Normalize response shapes for facts
       let parseShape: string;
       if (Array.isArray(parsed)) {
         extractedFacts = parsed;
         parseShape = "array";
       } else if (typeof parsed === "object" && parsed !== null) {
-        // Check for wrapper key: { facts: [...] }, { results: [...] }, etc.
-        const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
-        if (arrayVal) {
-          extractedFacts = arrayVal;
-          parseShape = "wrapped-array";
-        } else if (parsed.contact_name && parsed.value) {
-          // Single fact object returned directly
-          extractedFacts = [parsed];
-          parseShape = "single-object";
+        // New expected shape: { facts: [...], relationships: [...] }
+        if (Array.isArray(parsed.facts)) {
+          extractedFacts = parsed.facts;
+          parseShape = "structured";
         } else {
-          extractedFacts = [];
-          parseShape = "invalid-object";
+          const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
+          if (arrayVal) {
+            extractedFacts = arrayVal;
+            parseShape = "wrapped-array";
+          } else if (parsed.contact_name && parsed.value) {
+            extractedFacts = [parsed];
+            parseShape = "single-object";
+          } else {
+            extractedFacts = [];
+            parseShape = "invalid-object";
+          }
+        }
+
+        // Extract relationships
+        if (Array.isArray(parsed.relationships)) {
+          extractedRelationships = parsed.relationships.filter(
+            (r: any) => r.person_a && r.person_b && r.label_a_to_b
+          ).map((r: any) => ({
+            person_a: (r.person_a || "").trim(),
+            person_b: (r.person_b || "").trim(),
+            label_a_to_b: (r.label_a_to_b || "").trim().toLowerCase(),
+            label_b_to_a: (r.label_b_to_a || r.label_a_to_b || "").trim().toLowerCase(),
+          }));
         }
       } else {
         extractedFacts = [];
@@ -390,7 +412,7 @@ async function generateProfileSuggestions(
         value: (f.value || "").trim(),
       }));
 
-      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length} for note ${noteId}`);
+      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length}, relationshipsCount=${extractedRelationships.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during profile extraction for note ${noteId}`);
