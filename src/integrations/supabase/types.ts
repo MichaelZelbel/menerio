@@ -1026,6 +1026,7 @@ export type Database = {
       }
       profile_categories: {
         Row: {
+          contact_id: string | null
           created_at: string | null
           description: string | null
           icon: string | null
@@ -1039,6 +1040,7 @@ export type Database = {
           visibility_scope: string | null
         }
         Insert: {
+          contact_id?: string | null
           created_at?: string | null
           description?: string | null
           icon?: string | null
@@ -1052,6 +1054,7 @@ export type Database = {
           visibility_scope?: string | null
         }
         Update: {
+          contact_id?: string | null
           created_at?: string | null
           description?: string | null
           icon?: string | null
@@ -1064,11 +1067,20 @@ export type Database = {
           user_id?: string
           visibility_scope?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profile_categories_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profile_entries: {
         Row: {
           category_id: string
+          contact_id: string | null
           created_at: string | null
           id: string
           label: string
@@ -1080,6 +1092,7 @@ export type Database = {
         }
         Insert: {
           category_id: string
+          contact_id?: string | null
           created_at?: string | null
           id?: string
           label: string
@@ -1091,6 +1104,7 @@ export type Database = {
         }
         Update: {
           category_id?: string
+          contact_id?: string | null
           created_at?: string | null
           id?: string
           label?: string
@@ -1106,6 +1120,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "profile_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_entries_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
           {
