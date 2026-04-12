@@ -158,6 +158,39 @@ export default function ReviewQueue() {
       return;
     }
 
+    if (type === "add_alias") {
+      const { contact_id, alias } = item.payload as any;
+      if (!contact_id || !alias) {
+        showToast.error("Missing alias data");
+        return;
+      }
+      // Fetch current aliases, append, update
+      const { data: contact, error: fetchErr } = await supabase
+        .from("contacts")
+        .select("aliases")
+        .eq("id", contact_id)
+        .single();
+      if (fetchErr || !contact) {
+        showToast.error("Contact not found");
+        return;
+      }
+      const currentAliases: string[] = Array.isArray(contact.aliases) ? contact.aliases : [];
+      if (!currentAliases.some((a: string) => a.toLowerCase() === alias.toLowerCase())) {
+        const { error: updateErr } = await supabase
+          .from("contacts")
+          .update({ aliases: [...currentAliases, alias] })
+          .eq("id", contact_id);
+        if (updateErr) {
+          showToast.error("Failed to add alias: " + updateErr.message);
+          return;
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      updateStatus.mutate({ id: item.id, status: "accepted" });
+      showToast.success(`Added "${alias}" as alternate spelling`);
+      return;
+    }
+
     if (type === "add_contact") {
       const name = (item.payload.name as string) || "";
       if (!name) {
