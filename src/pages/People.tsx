@@ -297,9 +297,14 @@ export default function People() {
 
                 <div className="flex gap-1">
                   {!isEditing ? (
-                    <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
-                      Edit
-                    </Button>
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
+                        Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
+                        <Merge className="h-3.5 w-3.5 mr-1" /> Merge
+                      </Button>
+                    </>
                   ) : (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }}>
