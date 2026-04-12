@@ -35,7 +35,7 @@ const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
 const People = lazy(() => import("./pages/People"));
-const Actions = lazy(() => import("./pages/Actions"));
+
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
 const MediaLibrary = lazy(() => import("./pages/MediaLibrary"));
 const Profile = lazy(() => import("./pages/Profile"));
@@ -104,7 +104,7 @@ const App = () => (
                     <Route path="activity" element={<ActivityPage />} />
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="people" element={<People />} />
-                    <Route path="actions" element={<Actions />} />
+                    
                     <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />
                     <Route path="media" element={<MediaLibrary />} />

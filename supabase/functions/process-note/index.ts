@@ -60,7 +60,7 @@ const corsHeaders = {
 const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
 - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
 - "people": array of people mentioned (empty if none)
-- "action_items": array of implied to-dos (empty if none)
+
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
 - "topics": array of 1-5 short topic tags (always generate at least one)
 - "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
@@ -604,30 +604,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       return;
     }
 
-    // Insert extracted action items into the action_items table
-    const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items as string[] : [];
-    if (actionItems.length > 0) {
-      const rows = actionItems.map((content: string) => {
-        let contact_id: string | null = null;
-        for (const [name, id] of Object.entries(contactMap)) {
-          if (content.toLowerCase().includes(name)) {
-            contact_id = id;
-            break;
-          }
-        }
-        return {
-          user_id: note.user_id,
-          content,
-          source_note_id: noteId,
-          contact_id,
-          status: "open",
-          priority: "normal",
-        };
-      });
-
-      const { error: aiError } = await supabase.from("action_items").insert(rows);
-      if (aiError) console.error("Action items insert error:", aiError);
-    }
+    // Action items extraction removed
 
     // Generate review queue suggestions (no extra LLM calls)
     await generateReviewItems(note.user_id, noteId, note.title, note.content, metadata);
