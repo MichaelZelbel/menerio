@@ -28,6 +28,28 @@ const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JS
 - "summary": one-sentence summary of the note
 Only extract what's explicitly there. Don't invent details.`;
 
+const PROFILE_CATEGORY_SLUGS = [
+  "identity", "location", "professional", "relationships",
+  "communication", "personality", "hobbies", "food", "travel", "preferences",
+];
+
+const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
+
+Return a JSON array of objects, each with:
+- "contact_name": the person's name exactly as provided
+- "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
+- "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
+- "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+
+Rules:
+- Only extract facts that are clearly stated or strongly implied in the note
+- Do NOT invent or assume facts
+- Skip vague or uncertain information
+- Each fact should be a distinct, specific piece of information
+- Return an empty array if no profile-worthy facts are found
+- Keep labels concise (2-4 words)
+- Keep values concise but complete`;
+
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
   userId: string,
@@ -170,7 +192,6 @@ async function generateReviewItems(
       const newSuggestions = suggestions.filter(
         (s) => {
           const key = `${s.suggestion_type}|${s.title}`;
-          // Skip if already exists in any non-skipped state, or was just re-pended
           const alreadyExists = existingSet.has(key);
           const wasSkipped = skippedItems.some(
             (e: any) => `${e.suggestion_type}|${e.title}` === key,
@@ -189,6 +210,173 @@ async function generateReviewItems(
     }
   } catch (err) {
     console.error("generateReviewItems error:", err);
+  }
+}
+
+/* ── Profile fact extraction for matched people ── */
+async function generateProfileSuggestions(
+  userId: string,
+  noteId: string,
+  noteTitle: string,
+  noteContent: string,
+  matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }>,
+) {
+  if (matchedPeople.length === 0) return;
+
+  try {
+    // Check balance before making another LLM call
+    const balance = await checkBalance(supabase, userId);
+    if (!balance.allowed) {
+      console.log(`Skipping profile extraction for note ${noteId}: insufficient credits`);
+      return;
+    }
+
+    const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
+    const userPrompt = `People mentioned: ${peopleList}\n\nNote title: ${noteTitle}\nNote content:\n${noteContent}`;
+
+    let extractedFacts: Array<{
+      contact_name: string;
+      category_slug: string;
+      label: string;
+      value: string;
+    }> = [];
+
+    try {
+      const result = await chatWithCredits(
+        supabase, OPENROUTER_API_KEY, userId, "process-note-profile",
+        [
+          { role: "system", content: PROFILE_EXTRACTION_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        { response_format: { type: "json_object" } },
+      );
+
+      const parsed = JSON.parse(result.result.choices[0].message.content);
+      // Handle both { facts: [...] } and direct array formats
+      extractedFacts = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.facts) ? parsed.facts : []);
+    } catch (err: any) {
+      if (err.message === "INSUFFICIENT_CREDITS") {
+        console.log(`Credit limit reached during profile extraction for note ${noteId}`);
+        return;
+      }
+      console.error("Profile extraction LLM error:", err);
+      return;
+    }
+
+    if (extractedFacts.length === 0) {
+      console.log(`No profile facts extracted from note ${noteId}`);
+      return;
+    }
+
+    // Filter to valid category slugs and match to contacts
+    const nameToContact = new Map(
+      matchedPeople.map((p) => [p.canonical_name.toLowerCase(), p]),
+    );
+    // Also map by original extracted name
+    for (const p of matchedPeople) {
+      nameToContact.set(p.name.toLowerCase(), p);
+    }
+
+    const validFacts = extractedFacts.filter((f) =>
+      f.contact_name &&
+      f.category_slug &&
+      f.label &&
+      f.value &&
+      PROFILE_CATEGORY_SLUGS.includes(f.category_slug) &&
+      nameToContact.has(f.contact_name.toLowerCase())
+    );
+
+    if (validFacts.length === 0) {
+      console.log(`No valid profile facts after filtering for note ${noteId}`);
+      return;
+    }
+
+    // Get existing profile entries for these contacts to avoid duplicates
+    const contactIds = [...new Set(validFacts.map((f) => nameToContact.get(f.contact_name.toLowerCase())!.contact_id))];
+
+    const { data: existingEntries } = await supabase
+      .from("profile_entries")
+      .select("contact_id, label, value, category_id")
+      .eq("user_id", userId)
+      .in("contact_id", contactIds);
+
+    // Get existing categories for these contacts to map slugs to IDs
+    const { data: existingCategories } = await supabase
+      .from("profile_categories")
+      .select("id, slug, contact_id")
+      .eq("user_id", userId)
+      .in("contact_id", contactIds);
+
+    const entrySet = new Set(
+      (existingEntries || []).map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}|${e.value.toLowerCase()}`),
+    );
+
+    // Check existing review_queue for duplicate profile suggestions
+    const { data: existingQueueItems } = await supabase
+      .from("review_queue")
+      .select("payload, status")
+      .eq("user_id", userId)
+      .eq("suggestion_type", "add_profile_entry")
+      .in("status", ["pending", "accepted", "dismissed"]);
+
+    const queueSet = new Set(
+      (existingQueueItems || []).map((q: any) =>
+        `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}|${(q.payload.value || "").toLowerCase()}`
+      ),
+    );
+
+    const suggestions: Array<{
+      user_id: string;
+      source_note_id: string;
+      suggestion_type: string;
+      title: string;
+      description: string;
+      payload: Record<string, unknown>;
+      status: string;
+    }> = [];
+
+    for (const fact of validFacts) {
+      const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
+      const dedupKey = `${contact.contact_id}|${fact.label.toLowerCase()}|${fact.value.toLowerCase()}`;
+
+      // Skip if entry already exists or already in queue
+      if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
+
+      // Find category ID if categories are seeded
+      const catRow = (existingCategories || []).find(
+        (c: any) => c.slug === fact.category_slug && c.contact_id === contact.contact_id,
+      );
+
+      suggestions.push({
+        user_id: userId,
+        source_note_id: noteId,
+        suggestion_type: "add_profile_entry",
+        title: `Add to ${contact.canonical_name}'s profile: ${fact.label}`,
+        description: `"${fact.value}" — extracted from "${noteTitle}"`,
+        payload: {
+          contact_id: contact.contact_id,
+          contact_name: contact.canonical_name,
+          category_slug: fact.category_slug,
+          category_id: catRow?.id || null,
+          label: fact.label,
+          value: fact.value,
+        },
+        status: "pending",
+      });
+
+      // Track to avoid duplicates within same batch
+      queueSet.add(dedupKey);
+    }
+
+    if (suggestions.length > 0) {
+      const { error } = await supabase.from("review_queue").insert(suggestions);
+      if (error) console.error("Profile suggestion insert error:", error);
+      else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
+    } else {
+      console.log(`All profile facts already known for note ${noteId}`);
+    }
+  } catch (err) {
+    console.error("generateProfileSuggestions error:", err);
   }
 }
 
@@ -276,6 +464,8 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Auto-link metadata people to contacts (alias-aware)
     const metadataPeople = Array.isArray(metadata.people) ? metadata.people as string[] : [];
     const contactMap: Record<string, string> = {};
+    const matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }> = [];
+
     if (metadataPeople.length > 0) {
       const { data: allContacts } = await supabase
         .from("contacts")
@@ -292,7 +482,6 @@ async function processInBackground(noteId: string, authHeader: string) {
         }
       }
 
-      const matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }> = [];
       for (const person of metadataPeople) {
         const match = nameToContact.get(person.toLowerCase());
         if (match) {
@@ -303,7 +492,7 @@ async function processInBackground(noteId: string, authHeader: string) {
         metadata.matched_people = matchedPeople;
       }
 
-      // Build contact map for action items (reuse the same alias-aware map)
+      // Build contact map for action items
       for (const [name, contact] of nameToContact) {
         contactMap[name] = contact.id;
       }
@@ -355,6 +544,9 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Generate review queue suggestions (no extra LLM calls)
     await generateReviewItems(note.user_id, noteId, note.title, metadata);
+
+    // Generate profile suggestions for matched people (one extra LLM call)
+    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
