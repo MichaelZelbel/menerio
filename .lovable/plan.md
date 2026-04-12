@@ -1,27 +1,35 @@
 
 
-## Fix: Show Note Titles Earlier and Support Dark/Light Themes
+## Fix: Profile Facts Not Being Extracted from Notes
 
-### Problem
-1. Labels only appear when zoomed in past `globalScale > 2.5` (very zoomed in), or on hover/select. The default `labelMode` is `"hover"`.
-2. Label text color is hardcoded to `hsl(220, 25%, 20%)` (dark text) -- invisible on dark backgrounds.
+### Root Cause (confirmed via edge function logs)
 
-### Changes
+The `process-note` function IS running successfully for the Lucy note. The contact IS matched (`matched_people: [{name: "Lucy", contact_id: "872f6c89..."}]`). But the log shows:
 
-**File: `src/pages/KnowledgeGraph.tsx`**
+```
+No profile facts extracted from note 33be1047...
+```
 
-1. **Lower the zoom threshold for labels**: Change `globalScale > 2.5` to `globalScale > 1.2` so labels appear much earlier when zooming in slightly.
+Two issues cause the LLM to return empty results:
 
-2. **Change default `labelMode`** from `"hover"` to `"always"` so labels are visible by default without requiring any zoom.
+1. **HTML content sent to LLM**: The note body contains raw HTML (`<p>She is Xihui's best friend</p><p>Living in Beijing.</p>...`). The profile extraction prompt receives this HTML directly, which confuses the model and causes it to return zero facts despite rich content.
 
-3. **Theme-aware label colors**: Detect the current theme (check for `dark` class on `document.documentElement`) and set label fill color accordingly:
-   - Light mode: `hsl(220, 25%, 20%)` (dark text, current)
-   - Dark mode: `hsl(220, 15%, 85%)` (light text)
-   - Dimmed variants adjusted for both themes too
+2. **Possible JSON format mismatch**: The `response_format: { type: "json_object" }` forces the model to return a JSON object (not array). The code handles `parsed.facts` but the model might use a different wrapper key (e.g. `{"results": []}`, `{"data": []}`, `{"profile_facts": []}`). Without debug logging, we can't see what the model actually returns.
 
-4. **Add a text background/halo** behind labels for readability: Draw a subtle filled rect or use `ctx.strokeText` with a contrasting stroke to ensure labels are readable regardless of what nodes/edges are behind them.
+### Plan
+
+**File: `supabase/functions/process-note/index.ts`**
+
+1. **Strip HTML tags before sending to profile extraction LLM** — Add a simple HTML-to-text helper (strip tags, decode entities) and use it when building the `userPrompt` for `generateProfileSuggestions`. This ensures the LLM sees clean plain text.
+
+2. **Handle all possible JSON wrapper keys** — Update the parsing at line 330 to check for any array value in the parsed object (not just `parsed.facts`), so regardless of what key the model wraps the array in, we extract it.
+
+3. **Add debug logging** — Log the raw LLM response content so we can diagnose future issues without guessing.
+
+4. **Redeploy the edge function**.
 
 ### Scope
-- Single file change: `src/pages/KnowledgeGraph.tsx`
-- Lines ~101, ~226-238 (label logic in `nodeCanvasObject`)
+- Single file: `supabase/functions/process-note/index.ts`
+- Add ~10 lines for HTML stripping utility
+- Modify `generateProfileSuggestions` function (~5 lines changed)
 
