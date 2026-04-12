@@ -2,53 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
-
-export interface ProfileCategory {
-  id: string;
-  user_id: string;
-  name: string;
-  slug: string;
-  icon: string | null;
-  description: string | null;
-  sort_order: number;
-  is_default: boolean;
-  visibility_scope: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProfileEntry {
-  id: string;
-  user_id: string;
-  category_id: string;
-  label: string;
-  value: string;
-  linked_note_id: string | null;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AgentInstruction {
-  id: string;
-  user_id: string;
-  instruction: string;
-  applies_to: string;
-  is_active: boolean;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProfileView {
-  id: string;
-  user_id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  included_scopes: string[];
-  created_at: string;
-}
+import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
 
 const DEFAULT_CATEGORIES = [
   { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
@@ -70,67 +24,44 @@ const DEFAULT_CATEGORIES = [
   { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Morning/night, introvert/extrovert, pet peeves", sort_order: 16, visibility_scope: "all" },
 ];
 
-export function useProfile() {
+/**
+ * Profile hook scoped to a specific contact.
+ * Reuses the same profile_categories and profile_entries tables
+ * but filtered by contact_id.
+ */
+export function useContactProfile(contactId: string | null) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const userId = user?.id;
 
   const categoriesQuery = useQuery({
-    queryKey: ["profile-categories", userId],
+    queryKey: ["contact-profile-categories", contactId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profile_categories")
         .select("*")
         .eq("user_id", userId!)
-        .is("contact_id", null)
+        .eq("contact_id", contactId!)
         .order("sort_order");
       if (error) throw error;
-      return data as ProfileCategory[];
+      return data as (ProfileCategory & { contact_id: string })[];
     },
-    enabled: !!userId,
+    enabled: !!userId && !!contactId,
   });
 
   const entriesQuery = useQuery({
-    queryKey: ["profile-entries", userId],
+    queryKey: ["contact-profile-entries", contactId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profile_entries")
         .select("*")
         .eq("user_id", userId!)
-        .is("contact_id", null)
+        .eq("contact_id", contactId!)
         .order("sort_order");
       if (error) throw error;
-      return data as ProfileEntry[];
+      return data as (ProfileEntry & { contact_id: string })[];
     },
-    enabled: !!userId,
-  });
-
-  const instructionsQuery = useQuery({
-    queryKey: ["agent-instructions", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("agent_instructions")
-        .select("*")
-        .eq("user_id", userId!)
-        .order("sort_order");
-      if (error) throw error;
-      return data as AgentInstruction[];
-    },
-    enabled: !!userId,
-  });
-
-  const viewsQuery = useQuery({
-    queryKey: ["profile-views", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profile_views")
-        .select("*")
-        .eq("user_id", userId!)
-        .order("created_at");
-      if (error) throw error;
-      return data as ProfileView[];
-    },
-    enabled: !!userId,
+    enabled: !!userId && !!contactId,
   });
 
   const seedDefaults = useMutation({
@@ -138,12 +69,13 @@ export function useProfile() {
       const rows = DEFAULT_CATEGORIES.map((c) => ({
         ...c,
         user_id: userId!,
+        contact_id: contactId!,
         is_default: true,
       }));
-      const { error } = await supabase.from("profile_categories").insert(rows);
+      const { error } = await supabase.from("profile_categories").insert(rows as any);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile-categories"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contact-profile-categories", contactId] }),
   });
 
   const upsertCategory = useMutation({
@@ -152,12 +84,16 @@ export function useProfile() {
         const { error } = await supabase.from("profile_categories").update(cat).eq("id", cat.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("profile_categories").insert({ ...cat, user_id: userId! } as any);
+        const { error } = await supabase.from("profile_categories").insert({
+          ...cat,
+          user_id: userId!,
+          contact_id: contactId!,
+        } as any);
         if (error) throw error;
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-categories"] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-categories", contactId] });
       showToast.success("Category saved");
     },
   });
@@ -168,8 +104,8 @@ export function useProfile() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-categories"] });
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-categories", contactId] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-entries", contactId] });
       showToast.success("Category deleted");
     },
   });
@@ -180,12 +116,16 @@ export function useProfile() {
         const { error } = await supabase.from("profile_entries").update(entry).eq("id", entry.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("profile_entries").insert({ ...entry, user_id: userId! } as any);
+        const { error } = await supabase.from("profile_entries").insert({
+          ...entry,
+          user_id: userId!,
+          contact_id: contactId!,
+        } as any);
         if (error) throw error;
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-entries", contactId] });
       showToast.success("Entry saved");
     },
   });
@@ -196,90 +136,19 @@ export function useProfile() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-entries", contactId] });
       showToast.success("Entry deleted");
-    },
-  });
-
-  const upsertInstruction = useMutation({
-    mutationFn: async (inst: Partial<AgentInstruction> & { id?: string }) => {
-      if (inst.id) {
-        const { error } = await supabase.from("agent_instructions").update(inst).eq("id", inst.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("agent_instructions").insert({ ...inst, user_id: userId! } as any);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-instructions"] });
-      showToast.success("Instruction saved");
-    },
-  });
-
-  const deleteInstruction = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("agent_instructions").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-instructions"] });
-      showToast.success("Instruction deleted");
-    },
-  });
-
-  const upsertView = useMutation({
-    mutationFn: async (view: Partial<ProfileView> & { id?: string }) => {
-      if (view.id) {
-        const { error } = await supabase.from("profile_views").update({
-          name: view.name,
-          description: view.description,
-          included_scopes: view.included_scopes,
-        }).eq("id", view.id);
-        if (error) throw error;
-      } else {
-        const slug = (view.name ?? "custom").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const { error } = await supabase.from("profile_views").insert({
-          user_id: userId!,
-          name: view.name!,
-          slug,
-          description: view.description ?? null,
-          included_scopes: view.included_scopes ?? ["all"],
-        });
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-views"] });
-      showToast.success("View saved");
-    },
-  });
-
-  const deleteView = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("profile_views").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-views"] });
-      showToast.success("View deleted");
     },
   });
 
   return {
     categories: categoriesQuery.data ?? [],
     entries: entriesQuery.data ?? [],
-    instructions: instructionsQuery.data ?? [],
-    views: viewsQuery.data ?? [],
     isLoading: categoriesQuery.isLoading || entriesQuery.isLoading,
     seedDefaults,
     upsertCategory,
     deleteCategory,
     upsertEntry,
     deleteEntry,
-    upsertInstruction,
-    deleteInstruction,
-    upsertView,
-    deleteView,
   };
 }

@@ -14,154 +14,143 @@ serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
 
+    const { contact_id } = await req.json();
+    if (!contact_id) {
+      return new Response(JSON.stringify({ error: "contact_id is required" }), { status: 400, headers: corsHeaders });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openrouterKey = Deno.env.get("OPENROUTER_API_KEY")!;
     const db = createClient(supabaseUrl, supabaseKey);
 
-    // Get user from JWT
+    // Auth
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
     const { data: { user }, error: authErr } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
     if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     const userId = user.id;
 
-    // Get existing categories for the user
+    // Get the contact
+    const { data: contact, error: contactErr } = await db
+      .from("contacts")
+      .select("name, aliases, notes, tags, metadata")
+      .eq("id", contact_id)
+      .eq("user_id", userId)
+      .single();
+
+    if (contactErr || !contact) {
+      return new Response(JSON.stringify({ error: "Contact not found" }), { status: 404, headers: corsHeaders });
+    }
+
+    const names = [contact.name, ...(contact.aliases || [])];
+
+    // Get profile categories for this contact
     const { data: categories } = await db
       .from("profile_categories")
       .select("slug, name")
       .eq("user_id", userId)
-      .is("contact_id", null);
+      .eq("contact_id", contact_id);
 
     const categorySlugs = (categories || []).map((c: any) => c.slug);
 
-    // Gather note intelligence
-    // 1. Get all notes metadata
-    const { data: notes } = await db
+    // Get related notes (notes mentioning this person)
+    const { data: allNotes } = await db
       .from("notes")
-      .select("title, content, tags, metadata, entity_type, created_at")
+      .select("id, title, content, tags, metadata, entity_type, created_at")
       .eq("user_id", userId)
       .eq("is_trashed", false)
       .order("created_at", { ascending: false })
       .limit(500);
 
-    if (!notes || notes.length < 5) {
+    // Filter to notes mentioning this person
+    const relatedNotes = (allNotes || []).filter((note: any) => {
+      const people = note.metadata?.people as string[] | undefined;
+      if (!people || !Array.isArray(people)) return false;
+      return names.some((n: string) => people.some((p: string) => p.toLowerCase() === n.toLowerCase()));
+    });
+
+    if (relatedNotes.length === 0) {
       return new Response(JSON.stringify({
         suggestions: [],
-        message: "Not enough notes to generate suggestions. Write at least 5 notes first."
+        message: `No notes mention ${contact.name} yet.`,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // 2. Aggregate topics
-    const topicCounts: Record<string, number> = {};
-    const peopleMentions: Record<string, number> = {};
-    const entityTypes: Record<string, number> = {};
-
-    for (const note of notes) {
-      // Tags as topics
-      if (note.tags) {
-        for (const tag of note.tags) {
-          topicCounts[tag] = (topicCounts[tag] || 0) + 1;
-        }
-      }
-      // Metadata topics
-      const meta = note.metadata as any;
-      if (meta?.topics) {
-        for (const t of meta.topics) {
-          topicCounts[t] = (topicCounts[t] || 0) + 1;
-        }
-      }
-      // People
-      if (meta?.people) {
-        for (const p of meta.people) {
-          peopleMentions[p] = (peopleMentions[p] || 0) + 1;
-        }
-      }
-      // Entity types
-      if (note.entity_type) {
-        entityTypes[note.entity_type] = (entityTypes[note.entity_type] || 0) + 1;
-      }
-    }
-
-    const topTopics = Object.entries(topicCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([topic, count]) => `${topic} (${count} notes)`);
-
-    const topPeople = Object.entries(peopleMentions)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([person, count]) => `${person} (${count} mentions)`);
-
-    const entitySummary = Object.entries(entityTypes)
-      .sort((a, b) => b[1] - a[1])
-      .map(([type, count]) => `${type}: ${count}`);
-
-    // 3. Random sample of note snippets
-    const shuffled = [...notes].sort(() => Math.random() - 0.5);
-    const sampleSnippets = shuffled.slice(0, 15).map((n: any) => {
-      const content = (n.content || "").substring(0, 300);
-      return `Title: ${n.title}\nSnippet: ${content}`;
-    });
-
-    // 4. Get existing entries to avoid duplicates
+    // Get existing entries for this contact's profile
     const { data: existingEntries } = await db
       .from("profile_entries")
       .select("label, value, category_id")
       .eq("user_id", userId)
-      .is("contact_id", null);
+      .eq("contact_id", contact_id);
 
     const existingLabels = (existingEntries || []).map((e: any) => `${e.label}: ${e.value}`);
 
-    const prompt = `You are analyzing a user's personal notes to suggest profile entries they might want to add to their personal profile. The profile has these categories (by slug): ${categorySlugs.join(", ")}.
+    // Build note snippets
+    const noteSnippets = relatedNotes.slice(0, 20).map((n: any) => {
+      const content = (n.content || "").substring(0, 400);
+      return `[Note ID: ${n.id}] Title: ${n.title}\nSnippet: ${content}`;
+    });
 
-Here are the default category slugs and what they cover:
+    // Aggregate topics from related notes
+    const topicCounts: Record<string, number> = {};
+    for (const note of relatedNotes) {
+      if (note.tags) for (const tag of note.tags) topicCounts[tag] = (topicCounts[tag] || 0) + 1;
+      const meta = note.metadata as any;
+      if (meta?.topics) for (const t of meta.topics) topicCounts[t] = (topicCounts[t] || 0) + 1;
+    }
+    const topTopics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([t, c]) => `${t} (${c})`);
+
+    const prompt = `You are analyzing notes about a person called "${contact.name}" (also known as: ${(contact.aliases || []).join(", ") || "no aliases"}).
+
+The user has written ${relatedNotes.length} notes mentioning this person. Your job is to extract profile facts about ${contact.name} from these notes and suggest profile entries.
+
+The profile uses these categories (by slug): ${categorySlugs.join(", ")}.
+
+Category descriptions:
 - identity: Name, pronouns, languages, nationality
 - location: Current city, timezone, living situation
 - professional: Job, company, industry, skills
 - education: Degrees, certifications
 - relationships: Partner, children, close family
-- communication: Tone, humor style
+- communication: Tone, humor style, preferred channels
 - personality: Type indicators, core values
-- principles: Personal rules, codex vitae
+- principles: Personal rules, frameworks
 - health: Medical, allergies, fitness
 - hobbies: Active hobbies, creative pursuits
 - food: Cuisines, dietary style
 - entertainment: Genres, movies, books
 - travel: Countries, bucket list
-- digital: Social profiles, tools, tech stack
+- digital: Social profiles, tools
 - financial: Goals, investment style
 - goals: Short-term, long-term goals
-- preferences: Morning/night, introvert/extrovert
+- preferences: Morning/night, likes/dislikes
 
-DATA FROM THE USER'S NOTES:
+CONTEXT ABOUT ${contact.name}:
+Free-form notes: ${contact.notes || "none"}
+Tags: ${(contact.tags || []).join(", ") || "none"}
 
-Top topics: ${topTopics.join(", ") || "none"}
+TOPICS FROM RELATED NOTES: ${topTopics.join(", ") || "none"}
 
-Top people mentioned: ${topPeople.join(", ") || "none"}
+RELATED NOTE SNIPPETS:
+${noteSnippets.join("\n---\n")}
 
-Note types: ${entitySummary.join(", ") || "none"}
-
-Total notes: ${notes.length}
-
-Sample note snippets:
-${sampleSnippets.join("\n---\n")}
-
-Existing profile entries (DO NOT duplicate these):
+EXISTING PROFILE ENTRIES (DO NOT duplicate):
 ${existingLabels.join("\n") || "none yet"}
 
-Based on these patterns, suggest profile entries the user might want to add. For each suggestion provide:
+Based on these notes, suggest profile entries for ${contact.name}. For each suggestion:
 - category_slug (from the list above)
-- label (short field name)
-- value (suggested value)
+- label (short field name, e.g. "Favorite hobby", "Current city")
+- value (the extracted fact)
 - confidence: "high", "medium", or "low"
-- reason: brief explanation of why you suggest this
+- reason: brief explanation citing which note(s) support this
+- source_note_id: the note ID that most strongly supports this fact (from the [Note ID: ...] tags)
 
-Only suggest things you're reasonably confident about. Return 5-15 suggestions max. Return valid JSON array.`;
+Only suggest things clearly supported by the notes. Return 3-12 suggestions max. Return valid JSON array.`;
 
     const { result, credits } = await chatWithCredits(
-      db, openrouterKey, userId, "profile-suggestions",
+      db, openrouterKey, userId, "contact-profile-suggestions",
       [
-        { role: "system", content: "You are a profile analyst. Return ONLY a JSON array of suggestion objects. No markdown, no explanation outside the JSON." },
+        { role: "system", content: "You are a profile analyst for a person. Return ONLY a JSON array of suggestion objects. No markdown, no explanation outside the JSON." },
         { role: "user", content: prompt },
       ],
       { response_format: { type: "json_object" } }
@@ -177,7 +166,7 @@ Only suggest things you're reasonably confident about. Return 5-15 suggestions m
       suggestions = [];
     }
 
-    // Filter out suggestions for categories the user doesn't have
+    // Validate
     suggestions = suggestions.filter((s: any) =>
       s.category_slug && s.label && s.value && categorySlugs.includes(s.category_slug)
     );
@@ -185,12 +174,12 @@ Only suggest things you're reasonably confident about. Return 5-15 suggestions m
     return new Response(JSON.stringify({
       suggestions,
       credits: { remaining_credits: credits.remaining_credits },
-      analyzed_notes: notes.length,
+      analyzed_notes: relatedNotes.length,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
-    console.error("generate-profile-suggestions error:", err);
+    console.error("generate-contact-profile-suggestions error:", err);
     if (err.message === "INSUFFICIENT_CREDITS") {
       return insufficientCreditsResponse(corsHeaders);
     }
