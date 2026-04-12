@@ -38,6 +38,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
   add_event_temerio: { icon: CalendarDays, label: "Add Event to Temerio", color: "text-blue-500" },
   add_event_cherishly: { icon: Heart, label: "Add Event to Cherishly", color: "text-pink-500" },
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
+  add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
 };
