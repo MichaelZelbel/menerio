@@ -328,7 +328,7 @@ async function generateProfileSuggestions(
     }
 
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
-    const cleanContent = stripHtml(noteContent);
+    const cleanContent = stripHtmlIfNeeded(noteContent);
     const userPrompt = `People mentioned: ${peopleList}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
 
     let extractedFacts: Array<{
