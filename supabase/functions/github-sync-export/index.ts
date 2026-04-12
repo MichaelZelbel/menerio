@@ -6,6 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/** Returns true when content looks like HTML (has block-level tags) */
+function looksLikeHtml(content: string): boolean {
+  return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
+}
+
 /** Convert Tiptap HTML to Markdown (server-side, no DOM). */
 function htmlToMarkdown(html: string): string {
   if (!html || !html.trim()) return "";
@@ -207,7 +212,9 @@ async function syncSingleNote(
 
     // Create/Update
     const frontmatter = buildFrontmatter(note);
-    const mdBody = htmlToMarkdown(String(note.content || ""));
+    // Content is now stored as Markdown; only convert if legacy HTML detected
+    const rawContent = String(note.content || "");
+    const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdown(rawContent) : rawContent;
     const fullContent = `${frontmatter}\n\n${mdBody}`;
 
     // Check if file already exists (need SHA for updates)
