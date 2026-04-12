@@ -547,6 +547,107 @@ async function generateProfileSuggestions(
     } else {
       console.log(`All profile facts already known for note ${noteId}`);
     }
+
+    // ── Relationship suggestions ──
+    if (extractedRelationships.length > 0) {
+      const relSuggestions: typeof suggestions = [];
+
+      // Check existing relationship review queue items
+      const { data: existingRelQueue } = await supabase
+        .from("review_queue")
+        .select("title, status")
+        .eq("user_id", userId)
+        .eq("suggestion_type", "add_relationship")
+        .in("status", ["pending", "accepted", "dismissed"]);
+
+      const relQueueSet = new Set(
+        (existingRelQueue || []).map((q: any) => q.title)
+      );
+
+      for (const rel of extractedRelationships) {
+        // Resolve person_a and person_b to contacts
+        const isSelfA = /^(me|myself|i)$/i.test(rel.person_a);
+        const isSelfB = /^(me|myself|i)$/i.test(rel.person_b);
+
+        let contactA: { id: string; name: string } | null = null;
+        let contactB: { id: string; name: string } | null = null;
+
+        if (!isSelfA) {
+          // Find contact for person_a
+          const matchA = nameToContact.get(rel.person_a.toLowerCase());
+          if (matchA) contactA = { id: matchA.contact_id, name: matchA.canonical_name };
+          else {
+            // Fuzzy match
+            for (const [key, c] of nameToContact) {
+              if (isFuzzyMatch(rel.person_a, key)) {
+                contactA = { id: c.contact_id, name: c.canonical_name };
+                break;
+              }
+            }
+          }
+          if (!contactA) {
+            console.log(`[relationships] Skipping: cannot match person_a="${rel.person_a}"`);
+            continue;
+          }
+        }
+
+        if (!isSelfB) {
+          const matchB = nameToContact.get(rel.person_b.toLowerCase());
+          if (matchB) contactB = { id: matchB.contact_id, name: matchB.canonical_name };
+          else {
+            for (const [key, c] of nameToContact) {
+              if (isFuzzyMatch(rel.person_b, key)) {
+                contactB = { id: c.contact_id, name: c.canonical_name };
+                break;
+              }
+            }
+          }
+          if (!contactB) {
+            console.log(`[relationships] Skipping: cannot match person_b="${rel.person_b}"`);
+            continue;
+          }
+        }
+
+        // Can't have both be self
+        if (isSelfA && isSelfB) continue;
+
+        const nameA = isSelfA ? "Me" : contactA!.name;
+        const nameB = isSelfB ? "Me" : contactB!.name;
+        const title = `Add relationship: ${nameA} → ${nameB} (${rel.label_a_to_b})`;
+
+        if (relQueueSet.has(title)) continue;
+
+        relSuggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_relationship",
+          title,
+          description: `${nameA} is ${rel.label_a_to_b} of ${nameB}`,
+          payload: {
+            source_type: isSelfA ? "self" : "contact",
+            source_id: isSelfA ? null : contactA!.id,
+            target_type: isSelfB ? "self" : "contact",
+            target_id: isSelfB ? null : contactB!.id,
+            label: rel.label_a_to_b,
+            inverse_label: rel.label_b_to_a,
+            inverse_source_type: isSelfB ? "self" : "contact",
+            inverse_source_id: isSelfB ? null : contactB!.id,
+            inverse_target_type: isSelfA ? "self" : "contact",
+            inverse_target_id: isSelfA ? null : contactA!.id,
+            contact_name_a: nameA,
+            contact_name_b: nameB,
+          },
+          status: "pending",
+        });
+        relQueueSet.add(title);
+      }
+
+      if (relSuggestions.length > 0) {
+        const { error } = await supabase.from("review_queue").insert(relSuggestions);
+        if (error) console.error("Relationship suggestion insert error:", error);
+        else console.log(`Created ${relSuggestions.length} relationship suggestions for note ${noteId}`);
+      }
+    }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
   }
