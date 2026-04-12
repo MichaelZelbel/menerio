@@ -408,17 +408,30 @@ async function generateProfileSuggestions(
       nameToContact.set(p.name.toLowerCase(), p);
     }
 
-    const validFacts = extractedFacts.filter((f) =>
-      f.contact_name &&
-      f.category_slug &&
-      f.label &&
-      f.value &&
-      PROFILE_CATEGORY_SLUGS.includes(f.category_slug) &&
-      nameToContact.has(f.contact_name.toLowerCase())
-    );
+    const validFacts = extractedFacts.filter((f) => {
+      if (!f.contact_name || !f.category_slug || !f.label || !f.value) return false;
+      if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
+        console.log(`[profile-extract] Dropping fact: invalid category_slug="${f.category_slug}"`);
+        return false;
+      }
+      // Fuzzy match contact name against known contacts
+      const exactMatch = nameToContact.has(f.contact_name.toLowerCase());
+      if (exactMatch) return true;
+      // Try fuzzy matching
+      for (const [key, contact] of nameToContact) {
+        if (isFuzzyMatch(f.contact_name, key)) {
+          // Rewrite contact_name to canonical for downstream matching
+          f.contact_name = contact.canonical_name;
+          return true;
+        }
+      }
+      console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
+      return false;
+    });
+
+    console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
 
     if (validFacts.length === 0) {
-      console.log(`No valid profile facts after filtering for note ${noteId}`);
       return;
     }
 
