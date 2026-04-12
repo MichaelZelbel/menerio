@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -32,7 +33,6 @@ import {
   X,
   FileText,
   Link2,
-  BookUser,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
@@ -97,6 +97,7 @@ export default function People() {
     queryKey: ["contact_notes", selectedPerson?.name, selectedPerson?.aliases],
     enabled: !!selectedPerson,
     queryFn: async () => {
+      // Search by canonical name
       const names = [selectedPerson!.name, ...(selectedPerson!.aliases || [])];
       const { data, error } = await supabase
         .from("notes")
@@ -106,6 +107,7 @@ export default function People() {
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
+      // Filter client-side: notes whose metadata.people array contains any of the names
       return (data || []).filter((note: any) => {
         const people = note.metadata?.people as string[] | undefined;
         if (!people || !Array.isArray(people)) return false;
@@ -204,6 +206,7 @@ export default function People() {
     if (editingAliases !== null) updates.aliases = editingAliases;
     if (editingNotes !== null) updates.notes = editingNotes || null;
     if (editingMappings !== null) {
+      // Clean out empty mappings
       const cleaned: Record<string, { display_name?: string }> = {};
       for (const [k, v] of Object.entries(editingMappings)) {
         if (v.display_name) cleaned[k] = v;
@@ -236,187 +239,180 @@ export default function People() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
-        {/* Header Card */}
-        <Card className="mb-4">
-          <CardHeader>
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <CardTitle className="text-xl flex items-center gap-2">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
-                    <User className="h-5 w-5 text-primary" />
-                  </div>
-                  {selectedPerson.name}
-                </CardTitle>
-
-                {/* Aliases */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {aliases.map((alias) => (
-                    <Badge key={alias} variant="secondary" className="text-xs gap-1">
-                      {alias}
-                      {isEditing && (
-                        <button onClick={() => removeAlias(alias)} className="ml-0.5 hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  ))}
-                  {isEditing && (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        className="h-7 w-32 text-xs"
-                        placeholder="Add alias..."
-                        value={newAlias}
-                        onChange={(e) => setNewAlias(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && addAlias()}
-                      />
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={addAlias}>
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  )}
-                  {!isEditing && aliases.length === 0 && (
-                    <span className="text-xs text-muted-foreground">No aliases</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-1">
-                {!isEditing ? (
-                  <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
-                    Edit
-                  </Button>
-                ) : (
-                  <>
-                    <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={saveChanges} disabled={updatePerson.isPending}>
-                      {updatePerson.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      Save
-                    </Button>
-                  </>
-                )}
-                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deletePerson.mutate(selectedPerson.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-        </Card>
-
-        {/* Tabbed content */}
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue="overview" className="space-y-4">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="profile" className="gap-1.5">
-              <BookUser className="h-3.5 w-3.5" /> Profile
-            </TabsTrigger>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-4 mt-4">
-            {/* App Identity Mapping — admin only */}
-            {isAdmin && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Link2 className="h-4 w-4 text-muted-foreground" />
-                    App Identity Mapping
+          <TabsContent value="overview" className="space-y-6 mt-0">
+          {/* Header Card */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="space-y-2">
+                  <CardTitle className="text-xl flex items-center gap-2">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
+                      <User className="h-5 w-5 text-primary" />
+                    </div>
+                    {selectedPerson.name}
                   </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {KNOWN_APPS.map((app) => {
-                      const mapping = mappings[app.key];
-                      return (
-                        <div key={app.key} className="flex items-center gap-3">
-                          <span className="text-sm font-medium w-24 shrink-0">{app.label}</span>
-                          {isEditing ? (
-                            <Input
-                              className="h-8 text-sm"
-                              placeholder={`Display name in ${app.label}...`}
-                              value={mapping?.display_name || ""}
-                              onChange={(e) => setAppMapping(app.key, e.target.value)}
-                            />
-                          ) : (
-                            <span className="text-sm text-muted-foreground">
-                              {mapping?.display_name || "—"}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {!isEditing && Object.keys(mappings).length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      No app mappings configured. Click Edit to add how this person is known in other apps.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
 
-            {/* Notes */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Notes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isEditing ? (
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setEditingNotes(e.target.value)}
-                    placeholder="Freeform notes about this person..."
-                    rows={3}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {notes || "No notes yet."}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Related Notes */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  Related Knowledge ({relatedNotes.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {relatedNotes.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No notes mention this person yet.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {relatedNotes.map((note: any) => (
-                      <Link
-                        key={note.id}
-                        to={`/dashboard/notes/${note.id}`}
-                        className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{note.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(note.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </Link>
+                  {/* Aliases */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {aliases.map((alias) => (
+                      <Badge key={alias} variant="secondary" className="text-xs gap-1">
+                        {alias}
+                        {isEditing && (
+                          <button onClick={() => removeAlias(alias)} className="ml-0.5 hover:text-destructive">
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </Badge>
                     ))}
+                    {isEditing && (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          className="h-7 w-32 text-xs"
+                          placeholder="Add alias..."
+                          value={newAlias}
+                          onChange={(e) => setNewAlias(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && addAlias()}
+                        />
+                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={addAlias}>
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                    {!isEditing && aliases.length === 0 && (
+                      <span className="text-xs text-muted-foreground">No aliases</span>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </div>
+
+                <div className="flex gap-1">
+                  {!isEditing ? (
+                    <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
+                      Edit
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={saveChanges} disabled={updatePerson.isPending}>
+                        {updatePerson.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                        Save
+                      </Button>
+                    </>
+                  )}
+                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deletePerson.mutate(selectedPerson.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+
+          {/* App Identity Mapping — admin only */}
+          {isAdmin && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                App Identity Mapping
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {KNOWN_APPS.map((app) => {
+                  const mapping = mappings[app.key];
+                  return (
+                    <div key={app.key} className="flex items-center gap-3">
+                      <span className="text-sm font-medium w-24 shrink-0">{app.label}</span>
+                      {isEditing ? (
+                        <Input
+                          className="h-8 text-sm"
+                          placeholder={`Display name in ${app.label}...`}
+                          value={mapping?.display_name || ""}
+                          onChange={(e) => setAppMapping(app.key, e.target.value)}
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          {mapping?.display_name || "—"}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {!isEditing && Object.keys(mappings).length === 0 && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  No app mappings configured. Click Edit to add how this person is known in other apps.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          )}
+
+          {/* Notes */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isEditing ? (
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setEditingNotes(e.target.value)}
+                  placeholder="Freeform notes about this person..."
+                  rows={3}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {notes || "No notes yet."}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Related Notes */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                Related Knowledge
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {relatedNotes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No notes mention this person yet.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {relatedNotes.map((note: any) => (
+                    <Link
+                      key={note.id}
+                      to={`/dashboard/notes/${note.id}`}
+                      className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{note.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(note.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
           </TabsContent>
 
-          <TabsContent value="profile" className="mt-4">
-            <ContactProfileTab
-              contactId={selectedPerson.id}
-              contactName={selectedPerson.name}
-              relatedNoteCount={relatedNotes.length}
-            />
+          <TabsContent value="profile" className="mt-0">
+            <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
           </TabsContent>
         </Tabs>
       </div>

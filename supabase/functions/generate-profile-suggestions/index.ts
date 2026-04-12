@@ -29,8 +29,7 @@ serve(async (req) => {
     const { data: categories } = await db
       .from("profile_categories")
       .select("slug, name")
-      .eq("user_id", userId)
-      .is("contact_id", null);
+      .eq("user_id", userId);
 
     const categorySlugs = (categories || []).map((c: any) => c.slug);
 
@@ -107,8 +106,7 @@ serve(async (req) => {
     const { data: existingEntries } = await db
       .from("profile_entries")
       .select("label, value, category_id")
-      .eq("user_id", userId)
-      .is("contact_id", null);
+      .eq("user_id", userId);
 
     const existingLabels = (existingEntries || []).map((e: any) => `${e.label}: ${e.value}`);
 

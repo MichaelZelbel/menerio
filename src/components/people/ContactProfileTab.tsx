@@ -6,17 +6,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CategorySection } from "@/components/profile/CategorySection";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
-import { PageLoader } from "@/components/LoadingStates";
+import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { useContactProfile } from "@/hooks/useContactProfile";
-import { ContactProfileSuggestions } from "./ContactProfileSuggestions";
+import { PageLoader } from "@/components/LoadingStates";
 
 interface ContactProfileTabProps {
   contactId: string;
   contactName: string;
-  relatedNoteCount: number;
 }
 
-export function ContactProfileTab({ contactId, contactName, relatedNoteCount }: ContactProfileTabProps) {
+export function ContactProfileTab({ contactId, contactName }: ContactProfileTabProps) {
   const {
     categories,
     entries,
@@ -44,10 +43,15 @@ export function ContactProfileTab({ contactId, contactName, relatedNoteCount }: 
 
   if (isLoading) return <PageLoader />;
 
-  if (categories.length === 0 && seeded) {
+  if (categories.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        <p className="text-sm">Setting up {contactName}'s profile…</p>
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-sm text-muted-foreground mb-3">
+          Setting up {contactName}'s profile…
+        </p>
+        <Button onClick={() => seedDefaults.mutate()} disabled={seedDefaults.isPending} size="sm">
+          Initialize Profile
+        </Button>
       </div>
     );
   }
@@ -69,7 +73,7 @@ export function ContactProfileTab({ contactId, contactName, relatedNoteCount }: 
     setNewCatScope("all");
   };
 
-  // Find the neediest category
+  // Find the "neediest" category (fewest entries)
   const neediestId = [...categories]
     .sort((a, b) => {
       const aCount = entries.filter((e) => e.category_id === a.id).length;
@@ -81,15 +85,6 @@ export function ContactProfileTab({ contactId, contactName, relatedNoteCount }: 
   return (
     <div className="space-y-3">
       <ProfileCompleteness categories={categories} entries={entries} />
-
-      <ContactProfileSuggestions
-        contactId={contactId}
-        contactName={contactName}
-        categories={categories}
-        entryCount={entries.length}
-        noteCount={relatedNoteCount}
-        onAccept={(data) => upsertEntry.mutate(data)}
-      />
 
       {categories.map((cat) => (
         <CategorySection

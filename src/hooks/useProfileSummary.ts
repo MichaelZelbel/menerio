@@ -15,8 +15,8 @@ export function useProfileSummary() {
     queryKey: ["profile-summary", userId],
     queryFn: async () => {
       const [catRes, entryRes, instrRes] = await Promise.all([
-        supabase.from("profile_categories").select("id, slug, name, icon, visibility_scope").eq("user_id", userId!).is("contact_id", null),
-        supabase.from("profile_entries").select("id, category_id").eq("user_id", userId!).is("contact_id", null),
+        supabase.from("profile_categories").select("id, slug, name, icon, visibility_scope").eq("user_id", userId!),
+        supabase.from("profile_entries").select("id, category_id").eq("user_id", userId!),
         supabase.from("agent_instructions").select("id, is_active").eq("user_id", userId!),
       ]);
 
