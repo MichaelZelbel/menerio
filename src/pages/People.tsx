@@ -68,7 +68,7 @@ export default function People() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const isAdmin = useIsAdmin();
-
+  const [mergeOpen, setMergeOpen] = useState(false);
   // Inline editing state for detail view
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
