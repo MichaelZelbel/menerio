@@ -12,6 +12,22 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+/** Strip HTML tags and decode common entities to produce plain text */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /* ── Levenshtein distance (lightweight, no deps) ── */
 function levenshtein(a: string, b: string): number {
   const la = a.length, lb = b.length;
@@ -306,7 +322,8 @@ async function generateProfileSuggestions(
     }
 
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
-    const userPrompt = `People mentioned: ${peopleList}\n\nNote title: ${noteTitle}\nNote content:\n${noteContent}`;
+    const cleanContent = stripHtml(noteContent);
+    const userPrompt = `People mentioned: ${peopleList}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
 
     let extractedFacts: Array<{
       contact_name: string;
@@ -325,9 +342,16 @@ async function generateProfileSuggestions(
         { response_format: { type: "json_object" } },
       );
 
-      const parsed = JSON.parse(result.result.choices[0].message.content);
-      // Handle both { facts: [...] } and direct array formats
-      extractedFacts = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.facts) ? parsed.facts : []);
+      const rawContent = result.result.choices[0].message.content;
+      console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
+      const parsed = JSON.parse(rawContent);
+      // Handle any wrapper key: { facts: [...] }, { results: [...] }, etc.
+      if (Array.isArray(parsed)) {
+        extractedFacts = parsed;
+      } else {
+        const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
+        extractedFacts = arrayVal || [];
+      }
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during profile extraction for note ${noteId}`);
