@@ -95,6 +95,7 @@ async function generateReviewItems(
   userId: string,
   noteId: string,
   noteTitle: string,
+  noteContent: string,
   metadata: Record<string, unknown>,
 ) {
   try {
@@ -185,18 +186,49 @@ async function generateReviewItems(
         }
       }
 
+      const fullText = `${noteTitle}\n${noteContent}`;
       for (const person of people) {
-        if (!nameToContact.has(person.toLowerCase())) {
+        // 1. Exact match
+        if (nameToContact.has(person.toLowerCase())) continue;
+
+        // 2. Fuzzy match — find close match among all contact names/aliases
+        let fuzzyMatch: { id: string; name: string } | null = null;
+        for (const [key, contact] of nameToContact) {
+          if (isFuzzyMatch(person, key)) {
+            fuzzyMatch = contact;
+            break;
+          }
+        }
+
+        if (fuzzyMatch) {
+          // Suggest adding as alias instead of new contact
           suggestions.push({
             user_id: userId,
             source_note_id: noteId,
-            suggestion_type: "add_contact",
-            title: `Add "${person}" to your People`,
-            description: `${person} was mentioned in "${noteTitle}" but isn't in your contacts yet.`,
-            payload: { name: person },
+            suggestion_type: "add_alias",
+            title: `Add "${person}" as alias for ${fuzzyMatch.name}`,
+            description: `"${person}" in "${noteTitle}" looks like ${fuzzyMatch.name}. Add as alternate spelling?`,
+            payload: { contact_id: fuzzyMatch.id, contact_name: fuzzyMatch.name, alias: person },
             status: "pending",
           });
+          continue;
         }
+
+        // 3. No match — validate name appears in source text before suggesting
+        if (!nameAppearsInText(person, fullText)) {
+          console.log(`Skipping hallucinated name "${person}" — not found in note text`);
+          continue;
+        }
+
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_contact",
+          title: `Add "${person}" to your People`,
+          description: `${person} was mentioned in "${noteTitle}" but isn't in your contacts yet.`,
+          payload: { name: person },
+          status: "pending",
+        });
       }
     }
 
@@ -525,9 +557,18 @@ async function processInBackground(noteId: string, authHeader: string) {
       }
 
       for (const person of metadataPeople) {
-        const match = nameToContact.get(person.toLowerCase());
-        if (match) {
-          matchedPeople.push({ name: person, contact_id: match.id, canonical_name: match.name });
+        // Exact match first
+        const exactMatch = nameToContact.get(person.toLowerCase());
+        if (exactMatch) {
+          matchedPeople.push({ name: person, contact_id: exactMatch.id, canonical_name: exactMatch.name });
+          continue;
+        }
+        // Fuzzy match — treat as matched to existing contact
+        for (const [key, contact] of nameToContact) {
+          if (isFuzzyMatch(person, key)) {
+            matchedPeople.push({ name: person, contact_id: contact.id, canonical_name: contact.name });
+            break;
+          }
         }
       }
       if (matchedPeople.length > 0) {
@@ -585,7 +626,7 @@ async function processInBackground(noteId: string, authHeader: string) {
     }
 
     // Generate review queue suggestions (no extra LLM calls)
-    await generateReviewItems(note.user_id, noteId, note.title, metadata);
+    await generateReviewItems(note.user_id, noteId, note.title, note.content, metadata);
 
     // Generate profile suggestions for matched people (one extra LLM call)
     await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);
