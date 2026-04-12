@@ -45,6 +45,13 @@ import {
   Type,
   Pilcrow,
   RemoveFormatting,
+  RowsIcon,
+  Columns,
+  Trash2,
+  Plus,
+  Merge,
+  SplitSquareHorizontal,
+  TableProperties,
 } from "lucide-react";
 import { useState } from "react";
 
