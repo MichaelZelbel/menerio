@@ -581,8 +581,10 @@ async function processInBackground(noteId: string, authHeader: string) {
       }
     }
 
-    // Use AI-generated title if available
-    const aiTitle = typeof metadata.title === "string" && metadata.title.trim()
+    // Only use AI-generated title for quick-capture notes (where the user didn't write the title).
+    // Never overwrite a user-authored title.
+    const isQuickCapture = noteRow.metadata?.is_quick_capture === true;
+    const aiTitle = isQuickCapture && typeof metadata.title === "string" && metadata.title.trim()
       ? metadata.title.trim()
       : null;
 
