@@ -324,6 +324,13 @@ export default function People() {
             </CardHeader>
           </Card>
 
+          {/* Duplicate detection */}
+          <DuplicateHints
+            person={selectedPerson}
+            allPeople={people}
+            onMergeSuggested={() => setMergeOpen(true)}
+          />
+
           {/* App Identity Mapping — admin only */}
           {isAdmin && (
           <Card>
