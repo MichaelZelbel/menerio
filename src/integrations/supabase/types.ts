@@ -295,6 +295,70 @@ export type Database = {
           },
         ]
       }
+      contact_relationships: {
+        Row: {
+          created_at: string
+          custom_label: string | null
+          id: string
+          inverse_id: string | null
+          label: string
+          source_id: string | null
+          source_type: string
+          target_id: string | null
+          target_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          custom_label?: string | null
+          id?: string
+          inverse_id?: string | null
+          label: string
+          source_id?: string | null
+          source_type: string
+          target_id?: string | null
+          target_type: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          custom_label?: string | null
+          id?: string
+          inverse_id?: string | null
+          label?: string
+          source_id?: string | null
+          source_type?: string
+          target_id?: string | null
+          target_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_relationships_inverse_id_fkey"
+            columns: ["inverse_id"]
+            isOneToOne: false
+            referencedRelation: "contact_relationships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_relationships_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_relationships_target_id_fkey"
+            columns: ["target_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           aliases: string[] | null

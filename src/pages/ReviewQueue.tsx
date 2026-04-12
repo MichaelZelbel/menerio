@@ -49,6 +49,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
   add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
+  add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
 };
 
 export default function ReviewQueue() {
@@ -148,11 +149,75 @@ export default function ReviewQueue() {
     }
   };
 
+  const handleAcceptRelationship = async (item: ReviewItem) => {
+    const { source_type, source_id, target_type, target_id, label, custom_label, inverse_label, inverse_source_type, inverse_source_id, inverse_target_type, inverse_target_id, contact_name_a, contact_name_b } = item.payload as any;
+
+    try {
+      // Insert the relationship
+      const { data: inserted, error } = await supabase
+        .from("contact_relationships")
+        .insert({
+          user_id: user!.id,
+          source_type,
+          source_id: source_id || null,
+          target_type,
+          target_id: target_id || null,
+          label,
+          custom_label: custom_label || null,
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        if (error.message?.includes("uq_contact_relationship")) {
+          showToast.info("This relationship already exists");
+          updateStatus.mutate({ id: item.id, status: "accepted" });
+          return;
+        }
+        showToast.error("Failed to add relationship: " + error.message);
+        return;
+      }
+
+      // Create inverse suggestion in the review queue (suggested mirror)
+      if (inverse_label) {
+        const inverseTitle = `Add relationship: ${contact_name_b || "?"} → ${contact_name_a || "?"} (${inverse_label})`;
+        await supabase.from("review_queue").insert({
+          user_id: user!.id,
+          source_note_id: item.source_note_id,
+          suggestion_type: "add_relationship",
+          title: inverseTitle,
+          description: `Mirror relationship: ${contact_name_b} is ${inverse_label} of ${contact_name_a}`,
+          payload: {
+            source_type: inverse_source_type || target_type,
+            source_id: inverse_source_id || target_id,
+            target_type: inverse_target_type || source_type,
+            target_id: inverse_target_id || source_id,
+            label: inverse_label,
+            contact_name_a: contact_name_b,
+            contact_name_b: contact_name_a,
+            // No inverse_label here — it's the final record, no further mirroring
+          },
+          status: "pending",
+        });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      updateStatus.mutate({ id: item.id, status: "accepted" });
+      showToast.success(`Relationship added: ${contact_name_a} → ${label} → ${contact_name_b}`);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
+    }
+
+    if (type === "add_relationship") {
+      return handleAcceptRelationship(item);
     }
 
     if (type === "add_event_temerio" || type === "add_event_cherishly") {

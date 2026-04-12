@@ -98,20 +98,26 @@ const PROFILE_CATEGORY_SLUGS = [
 
 const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
 
-Return a JSON array of objects, each with:
-- "contact_name": the person's name exactly as provided
-- "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-- "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
-- "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+Return a JSON object with two keys:
+1. "facts": an array of profile fact objects, each with:
+   - "contact_name": the person's name exactly as provided
+   - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
+   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
+   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+
+2. "relationships": an array of relationship objects, each with:
+   - "person_a": name of the first person
+   - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
+   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
+   - "label_b_to_a": what person_b is to person_a (e.g. "employer", "brother", "friend", "mentee")
 
 Rules:
-- Only extract facts that are clearly stated or strongly implied in the note
-- Do NOT invent or assume facts
+- Only extract facts/relationships clearly stated or strongly implied in the note
+- Do NOT invent or assume
 - Skip vague or uncertain information
-- Each fact should be a distinct, specific piece of information
-- Return an empty array if no profile-worthy facts are found
-- Keep labels concise (2-4 words)
-- Keep values concise but complete`;
+- Return empty arrays if nothing found
+- Keep labels concise
+- For relationships, use standard labels when possible: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
@@ -337,6 +343,12 @@ async function generateProfileSuggestions(
       label: string;
       value: string;
     }> = [];
+    let extractedRelationships: Array<{
+      person_a: string;
+      person_b: string;
+      label_a_to_b: string;
+      label_b_to_a: string;
+    }> = [];
 
     try {
       const result = await chatWithCredits(
@@ -352,24 +364,40 @@ async function generateProfileSuggestions(
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
 
-      // Normalize three possible response shapes
+      // Normalize response shapes for facts
       let parseShape: string;
       if (Array.isArray(parsed)) {
         extractedFacts = parsed;
         parseShape = "array";
       } else if (typeof parsed === "object" && parsed !== null) {
-        // Check for wrapper key: { facts: [...] }, { results: [...] }, etc.
-        const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
-        if (arrayVal) {
-          extractedFacts = arrayVal;
-          parseShape = "wrapped-array";
-        } else if (parsed.contact_name && parsed.value) {
-          // Single fact object returned directly
-          extractedFacts = [parsed];
-          parseShape = "single-object";
+        // New expected shape: { facts: [...], relationships: [...] }
+        if (Array.isArray(parsed.facts)) {
+          extractedFacts = parsed.facts;
+          parseShape = "structured";
         } else {
-          extractedFacts = [];
-          parseShape = "invalid-object";
+          const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
+          if (arrayVal) {
+            extractedFacts = arrayVal;
+            parseShape = "wrapped-array";
+          } else if (parsed.contact_name && parsed.value) {
+            extractedFacts = [parsed];
+            parseShape = "single-object";
+          } else {
+            extractedFacts = [];
+            parseShape = "invalid-object";
+          }
+        }
+
+        // Extract relationships
+        if (Array.isArray(parsed.relationships)) {
+          extractedRelationships = parsed.relationships.filter(
+            (r: any) => r.person_a && r.person_b && r.label_a_to_b
+          ).map((r: any) => ({
+            person_a: (r.person_a || "").trim(),
+            person_b: (r.person_b || "").trim(),
+            label_a_to_b: (r.label_a_to_b || "").trim().toLowerCase(),
+            label_b_to_a: (r.label_b_to_a || r.label_a_to_b || "").trim().toLowerCase(),
+          }));
         }
       } else {
         extractedFacts = [];
@@ -384,7 +412,7 @@ async function generateProfileSuggestions(
         value: (f.value || "").trim(),
       }));
 
-      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length} for note ${noteId}`);
+      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length}, relationshipsCount=${extractedRelationships.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during profile extraction for note ${noteId}`);
@@ -518,6 +546,107 @@ async function generateProfileSuggestions(
       else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
     } else {
       console.log(`All profile facts already known for note ${noteId}`);
+    }
+
+    // ── Relationship suggestions ──
+    if (extractedRelationships.length > 0) {
+      const relSuggestions: typeof suggestions = [];
+
+      // Check existing relationship review queue items
+      const { data: existingRelQueue } = await supabase
+        .from("review_queue")
+        .select("title, status")
+        .eq("user_id", userId)
+        .eq("suggestion_type", "add_relationship")
+        .in("status", ["pending", "accepted", "dismissed"]);
+
+      const relQueueSet = new Set(
+        (existingRelQueue || []).map((q: any) => q.title)
+      );
+
+      for (const rel of extractedRelationships) {
+        // Resolve person_a and person_b to contacts
+        const isSelfA = /^(me|myself|i)$/i.test(rel.person_a);
+        const isSelfB = /^(me|myself|i)$/i.test(rel.person_b);
+
+        let contactA: { id: string; name: string } | null = null;
+        let contactB: { id: string; name: string } | null = null;
+
+        if (!isSelfA) {
+          // Find contact for person_a
+          const matchA = nameToContact.get(rel.person_a.toLowerCase());
+          if (matchA) contactA = { id: matchA.contact_id, name: matchA.canonical_name };
+          else {
+            // Fuzzy match
+            for (const [key, c] of nameToContact) {
+              if (isFuzzyMatch(rel.person_a, key)) {
+                contactA = { id: c.contact_id, name: c.canonical_name };
+                break;
+              }
+            }
+          }
+          if (!contactA) {
+            console.log(`[relationships] Skipping: cannot match person_a="${rel.person_a}"`);
+            continue;
+          }
+        }
+
+        if (!isSelfB) {
+          const matchB = nameToContact.get(rel.person_b.toLowerCase());
+          if (matchB) contactB = { id: matchB.contact_id, name: matchB.canonical_name };
+          else {
+            for (const [key, c] of nameToContact) {
+              if (isFuzzyMatch(rel.person_b, key)) {
+                contactB = { id: c.contact_id, name: c.canonical_name };
+                break;
+              }
+            }
+          }
+          if (!contactB) {
+            console.log(`[relationships] Skipping: cannot match person_b="${rel.person_b}"`);
+            continue;
+          }
+        }
+
+        // Can't have both be self
+        if (isSelfA && isSelfB) continue;
+
+        const nameA = isSelfA ? "Me" : contactA!.name;
+        const nameB = isSelfB ? "Me" : contactB!.name;
+        const title = `Add relationship: ${nameA} → ${nameB} (${rel.label_a_to_b})`;
+
+        if (relQueueSet.has(title)) continue;
+
+        relSuggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_relationship",
+          title,
+          description: `${nameA} is ${rel.label_a_to_b} of ${nameB}`,
+          payload: {
+            source_type: isSelfA ? "self" : "contact",
+            source_id: isSelfA ? null : contactA!.id,
+            target_type: isSelfB ? "self" : "contact",
+            target_id: isSelfB ? null : contactB!.id,
+            label: rel.label_a_to_b,
+            inverse_label: rel.label_b_to_a,
+            inverse_source_type: isSelfB ? "self" : "contact",
+            inverse_source_id: isSelfB ? null : contactB!.id,
+            inverse_target_type: isSelfA ? "self" : "contact",
+            inverse_target_id: isSelfA ? null : contactA!.id,
+            contact_name_a: nameA,
+            contact_name_b: nameB,
+          },
+          status: "pending",
+        });
+        relQueueSet.add(title);
+      }
+
+      if (relSuggestions.length > 0) {
+        const { error } = await supabase.from("review_queue").insert(relSuggestions);
+        if (error) console.error("Relationship suggestion insert error:", error);
+        else console.log(`Created ${relSuggestions.length} relationship suggestions for note ${noteId}`);
+      }
     }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);

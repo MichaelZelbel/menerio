@@ -13,6 +13,7 @@ import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
+import { RelationshipsSection } from "@/components/people/RelationshipsSection";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -171,6 +172,7 @@ export default function Profile() {
           </TabsList>
 
           <TabsContent value="profile" className="space-y-3 mt-4">
+            <RelationshipsSection contactId={null} contactName="My" />
             <ProfileCompleteness categories={categories} entries={entries} />
             <ProfileSuggestions
               categories={categories}
