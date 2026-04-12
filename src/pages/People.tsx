@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,7 @@ import {
   Link2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 
 interface Person {
   id: string;
