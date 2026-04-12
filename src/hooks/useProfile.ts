@@ -82,6 +82,7 @@ export function useProfile() {
         .from("profile_categories")
         .select("*")
         .eq("user_id", userId!)
+        .is("contact_id", null)
         .order("sort_order");
       if (error) throw error;
       return data as ProfileCategory[];
@@ -96,6 +97,7 @@ export function useProfile() {
         .from("profile_entries")
         .select("*")
         .eq("user_id", userId!)
+        .is("contact_id", null)
         .order("sort_order");
       if (error) throw error;
       return data as ProfileEntry[];
