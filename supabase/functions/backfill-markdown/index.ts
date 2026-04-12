@@ -6,15 +6,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/** Returns true when content looks like HTML (has block-level tags) */
 function looksLikeHtml(content: string): boolean {
   return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
 }
 
-/** Convert HTML to Markdown (server-side, no DOM) */
 function htmlToMarkdown(html: string): string {
   if (!html || !html.trim()) return "";
   let md = html;
+  // Wikilinks: preserve them before stripping other tags
+  md = md.replace(/<span[^>]*data-wikilink="true"[^>]*data-note-title="([^"]*)"[^>]*>.*?<\/span>/gi, (_, title) => `[[${title}]]`);
   md = md.replace(/<br\s*\/?>/gi, "  \n");
   md = md.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, c) => `# ${strip(c)}\n\n`);
   md = md.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_, c) => `## ${strip(c)}\n\n`);
@@ -74,34 +74,15 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceClient = createClient(supabaseUrl, serviceKey);
 
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
-    }
-    const userId = user.id;
-
-    // Optional: limit to a specific user or require admin
-    const body = await req.json().catch(() => ({}));
-    const batchSize = body.batch_size || 100;
-    const offset = body.offset || 0;
-
-    // Fetch notes with HTML content
+    // Fetch ALL notes with HTML content across all users (one-time migration)
     const { data: notes, error: fetchErr } = await serviceClient
       .from("notes")
       .select("id, content")
-      .eq("user_id", userId)
-      .range(offset, offset + batchSize - 1);
+      .limit(500);
 
     if (fetchErr) {
       return new Response(JSON.stringify({ error: fetchErr.message }), { status: 500, headers: corsHeaders });
@@ -119,11 +100,16 @@ Deno.serve(async (req) => {
 
       try {
         const markdown = htmlToMarkdown(note.content);
-        await serviceClient
+        const { error: updateErr } = await serviceClient
           .from("notes")
           .update({ content: markdown })
           .eq("id", note.id);
-        converted++;
+        if (updateErr) {
+          console.error(`Failed to update note ${note.id}:`, updateErr);
+          errors++;
+        } else {
+          converted++;
+        }
       } catch (err) {
         console.error(`Failed to convert note ${note.id}:`, err);
         errors++;
@@ -131,14 +117,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({
-        success: true,
-        total: (notes || []).length,
-        converted,
-        skipped,
-        errors,
-        next_offset: offset + batchSize,
-      }),
+      JSON.stringify({ success: true, total: (notes || []).length, converted, skipped, errors }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
