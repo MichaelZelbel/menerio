@@ -69,8 +69,9 @@ const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JS
 Only extract what's explicitly there. Don't invent details.`;
 
 const PROFILE_CATEGORY_SLUGS = [
-  "identity", "location", "professional", "relationships",
-  "communication", "personality", "hobbies", "food", "travel", "preferences",
+  "identity", "location", "professional", "education", "relationships",
+  "communication", "personality", "principles", "health", "hobbies",
+  "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
 ];
 
 const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
