@@ -239,7 +239,13 @@ export default function People() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
-        <div className="space-y-6">
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6 mt-0">
           {/* Header Card */}
           <Card>
             <CardHeader>
@@ -403,7 +409,12 @@ export default function People() {
               )}
             </CardContent>
           </Card>
-        </div>
+          </TabsContent>
+
+          <TabsContent value="profile" className="mt-0">
+            <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
+          </TabsContent>
+        </Tabs>
       </div>
     );
   }
