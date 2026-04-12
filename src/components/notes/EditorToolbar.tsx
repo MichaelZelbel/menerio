@@ -124,197 +124,260 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
     setLinkOpen(false);
   };
 
+  const isInsideTable = editor.isActive("table");
+
   return (
-    <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-background flex-wrap shrink-0">
-      {/* Block type dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs font-normal px-2">
-            <Pilcrow className="h-3.5 w-3.5" />
-            {currentHeading}
-            <ChevronDown className="h-3 w-3" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem onClick={() => editor.chain().focus().setParagraph().run()}>
-            <Type className="mr-2 h-4 w-4" /> Normal text
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
-            <Heading1 className="mr-2 h-4 w-4" /> Heading 1
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
-            <Heading2 className="mr-2 h-4 w-4" /> Heading 2
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
-            <Heading3 className="mr-2 h-4 w-4" /> Heading 3
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Inline formatting */}
-      <ToolbarButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="Bold (Ctrl+B)">
-        <Bold className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} title="Italic (Ctrl+I)">
-        <Italic className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive("underline")} title="Underline (Ctrl+U)">
-        <Underline className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive("strike")} title="Strikethrough">
-        <Strikethrough className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="Inline code">
-        <Code className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive("highlight")} title="Highlight">
-        <Highlighter className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleSuperscript().run()} active={editor.isActive("superscript")} title="Superscript">
-        <Superscript className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleSubscript().run()} active={editor.isActive("subscript")} title="Subscript">
-        <Subscript className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Text color */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7" title="Text color">
-            <span className="text-xs font-bold" style={{ color: editor.getAttributes("textStyle").color || "inherit" }}>A</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {TEXT_COLORS.map((c) => (
-            <DropdownMenuItem
-              key={c.value}
-              onClick={() =>
-                c.value === "inherit"
-                  ? editor.chain().focus().unsetColor().run()
-                  : editor.chain().focus().setColor(c.value).run()
-              }
-            >
-              <span className="mr-2 h-3 w-3 rounded-full inline-block border border-border" style={{ backgroundColor: c.value === "inherit" ? "currentColor" : c.value }} />
-              {c.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Lists */}
-      <ToolbarButton onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="Bullet list">
-        <List className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="Numbered list">
-        <ListOrdered className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="Checklist">
-        <ListChecks className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Block formatting */}
-      <ToolbarButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Quote">
-        <Quote className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Horizontal rule">
-        <Minus className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="Code block">
-        <Code className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Alignment */}
-      <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("left").run()} active={editor.getAttributes("paragraph").textAlign === "left" || !editor.getAttributes("paragraph").textAlign} title="Align left">
-        <AlignLeft className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("center").run()} active={editor.getAttributes("paragraph").textAlign === "center"} title="Align center">
-        <AlignCenter className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("right").run()} active={editor.getAttributes("paragraph").textAlign === "right"} title="Align right">
-        <AlignRight className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("justify").run()} active={editor.getAttributes("paragraph").textAlign === "justify"} title="Justify">
-        <AlignJustify className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Link */}
-      <Popover open={linkOpen} onOpenChange={setLinkOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-7 w-7 ${editor.isActive("link") ? "bg-accent text-accent-foreground" : ""}`}
-            title="Insert link"
-            onClick={() => {
-              const existing = editor.getAttributes("link").href || "";
-              setLinkUrl(existing);
-              setLinkOpen(true);
-            }}
-          >
-            <Link className="h-3.5 w-3.5" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-72 p-3" align="start">
-          <div className="flex gap-2">
-            <Input
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              placeholder="https://..."
-              className="h-8 text-sm"
-              onKeyDown={(e) => e.key === "Enter" && setLink()}
-              autoFocus
-            />
-            <Button size="sm" className="h-8" onClick={setLink}>
-              Apply
+    <div className="shrink-0">
+      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-background flex-wrap">
+        {/* Block type dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs font-normal px-2">
+              <Pilcrow className="h-3.5 w-3.5" />
+              {currentHeading}
+              <ChevronDown className="h-3 w-3" />
             </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
-      {editor.isActive("link") && (
-        <ToolbarButton onClick={() => editor.chain().focus().unsetLink().run()} title="Remove link">
-          <Unlink className="h-3.5 w-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => editor.chain().focus().setParagraph().run()}>
+              <Type className="mr-2 h-4 w-4" /> Normal text
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
+              <Heading1 className="mr-2 h-4 w-4" /> Heading 1
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+              <Heading2 className="mr-2 h-4 w-4" /> Heading 2
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
+              <Heading3 className="mr-2 h-4 w-4" /> Heading 3
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Inline formatting */}
+        <ToolbarButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="Bold (Ctrl+B)">
+          <Bold className="h-3.5 w-3.5" />
         </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} title="Italic (Ctrl+I)">
+          <Italic className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive("underline")} title="Underline (Ctrl+U)">
+          <Underline className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive("strike")} title="Strikethrough">
+          <Strikethrough className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive("code")} title="Inline code">
+          <Code className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive("highlight")} title="Highlight">
+          <Highlighter className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleSuperscript().run()} active={editor.isActive("superscript")} title="Superscript">
+          <Superscript className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleSubscript().run()} active={editor.isActive("subscript")} title="Subscript">
+          <Subscript className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Text color */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Text color">
+              <span className="text-xs font-bold" style={{ color: editor.getAttributes("textStyle").color || "inherit" }}>A</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {TEXT_COLORS.map((c) => (
+              <DropdownMenuItem
+                key={c.value}
+                onClick={() =>
+                  c.value === "inherit"
+                    ? editor.chain().focus().unsetColor().run()
+                    : editor.chain().focus().setColor(c.value).run()
+                }
+              >
+                <span className="mr-2 h-3 w-3 rounded-full inline-block border border-border" style={{ backgroundColor: c.value === "inherit" ? "currentColor" : c.value }} />
+                {c.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Lists */}
+        <ToolbarButton onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="Bullet list">
+          <List className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} title="Numbered list">
+          <ListOrdered className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="Checklist">
+          <ListChecks className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Block formatting */}
+        <ToolbarButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Quote">
+          <Quote className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Horizontal rule">
+          <Minus className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="Code block">
+          <Code className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Alignment */}
+        <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("left").run()} active={editor.getAttributes("paragraph").textAlign === "left" || !editor.getAttributes("paragraph").textAlign} title="Align left">
+          <AlignLeft className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("center").run()} active={editor.getAttributes("paragraph").textAlign === "center"} title="Align center">
+          <AlignCenter className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("right").run()} active={editor.getAttributes("paragraph").textAlign === "right"} title="Align right">
+          <AlignRight className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().setTextAlign("justify").run()} active={editor.getAttributes("paragraph").textAlign === "justify"} title="Justify">
+          <AlignJustify className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Link */}
+        <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-7 w-7 ${editor.isActive("link") ? "bg-accent text-accent-foreground" : ""}`}
+              title="Insert link"
+              onClick={() => {
+                const existing = editor.getAttributes("link").href || "";
+                setLinkUrl(existing);
+                setLinkOpen(true);
+              }}
+            >
+              <Link className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 p-3" align="start">
+            <div className="flex gap-2">
+              <Input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://..."
+                className="h-8 text-sm"
+                onKeyDown={(e) => e.key === "Enter" && setLink()}
+                autoFocus
+              />
+              <Button size="sm" className="h-8" onClick={setLink}>
+                Apply
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+        {editor.isActive("link") && (
+          <ToolbarButton onClick={() => editor.chain().focus().unsetLink().run()} title="Remove link">
+            <Unlink className="h-3.5 w-3.5" />
+          </ToolbarButton>
+        )}
+
+        {/* Table */}
+        <ToolbarButton
+          onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+          title="Insert table"
+        >
+          <Table className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        {/* Media embeds */}
+        <EmbedToolbar editor={editor} />
+
+        <Separator orientation="vertical" className="h-5 mx-1" />
+
+        {/* Clear formatting */}
+        <ToolbarButton onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting">
+          <RemoveFormatting className="h-3.5 w-3.5" />
+        </ToolbarButton>
+
+        <div className="flex-1" />
+
+        {/* Undo / Redo */}
+        <ToolbarButton onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Undo (Ctrl+Z)">
+          <Undo className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo (Ctrl+Shift+Z)">
+          <Redo className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </div>
+
+      {/* Contextual table toolbar */}
+      {isInsideTable && (
+        <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-muted/50 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium mr-1">Table:</span>
+
+          {/* Row operations */}
+          <ToolbarButton onClick={() => editor.chain().focus().addRowBefore().run()} title="Add row above">
+            <Plus className="h-3 w-3" />
+            <RowsIcon className="h-3 w-3" />
+          </ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().addRowAfter().run()} title="Add row below">
+            <RowsIcon className="h-3 w-3" />
+            <Plus className="h-3 w-3" />
+          </ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().deleteRow().run()} title="Delete row">
+            <RowsIcon className="h-3 w-3 text-destructive" />
+          </ToolbarButton>
+
+          <Separator orientation="vertical" className="h-5 mx-1" />
+
+          {/* Column operations */}
+          <ToolbarButton onClick={() => editor.chain().focus().addColumnBefore().run()} title="Add column before">
+            <Plus className="h-3 w-3" />
+            <Columns className="h-3 w-3" />
+          </ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().addColumnAfter().run()} title="Add column after">
+            <Columns className="h-3 w-3" />
+            <Plus className="h-3 w-3" />
+          </ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().deleteColumn().run()} title="Delete column">
+            <Columns className="h-3 w-3 text-destructive" />
+          </ToolbarButton>
+
+          <Separator orientation="vertical" className="h-5 mx-1" />
+
+          {/* Cell operations */}
+          <ToolbarButton onClick={() => editor.chain().focus().mergeCells().run()} title="Merge cells">
+            <Merge className="h-3.5 w-3.5" />
+          </ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().splitCell().run()} title="Split cell">
+            <SplitSquareHorizontal className="h-3.5 w-3.5" />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleHeaderRow().run()}
+            active={editor.isActive("tableHeader")}
+            title="Toggle header row"
+          >
+            <TableProperties className="h-3.5 w-3.5" />
+          </ToolbarButton>
+
+          <Separator orientation="vertical" className="h-5 mx-1" />
+
+          {/* Delete table */}
+          <ToolbarButton onClick={() => editor.chain().focus().deleteTable().run()} title="Delete table">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </ToolbarButton>
+        </div>
       )}
-
-      {/* Table */}
-      <ToolbarButton
-        onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
-        title="Insert table"
-      >
-        <Table className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      {/* Media embeds */}
-      <EmbedToolbar editor={editor} />
-
-      <Separator orientation="vertical" className="h-5 mx-1" />
-
-      {/* Clear formatting */}
-      <ToolbarButton onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting">
-        <RemoveFormatting className="h-3.5 w-3.5" />
-      </ToolbarButton>
-
-      <div className="flex-1" />
-
-      {/* Undo / Redo */}
-      <ToolbarButton onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Undo (Ctrl+Z)">
-        <Undo className="h-3.5 w-3.5" />
-      </ToolbarButton>
-      <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo (Ctrl+Shift+Z)">
-        <Redo className="h-3.5 w-3.5" />
-      </ToolbarButton>
     </div>
   );
 }
