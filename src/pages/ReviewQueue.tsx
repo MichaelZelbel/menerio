@@ -78,6 +78,7 @@ export default function ReviewQueue() {
         // Seed default categories for this contact
         const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
           ...c,
+          user_id: user!.id,
           contact_id,
           is_default: true,
         } as any));
