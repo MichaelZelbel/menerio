@@ -98,7 +98,7 @@ export default function KnowledgeGraph() {
     noteTypes: new Set(ALL_NOTE_TYPES),
     showOrphans: false,
     sizeMode: "connections",
-    labelMode: "hover",
+    labelMode: "always",
   });
 
   // Fetch graph data from edge function
@@ -226,16 +226,35 @@ export default function KnowledgeGraph() {
       const showLabel =
         filters.labelMode === "always" ||
         (filters.labelMode === "hover" && (isHovered || isSelected)) ||
-        (globalScale > 2.5 && !isDimmed);
+        (globalScale > 1.2 && !isDimmed);
 
       if (showLabel) {
+        const isDarkTheme = document.documentElement.classList.contains("dark");
         const fontSize = Math.max(11 / globalScale, 3);
         ctx.font = `500 ${fontSize}px Inter, system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillStyle = isDimmed ? "hsla(220, 25%, 30%, 0.3)" : "hsl(220, 25%, 20%)";
         const label = (node.title || "").length > 28 ? node.title.slice(0, 25) + "…" : node.title;
-        ctx.fillText(label, node.x, node.y + size + 3 / globalScale);
+        const labelY = node.y + size + 3 / globalScale;
+
+        // Background halo for readability
+        const textWidth = ctx.measureText(label).width;
+        const pad = 2 / globalScale;
+        ctx.fillStyle = isDarkTheme ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.75)";
+        ctx.fillRect(
+          node.x - textWidth / 2 - pad,
+          labelY - pad / 2,
+          textWidth + pad * 2,
+          fontSize + pad
+        );
+
+        // Theme-aware text color
+        if (isDimmed) {
+          ctx.fillStyle = isDarkTheme ? "hsla(220, 15%, 70%, 0.3)" : "hsla(220, 25%, 30%, 0.3)";
+        } else {
+          ctx.fillStyle = isDarkTheme ? "hsl(220, 15%, 85%)" : "hsl(220, 25%, 20%)";
+        }
+        ctx.fillText(label, node.x, labelY);
       }
     },
     [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor, bridgeNoteIds]
