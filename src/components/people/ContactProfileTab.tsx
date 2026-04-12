@@ -33,7 +33,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
 
-  // Seed defaults on first visit
+  // Auto-seed defaults on first visit
   useEffect(() => {
     if (!isLoading && categories.length === 0 && !seeded) {
       setSeeded(true);
@@ -41,19 +41,9 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
     }
   }, [isLoading, categories.length, seeded]);
 
-  if (isLoading) return <PageLoader />;
-
-  if (categories.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <p className="text-sm text-muted-foreground mb-3">
-          Setting up {contactName}'s profile…
-        </p>
-        <Button onClick={() => seedDefaults.mutate()} disabled={seedDefaults.isPending} size="sm">
-          Initialize Profile
-        </Button>
-      </div>
-    );
+  // Show loader while loading or while seeding is in progress
+  if (isLoading || (categories.length === 0 && (seedDefaults.isPending || seeded))) {
+    return <PageLoader />;
   }
 
   const handleAddCategory = () => {

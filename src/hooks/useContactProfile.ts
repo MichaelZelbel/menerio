@@ -64,6 +64,9 @@ export function useContactProfile(contactId: string | null) {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] }),
+    onError: (err: any) => {
+      showToast.error(`Failed to initialize profile: ${err.message ?? "Unknown error"}`);
+    },
   });
 
   const upsertCategory = useMutation({
