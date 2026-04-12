@@ -108,6 +108,7 @@ export default function ReviewQueue() {
             name: catDef?.name || category_slug,
             slug: category_slug,
             icon: catDef?.icon || "folder",
+            user_id: user!.id,
             contact_id,
             is_default: false,
             sort_order: 99,
