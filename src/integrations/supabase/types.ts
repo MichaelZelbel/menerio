@@ -305,6 +305,8 @@ export type Database = {
           email: string | null
           id: string
           last_contact_date: string | null
+          merged_at: string | null
+          merged_into: string | null
           metadata: Json | null
           name: string
           notes: string | null
@@ -324,6 +326,8 @@ export type Database = {
           email?: string | null
           id?: string
           last_contact_date?: string | null
+          merged_at?: string | null
+          merged_into?: string | null
           metadata?: Json | null
           name: string
           notes?: string | null
@@ -343,6 +347,8 @@ export type Database = {
           email?: string | null
           id?: string
           last_contact_date?: string | null
+          merged_at?: string | null
+          merged_into?: string | null
           metadata?: Json | null
           name?: string
           notes?: string | null
@@ -353,7 +359,15 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contacts_merged_into_fkey"
+            columns: ["merged_into"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       discord_connections: {
         Row: {
