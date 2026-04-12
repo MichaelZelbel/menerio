@@ -64,7 +64,7 @@ export function useContactRelationships(contactId: string | null) {
         if (r.target_type === "contact" && r.target_id) contactIds.add(r.target_id);
       }
 
-      let contactMap = new Map<string, string>();
+      const contactMap = new Map<string, string>();
       if (contactIds.size > 0) {
         const { data: contacts } = await supabase
           .from("contacts")
