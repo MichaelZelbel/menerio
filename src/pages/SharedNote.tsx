@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { SEOHead } from "@/components/SEOHead";
+import ReactMarkdown from "react-markdown";
 
 interface SharedNoteData {
   title: string;
@@ -13,6 +14,11 @@ interface SharedNoteData {
   entity_type: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Returns true when content looks like HTML (has block-level tags) */
+function looksLikeHtml(content: string): boolean {
+  return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
 }
 
 export default function SharedNote() {
@@ -75,6 +81,8 @@ export default function SharedNote() {
     );
   }
 
+  const isHtml = looksLikeHtml(note.content);
+
   return (
     <>
       <SEOHead title={`${note.title} — Menerio`} description={`Shared note: ${note.title}`} />
@@ -95,10 +103,16 @@ export default function SharedNote() {
           )}
         </header>
 
-        <div
-          className="prose prose-neutral dark:prose-invert max-w-none"
-          dangerouslySetInnerHTML={{ __html: note.content }}
-        />
+        {isHtml ? (
+          <div
+            className="prose prose-neutral dark:prose-invert max-w-none"
+            dangerouslySetInnerHTML={{ __html: note.content }}
+          />
+        ) : (
+          <div className="prose prose-neutral dark:prose-invert max-w-none">
+            <ReactMarkdown>{note.content}</ReactMarkdown>
+          </div>
+        )}
 
         <footer className="mt-16 pt-6 border-t border-border text-center">
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
