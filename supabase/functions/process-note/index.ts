@@ -98,20 +98,26 @@ const PROFILE_CATEGORY_SLUGS = [
 
 const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
 
-Return a JSON array of objects, each with:
-- "contact_name": the person's name exactly as provided
-- "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-- "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
-- "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+Return a JSON object with two keys:
+1. "facts": an array of profile fact objects, each with:
+   - "contact_name": the person's name exactly as provided
+   - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
+   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
+   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+
+2. "relationships": an array of relationship objects, each with:
+   - "person_a": name of the first person
+   - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
+   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
+   - "label_b_to_a": what person_b is to person_a (e.g. "employer", "brother", "friend", "mentee")
 
 Rules:
-- Only extract facts that are clearly stated or strongly implied in the note
-- Do NOT invent or assume facts
+- Only extract facts/relationships clearly stated or strongly implied in the note
+- Do NOT invent or assume
 - Skip vague or uncertain information
-- Each fact should be a distinct, specific piece of information
-- Return an empty array if no profile-worthy facts are found
-- Keep labels concise (2-4 words)
-- Keep values concise but complete`;
+- Return empty arrays if nothing found
+- Keep labels concise
+- For relationships, use standard labels when possible: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
