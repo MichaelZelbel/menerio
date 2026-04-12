@@ -351,13 +351,40 @@ async function generateProfileSuggestions(
       const rawContent = result.result.choices[0].message.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
-      // Handle any wrapper key: { facts: [...] }, { results: [...] }, etc.
+
+      // Normalize three possible response shapes
+      let parseShape: string;
       if (Array.isArray(parsed)) {
         extractedFacts = parsed;
-      } else {
+        parseShape = "array";
+      } else if (typeof parsed === "object" && parsed !== null) {
+        // Check for wrapper key: { facts: [...] }, { results: [...] }, etc.
         const arrayVal = Object.values(parsed).find((v) => Array.isArray(v)) as any[] | undefined;
-        extractedFacts = arrayVal || [];
+        if (arrayVal) {
+          extractedFacts = arrayVal;
+          parseShape = "wrapped-array";
+        } else if (parsed.contact_name && parsed.value) {
+          // Single fact object returned directly
+          extractedFacts = [parsed];
+          parseShape = "single-object";
+        } else {
+          extractedFacts = [];
+          parseShape = "invalid-object";
+        }
+      } else {
+        extractedFacts = [];
+        parseShape = "invalid";
       }
+
+      // Normalize string fields
+      extractedFacts = extractedFacts.map((f: any) => ({
+        contact_name: (f.contact_name || "").trim(),
+        category_slug: (f.category_slug || "").trim().toLowerCase(),
+        label: (f.label || "").trim(),
+        value: (f.value || "").trim(),
+      }));
+
+      console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during profile extraction for note ${noteId}`);
@@ -368,7 +395,7 @@ async function generateProfileSuggestions(
     }
 
     if (extractedFacts.length === 0) {
-      console.log(`No profile facts extracted from note ${noteId}`);
+      console.log(`No profile facts extracted from note ${noteId} (0 after parsing)`);
       return;
     }
 
