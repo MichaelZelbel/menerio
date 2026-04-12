@@ -82,8 +82,9 @@ export default function People() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("id, user_id, name, notes, tags, aliases, app_mappings, metadata, created_at, updated_at")
+        .select("id, user_id, name, notes, tags, aliases, app_mappings, metadata, merged_into, created_at, updated_at")
         .eq("user_id", user!.id)
+        .is("merged_into", null)
         .order("name");
       if (error) throw error;
       return (data || []).map((d: any) => ({
