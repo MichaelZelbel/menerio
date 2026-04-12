@@ -1,47 +1,27 @@
 
 
-## Fix: AI Suggests Adding People Who Already Exist (Spelling Variations)
+## Fix: Show Note Titles Earlier and Support Dark/Light Themes
 
-### Root Cause
-The contact matching in `process-note` uses **exact string match** only. The AI extracted "Gaujie" from the note title, but the actual contact is stored as "Gaojie". Since `"gaujie" !== "gaojie"`, the system treats it as a new person and suggests adding them.
+### Problem
+1. Labels only appear when zoomed in past `globalScale > 2.5` (very zoomed in), or on hover/select. The default `labelMode` is `"hover"`.
+2. Label text color is hardcoded to `hsl(220, 25%, 20%)` (dark text) -- invisible on dark backgrounds.
 
-This will happen for any spelling variation, typo, or transliteration difference (common with non-English names).
+### Changes
 
-### Fix: Add Fuzzy Name Matching
+**File: `src/pages/KnowledgeGraph.tsx`**
 
-**File: `supabase/functions/process-note/index.ts`**
+1. **Lower the zoom threshold for labels**: Change `globalScale > 2.5` to `globalScale > 1.2` so labels appear much earlier when zooming in slightly.
 
-1. Add a lightweight fuzzy matching function (Levenshtein distance or similar) directly in the file -- no new dependencies needed. A simple implementation is ~15 lines.
+2. **Change default `labelMode`** from `"hover"` to `"always"` so labels are visible by default without requiring any zoom.
 
-2. When a person name doesn't match exactly, check all existing contact names/aliases for close matches (e.g., edit distance <= 2, or normalized distance < 0.3 for short names).
+3. **Theme-aware label colors**: Detect the current theme (check for `dark` class on `document.documentElement`) and set label fill color accordingly:
+   - Light mode: `hsl(220, 25%, 20%)` (dark text, current)
+   - Dark mode: `hsl(220, 15%, 85%)` (light text)
+   - Dimmed variants adjusted for both themes too
 
-3. If a close match is found:
-   - Treat it as a match to the existing contact (same as exact match)
-   - Add the extracted spelling as a suggested alias via a new review queue item (`suggestion_type: "add_alias"`) so the user can confirm
-
-4. If no close match is found either, proceed with the current "add_contact" suggestion as before.
-
-**File: `src/pages/ReviewQueue.tsx`**
-
-5. Add a handler for the new `"add_alias"` suggestion type. On accept, append the alias to the contact's `aliases` array.
-
-### Matching Logic (pseudocode)
-```text
-for each extracted person name:
-  1. exact match against contacts + aliases → matched
-  2. fuzzy match (edit distance ≤ 2) → matched + suggest alias
-  3. no match → suggest add_contact
-```
-
-### Additional Hardening
-
-6. **Validate extracted names against source text**: Before suggesting "add_contact", verify the extracted name actually appears in the note content. If the LLM hallucinated a name that isn't in the text at all, skip it entirely. This catches pure hallucinations.
+4. **Add a text background/halo** behind labels for readability: Draw a subtle filled rect or use `ctx.strokeText` with a contrasting stroke to ensure labels are readable regardless of what nodes/edges are behind them.
 
 ### Scope
-- `supabase/functions/process-note/index.ts` -- add fuzzy matching + source text validation
-- `src/pages/ReviewQueue.tsx` -- add "add_alias" accept handler
-- Deploy updated edge function
-
-### Immediate Fix for Current Item
-- Dismiss the current "Gaujie" suggestion and add "Gaujie" as an alias to the existing "Gaojie" contact (can be done manually or we can clean it up in the migration)
+- Single file change: `src/pages/KnowledgeGraph.tsx`
+- Lines ~101, ~226-238 (label logic in `nodeCanvasObject`)
 
