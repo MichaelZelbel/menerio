@@ -52,6 +52,7 @@ const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; col
 };
 
 export default function ReviewQueue() {
+  const { user } = useAuth();
   const { items, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
