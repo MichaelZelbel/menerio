@@ -9,6 +9,7 @@ import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { useContactProfile } from "@/hooks/useContactProfile";
 import { PageLoader } from "@/components/LoadingStates";
+import { RelationshipsSection } from "@/components/people/RelationshipsSection";
 
 interface ContactProfileTabProps {
   contactId: string;
@@ -74,6 +75,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
 
   return (
     <div className="space-y-3">
+      <RelationshipsSection contactId={contactId} contactName={contactName} />
       <ProfileCompleteness categories={categories} entries={entries} />
 
       {categories.map((cat) => (
