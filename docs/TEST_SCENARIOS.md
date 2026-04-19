@@ -1178,9 +1178,51 @@
   2. Click on a notification
 - **Expected Outcome:** Notification marked as read. Unread count decreases.
 
+### TS-NOTIFY-003: Daily Digest Email
+
+- **Objective:** Validate scheduled daily digest delivery
+- **Preconditions:** Notification preferences have `daily_digest_enabled = true` and a digest email/time set
+- **Steps:**
+  1. Wait for the scheduled run of `daily-digest` (or trigger it manually as admin)
+  2. Check the configured inbox
+- **Expected Outcome:** Digest email arrives summarizing recent notes, pending review items, and stale actions.
+
 ---
 
-## Section 18: Public Pages & Navigation
+## Section 18: Content Moderation
+
+### TS-MOD-001: Stopword Filter on Note Save
+
+- **Objective:** Validate the first-tier moderation
+- **Preconditions:** A stopword exists in `moderation_stopwords`
+- **Steps:**
+  1. Create a note containing the stopword
+  2. Save the note
+- **Expected Outcome:** A `moderation_events` row is recorded with the matched word. Depending on severity, the note is either flagged for review or blocked from saving via `ModerationBlockDialog`.
+
+### TS-MOD-002: AI Moderation Review Queue
+
+- **Objective:** Validate AI-assisted moderation review
+- **Preconditions:** A flagged item is queued in `moderation_review_queue`
+- **Steps:**
+  1. Sign in as Admin
+  2. Open the Moderation Panel from the Admin dashboard
+  3. Inspect AI category, confidence and reason
+  4. Approve or reject the item
+- **Expected Outcome:** Item status transitions to `approved` or `rejected`. Strikes/suspensions update on the user via `user_suspensions` if rejected.
+
+### TS-MOD-003: Suspended User Blocked
+
+- **Objective:** Validate suspension enforcement
+- **Preconditions:** A test user has `suspended = true`
+- **Steps:**
+  1. Sign in as that user
+  2. Try to create a note
+- **Expected Outcome:** Creation is blocked with a moderation/suspension message. User can still read existing data per policy.
+
+---
+
+## Section 19: Public Pages & Navigation
 
 ### TS-PUBLIC-001: Landing Page
 
