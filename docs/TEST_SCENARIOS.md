@@ -1283,7 +1283,7 @@
 
 ---
 
-## Section 19: Sidebar Navigation
+## Section 20: Sidebar Navigation
 
 ### TS-NAV-001: Sidebar Navigation Links
 
@@ -1306,7 +1306,7 @@
 
 ---
 
-## Section 20: Cleanup — Delete Test Data
+## Section 21: Cleanup — Delete Test Data
 
 ### TS-CLEANUP-001: Delete All Test Notes
 
