@@ -1,6 +1,6 @@
 # Menerio — End-to-End Test Scenarios
 
-> **Last updated:** 2026-04-03
+> **Last updated:** 2026-04-19
 
 > **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
