@@ -408,9 +408,186 @@
   4. Save
 - **Expected Outcome:** Interaction appears in the contact's interaction history with correct date and type.
 
+### TS-PEOPLE-007: Merge Duplicate Contacts
+
+- **Objective:** Validate contact merge flow
+- **Preconditions:** Two contacts exist that represent the same person (e.g. "Jane Doe" and "Jane D.")
+- **Steps:**
+  1. Navigate to `/dashboard/people`
+  2. Open one of the duplicates and observe the Duplicate Hints suggestion
+  3. Click "Merge" and pick the canonical contact
+  4. Confirm the merge dialog
+- **Expected Outcome:** Source contact is marked `merged_into` the target. Notes, interactions, profile entries, and relationships re-point to the canonical contact. Source no longer appears in the People list.
+
+### TS-PEOPLE-008: Contact Profile Tab — Seed & Edit Categories
+
+- **Objective:** Validate per-contact profile system
+- **Preconditions:** A contact exists with no profile categories yet
+- **Steps:**
+  1. Open the contact detail and switch to the "Profile" tab
+  2. Wait for default categories to auto-seed
+  3. Add an entry under "Identity & Basics" (label: "Hometown", value: "Berlin")
+  4. Add a custom category "Side Projects" with scope "Professional"
+  5. Edit and delete an entry
+- **Expected Outcome:** Default categories appear automatically. Entries persist. Profile completeness ring updates. Custom categories show scope badges.
+
+### TS-PEOPLE-009: Contact Profile Suggestions from Notes
+
+- **Objective:** Validate AI suggestions for a specific contact
+- **Preconditions:** Multiple notes mention the contact by name. AI credits available.
+- **Steps:**
+  1. Open the contact's Profile tab
+  2. Trigger "Suggest from notes" (or save a note that mentions the contact to fire `process-note`)
+  3. Open `/dashboard/review-queue`
+- **Expected Outcome:** `add_profile_entry` items for that contact appear in the Review Queue with category, label, value, and source note link.
+
 ---
 
-## Section 5: Action Items
+## Section 5: People Relationships
+
+### TS-REL-001: Add a Relationship Manually (Contact ↔ Contact)
+
+- **Objective:** Validate manual relationship creation between two contacts
+- **Preconditions:** At least two contacts exist (e.g. "Max" and "Michael")
+- **Steps:**
+  1. Open Max's contact, switch to the Profile tab
+  2. Locate the "Relationships" section at the top
+  3. Click "Add"
+  4. Pick label "employee", target type "A contact", target person "Michael"
+  5. Click "Add"
+- **Expected Outcome:** Relationship row appears showing "→ employee — Michael" with a clickable link to Michael's contact. Toast "Relationship saved".
+
+### TS-REL-002: Add a Self-Relationship
+
+- **Objective:** Validate relationships involving the logged-in user
+- **Preconditions:** At least one contact exists
+- **Steps:**
+  1. Open a contact's Profile tab
+  2. In Relationships, click "Add"
+  3. Pick label "mentor", target type "Me ({your name})"
+  4. Save
+- **Expected Outcome:** Row shows the user's display name as the linked target, navigating to `/dashboard/profile`. The same relationship is visible from the user's own Profile page (mirrored perspective).
+
+### TS-REL-003: Custom Relationship Label
+
+- **Objective:** Validate the custom label override
+- **Preconditions:** Two contacts exist
+- **Steps:**
+  1. Add a relationship and type a value into the "Custom label" field (e.g. "rowing partner")
+  2. Save
+- **Expected Outcome:** The custom label is shown in the badge instead of the standard one.
+
+### TS-REL-004: Edit and Delete a Relationship
+
+- **Objective:** Validate edit / delete actions
+- **Preconditions:** At least one relationship exists
+- **Steps:**
+  1. Hover the relationship row
+  2. Click pencil → change label → Update
+  3. Click trash → confirm
+- **Expected Outcome:** Edit updates label and persists. Delete removes the row and the inverse paired record (if any).
+
+### TS-REL-005: Perspective-Aware Display
+
+- **Objective:** Validate that labels invert when viewed from the other side
+- **Preconditions:** A relationship "Max → employee → Michael" exists
+- **Steps:**
+  1. View Max's profile — observe the displayed label
+  2. View Michael's profile — observe the displayed label
+- **Expected Outcome:** Max's profile shows "employer — Michael". Michael's profile shows "employee — Max". Same row, opposite perspectives.
+
+### TS-REL-006: LLM-Suggested Relationship via Review Queue
+
+- **Objective:** Validate AI extraction of relationships into the Review Queue
+- **Preconditions:** AI credits available; two contacts (or names) exist
+- **Steps:**
+  1. Create or edit a note containing wording like "Max is Michael's employee"
+  2. Save and wait for `process-note` to finish
+  3. Open `/dashboard/review-queue`
+- **Expected Outcome:** An `add_relationship` suggestion appears with the proposed label pair and the two people. Accepting it creates the forward record and queues the inverse "suggested mirror" suggestion.
+
+### TS-REL-007: Relationship Deduplication
+
+- **Objective:** Validate the system prevents duplicate edges
+- **Preconditions:** A relationship "Max ↔ Michael (employee)" already exists
+- **Steps:**
+  1. Try to add the exact same relationship again from the UI
+- **Expected Outcome:** Toast "This relationship already exists". No duplicate row is created.
+
+---
+
+## Section 6: Review Queue
+
+### TS-RQ-001: Open Review Queue
+
+- **Objective:** Validate page renders and badge syncs
+- **Preconditions:** AI has produced at least one pending suggestion
+- **Steps:**
+  1. Observe the sidebar — "Review Queue" should show a numeric badge
+  2. Navigate to `/dashboard/review-queue`
+- **Expected Outcome:** Pending items list renders. Sidebar badge count matches the list count. Both refresh roughly every 60 seconds.
+
+### TS-RQ-002: Accept an `add_contact` Suggestion
+
+- **Objective:** Validate contact creation via Review Queue
+- **Preconditions:** A pending `add_contact` item exists
+- **Steps:**
+  1. Click "Accept" on the suggestion
+- **Expected Outcome:** New contact created. People page updates immediately (React Query cache invalidated). Item moves out of the pending list.
+
+### TS-RQ-003: Accept an `add_alias` Suggestion
+
+- **Objective:** Validate alias merging into an existing contact
+- **Preconditions:** A pending `add_alias` item references an existing contact
+- **Steps:**
+  1. Accept the suggestion
+- **Expected Outcome:** The alias is appended to the contact's `aliases` array (no duplicates).
+
+### TS-RQ-004: Accept an `add_profile_entry` Suggestion
+
+- **Objective:** Validate profile fact insertion
+- **Preconditions:** A pending `add_profile_entry` item exists for self or a contact
+- **Steps:**
+  1. Accept the suggestion
+- **Expected Outcome:** Default categories are seeded for the target if missing. The entry is inserted under the suggested category. Profile completeness updates.
+
+### TS-RQ-005: Accept an `add_event` Suggestion
+
+- **Objective:** Validate calendar/event extraction
+- **Preconditions:** A pending `add_event` item exists
+- **Steps:**
+  1. Accept the suggestion
+- **Expected Outcome:** Event is created (or forwarded according to feature config). Item resolves.
+
+### TS-RQ-006: Accept an `add_relationship` Suggestion (Mirror)
+
+- **Objective:** Validate the suggested-mirror workflow
+- **Preconditions:** A pending `add_relationship` suggestion exists
+- **Steps:**
+  1. Accept it
+  2. Stay on the Review Queue page
+- **Expected Outcome:** The forward relationship row is inserted in `contact_relationships`. A new pending item for the inverse relationship appears in the Review Queue for the other person.
+
+### TS-RQ-007: Skip vs. Never
+
+- **Objective:** Validate the three-option resolution model
+- **Preconditions:** Pending suggestions exist
+- **Steps:**
+  1. Click "Skip" on one item
+  2. Click "Never" on another item
+- **Expected Outcome:** "Skip" removes from pending but leaves room to be re-suggested. "Never" dismisses permanently — re-running extraction does not re-create the same item (deduplication via `uq_review_queue_pending`).
+
+### TS-RQ-008: Source Note Link
+
+- **Objective:** Validate traceability back to the note
+- **Preconditions:** A suggestion has a `source_note_id`
+- **Steps:**
+  1. Click the source-note link on the suggestion card
+- **Expected Outcome:** Navigates to `/dashboard/notes/<id>` with the source note open.
+
+---
+
+## Section 7: Action Items
 
 ### TS-ACTIONS-001: Create an Action Item
 
