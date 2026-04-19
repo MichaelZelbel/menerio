@@ -633,7 +633,7 @@
 
 ---
 
-## Section 6: Knowledge Graph
+## Section 8: Knowledge Graph
 
 ### TS-GRAPH-001: View Knowledge Graph
 
@@ -682,7 +682,7 @@
 
 ---
 
-## Section 7: Media Library
+## Section 9: Media Library
 
 ### TS-MEDIA-001: View Media Library
 
@@ -733,7 +733,7 @@
 
 ---
 
-## Section 8: Weekly Review
+## Section 10: Weekly Review
 
 ### TS-REVIEW-001: Generate Weekly Review
 
@@ -757,7 +757,7 @@
 
 ---
 
-## Section 9: User Profile System
+## Section 11: User Profile System
 
 ### TS-PROFILE-001: Seed Default Categories
 
@@ -890,7 +890,7 @@
 
 ---
 
-## Section 10: Dashboard
+## Section 12: Dashboard
 
 ### TS-DASH-001: Dashboard Overview Cards
 
@@ -939,7 +939,7 @@
 
 ---
 
-## Section 11: AI Features & Credit Tracking
+## Section 13: AI Features & Credit Tracking
 
 ### TS-AI-001: View AI Credits
 
@@ -988,7 +988,7 @@
 
 ---
 
-## Section 12: Premium Feature Gating
+## Section 14: Premium Feature Gating
 
 ### TS-PREMIUM-001: Premium Gate — Free User Blocked
 
@@ -1008,7 +1008,7 @@
 
 ---
 
-## Section 13: Settings & Integrations
+## Section 15: Settings & Integrations
 
 ### TS-SETTINGS-001: Update Profile Info
 
@@ -1088,7 +1088,7 @@
 
 ---
 
-## Section 14: Admin Dashboard
+## Section 16: Admin Dashboard
 
 ### TS-ADMIN-001: Access Admin Panel
 
@@ -1150,7 +1150,7 @@
 
 ---
 
-## Section 15: Activity & Notifications
+## Section 17: Activity & Notifications
 
 ### TS-ACTIVITY-001: View Activity Page
 
@@ -1180,7 +1180,7 @@
 
 ---
 
-## Section 16: Public Pages & Navigation
+## Section 18: Public Pages & Navigation
 
 ### TS-PUBLIC-001: Landing Page
 
@@ -1241,7 +1241,7 @@
 
 ---
 
-## Section 17: Sidebar Navigation
+## Section 19: Sidebar Navigation
 
 ### TS-NAV-001: Sidebar Navigation Links
 
@@ -1264,7 +1264,7 @@
 
 ---
 
-## Section 18: Cleanup — Delete Test Data
+## Section 20: Cleanup — Delete Test Data
 
 ### TS-CLEANUP-001: Delete All Test Notes
 
