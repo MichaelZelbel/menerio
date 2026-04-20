@@ -69,59 +69,80 @@ export default function ReviewQueue() {
     }
 
     try {
-      // Check if the contact has profile categories seeded
-      const { data: existingCats } = await supabase
+      // Check if the contact has profile categories seeded (scoped to current user)
+      const { data: existingCats, error: existingErr } = await supabase
         .from("profile_categories")
         .select("id, slug")
+        .eq("user_id", user!.id)
         .eq("contact_id", contact_id);
 
-      let categoryId: string | null = null;
+      if (existingErr) {
+        showToast.error("Failed to load contact profile: " + existingErr.message);
+        return;
+      }
 
+      let categoryId: string | null = null;
+      const matchExisting = (existingCats || []).find((c: any) => c.slug === category_slug);
+      if (matchExisting) {
+        categoryId = matchExisting.id;
+      }
+
+      // If no categories exist at all, seed defaults using upsert (idempotent — survives races)
       if (!existingCats || existingCats.length === 0) {
-        // Seed default categories for this contact
         const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
           ...c,
           user_id: user!.id,
           contact_id,
           is_default: true,
         } as any));
-        const { data: seeded, error: seedErr } = await supabase
+        const { error: seedErr } = await supabase
           .from("profile_categories")
-          .insert(rows)
-          .select("id, slug");
+          .upsert(rows, { onConflict: "user_id,contact_id,slug", ignoreDuplicates: true });
         if (seedErr) {
           showToast.error("Failed to initialize contact profile: " + seedErr.message);
           return;
         }
-        const match = (seeded || []).find((c: any) => c.slug === category_slug);
-        categoryId = match?.id || null;
-      } else {
-        const match = existingCats.find((c: any) => c.slug === category_slug);
-        categoryId = match?.id || null;
+        // Re-fetch to get the category id (covers both fresh seed and race with another tab)
+        const { data: refetched } = await supabase
+          .from("profile_categories")
+          .select("id, slug")
+          .eq("user_id", user!.id)
+          .eq("contact_id", contact_id)
+          .eq("slug", category_slug)
+          .maybeSingle();
+        categoryId = refetched?.id || null;
       }
 
+      // Still no category? Create the missing one (custom slug or non-default)
       if (!categoryId) {
-        // Category slug doesn't exist — create it
         const catDef = DEFAULT_PROFILE_CATEGORIES.find((c) => c.slug === category_slug);
         const { data: newCat, error: catErr } = await supabase
           .from("profile_categories")
-          .insert({
-            name: catDef?.name || category_slug,
-            slug: category_slug,
-            icon: catDef?.icon || "folder",
-            user_id: user!.id,
-            contact_id,
-            is_default: false,
-            sort_order: 99,
-            visibility_scope: "all",
-          } as any)
+          .upsert(
+            {
+              name: catDef?.name || category_slug,
+              slug: category_slug,
+              icon: catDef?.icon || "folder",
+              user_id: user!.id,
+              contact_id,
+              is_default: false,
+              sort_order: 99,
+              visibility_scope: "all",
+            } as any,
+            { onConflict: "user_id,contact_id,slug" }
+          )
           .select("id")
-          .single();
+          .maybeSingle();
         if (catErr) {
           showToast.error("Failed to create category: " + catErr.message);
           return;
         }
-        categoryId = newCat.id;
+        categoryId = newCat?.id || null;
+      }
+
+      if (!categoryId) {
+        showToast.error("Could not resolve profile category");
+        return;
       }
 
       // Insert the profile entry
