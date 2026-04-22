@@ -384,8 +384,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (processTimer.current) clearTimeout(processTimer.current);
     let normalizedContent = normalizeNoteContent(note.content);
     if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
-    if (editor && normalizedContent !== editor.getHTML()) {
-      editor.commands.setContent(normalizedContent);
+    // Convert Markdown → HTML before handing to TipTap so block constructs
+    // (task lists, tables, etc.) materialize as proper nodes deterministically.
+    const editorContent = looksLikeHtml(normalizedContent)
+      ? normalizedContent
+      : markdownToHtml(normalizedContent);
+    if (editor && editorContent !== editor.getHTML()) {
+      editor.commands.setContent(editorContent);
     }
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);
