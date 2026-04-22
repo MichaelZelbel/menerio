@@ -1,120 +1,75 @@
 
 
-# People Relationships Feature
+# Make Obsidian-style task lists with blank lines work
 
-## Summary
-Add a structured relationships system to Menerio that connects people to each other (and to the logged-in user), with perspective-aware labels and LLM-powered suggestions via the Review Queue.
+## Problem
+When you paste this Markdown into Menerio:
 
-## Data Model
+```
+- [x] Item A.
 
-A new `contact_relationships` table stores directional relationship edges:
+- [x] Item B.
+
+- [ ] Item C.
+```
+
+…you get three separate paragraphs instead of a checklist. Obsidian and Evernote happily render it as a checklist because they tolerate blank lines between task items. Our markdown parser (and the fallback converter in `src/utils/markdown-converter.ts`) follows strict CommonMark/GFM rules and treats blank-line-separated `- [ ]` lines as independent blocks.
+
+The TipTap editor itself is configured correctly (`TaskList` + `TaskItem.configure({ nested: true })`) and the CSS for `ul[data-type="taskList"]` already exists. The bug is purely in **how Markdown is normalized into the editor**.
+
+## Fix
+
+Add a small Markdown pre-processor that runs before content reaches TipTap's markdown parser. It detects sequences of task-list items separated only by blank lines and collapses the blank lines so they form a single contiguous list. After collapsing, both `tiptap-markdown` and our custom `markdownToHtml` fallback recognize it as a task list.
+
+### What "task-list block" means here
+A run of two or more consecutive non-blank lines that each look like `- [ ] ...` or `- [x] ...` (with optional indentation), separated only by blank lines. We collapse the blank separators inside the run; we do not touch surrounding paragraphs.
+
+### Where the fix lives
+
+1. **`src/lib/note-content.ts`** — add `coalesceTaskList(md: string): string` and call it from `normalizeNoteContent` before returning. This is the single funnel both initial load and `setContent` go through, so it covers:
+   - Loading a note from the DB
+   - External/synced notes
+   - Markdown that arrives via paste (we also wire it into the paste handler — see step 2)
+
+2. **`src/components/notes/NoteEditor.tsx`** — add a `transformPasted`/paste handler so that pasting Obsidian-style Markdown directly into the editor also gets normalized. The simplest path is a TipTap `editorProps.handlePaste` that runs the same `coalesceTaskList` on `text/plain` clipboard data before letting `tiptap-markdown`'s `transformPastedText` pick it up.
+
+3. **`src/utils/markdown-converter.ts`** — apply `coalesceTaskList` at the top of `markdownToHtml` so the legacy converter (used in some import paths) also benefits. This keeps the two render paths consistent.
+
+### Algorithm sketch
 
 ```text
-contact_relationships
-─────────────────────
-id              uuid PK
-user_id         uuid NOT NULL (owner, for RLS)
-source_type     text NOT NULL ('contact' | 'self')
-source_id       uuid NULL (contact_id, NULL when source_type='self')
-target_type     text NOT NULL ('contact' | 'self')
-target_id       uuid NULL (contact_id, NULL when target_type='self')
-label           text NOT NULL (e.g. 'employee', 'brother')
-custom_label    text NULL (manual override)
-inverse_id      uuid NULL (FK → contact_relationships.id, links paired records)
-created_at      timestamptz
-updated_at      timestamptz
+TASK_LINE = /^(\s*)- \[[ xX]\]\s+/
+
+split markdown into lines
+walk lines, marking task-line indices
+for each maximal run of task-line indices separated only by blank lines:
+    drop the blank lines between them
+re-join
 ```
 
-- `source_type='self'` + `source_id=NULL` means "me (the logged-in user)".
-- `inverse_id` links paired records: when you add "Max is my employee", the system suggests the mirror "Michael is Max's employer" in the Review Queue.
-- RLS: `user_id = auth.uid()` on all operations.
+Idempotent: running it twice on already-tight task lists is a no-op.
 
-### Label Pairs (predefined)
+## What this does NOT change
+- No new dependencies.
+- TipTap extension list, schema, and CSS stay as-is.
+- HTML → Markdown (export) path is unchanged — it already emits tight task lists.
+- Non-task lists (regular `- bullet` items separated by blank lines) are untouched.
 
-A hardcoded list of label pairs provides perspective-aware display:
+## Test additions (`src/utils/__tests__/markdown-converter.test.ts`)
+- Blank-line-separated `- [ ]` items become a single `<ul data-type="taskList">` with all items.
+- Mixed checked/unchecked states are preserved (`data-checked="true"`/`"false"`).
+- Tight task list (no blank lines) still renders correctly (idempotency).
+- A regular `- A\n\n- B` bullet list is **not** merged into one list (only task syntax triggers coalescing).
 
-```text
-employee ↔ employer
-friend ↔ friend
-brother ↔ brother/sister (gendered pairs)
-sister ↔ brother/sister
-mother ↔ son/daughter
-father ↔ son/daughter
-son ↔ mother/father
-daughter ↔ mother/father
-partner ↔ partner
-spouse ↔ spouse
-mentor ↔ mentee
-manager ↔ report
-co-worker ↔ co-worker
-neighbor ↔ neighbor
-roommate ↔ roommate
-```
-
-When viewing Max's profile and the relationship says `label='employee', source_type='self'`, the UI shows: **"Employee of Michael"**. On Michael's own profile, it shows **"Max is my employee"**.
-
-Custom labels bypass the pair system — the user types both the forward and inverse label manually.
-
-## UI Design
-
-### Inside the Profile Tab
-A new "Relationships" section renders at the top of the Profile tab (above categories), since relationships are structurally different from key-value entries:
-
-- Each relationship shows: the other person's name (clickable link to their People page), the label (from the current profile's perspective), and optionally a custom override.
-- An "Add relationship" button opens a small form: pick a contact (or "Me"), pick a label from the standard list or type a custom one.
-- Each relationship has edit/delete actions.
-
-### Perspective Display Logic
-When viewing **Max's profile**, a relationship where `source_type='self', label='employee'` displays as:
-> **Michael** — employer
-
-When viewing **Michael's own profile** (or "My Profile"), the same relationship from source shows:
-> **Max** — employee
-
-The UI always answers: "Who is this person to the profile I'm looking at?"
-
-## LLM Integration
-
-### Extraction
-Extend the `generateProfileSuggestions` function in `process-note/index.ts` to also extract relationships. The prompt will ask for an additional `relationships` array alongside profile facts:
-
-```json
-{
-  "facts": [...],
-  "relationships": [
-    { "person_a": "Max", "person_b": "Michael", "label_a_to_b": "employer", "label_b_to_a": "employee" }
-  ]
-}
-```
-
-### Review Queue
-A new suggestion type `add_relationship` appears in the Review Queue. Accepting it:
-1. Creates the forward relationship record.
-2. Creates a second Review Queue item for the inverse (the "suggested mirror" approach you chose).
-
-Deduplication checks existing `contact_relationships` rows before inserting.
-
-## Implementation Steps
-
-1. **Database migration**: Create `contact_relationships` table with RLS policies.
-2. **Shared constants**: Create `src/lib/relationship-labels.ts` with the label pairs and helper functions for perspective display.
-3. **Hook**: Create `src/hooks/useContactRelationships.ts` — CRUD operations for relationships scoped to a contact or self.
-4. **UI component**: Create `src/components/people/RelationshipsSection.tsx` — renders inside the Profile tab, handles add/edit/delete.
-5. **ContactProfileTab update**: Mount the RelationshipsSection above the category sections.
-6. **Process-note update**: Extend the profile extraction prompt and parser to extract relationships, insert `add_relationship` items into `review_queue`.
-7. **ReviewQueue update**: Handle `add_relationship` acceptance — insert the record and create the inverse suggestion.
-8. **My Profile**: Add RelationshipsSection to the user's own Profile page so self-relationships are visible there too.
-
-## Files to Create/Modify
+## Files touched
 
 | File | Action |
 |------|--------|
-| `supabase/migrations/NNNN_create_contact_relationships.sql` | New — table + RLS |
-| `src/lib/relationship-labels.ts` | New — label pairs, inverse lookup, display helpers |
-| `src/hooks/useContactRelationships.ts` | New — query/mutate relationships |
-| `src/components/people/RelationshipsSection.tsx` | New — UI component |
-| `src/components/people/ContactProfileTab.tsx` | Modify — mount RelationshipsSection |
-| `src/pages/Profile.tsx` | Modify — mount RelationshipsSection for self |
-| `supabase/functions/process-note/index.ts` | Modify — extend prompt + parser |
-| `src/pages/ReviewQueue.tsx` | Modify — handle `add_relationship` type |
+| `src/lib/note-content.ts` | Add `coalesceTaskList`; call it inside `normalizeNoteContent` |
+| `src/components/notes/NoteEditor.tsx` | Add `editorProps.handlePaste` to coalesce pasted Markdown |
+| `src/utils/markdown-converter.ts` | Run `coalesceTaskList` at top of `markdownToHtml` |
+| `src/utils/__tests__/markdown-converter.test.ts` | Add 4 test cases described above |
+
+## Note on the reported build errors
+The TypeScript errors about `@tiptap/core`, `@tiptap/extension-underline`, and `@tiptap/pm/state` not being found are not new — these packages are used throughout the working editor and are in `package.json`. They look like a stale dependency-install / TS-server state and should clear automatically on the next install + typecheck cycle. No code change is required for them; if they persist after this fix is implemented, a clean `bun install` will resolve them.
 
