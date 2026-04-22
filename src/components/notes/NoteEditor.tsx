@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
+import { TaskListShortcut } from "./extensions/TaskListShortcut";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
 import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink, ShareNoteResult } from "@/hooks/useNoteSharing";
 import { ModerationResult } from "@/lib/moderateContent";
@@ -99,7 +100,8 @@ import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
-import { normalizeNoteContent, stripLeadingH1, coalesceTaskList } from "@/lib/note-content";
+import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
+import { markdownToHtml } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
