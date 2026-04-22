@@ -1,75 +1,147 @@
 
+# Make Obsidian/Evernote task syntax render as real checklists in Menerio
 
-# Make Obsidian-style task lists with blank lines work
+## Revised diagnosis
+The earlier blank-line theory is not the core issue.
 
-## Problem
-When you paste this Markdown into Menerio:
+What the app is missing is this behavior:
+- When a user types or pastes Markdown task syntax like `- [ ]` / `- [x]`
+- the editor should convert that syntax into actual TipTap `taskList` / `taskItem` nodes
+- so the UI shows clickable checkboxes and checked items get struck through
 
-```
-- [x] Item A.
+Right now:
+- the checklist UI/CSS already exists
+- the toolbar can already create task lists manually
+- but raw Markdown task syntax is not being promoted reliably into real task nodes
+- and the current paste workaround is brittle
+- plus the current branch has genuine CI/build issues from missing explicit Tiptap packages
 
-- [x] Item B.
+## UX target
+After this change, the experience should be:
 
-- [ ] Item C.
-```
+1. Paste Obsidian/Evernote checklist Markdown into a note
+   - it immediately renders as a real checklist with boxes
+   - checked items appear checked and struck through
 
-…you get three separate paragraphs instead of a checklist. Obsidian and Evernote happily render it as a checklist because they tolerate blank lines between task items. Our markdown parser (and the fallback converter in `src/utils/markdown-converter.ts`) follows strict CommonMark/GFM rules and treats blank-line-separated `- [ ]` lines as independent blocks.
+2. Type checklist Markdown manually in the rich editor
+   - entering `- [ ] ` or `- [x] ` should turn the current line into a checklist item
+   - subsequent Enter presses should continue the checklist naturally
 
-The TipTap editor itself is configured correctly (`TaskList` + `TaskItem.configure({ nested: true })`) and the CSS for `ul[data-type="taskList"]` already exists. The bug is purely in **how Markdown is normalized into the editor**.
+3. Toggle a checkbox
+   - the visual state updates immediately
+   - saving still stores Obsidian-compatible Markdown in the DB
 
-## Fix
+4. Switch to Source Mode
+   - the same content appears as Markdown (`- [ ]`, `- [x]`)
+   - switching back to rich mode restores real checkboxes
 
-Add a small Markdown pre-processor that runs before content reaches TipTap's markdown parser. It detects sequences of task-list items separated only by blank lines and collapses the blank lines so they form a single contiguous list. After collapsing, both `tiptap-markdown` and our custom `markdownToHtml` fallback recognize it as a task list.
+## Implementation plan
 
-### What "task-list block" means here
-A run of two or more consecutive non-blank lines that each look like `- [ ] ...` or `- [x] ...` (with optional indentation), separated only by blank lines. We collapse the blank separators inside the run; we do not touch surrounding paragraphs.
+### 1) Fix the broken Tiptap dependency setup first
+The current “module not found” errors are real and need to be fixed before anything else.
 
-### Where the fix lives
+Update dependencies so the code matches the imports already used:
+- add explicit `@tiptap/core`
+- add explicit `@tiptap/pm`
+- add explicit `@tiptap/extension-underline`
 
-1. **`src/lib/note-content.ts`** — add `coalesceTaskList(md: string): string` and call it from `normalizeNoteContent` before returning. This is the single funnel both initial load and `setContent` go through, so it covers:
-   - Loading a note from the DB
-   - External/synced notes
-   - Markdown that arrives via paste (we also wire it into the paste handler — see step 2)
+Then refresh the lockfile(s) so CI sees the same dependency graph locally and on GitHub.
 
-2. **`src/components/notes/NoteEditor.tsx`** — add a `transformPasted`/paste handler so that pasting Obsidian-style Markdown directly into the editor also gets normalized. The simplest path is a TipTap `editorProps.handlePaste` that runs the same `coalesceTaskList` on `text/plain` clipboard data before letting `tiptap-markdown`'s `transformPastedText` pick it up.
+### 2) Stop relying on raw Markdown auto-detection for checklist rendering
+The editor currently feeds Markdown directly into `setContent()` and assumes the Markdown extension will always turn task syntax into proper task nodes. That is the weak point.
 
-3. **`src/utils/markdown-converter.ts`** — apply `coalesceTaskList` at the top of `markdownToHtml` so the legacy converter (used in some import paths) also benefits. This keeps the two render paths consistent.
+Instead:
+- if note content is Markdown, convert it through `markdownToHtml(normalizeNoteContent(...))` before passing it into the editor
+- keep legacy HTML notes as HTML
+- keep saving back to Markdown using the existing serializer (`storage.markdown.getMarkdown()`)
 
-### Algorithm sketch
+This keeps DB storage Markdown-native while making rendering deterministic.
 
-```text
-TASK_LINE = /^(\s*)- \[[ xX]\]\s+/
+### 3) Replace the synthetic paste event workaround with direct task-list insertion
+The current paste fix re-dispatches a synthetic `ClipboardEvent`, which is fragile.
 
-split markdown into lines
-walk lines, marking task-line indices
-for each maximal run of task-line indices separated only by blank lines:
-    drop the blank lines between them
-re-join
-```
+Replace it with a direct flow in `NoteEditor`:
+- read `text/plain` from the clipboard
+- detect task-list Markdown
+- normalize it with `coalesceTaskList`
+- convert it with `markdownToHtml`
+- insert that rendered content directly at the current selection
 
-Idempotent: running it twice on already-tight task lists is a no-op.
+For non-task pastes, fall back to the normal editor pipeline.
 
-## What this does NOT change
-- No new dependencies.
-- TipTap extension list, schema, and CSS stay as-is.
-- HTML → Markdown (export) path is unchanged — it already emits tight task lists.
-- Non-task lists (regular `- bullet` items separated by blank lines) are untouched.
+This makes pasted checklists reliable regardless of how `tiptap-markdown` handles pasted text internally.
 
-## Test additions (`src/utils/__tests__/markdown-converter.test.ts`)
-- Blank-line-separated `- [ ]` items become a single `<ul data-type="taskList">` with all items.
-- Mixed checked/unchecked states are preserved (`data-checked="true"`/`"false"`).
-- Tight task list (no blank lines) still renders correctly (idempotency).
-- A regular `- A\n\n- B` bullet list is **not** merged into one list (only task syntax triggers coalescing).
+### 4) Add a real Markdown shortcut for manual typing
+To match Obsidian/Evernote expectations, typing the syntax should also work, not only pasting.
 
-## Files touched
+Add a small editor extension or input rule that watches the current line for:
+- `- [ ] `
+- `- [x] `
 
-| File | Action |
-|------|--------|
-| `src/lib/note-content.ts` | Add `coalesceTaskList`; call it inside `normalizeNoteContent` |
-| `src/components/notes/NoteEditor.tsx` | Add `editorProps.handlePaste` to coalesce pasted Markdown |
-| `src/utils/markdown-converter.ts` | Run `coalesceTaskList` at top of `markdownToHtml` |
-| `src/utils/__tests__/markdown-converter.test.ts` | Add 4 test cases described above |
+When the pattern is completed, convert that line into a `taskItem` with the correct checked state.
 
-## Note on the reported build errors
-The TypeScript errors about `@tiptap/core`, `@tiptap/extension-underline`, and `@tiptap/pm/state` not being found are not new — these packages are used throughout the working editor and are in `package.json`. They look like a stale dependency-install / TS-server state and should clear automatically on the next install + typecheck cycle. No code change is required for them; if they persist after this fix is implemented, a clean `bun install` will resolve them.
+This is the missing UX behavior the user is describing.
 
+### 5) Preserve existing checkbox behavior after conversion
+Once the content is a real TipTap task list:
+- clicking a checkbox should toggle `checked`
+- checked items should remain visually struck through
+- saving should serialize back to Markdown with `- [x]` / `- [ ]`
+
+No separate checklist storage model should be introduced.
+
+### 6) Clean up the TypeScript issues uncovered by CI
+Alongside the checklist fix, resolve the current compile errors:
+
+- `insertWikilink` typing:
+  - once `@tiptap/core` is installed, the module augmentation should resolve
+  - if not, tighten the command typing or add a local typed wrapper so call sites compile cleanly
+
+- `FileUploadHandler` unknown-to-File errors:
+  - explicitly narrow dropped/pasted files to `File[]`
+  - avoid relying on inference from ProseMirror event types
+
+This keeps the feature branch buildable again.
+
+## Files to update
+
+| File | Change |
+|---|---|
+| `package.json` | Add missing Tiptap dependencies |
+| `bun.lock` / `package-lock.json` | Refresh lockfile(s) for CI consistency |
+| `src/components/notes/NoteEditor.tsx` | Use deterministic Markdown→HTML hydration, replace paste handler, wire typing shortcut |
+| `src/components/notes/extensions/FileUploadHandler.ts` | Tighten file typing |
+| `src/components/notes/extensions/WikilinkExtension.ts` | Verify/fix command typing if needed after dependency fix |
+| `src/lib/note-content.ts` | Keep normalization utility; retain coalescing as a helper, not the main fix |
+| `src/utils/markdown-converter.ts` | Continue using task-list HTML conversion as the canonical render bridge |
+| `src/utils/__tests__/markdown-converter.test.ts` | Keep/update checklist conversion tests |
+| `src/components/notes/...` | Add a small markdown-task shortcut extension if implemented as a separate file |
+
+## Verification checklist
+After implementation, verify all of these:
+
+1. Paste the user’s sample Markdown into a note
+   - real checkboxes appear
+   - checked items are checked and struck through
+
+2. Type a new item manually with `- [ ] `
+   - it becomes a checklist item without using the toolbar
+
+3. Toggle a checkbox
+   - save
+   - reload the note
+   - state remains correct
+
+4. Switch to Source Mode and back
+   - Markdown stays Obsidian-compatible
+   - rich mode still shows checkboxes
+
+5. Run CI/build checks
+   - no missing Tiptap module errors
+   - no `insertWikilink` typing errors
+   - no `unknown`→`File` errors
+
+## Key technical constraint
+The fix should preserve the project rule:
+- notes remain stored as Markdown in the database
+- the change only improves how Markdown task syntax is interpreted and rendered inside the TipTap editor
