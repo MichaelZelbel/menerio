@@ -23,6 +23,7 @@ import { PdfEmbed } from "./extensions/PdfEmbed";
 import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
+import { TaskListShortcut } from "./extensions/TaskListShortcut";
 import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
 import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink, ShareNoteResult } from "@/hooks/useNoteSharing";
 import { ModerationResult } from "@/lib/moderateContent";
@@ -99,7 +100,8 @@ import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
-import { normalizeNoteContent, stripLeadingH1, coalesceTaskList } from "@/lib/note-content";
+import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
+import { markdownToHtml } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -306,26 +308,35 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         onNavigate: (noteId: string) => handleNavigateToNote(noteId),
         onOpenAutocomplete: (pos: number) => handleOpenAutocomplete(pos),
       }),
+      TaskListShortcut,
     ],
     editorProps: {
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData("text/plain");
         if (!text) return false;
-        const coalesced = coalesceTaskList(text);
-        if (coalesced === text) return false;
-        // Re-dispatch a synthetic paste with the coalesced text so the
-        // tiptap-markdown `transformPastedText` pipeline still runs.
+
+        // Detect Markdown task-list syntax in the clipboard text.
+        const hasTaskSyntax = /^\s*-\s\[[ xX]\]\s+/m.test(text);
+        if (!hasTaskSyntax) return false;
+
+        // Normalize blank-line-separated items, then convert MD → HTML so
+        // we get real taskList/taskItem nodes regardless of how
+        // tiptap-markdown handles pasted text internally.
+        const normalized = coalesceTaskList(text);
+        const html = markdownToHtml(normalized);
+        if (!html) return false;
+
         event.preventDefault();
-        const dt = new DataTransfer();
-        dt.setData("text/plain", coalesced);
-        const synthetic = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
-        view.dom.dispatchEvent(synthetic);
+        editor?.chain().focus().insertContent(html).run();
         return true;
       },
     },
     content: (() => {
       const normalized = normalizeNoteContent(note.content);
-      return note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
+      const stripped = note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
+      // Convert Markdown deterministically to HTML so checklists and other
+      // block constructs always render as real TipTap nodes on first load.
+      return looksLikeHtml(stripped) ? stripped : markdownToHtml(stripped);
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
@@ -373,8 +384,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (processTimer.current) clearTimeout(processTimer.current);
     let normalizedContent = normalizeNoteContent(note.content);
     if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
-    if (editor && normalizedContent !== editor.getHTML()) {
-      editor.commands.setContent(normalizedContent);
+    // Convert Markdown → HTML before handing to TipTap so block constructs
+    // (task lists, tables, etc.) materialize as proper nodes deterministically.
+    const editorContent = looksLikeHtml(normalizedContent)
+      ? normalizedContent
+      : markdownToHtml(normalizedContent);
+    if (editor && editorContent !== editor.getHTML()) {
+      editor.commands.setContent(editorContent);
     }
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);
