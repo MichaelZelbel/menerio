@@ -890,28 +890,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       <NoteChatPanel
         note={note}
         onClose={() => setShowChat(false)}
-        messages={chatMessages}
-        onMessagesChange={(msgs) => {
-          setChatMessages(msgs);
-          chatMessagesRef.current.set(note.id, msgs);
-        }}
         onNoteChanged={() => {
           queryClient.invalidateQueries({ queryKey: ["notes"] });
-          if (editor) {
-            supabase
-              .from("notes" as any)
-              .select("content, tags, metadata")
-              .eq("id", note.id)
-              .single()
-              .then(({ data }) => {
-                if (data) {
-                  const normalized = normalizeNoteContent((data as any).content);
-                  if (normalized !== editor.getHTML()) {
-                    editor.commands.setContent(normalized);
-                  }
-                }
-              });
-          }
         }}
       />
     )}
