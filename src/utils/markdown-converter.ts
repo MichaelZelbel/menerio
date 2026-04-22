@@ -152,6 +152,7 @@ export function htmlToMarkdown(html: string): string {
  */
 export function markdownToHtml(md: string): string {
   if (!md) return "";
+  md = coalesceTaskListMd(md);
 
   let html = md;
 
