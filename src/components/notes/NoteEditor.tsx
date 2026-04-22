@@ -99,7 +99,7 @@ import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
-import { normalizeNoteContent, stripLeadingH1 } from "@/lib/note-content";
+import { normalizeNoteContent, stripLeadingH1, coalesceTaskList } from "@/lib/note-content";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
