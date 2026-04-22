@@ -15,6 +15,53 @@ function decodeHtmlEntities(value: string): string {
 }
 
 /**
+ * Coalesce Obsidian/Evernote-style task lists where items are separated by
+ * blank lines. CommonMark/GFM treats `- [ ] A\n\n- [ ] B` as two separate
+ * lists/paragraphs; Obsidian renders them as a single checklist. We collapse
+ * the blank lines between consecutive task-list items so downstream Markdown
+ * parsers (tiptap-markdown, our fallback `markdownToHtml`) treat them as
+ * one tight task list.
+ *
+ * Idempotent: already-tight task lists are returned unchanged.
+ * Only triggers on `- [ ]` / `- [x]` lines — regular bullet lists are untouched.
+ */
+export function coalesceTaskList(md: string): string {
+  if (!md || !md.includes("[")) return md;
+
+  const TASK_LINE = /^(\s*)- \[[ xX]\]\s+/;
+  const lines = md.split("\n");
+  const isTask = lines.map((l) => TASK_LINE.test(l));
+  const isBlank = lines.map((l) => l.trim() === "");
+  const drop = new Set<number>();
+
+  let i = 0;
+  while (i < lines.length) {
+    if (!isTask[i]) { i++; continue; }
+    // Found start of a task run — scan forward, marking blank separators that
+    // sit between two task lines for removal.
+    let j = i;
+    while (j < lines.length) {
+      if (isTask[j]) { j++; continue; }
+      if (isBlank[j]) {
+        // Look ahead past any consecutive blank lines for another task line.
+        let k = j;
+        while (k < lines.length && isBlank[k]) k++;
+        if (k < lines.length && isTask[k]) {
+          for (let b = j; b < k; b++) drop.add(b);
+          j = k;
+          continue;
+        }
+      }
+      break;
+    }
+    i = j;
+  }
+
+  if (drop.size === 0) return md;
+  return lines.filter((_, idx) => !drop.has(idx)).join("\n");
+}
+
+/**
  * Normalize note content for the TipTap editor.
  * Handles both legacy HTML content and new Markdown content.
  * TipTap's markdown extension auto-detects format via setContent().
@@ -33,7 +80,12 @@ export function normalizeNoteContent(content: string | null | undefined): string
     return decoded;
   }
 
-  // Markdown or plain HTML — pass through as-is (TipTap handles both)
+  // Markdown — coalesce Obsidian-style task lists with blank-line separators.
+  if (!looksLikeHtml(value)) {
+    return coalesceTaskList(value);
+  }
+
+  // Plain HTML — pass through as-is.
   return value;
 }
 
