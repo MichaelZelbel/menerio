@@ -87,7 +87,10 @@ export default function ReviewQueue() {
         categoryId = matchExisting.id;
       }
 
-      // If no categories exist at all, seed defaults using upsert (idempotent — survives races)
+      // If no categories exist at all, seed defaults via plain insert.
+      // The unique index uses an expression (COALESCE(contact_id, ...)) so we
+      // cannot use ON CONFLICT — instead we tolerate 23505 unique-violations
+      // (race with another tab) and re-fetch to resolve the category id.
       if (!existingCats || existingCats.length === 0) {
         const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
           ...c,
@@ -97,8 +100,8 @@ export default function ReviewQueue() {
         } as any));
         const { error: seedErr } = await supabase
           .from("profile_categories")
-          .upsert(rows, { onConflict: "user_id,contact_id,slug", ignoreDuplicates: true });
-        if (seedErr) {
+          .insert(rows);
+        if (seedErr && (seedErr as any).code !== "23505") {
           showToast.error("Failed to initialize contact profile: " + seedErr.message);
           return;
         }
@@ -113,13 +116,23 @@ export default function ReviewQueue() {
         categoryId = refetched?.id || null;
       }
 
-      // Still no category? Create the missing one (custom slug or non-default)
+      // Still no category? Create the missing one (custom slug or non-default).
+      // Same constraint applies — use select-then-insert with race tolerance.
       if (!categoryId) {
-        const catDef = DEFAULT_PROFILE_CATEGORIES.find((c) => c.slug === category_slug);
-        const { data: newCat, error: catErr } = await supabase
+        const { data: existing } = await supabase
           .from("profile_categories")
-          .upsert(
-            {
+          .select("id")
+          .eq("user_id", user!.id)
+          .eq("contact_id", contact_id)
+          .eq("slug", category_slug)
+          .maybeSingle();
+        if (existing?.id) {
+          categoryId = existing.id;
+        } else {
+          const catDef = DEFAULT_PROFILE_CATEGORIES.find((c) => c.slug === category_slug);
+          const { data: newCat, error: catErr } = await supabase
+            .from("profile_categories")
+            .insert({
               name: catDef?.name || category_slug,
               slug: category_slug,
               icon: catDef?.icon || "folder",
@@ -128,16 +141,28 @@ export default function ReviewQueue() {
               is_default: false,
               sort_order: 99,
               visibility_scope: "all",
-            } as any,
-            { onConflict: "user_id,contact_id,slug" }
-          )
-          .select("id")
-          .maybeSingle();
-        if (catErr) {
-          showToast.error("Failed to create category: " + catErr.message);
-          return;
+            } as any)
+            .select("id")
+            .maybeSingle();
+          if (catErr) {
+            if ((catErr as any).code === "23505") {
+              // Race: another insert won. Re-select.
+              const { data: raced } = await supabase
+                .from("profile_categories")
+                .select("id")
+                .eq("user_id", user!.id)
+                .eq("contact_id", contact_id)
+                .eq("slug", category_slug)
+                .maybeSingle();
+              categoryId = raced?.id || null;
+            } else {
+              showToast.error("Failed to create category: " + catErr.message);
+              return;
+            }
+          } else {
+            categoryId = newCat?.id || null;
+          }
         }
-        categoryId = newCat?.id || null;
       }
 
       if (!categoryId) {
