@@ -1,4 +1,5 @@
 import matter from "gray-matter";
+import { coalesceTaskList as coalesceTaskListMd } from "@/lib/note-content";
 
 // ─── Types ───────────────────────────────────────────────────────────
 

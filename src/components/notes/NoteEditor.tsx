@@ -307,6 +307,22 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         onOpenAutocomplete: (pos: number) => handleOpenAutocomplete(pos),
       }),
     ],
+    editorProps: {
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text) return false;
+        const coalesced = coalesceTaskList(text);
+        if (coalesced === text) return false;
+        // Re-dispatch a synthetic paste with the coalesced text so the
+        // tiptap-markdown `transformPastedText` pipeline still runs.
+        event.preventDefault();
+        const dt = new DataTransfer();
+        dt.setData("text/plain", coalesced);
+        const synthetic = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+        view.dom.dispatchEvent(synthetic);
+        return true;
+      },
+    },
     content: (() => {
       const normalized = normalizeNoteContent(note.content);
       return note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
