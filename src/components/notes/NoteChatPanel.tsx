@@ -5,7 +5,17 @@ import { Note } from "@/hooks/useNotes";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  loadChatState,
+  saveChatState,
+  clearChatState,
+  buildApiMessages,
+  CHAT_WINDOW_SIZE,
+  SUMMARY_THRESHOLD,
+  NOTE_MODIFYING_TOOLS,
+  type PersistedChatMessage,
+  type PersistedChatState,
+} from "@/lib/chat-history";
 import {
   X,
   Send,
@@ -14,41 +24,74 @@ import {
   User,
   Wrench,
   AlertCircle,
+  Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  toolResults?: Array<{
-    tool: string;
-    args: Record<string, unknown>;
-    result: Record<string, unknown>;
-  }>;
-}
+export type ChatMessage = PersistedChatMessage;
 
 export interface NoteChatPanelProps {
   note: Note;
   onClose: () => void;
   onNoteChanged: () => void;
-  messages: ChatMessage[];
-  onMessagesChange: (msgs: ChatMessage[]) => void;
 }
 
-export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessagesChange }: NoteChatPanelProps) {
-  const { session } = useAuth();
+export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelProps) {
+  const { session, user } = useAuth();
+  const contextKey = `note:${note.id}`;
+  const [state, setState] = useState<PersistedChatState>(() =>
+    loadChatState(user?.id, contextKey),
+  );
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Hydrate from localStorage when the note (context) changes
+  useEffect(() => {
+    setState(loadChatState(user?.id, contextKey));
+    setError(null);
+  }, [contextKey, user?.id]);
+
+  // Persist on every change
+  useEffect(() => {
+    saveChatState(user?.id, contextKey, state);
+  }, [state, contextKey, user?.id]);
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [state.messages, isLoading]);
+
+  const refreshSummaryIfNeeded = useCallback(
+    async (current: PersistedChatState): Promise<PersistedChatState> => {
+      // Only summarize when we have enough fresh history above the window
+      const olderCount = current.messages.length - CHAT_WINDOW_SIZE;
+      if (olderCount < SUMMARY_THRESHOLD - CHAT_WINDOW_SIZE) return current;
+      if (current.summarizedUpTo >= current.messages.length - CHAT_WINDOW_SIZE) return current;
+      try {
+        const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
+        const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
+        const { data } = await supabase.functions.invoke("note-chat", {
+          body: { mode: "summarize", messages: transcript },
+        });
+        if (data?.summary) {
+          return {
+            ...current,
+            summary: data.summary,
+            summarizedUpTo: current.messages.length - CHAT_WINDOW_SIZE,
+          };
+        }
+      } catch {
+        // ignore summary failures, keep going
+      }
+      return current;
+    },
+    [],
+  );
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -56,27 +99,21 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
 
     setError(null);
     const userMsg: ChatMessage = { role: "user", content: text };
-    const newMessages = [...messages, userMsg];
-    onMessagesChange(newMessages);
+    const nextState: PersistedChatState = {
+      ...state,
+      messages: [...state.messages, userMsg],
+    };
+    setState(nextState);
     setInput("");
     setIsLoading(true);
 
     try {
-      // Build conversation for the API (only role + content)
-      const apiMessages = newMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const { data, error: fnErr } = await supabase.functions.invoke(
-        "note-chat",
-        {
-          body: { note_id: note.id, messages: apiMessages },
-        }
-      );
+      const apiMessages = buildApiMessages(nextState);
+      const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
+        body: { note_id: note.id, messages: apiMessages },
+      });
 
       if (fnErr) {
-        // Preview environment can interfere with edge function requests
         const msg = fnErr.message || "Chat request failed";
         if (msg.includes("Failed to send") || msg.includes("FunctionsFetchError")) {
           throw new Error("Edge function call failed. This may work on the published URL — try publishing first.");
@@ -98,37 +135,43 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
         content: data.reply || "",
         toolResults: data.tool_results,
       };
-      onMessagesChange([...messages, userMsg, assistantMsg]);
+      let updated: PersistedChatState = {
+        ...nextState,
+        messages: [...nextState.messages, assistantMsg],
+      };
 
-      // If any tool modified the note, notify parent to refresh
-      const modifyingTools = [
-        "append_to_note",
-        "update_note_metadata",
-        "update_note_tags",
-        "add_wikilink",
-      ];
-      if (
-        data.tool_results?.some((tr: any) =>
-          modifyingTools.includes(tr.tool)
-        )
-      ) {
+      // If any tool modified the note, notify parent + the editor.
+      if (data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool))) {
         onNoteChanged();
+        window.dispatchEvent(
+          new CustomEvent("menerio:note-updated", { detail: { noteId: note.id } }),
+        );
       }
 
-      // Refresh credits display
+      // Roll the summary forward when needed.
+      updated = await refreshSummaryIfNeeded(updated);
+      setState(updated);
+
       triggerCreditsRefresh();
     } catch (err: any) {
       setError(err.message || "Something went wrong");
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, messages, note.id, onNoteChanged]);
+  }, [input, isLoading, session, state, note.id, onNoteChanged, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
+  };
+
+  const handleClear = () => {
+    if (!confirm("Clear this conversation?")) return;
+    clearChatState(user?.id, contextKey);
+    setState({ messages: [], summary: "", summarizedUpTo: 0 });
+    setError(null);
   };
 
   return (
@@ -138,20 +181,38 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">AI Chat</span>
+          {state.messages.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {state.messages.length} msgs{state.summary ? " · summary" : ""}
+            </span>
+          )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={onClose}
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center gap-1">
+          {state.messages.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleClear}
+              title="Clear conversation"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onClose}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-3 space-y-3">
-        {messages.length === 0 && (
+        {state.messages.length === 0 && (
           <div className="text-center text-muted-foreground text-xs py-8 space-y-2">
             <Bot className="h-8 w-8 mx-auto opacity-40" />
             <p>Ask me anything about this note or your knowledge base.</p>
@@ -162,7 +223,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
           </div>
         )}
 
-        {messages.map((msg, i) => (
+        {state.messages.map((msg, i) => (
           <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
             {msg.role === "assistant" && (
               <Bot className="h-5 w-5 text-primary shrink-0 mt-0.5" />
@@ -182,7 +243,6 @@ export function NoteChatPanel({ note, onClose, onNoteChanged, messages, onMessag
                 <p className="whitespace-pre-wrap">{msg.content}</p>
               )}
 
-              {/* Tool results indicator */}
               {msg.toolResults && msg.toolResults.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
                   {msg.toolResults.map((tr, j) => (
