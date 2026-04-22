@@ -158,6 +158,39 @@ describe("markdownToHtml", () => {
   it("handles empty input", () => {
     expect(markdownToHtml("")).toBe("");
   });
+
+  it("coalesces blank-line-separated task list items into a single list", () => {
+    const md = "- [x] Item A.\n\n- [x] Item B.\n\n- [ ] Item C.";
+    const html = markdownToHtml(md);
+    // All three items appear as task-list items in one list
+    const taskLists = html.match(/<ul[^>]*data-type="taskList"[^>]*>/g) || [];
+    expect(taskLists.length).toBe(1);
+    expect(html).toContain("Item A.");
+    expect(html).toContain("Item B.");
+    expect(html).toContain("Item C.");
+  });
+
+  it("preserves mixed checked/unchecked states when coalescing", () => {
+    const md = "- [x] Done\n\n- [ ] Todo\n\n- [x] Also done";
+    const html = markdownToHtml(md);
+    expect(html.match(/data-checked="true"/g)?.length).toBe(2);
+    expect(html.match(/data-checked="false"/g)?.length).toBe(1);
+  });
+
+  it("is idempotent on already-tight task lists", () => {
+    const md = "- [x] A\n- [ ] B\n- [x] C";
+    const html = markdownToHtml(md);
+    const taskLists = html.match(/<ul[^>]*data-type="taskList"[^>]*>/g) || [];
+    expect(taskLists.length).toBe(1);
+    expect(html.match(/data-checked=/g)?.length).toBe(3);
+  });
+
+  it("does NOT coalesce regular bullet lists separated by blank lines", () => {
+    const md = "- A\n\n- B";
+    const html = markdownToHtml(md);
+    // Regular bullets stay as separate paragraphs/lists — no task-list markup
+    expect(html).not.toContain('data-type="taskList"');
+  });
 });
 
 // ─── Round-trip ──────────────────────────────────────────────────────
