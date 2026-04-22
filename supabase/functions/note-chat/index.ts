@@ -389,7 +389,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
-    const { note_id, messages: chatMessages } = body;
+    const { note_id, messages: chatMessages, mode } = body;
 
     if (!chatMessages || !Array.isArray(chatMessages))
       return json({ error: "messages required" }, 400);
@@ -397,6 +397,52 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Check credits
     const balance = await checkBalance(db, user.id);
     if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+
+    // Lightweight summarization mode — used by the client to compress
+    // older turns into a rolling summary so context doesn't grow unbounded.
+    if (mode === "summarize") {
+      const transcript = chatMessages
+        .map((m: any) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+        .join("\n");
+      try {
+        const sumResult = await openRouterWithCredits(
+          db,
+          OPENROUTER_API_KEY,
+          user.id,
+          "note-chat:summarize",
+          "chat/completions",
+          {
+            model: "openai/gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You compress chat transcripts into a concise running summary (max ~150 words). Capture topics discussed, decisions made, key facts about the user's notes, and open questions. Use neutral third-person.",
+              },
+              {
+                role: "user",
+                content: `Summarize this conversation:\n\n${transcript}`,
+              },
+            ],
+          }
+        );
+        const summary = sumResult.result.choices?.[0]?.message?.content?.trim() || "";
+        return json({
+          summary,
+          credits: sumResult.credits
+            ? {
+                remaining_tokens: sumResult.credits.remaining_tokens,
+                remaining_credits: sumResult.credits.remaining_credits,
+              }
+            : null,
+        });
+      } catch (err: any) {
+        if (err.message === "INSUFFICIENT_CREDITS") {
+          return insufficientCreditsResponse(corsHeaders);
+        }
+        return json({ error: err.message || "Summarize failed" }, 500);
+      }
+    }
 
     // Determine mode: note-specific or general knowledge base
     const isNoteMode = !!note_id;
