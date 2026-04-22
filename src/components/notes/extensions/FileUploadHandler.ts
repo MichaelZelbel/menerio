@@ -100,12 +100,12 @@ export const FileUploadHandler = Extension.create({
         key: new PluginKey("fileUploadHandler"),
         props: {
           handleDrop(view, event) {
-            const files = event.dataTransfer?.files;
-            if (!files?.length) return false;
+            const dt = (event as DragEvent).dataTransfer;
+            const fileList = dt?.files;
+            if (!fileList?.length) return false;
+            const files: File[] = Array.from(fileList) as File[];
 
-            const supported = Array.from(files).some(
-              (f) => detectMediaType(f) !== "unknown"
-            );
+            const supported = files.some((f) => detectMediaType(f) !== "unknown");
             if (!supported) return false;
 
             event.preventDefault();
@@ -113,12 +113,12 @@ export const FileUploadHandler = Extension.create({
             return true;
           },
           handlePaste(view, event) {
-            const files = event.clipboardData?.files;
-            if (!files?.length) return false;
+            const cd = (event as ClipboardEvent).clipboardData;
+            const fileList = cd?.files;
+            if (!fileList?.length) return false;
+            const files: File[] = Array.from(fileList) as File[];
 
-            const supported = Array.from(files).some(
-              (f) => detectMediaType(f) !== "unknown"
-            );
+            const supported = files.some((f) => detectMediaType(f) !== "unknown");
             if (!supported) return false;
 
             event.preventDefault();
