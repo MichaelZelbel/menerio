@@ -373,14 +373,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // Sync when note changes
   useEffect(() => {
-    // Save current chat messages for the previous note
-    // (note.id has already changed, so we use a ref to track the previous)
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
-    // Restore chat messages for this note (or empty)
-    setChatMessages(chatMessagesRef.current.get(note.id) || []);
     if (processTimer.current) clearTimeout(processTimer.current);
     let normalizedContent = normalizeNoteContent(note.content);
     if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
@@ -395,7 +391,37 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);
     }
-  }, [note.id]);
+  }, [note.id, note.content]);
+
+  // Listen for AI-driven updates (from FAB chat or side panel) and refresh
+  // the editor live so the user sees the agent's edits without reloading.
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent<{ noteId?: string }>).detail;
+      if (!detail?.noteId || detail.noteId !== note.id) return;
+      try {
+        const { data, error } = await supabase
+          .from("notes")
+          .select("content, tags, metadata")
+          .eq("id", note.id)
+          .single();
+        if (error || !data) return;
+        let nextContent = normalizeNoteContent((data as any).content || "");
+        if (note.is_external) nextContent = stripLeadingH1(nextContent, note.title);
+        const html = looksLikeHtml(nextContent) ? nextContent : markdownToHtml(nextContent);
+        if (editor && html !== editor.getHTML()) {
+          editor.commands.setContent(html);
+        }
+        // Refresh the cached note in React Query so list/sidebar update too.
+        queryClient.invalidateQueries({ queryKey: ["notes"] });
+        queryClient.invalidateQueries({ queryKey: ["backlinks"] });
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("menerio:note-updated", handler as EventListener);
+    return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
+  }, [note.id, note.is_external, note.title, editor, queryClient]);
 
   const handleTitleChange = (val: string) => {
     setTitle(val);
