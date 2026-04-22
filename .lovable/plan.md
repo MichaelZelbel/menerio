@@ -1,147 +1,90 @@
 
-# Make Obsidian/Evernote task syntax render as real checklists in Menerio
 
-## Revised diagnosis
-The earlier blank-line theory is not the core issue.
+# Make AI Chat usable while editing notes
 
-What the app is missing is this behavior:
-- When a user types or pastes Markdown task syntax like `- [ ]` / `- [x]`
-- the editor should convert that syntax into actual TipTap `taskList` / `taskItem` nodes
-- so the UI shows clickable checkboxes and checked items get struck through
+## Three issues, three fixes
 
-Right now:
-- the checklist UI/CSS already exists
-- the toolbar can already create task lists manually
-- but raw Markdown task syntax is not being promoted reliably into real task nodes
-- and the current paste workaround is brittle
-- plus the current branch has genuine CI/build issues from missing explicit Tiptap packages
+### 1) Stop blurring the note while chatting
+The FAB chat opens a full-screen `bg-background/60 backdrop-blur-sm` overlay that covers the note and the entire app. Result: while chatting, you can't see what you're working on.
 
-## UX target
-After this change, the experience should be:
+**Fix**: Convert the FAB chat from a centered overlay into a non-blocking docked panel.
 
-1. Paste Obsidian/Evernote checklist Markdown into a note
-   - it immediately renders as a real checklist with boxes
-   - checked items appear checked and struck through
+- Remove the `fixed inset-0 ... backdrop-blur-sm` overlay entirely.
+- Keep the chat anchored bottom-right, same width/height, but with no backdrop and no click-outside-to-close.
+- Close happens only via the X button, the FAB toggle, or `Escape`.
+- The note (and the rest of the page) remain fully visible and interactive while the chat is open.
+- Add a subtle drop shadow so the panel still reads as floating UI.
 
-2. Type checklist Markdown manually in the rich editor
-   - entering `- [ ] ` or `- [x] ` should turn the current line into a checklist item
-   - subsequent Enter presses should continue the checklist naturally
+### 2) Make the chat actually edit the current note (and show it)
+The Edge Function `note-chat` already supports note-modifying tools (`append_to_note`, `update_note_metadata`, `update_note_tags`, `add_wikilink`) and writes directly to the DB with the service role. The side-panel `NoteChatPanel` correctly invalidates the notes query and re-hydrates the editor when this happens.
 
-3. Toggle a checkbox
-   - the visual state updates immediately
-   - saving still stores Obsidian-compatible Markdown in the DB
+The **FAB chat does not** — it never refreshes the editor or invalidates queries, so the agent's writes stay invisible until you reload.
 
-4. Switch to Source Mode
-   - the same content appears as Markdown (`- [ ]`, `- [x]`)
-   - switching back to rich mode restores real checkboxes
+**Fix**: Wire the FAB chat into the same refresh path as the side panel.
 
-## Implementation plan
+- After every assistant turn, inspect `data.tool_results` for any of the modifying tool names.
+- When detected and `noteId` is present:
+  - invalidate the React Query `notes` key so the list refreshes
+  - dispatch a new lightweight DOM event `menerio:note-updated` with `{ noteId }`
+- In `NoteEditor.tsx`, listen for `menerio:note-updated`. When the event matches the currently open note, re-fetch its `content`, `tags`, `metadata` and re-hydrate the TipTap editor exactly the way the side panel already does today (using `markdownToHtml(normalizeNoteContent(...))`).
+- This means the user sees AI edits appear live — no manual refresh, no "please reload" message from the agent.
 
-### 1) Fix the broken Tiptap dependency setup first
-The current “module not found” errors are real and need to be fixed before anything else.
+Also: the FAB sends `note_id` only when the URL matches `/dashboard/notes/:id`. Keep that behavior — but make sure the badge in the chat header makes the active mode obvious ("Editing: <note title>" vs "Knowledge Base").
 
-Update dependencies so the code matches the imports already used:
-- add explicit `@tiptap/core`
-- add explicit `@tiptap/pm`
-- add explicit `@tiptap/extension-underline`
+### 3) Stop losing chat history; keep the conversation alive across reloads and route changes
+Today the FAB stores messages in component state and clears them whenever the URL changes context. So:
+- refreshing the page wipes the conversation
+- navigating from one note to another wipes the conversation
+- going from a note to the dashboard wipes the conversation
 
-Then refresh the lockfile(s) so CI sees the same dependency graph locally and on GitHub.
+**Fix**: Persist conversation history per context, with a sliding window sent to the model.
 
-### 2) Stop relying on raw Markdown auto-detection for checklist rendering
-The editor currently feeds Markdown directly into `setContent()` and assumes the Markdown extension will always turn task syntax into proper task nodes. That is the weak point.
+Storage:
+- Persist messages in `localStorage` under a versioned key, namespaced by user and context:
+  - `menerio:chat:v1:<userId>:<contextKey>`
+  - `contextKey` = `note:<noteId>` for note chats, `general` for the knowledge-base chat
+- On open, hydrate from `localStorage`. On every message change, write back.
+- Cap each context at the last ~200 messages stored locally to keep `localStorage` healthy.
 
-Instead:
-- if note content is Markdown, convert it through `markdownToHtml(normalizeNoteContent(...))` before passing it into the editor
-- keep legacy HTML notes as HTML
-- keep saving back to Markdown using the existing serializer (`storage.markdown.getMarkdown()`)
+Cross-tab and cross-mount continuity:
+- Because state lives in `localStorage`, refreshing the page restores history.
+- Switching from note A back to note A later restores history for that note.
+- Switching from note A to note B switches to note B's history without wiping note A's.
 
-This keeps DB storage Markdown-native while making rendering deterministic.
+Sliding window sent to the model (this is the "compression" requirement):
+- Keep all messages locally, but only send a window to `note-chat`:
+  - always keep the most recent **N** turns (default: last 12 messages, ~6 user/assistant pairs)
+  - prepend a short auto-generated **conversation summary** of everything older than that window
+- The summary is produced lazily client-side: when the local history exceeds the window, call `note-chat` with a one-shot "summarize" instruction (or, simpler and cheaper: a small dedicated branch in the function — see "Edge Function" below) and store the resulting summary alongside the messages under the same key.
+- After each new exchange, if the window has grown past the threshold again, refresh the summary so older context keeps getting folded in.
 
-### 3) Replace the synthetic paste event workaround with direct task-list insertion
-The current paste fix re-dispatches a synthetic `ClipboardEvent`, which is fragile.
+Result:
+- The agent never "forgets" earlier topics — they survive as a rolling summary.
+- Token usage stays bounded regardless of how long the conversation runs.
+- Refreshing the page or switching notes preserves both the visible history and the summary.
 
-Replace it with a direct flow in `NoteEditor`:
-- read `text/plain` from the clipboard
-- detect task-list Markdown
-- normalize it with `coalesceTaskList`
-- convert it with `markdownToHtml`
-- insert that rendered content directly at the current selection
+Add a small "Clear conversation" action in the chat header so the user can intentionally start over.
 
-For non-task pastes, fall back to the normal editor pipeline.
+## UX details
 
-This makes pasted checklists reliable regardless of how `tiptap-markdown` handles pasted text internally.
-
-### 4) Add a real Markdown shortcut for manual typing
-To match Obsidian/Evernote expectations, typing the syntax should also work, not only pasting.
-
-Add a small editor extension or input rule that watches the current line for:
-- `- [ ] `
-- `- [x] `
-
-When the pattern is completed, convert that line into a `taskItem` with the correct checked state.
-
-This is the missing UX behavior the user is describing.
-
-### 5) Preserve existing checkbox behavior after conversion
-Once the content is a real TipTap task list:
-- clicking a checkbox should toggle `checked`
-- checked items should remain visually struck through
-- saving should serialize back to Markdown with `- [x]` / `- [ ]`
-
-No separate checklist storage model should be introduced.
-
-### 6) Clean up the TypeScript issues uncovered by CI
-Alongside the checklist fix, resolve the current compile errors:
-
-- `insertWikilink` typing:
-  - once `@tiptap/core` is installed, the module augmentation should resolve
-  - if not, tighten the command typing or add a local typed wrapper so call sites compile cleanly
-
-- `FileUploadHandler` unknown-to-File errors:
-  - explicitly narrow dropped/pasted files to `File[]`
-  - avoid relying on inference from ProseMirror event types
-
-This keeps the feature branch buildable again.
+- Chat header shows the active context: note title (when in a note) or "Knowledge Base".
+- A small "history saved" indicator (e.g. a tiny dot or message count) so the user knows messages persist.
+- "Clear conversation" lives in a header overflow menu, with a confirm step.
+- When AI writes to the note, the assistant's reply still says what it did, but no longer asks the user to refresh — because the editor updates live.
 
 ## Files to update
 
 | File | Change |
 |---|---|
-| `package.json` | Add missing Tiptap dependencies |
-| `bun.lock` / `package-lock.json` | Refresh lockfile(s) for CI consistency |
-| `src/components/notes/NoteEditor.tsx` | Use deterministic Markdown→HTML hydration, replace paste handler, wire typing shortcut |
-| `src/components/notes/extensions/FileUploadHandler.ts` | Tighten file typing |
-| `src/components/notes/extensions/WikilinkExtension.ts` | Verify/fix command typing if needed after dependency fix |
-| `src/lib/note-content.ts` | Keep normalization utility; retain coalescing as a helper, not the main fix |
-| `src/utils/markdown-converter.ts` | Continue using task-list HTML conversion as the canonical render bridge |
-| `src/utils/__tests__/markdown-converter.test.ts` | Keep/update checklist conversion tests |
-| `src/components/notes/...` | Add a small markdown-task shortcut extension if implemented as a separate file |
+| `src/components/chat/GlobalAIChatFAB.tsx` | Remove backdrop overlay; persist messages in `localStorage` per context; load history on open; dispatch `menerio:note-updated` after note-modifying tool calls; invalidate `notes` query; sliding-window + summary when sending; add "Clear conversation" action |
+| `src/components/notes/NoteEditor.tsx` | Listen for `menerio:note-updated`; on match, re-fetch the note and re-hydrate the editor (reuse the existing logic from the side-panel `onNoteChanged` block) |
+| `src/components/notes/NoteChatPanel.tsx` | Apply the same persistence + sliding-window + summary behavior so the in-editor side panel stays consistent with the FAB |
+| `supabase/functions/note-chat/index.ts` | Add a lightweight `summarize` mode (or accept an optional `prior_summary` field) so the client can request/refresh a compact summary of older turns without changing the existing tool-calling flow |
+| (no schema changes) | History lives in `localStorage`; no DB tables needed |
 
-## Verification checklist
-After implementation, verify all of these:
+## What this does not change
+- The Edge Function's tool-calling loop, credit accounting, and RLS model stay the same.
+- Notes remain stored as Markdown in the DB.
+- The in-editor side-panel chat (`NoteChatPanel`) keeps working; it gets the same persistence + summary upgrades for consistency.
+- No new dependencies.
 
-1. Paste the user’s sample Markdown into a note
-   - real checkboxes appear
-   - checked items are checked and struck through
-
-2. Type a new item manually with `- [ ] `
-   - it becomes a checklist item without using the toolbar
-
-3. Toggle a checkbox
-   - save
-   - reload the note
-   - state remains correct
-
-4. Switch to Source Mode and back
-   - Markdown stays Obsidian-compatible
-   - rich mode still shows checkboxes
-
-5. Run CI/build checks
-   - no missing Tiptap module errors
-   - no `insertWikilink` typing errors
-   - no `unknown`→`File` errors
-
-## Key technical constraint
-The fix should preserve the project rule:
-- notes remain stored as Markdown in the database
-- the change only improves how Markdown task syntax is interpreted and rendered inside the TipTap editor
