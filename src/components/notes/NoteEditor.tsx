@@ -308,26 +308,35 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         onNavigate: (noteId: string) => handleNavigateToNote(noteId),
         onOpenAutocomplete: (pos: number) => handleOpenAutocomplete(pos),
       }),
+      TaskListShortcut,
     ],
     editorProps: {
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData("text/plain");
         if (!text) return false;
-        const coalesced = coalesceTaskList(text);
-        if (coalesced === text) return false;
-        // Re-dispatch a synthetic paste with the coalesced text so the
-        // tiptap-markdown `transformPastedText` pipeline still runs.
+
+        // Detect Markdown task-list syntax in the clipboard text.
+        const hasTaskSyntax = /^\s*-\s\[[ xX]\]\s+/m.test(text);
+        if (!hasTaskSyntax) return false;
+
+        // Normalize blank-line-separated items, then convert MD → HTML so
+        // we get real taskList/taskItem nodes regardless of how
+        // tiptap-markdown handles pasted text internally.
+        const normalized = coalesceTaskList(text);
+        const html = markdownToHtml(normalized);
+        if (!html) return false;
+
         event.preventDefault();
-        const dt = new DataTransfer();
-        dt.setData("text/plain", coalesced);
-        const synthetic = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
-        view.dom.dispatchEvent(synthetic);
+        editor?.chain().focus().insertContent(html).run();
         return true;
       },
     },
     content: (() => {
       const normalized = normalizeNoteContent(note.content);
-      return note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
+      const stripped = note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
+      // Convert Markdown deterministically to HTML so checklists and other
+      // block constructs always render as real TipTap nodes on first load.
+      return looksLikeHtml(stripped) ? stripped : markdownToHtml(stripped);
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
