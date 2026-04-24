@@ -1,59 +1,38 @@
+I found two likely root causes in the editor:
 
+1. The editor saves Markdown after each local update, then React Query invalidates and feeds the saved note back into the editor. The current guard compares raw Markdown to incoming note content, but the editor/serializer changes Markdown syntax during typing, especially for headings, hard breaks, bullets, and escaped `#`. That lets a delayed save overwrite the live ProseMirror state and produces the “formats correctly for a moment, then reverts with backslashes” behavior.
+2. The console shows TipTap duplicate extension warnings for `link` and `underline`. In TipTap v3, `StarterKit` already includes these, but the editor also registers them separately. This can make markdown shortcuts and input rules unstable.
 
-# Fix "Failed to initialize contact profile" in Review Queue
+Plan:
 
-## Root cause
-When you click **Accept** on a `add_profile_entry` suggestion in the Review Queue, the code calls:
+1. Stabilize the TipTap extension setup
+   - Configure `StarterKit` to disable its built-in `link` and `underline` extensions.
+   - Keep the explicit `LinkExt.configure({ openOnClick: false })` and `UnderlineExt` instances so toolbar behavior remains the same.
+   - This should remove the duplicate extension warning.
 
-```ts
-supabase
-  .from("profile_categories")
-  .upsert(rows, { onConflict: "user_id,contact_id,slug", ignoreDuplicates: true })
-```
+2. Stop server echo updates from resetting active typing
+   - Replace the raw `lastLocalContentRef` equality check with a normalized “last saved / last local” content comparison.
+   - Compare canonical editor HTML or canonical Markdown rather than raw strings, so `# headline`, escaped `\#`, hard breaks, and list serialization differences do not look like external changes.
+   - Do not call `editor.commands.setContent(...)` for the same note while the editor is focused and the incoming content is just the result of the user’s own autosave.
 
-…and Postgres replies:
+3. Fix autosave race conditions
+   - Track pending autosave content per note id.
+   - When the mutation returns and React Query invalidates notes, mark the returned content as acknowledged instead of re-importing it into TipTap.
+   - Clear timers and refs correctly when switching notes.
 
-> there is no unique or exclusion constraint matching the ON CONFLICT specification
+4. Make source-mode conversion consistent
+   - When leaving Markdown source mode, convert Markdown to TipTap HTML the same way initial note load does.
+   - Avoid passing raw Markdown into `setContent` in one place and converted HTML in another.
 
-That's because the actual unique index on `profile_categories` is **expression-based**:
+5. Add regression coverage
+   - Add/extend tests around Markdown conversion for:
+     - headings (`# Title`) not becoming escaped regular text,
+     - bullets not gaining extra blank/hard-break lines,
+     - hard-break backslashes not multiplying over repeated round-trips.
+   - Run the existing test suite and TypeScript check.
 
-```
-UNIQUE (user_id, COALESCE(contact_id, '00000000-...'), slug)
-```
-
-Postgres only matches `ON CONFLICT (cols)` against constraints / indexes whose columns match **exactly**. An index over `COALESCE(contact_id, …)` is not the same as `contact_id`, so the upsert can never bind to it and always fails.
-
-The same broken `onConflict` string is used twice in `handleAcceptProfileEntry`:
-- when seeding the 17 default categories
-- when creating a missing custom category
-
-## Fix
-
-Replace both `upsert(..., { onConflict: "user_id,contact_id,slug" })` calls in `src/pages/ReviewQueue.tsx` with **plain inserts plus a follow-up select**, mirroring the pattern already used successfully in `src/hooks/useContactProfile.ts`:
-
-1. **Seeding defaults**
-   - Do a plain `insert(rows)` of the default categories.
-   - If it errors with a unique-violation (`23505` / message contains `profile_categories_user_contact_slug_idx`), treat it as already-seeded and continue.
-   - Re-fetch categories for `(user_id, contact_id)` and pick the one whose `slug` matches the suggestion.
-
-2. **Creating a single missing category**
-   - First `select` for `(user_id, contact_id, slug)` — if found, use it.
-   - Otherwise plain `insert` the row and read the new `id`.
-   - On a unique-violation race, re-`select` and use the existing row.
-
-3. Keep the rest of the handler unchanged: insert the `profile_entries` row, invalidate the contact-profile React Query keys, mark the review item accepted, show the success toast.
-
-No database migration required — the existing partial-unique index already protects against duplicates correctly. We're just adapting the client to not rely on `ON CONFLICT` against an expression index.
-
-## Files to change
-
-| File | Change |
-|---|---|
-| `src/pages/ReviewQueue.tsx` | Replace the two `upsert(..., { onConflict: "user_id,contact_id,slug" })` calls in `handleAcceptProfileEntry` with insert + re-select logic, and treat unique-violation errors as "already exists" |
-
-## Verification
-- Click **Accept** on a Florian-Knöll profile-entry suggestion → entry is added, toast appears, no error.
-- Click **Accept** on a profile-entry suggestion for a contact whose profile categories are already seeded → still works (re-select finds the right category).
-- Click **Skip** / **Never** on any item → still works (these don't touch `profile_categories`).
-- Click **Accept** on `add_relationship`, `add_alias`, `add_contact`, event suggestions → unaffected.
-
+Expected result:
+- Typing `# Heading` / `## Heading` should remain a heading after autosave.
+- Bullets should keep the cursor inside the list item, not one line below it.
+- Backslashes should no longer appear or multiply after typing/pasting and autosave.
+- TipTap duplicate extension warnings should disappear.

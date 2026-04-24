@@ -129,6 +129,16 @@ function extractWikilinkIds(doc: any): string[] {
   return [...new Set(ids)];
 }
 
+function contentToEditorHtml(content: string | null | undefined, note: Pick<Note, "is_external" | "title">): string {
+  let normalized = normalizeNoteContent(content);
+  if (note.is_external) normalized = stripLeadingH1(normalized, note.title);
+  return looksLikeHtml(normalized) ? normalized : markdownToHtml(normalized);
+}
+
+function normalizeEditorHtml(html: string): string {
+  return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
+}
+
 /** Sync manual_link connections based on wikilinks in content */
 async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
   try {
@@ -217,6 +227,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
+  const pendingSaveContentRef = useRef<string | null>(null);
+  const activeNoteIdRef = useRef(note.id);
 
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
@@ -271,6 +283,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         codeBlock: false,
+        link: false,
+        underline: false,
       }),
       UnderlineExt,
       LinkExt.configure({ openOnClick: false }),
@@ -331,19 +345,21 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       },
     },
     content: (() => {
-      const normalized = normalizeNoteContent(note.content);
-      const stripped = note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
       // Convert Markdown deterministically to HTML so checklists and other
       // block constructs always render as real TipTap nodes on first load.
-      return looksLikeHtml(stripped) ? stripped : markdownToHtml(stripped);
+      return contentToEditorHtml(note.content, note);
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = (e.storage as any).markdown?.getMarkdown?.() ?? e.getHTML();
       lastLocalContentRef.current = md;
+      pendingSaveContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, content: md });
+        updateNote.mutate(
+          { id: note.id, content: md },
+          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+        );
         triggerGitHubSync(note.id);
 
         // Sync manual_link connections
@@ -373,30 +389,33 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // Sync when note changes
   useEffect(() => {
+    if (activeNoteIdRef.current !== note.id) {
+      activeNoteIdRef.current = note.id;
+      lastLocalContentRef.current = note.content ?? "";
+      pendingSaveContentRef.current = null;
+    }
     setTitle(note.title);
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
     if (processTimer.current) clearTimeout(processTimer.current);
-    if ((note.content ?? "") === lastLocalContentRef.current) {
-      if (editor) editor.setEditable(!note.is_trashed && !note.is_external);
-      return;
-    }
-    let normalizedContent = normalizeNoteContent(note.content);
-    if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
-    // Convert Markdown → HTML before handing to TipTap so block constructs
-    // (task lists, tables, etc.) materialize as proper nodes deterministically.
-    const editorContent = looksLikeHtml(normalizedContent)
-      ? normalizedContent
-      : markdownToHtml(normalizedContent);
-    if (editor && editorContent !== editor.getHTML()) {
+    if (!editor) return;
+
+    const editorContent = contentToEditorHtml(note.content, note);
+    const currentHtml = editor.getHTML();
+    const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
+    const incomingMatchesPendingSave = pendingSaveContentRef.current === (note.content ?? "");
+    const incomingMatchesLastLocal = lastLocalContentRef.current === (note.content ?? "");
+
+    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
-    if (editor) {
-      editor.setEditable(!note.is_trashed && !note.is_external);
+    if (incomingMatchesPendingSave || incomingMatchesEditor) {
+      pendingSaveContentRef.current = null;
     }
-  }, [note.id, note.content]);
+    editor.setEditable(!note.is_trashed && !note.is_external);
+  }, [note.id, note.content, note.title, note.is_external, note.is_trashed, editor]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -411,10 +430,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           .eq("id", note.id)
           .single();
         if (error || !data) return;
-        let nextContent = normalizeNoteContent((data as any).content || "");
-        if (note.is_external) nextContent = stripLeadingH1(nextContent, note.title);
-        const html = looksLikeHtml(nextContent) ? nextContent : markdownToHtml(nextContent);
-        if (editor && html !== editor.getHTML()) {
+        const html = contentToEditorHtml((data as any).content || "", note);
+        if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
           editor.commands.setContent(html, { emitUpdate: false });
           lastLocalContentRef.current = (data as any).content || "";
         }
@@ -505,18 +522,23 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(sourceText, { emitUpdate: false });
+      editor.commands.setContent(contentToEditorHtml(sourceText, { ...note, is_external: false }), { emitUpdate: false });
       lastLocalContentRef.current = sourceText;
+      pendingSaveContentRef.current = sourceText;
       // trigger save
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         const md = (editor.storage as any).markdown?.getMarkdown?.() ?? editor.getHTML();
-        updateNote.mutate({ id: note.id, content: md });
+        pendingSaveContentRef.current = md;
+        updateNote.mutate(
+          { id: note.id, content: md },
+          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+        );
         triggerGitHubSync(note.id);
       }, 800);
       setSourceMode(false);
     }
-  }, [editor, sourceMode, sourceText, note.id, updateNote, triggerGitHubSync]);
+  }, [editor, sourceMode, sourceText, note, updateNote, triggerGitHubSync]);
 
   return (
     <div className="flex h-full">
