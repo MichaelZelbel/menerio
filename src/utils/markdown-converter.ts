@@ -130,6 +130,11 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, (_, src) => `![](${src})`);
 
   // Links
+  md = md.replace(/<span[^>]*data-wikilink="true"[^>]*data-note-title="([^"]*)"[^>]*data-display-text="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi, (_, title, display) => {
+    const label = decodeEntities(display || title);
+    const target = decodeEntities(title);
+    return label && label !== target ? `[[${target}|${label}]]` : `[[${target}]]`;
+  });
   md = md.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => `[${inlineHtml(text)}](${href})`);
 
   // Inline formatting
@@ -417,6 +422,12 @@ function inlineMarkdown(text: string): string {
   // Obsidian image embeds
   r = r.replace(/!\[\[([^\]]+)\]\]/g, '<img src="$1" alt="$1">');
 
+  // Obsidian wikilinks
+  r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
+    const label = display || target;
+    return `<span data-wikilink="true" data-note-id="" data-note-title="${encodeAttribute(target)}" data-display-text="${encodeAttribute(display || "")}" class="wikilink-node" contenteditable="false">[[${label}]]</span>`;
+  });
+
   // Links
   r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -463,6 +474,10 @@ function encodeEntities(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function encodeAttribute(text: string): string {
+  return encodeEntities(text).replace(/"/g, "&quot;");
 }
 
 // ─── Wikilinks ───────────────────────────────────────────────────────
