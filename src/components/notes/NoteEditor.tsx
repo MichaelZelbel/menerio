@@ -139,6 +139,10 @@ function normalizeEditorHtml(html: string): string {
   return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
 }
 
+function normalizeSavedMarkdown(md: string | null | undefined): string {
+  return (md ?? "").replace(/\r\n/g, "\n").trimEnd();
+}
+
 function editorToMarkdown(editor: { getJSON: () => any }): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
@@ -362,7 +366,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       saveTimer.current = setTimeout(() => {
         updateNote.mutate(
           { id: note.id, content: md },
-          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+          {
+            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+          }
         );
         triggerGitHubSync(note.id);
 
@@ -408,10 +415,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const editorContent = contentToEditorHtml(note.content, note);
     const currentHtml = editor.getHTML();
     const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
-    const incomingMatchesPendingSave = pendingSaveContentRef.current === (note.content ?? "");
-    const incomingMatchesLastLocal = lastLocalContentRef.current === (note.content ?? "");
+    const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
+    const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
 
-    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
+    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
