@@ -129,6 +129,16 @@ function extractWikilinkIds(doc: any): string[] {
   return [...new Set(ids)];
 }
 
+function contentToEditorHtml(content: string | null | undefined, note: Pick<Note, "is_external" | "title">): string {
+  let normalized = normalizeNoteContent(content);
+  if (note.is_external) normalized = stripLeadingH1(normalized, note.title);
+  return looksLikeHtml(normalized) ? normalized : markdownToHtml(normalized);
+}
+
+function normalizeEditorHtml(html: string): string {
+  return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
+}
+
 /** Sync manual_link connections based on wikilinks in content */
 async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
   try {
@@ -217,6 +227,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
+  const pendingSaveContentRef = useRef<string | null>(null);
+  const activeNoteIdRef = useRef(note.id);
 
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
@@ -271,6 +283,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         codeBlock: false,
+        link: false,
+        underline: false,
       }),
       UnderlineExt,
       LinkExt.configure({ openOnClick: false }),
@@ -331,16 +345,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       },
     },
     content: (() => {
-      const normalized = normalizeNoteContent(note.content);
-      const stripped = note.is_external ? stripLeadingH1(normalized, note.title) : normalized;
       // Convert Markdown deterministically to HTML so checklists and other
       // block constructs always render as real TipTap nodes on first load.
-      return looksLikeHtml(stripped) ? stripped : markdownToHtml(stripped);
+      return contentToEditorHtml(note.content, note);
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = (e.storage as any).markdown?.getMarkdown?.() ?? e.getHTML();
       lastLocalContentRef.current = md;
+      pendingSaveContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: md });
