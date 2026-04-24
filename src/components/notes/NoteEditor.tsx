@@ -356,7 +356,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updateNote.mutate({ id: note.id, content: md });
+        updateNote.mutate(
+          { id: note.id, content: md },
+          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+        );
         triggerGitHubSync(note.id);
 
         // Sync manual_link connections
@@ -404,7 +407,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const incomingMatchesPendingSave = pendingSaveContentRef.current === (note.content ?? "");
     const incomingMatchesLastLocal = lastLocalContentRef.current === (note.content ?? "");
 
-    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
+    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
