@@ -188,7 +188,7 @@ export default function ReviewQueue() {
       // Invalidate contact profile queries
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${label}: ${value}" to ${contact_name}'s profile`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
@@ -217,7 +217,7 @@ export default function ReviewQueue() {
       if (error) {
         if (error.message?.includes("uq_contact_relationship")) {
           showToast.info("This relationship already exists");
-          updateStatus.mutate({ id: item.id, status: "accepted" });
+          updateStatus.mutate({ id: item.id, status: "kept" });
           return;
         }
         showToast.error("Failed to add relationship: " + error.message);
@@ -243,12 +243,12 @@ export default function ReviewQueue() {
             contact_name_b: contact_name_a,
             // No inverse_label here — it's the final record, no further mirroring
           },
-          status: "pending",
+          status: "pending_review",
         });
       }
 
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Relationship added: ${contact_name_a} → ${label} → ${contact_name_b}`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
@@ -308,7 +308,7 @@ export default function ReviewQueue() {
         }
       }
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${alias}" as alternate spelling`);
       return;
     }
@@ -325,28 +325,24 @@ export default function ReviewQueue() {
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${name}" to your People`);
       return;
     }
 
-    updateStatus.mutate({ id: item.id, status: "accepted" });
-    showToast.success("Suggestion accepted");
+    updateStatus.mutate({ id: item.id, status: "kept" });
+    showToast.success("Change kept");
   };
 
-  const handleSkip = (id: string) => {
-    updateStatus.mutate({ id, status: "skipped" });
-    showToast.info("Skipped for now");
-  };
-
-  const handleNever = (id: string) => {
-    updateStatus.mutate({ id, status: "dismissed" });
-    showToast.info("Won't suggest again");
+  const handleKeep = (item: ReviewItem) => {
+    if (item.status === "pending" || item.status === "pending_review") return handleAccept(item);
+    updateStatus.mutate({ id: item.id, status: "kept" });
+    showToast.success("Change kept");
   };
 
   const handleEventDialogClose = () => {
     if (activeItemId) {
-      updateStatus.mutate({ id: activeItemId, status: "accepted" });
+      updateStatus.mutate({ id: activeItemId, status: "kept" });
     }
     setEventDialogOpen(false);
     setEventDraft(null);
