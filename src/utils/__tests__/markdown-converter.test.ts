@@ -159,6 +159,23 @@ describe("markdownToHtml", () => {
     expect(markdownToHtml("")).toBe("");
   });
 
+  it("keeps markdown headings as heading nodes", () => {
+    expect(markdownToHtml("# Title")).toBe("<h1>Title</h1>");
+    expect(markdownToHtml("## Subtitle")).toBe("<h2>Subtitle</h2>");
+  });
+
+  it("does not turn hard-break markers into literal backslashes", () => {
+    const once = markdownToHtml("First\\\nSecond");
+    const twice = markdownToHtml(htmlToMarkdown(once));
+    expect(once).toBe("<p>First<br>Second</p>");
+    expect(twice).not.toContain("\\");
+  });
+
+  it("keeps bullet lists tight without extra hard-break lines", () => {
+    const html = markdownToHtml("- One\n- Two");
+    expect(html).toBe("<ul><li><p>One</p></li><li><p>Two</p></li></ul>");
+  });
+
   it("coalesces blank-line-separated task list items into a single list", () => {
     const md = "- [x] Item A.\n\n- [x] Item B.\n\n- [ ] Item C.";
     const html = markdownToHtml(md);
