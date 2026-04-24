@@ -288,6 +288,71 @@ export function markdownToHtml(md: string): string {
   return result;
 }
 
+function isListBlock(block: string): boolean {
+  return /^\s*(?:[-*+]\s+|\d+\.\s+|- \[[ xX]\]\s+)/m.test(block);
+}
+
+function markdownListToHtml(block: string): string {
+  type ListLine = {
+    indent: number;
+    ordered: boolean;
+    task: boolean;
+    checked: boolean;
+    content: string;
+  };
+
+  const lines: ListLine[] = block.split("\n").flatMap((line) => {
+    const match = line.match(/^(\s*)(?:(- \[([ xX])\]\s+)|([-*+])\s+|(\d+)\.\s+)(.*)$/);
+    if (!match) return [];
+    return [{
+      indent: match[1].replace(/\t/g, "  ").length,
+      ordered: Boolean(match[5]),
+      task: Boolean(match[2]),
+      checked: String(match[3] || "").toLowerCase() === "x",
+      content: match[6] || "",
+    }];
+  });
+
+  const render = (start: number, indent: number): { html: string; next: number } => {
+    const listType = lines[start]?.ordered ? "ol" : "ul";
+    const isTaskList = lines[start]?.task && listType === "ul";
+    let html = isTaskList ? '<ul data-type="taskList">' : `<${listType}>`;
+    let index = start;
+
+    while (index < lines.length) {
+      const item = lines[index];
+      if (item.indent < indent) break;
+      if (item.indent > indent) {
+        const nested = render(index, item.indent);
+        html += nested.html;
+        index = nested.next;
+        continue;
+      }
+      if (item.ordered !== (listType === "ol") || item.task !== isTaskList) break;
+
+      index++;
+      let nestedHtml = "";
+      while (index < lines.length && lines[index].indent > indent) {
+        const nested = render(index, lines[index].indent);
+        nestedHtml += nested.html;
+        index = nested.next;
+      }
+
+      if (isTaskList) {
+        const checked = item.checked ? "true" : "false";
+        html += `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox"${item.checked ? " checked" : ""}><span></span></label><div><p>${inlineMarkdown(item.content)}</p>${nestedHtml}</div></li>`;
+      } else {
+        html += `<li><p>${inlineMarkdown(item.content)}</p>${nestedHtml}</li>`;
+      }
+    }
+
+    html += isTaskList ? "</ul>" : `</${listType}>`;
+    return { html, next: index };
+  };
+
+  return lines.length ? render(0, lines[0].indent).html : "";
+}
+
 function serializeBlock(node: TiptapNode, depth: number): string {
   const children = () => serializeInlineChildren(node);
   switch (node.type) {
