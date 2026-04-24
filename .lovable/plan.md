@@ -19,6 +19,13 @@ I’m in plan mode right now, so I cannot apply the fixes in this message. You a
    - Using custom HTML-to-Markdown avoided some TipTap Markdown escaping behavior, but it also bypassed TipTap’s richer document-aware serializer.
    - The pending-save guard is also too broad: once `pendingSaveContentRef` is set, the editor can refuse to accept the server’s returned content, leaving the app state stale and making it look like edits did not save after navigation.
 
+4. New confirmed root cause after checking the real screenshot note.
+   - The database row for `Hyperframes` no longer contains the URLs; a client autosave at 23:08 submitted only:
+     `# Resources\n\n- GitHub repo:\n\n- Skool Community Post:\n\n- Nate Herk YouTube video:`.
+   - So the screenshot note is no longer only a render problem: it was overwritten by the broken editor sync/save path.
+   - The exact bug was in `NoteEditor.tsx`: on note switches, `lastLocalContentRef` was set to the incoming note content before the comparison, making `incomingMatchesLastLocal` true and preventing `editor.commands.setContent(...)`. The editor could then keep stale/stripped content and autosave that into the newly selected note.
+   - A second rendering bug existed for older notes: the custom Markdown loader parsed only flat lists, so indented list items like `  - [https://test.com](https://test.com)` were dropped from the rendered editor even though the database still had the link.
+
 ## Plan to fix it safely
 
 1. Restore a reliable save path

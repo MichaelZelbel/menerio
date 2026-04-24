@@ -147,6 +147,10 @@ function editorToMarkdown(editor: { getJSON: () => any }): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
+function countMarkdownLinks(content: string | null | undefined): number {
+  return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
+}
+
 /** Sync manual_link connections based on wikilinks in content */
 async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
   try {
@@ -360,6 +364,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = editorToMarkdown(e);
+      if (!e.isFocused && countMarkdownLinks(note.content) > countMarkdownLinks(md)) {
+        console.warn("Skipped non-user editor update that would remove links", { noteId: note.id });
+        return;
+      }
       lastLocalContentRef.current = md;
       pendingSaveContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -400,9 +408,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // Sync when note changes
   useEffect(() => {
-    if (activeNoteIdRef.current !== note.id) {
+    const noteChanged = activeNoteIdRef.current !== note.id;
+    if (noteChanged) {
       activeNoteIdRef.current = note.id;
-      lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
     }
     setTitle(note.title);
@@ -418,7 +426,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
     const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
 
-    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
+    if (noteChanged) {
+      if (!incomingMatchesEditor) {
+        editor.commands.setContent(editorContent, { emitUpdate: false });
+      }
+      lastLocalContentRef.current = note.content ?? "";
+      pendingSaveContentRef.current = null;
+    } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
