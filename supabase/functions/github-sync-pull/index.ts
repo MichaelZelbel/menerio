@@ -452,11 +452,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Update last_sync_at
-    await serviceClient
-      .from("github_connections")
-      .update({ last_sync_at: new Date().toISOString() })
-      .eq("user_id", userId);
+    if (results.errors === 0) {
+      await serviceClient
+        .from("github_connections")
+        .update({ last_sync_at: new Date().toISOString() })
+        .eq("user_id", userId);
+    }
 
     return new Response(JSON.stringify({
       success: true,
