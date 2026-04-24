@@ -152,6 +152,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   } catch (err) {
     console.error("backfill-metadata error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);
   }
 });
