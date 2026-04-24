@@ -38,7 +38,7 @@ export function GitHubSyncSettings() {
   const [syncDirection, setSyncDirection] = useState("export");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<"success" | "error" | null>(null);
+  const [testResult, setTestResult] = useState<"success" | "missing" | "error" | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
@@ -140,6 +140,9 @@ export function GitHubSyncSettings() {
       if (res.ok) {
         setTestResult("success");
         showToast.success("Connection successful!");
+      } else if (res.status === 404) {
+        setTestResult("missing");
+        showToast.success("Repository does not exist yet. Menerio will create it on first export or sync.");
       } else {
         setTestResult("error");
         showToast.error(`Failed: ${res.status} ${res.statusText}`);
@@ -171,12 +174,13 @@ export function GitHubSyncSettings() {
   const handleBulkSync = () => {
     bulkSync.mutate(undefined, {
       onSuccess: (data) => {
-        showToast.success(`Synced ${data.succeeded}/${data.total} notes`);
+        showToast.success(`${data.repository_created ? "Created repository and exported" : "Exported"} ${data.succeeded}/${data.total} notes`);
         if (data.failed > 0) {
-          showToast.error(`${data.failed} notes failed to sync`);
+          const firstError = data.results?.find((r: any) => r.error)?.error;
+          showToast.error(firstError || `${data.failed} notes failed to sync`);
         }
       },
-      onError: () => showToast.error("Bulk sync failed"),
+      onError: (err: any) => showToast.error(err?.message || "Bulk sync failed"),
     });
   };
 
@@ -304,6 +308,7 @@ export function GitHubSyncSettings() {
               {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Test Connection
               {testResult === "success" && <CheckCircle2 className="ml-2 h-4 w-4 text-success" />}
+              {testResult === "missing" && <AlertTriangle className="ml-2 h-4 w-4 text-warning" />}
               {testResult === "error" && <XCircle className="ml-2 h-4 w-4 text-destructive" />}
             </Button>
             {connection && (
