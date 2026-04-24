@@ -264,45 +264,11 @@ export function markdownToHtml(md: string): string {
       continue;
     }
 
-    // Task list
-    if (/^- \[[ x]\]/m.test(trimmed)) {
-      const items = trimmed.split("\n").filter((l) => l.trim());
-      let listHtml = '<ul data-type="taskList">';
-      for (const item of items) {
-        const taskMatch = item.match(/^- \[([ x])\]\s*(.*)/);
-        if (taskMatch) {
-          const checked = taskMatch[1] === "x" ? "true" : "false";
-          listHtml += `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox"${checked === "true" ? " checked" : ""}><span></span></label><div><p>${inlineMarkdown(taskMatch[2])}</p></div></li>`;
-        }
-      }
-      listHtml += "</ul>";
-      processedBlocks.push(listHtml);
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*+]\s/.test(trimmed)) {
-      const items = trimmed.split("\n").filter((l) => l.trim());
-      let listHtml = "<ul>";
-      for (const item of items) {
-        const liMatch = item.match(/^[-*+]\s+(.*)/);
-        if (liMatch) listHtml += `<li><p>${inlineMarkdown(liMatch[1])}</p></li>`;
-      }
-      listHtml += "</ul>";
-      processedBlocks.push(listHtml);
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+\.\s/.test(trimmed)) {
-      const items = trimmed.split("\n").filter((l) => l.trim());
-      let listHtml = "<ol>";
-      for (const item of items) {
-        const liMatch = item.match(/^\d+\.\s+(.*)/);
-        if (liMatch) listHtml += `<li><p>${inlineMarkdown(liMatch[1])}</p></li>`;
-      }
-      listHtml += "</ol>";
-      processedBlocks.push(listHtml);
+    // Lists, including indented/nested items. The previous flat-list parser
+    // silently dropped lines such as `  - [link](url)`, which made nested links
+    // disappear from notes even though the Markdown was still stored correctly.
+    if (isListBlock(trimmed)) {
+      processedBlocks.push(markdownListToHtml(trimmed));
       continue;
     }
 
