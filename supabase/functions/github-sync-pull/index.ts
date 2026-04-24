@@ -472,7 +472,7 @@ Deno.serve(async (req) => {
 // ─── Conflict resolution ─────────────────────────────────────────────
 
 async function resolveConflict(
-  supabase: ReturnType<typeof createClient>,
+  supabase: DbClient,
   userId: string,
   ghToken: string,
   owner: string,
@@ -657,6 +657,55 @@ function decode(text: string): string {
 }
 
 // ─── GitHub API helpers ──────────────────────────────────────────────
+
+async function ensureGithubRepository(token: string, owner: string, repo: string, branch: string) {
+  const existing = await githubGetRepo(token, owner, repo);
+  if (existing) return { created: false, repository: existing };
+
+  const user = await githubGetAuthenticatedUser(token);
+  const created = user.login?.toLowerCase() === owner.toLowerCase()
+    ? await githubCreateUserRepo(token, repo, branch)
+    : await githubCreateOrgRepo(token, owner, repo, branch);
+
+  return { created: true, repository: created };
+}
+
+async function githubGetAuthenticatedUser(token: string) {
+  const res = await fetch("https://api.github.com/user", {
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
+  });
+  if (!res.ok) throw new Error(`GitHub authentication failed (${res.status}): ${await res.text()}`);
+  return await res.json();
+}
+
+async function githubGetRepo(token: string, owner: string, repo: string) {
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub repository check failed (${res.status}): ${await res.text()}`);
+  return await res.json();
+}
+
+async function githubCreateUserRepo(token: string, repo: string, branch: string) {
+  const res = await fetch("https://api.github.com/user/repos", {
+    method: "POST",
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
+    body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
+  });
+  if (!res.ok) throw new Error(`GitHub repository creation failed (${res.status}): ${await res.text()}`);
+  return await res.json();
+}
+
+async function githubCreateOrgRepo(token: string, org: string, repo: string, branch: string) {
+  const res = await fetch(`https://api.github.com/orgs/${org}/repos`, {
+    method: "POST",
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
+    body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
+  });
+  if (!res.ok) throw new Error(`GitHub organization repository creation failed (${res.status}): ${await res.text()}`);
+  return await res.json();
+}
 
 async function githubGetFile(token: string, owner: string, repo: string, path: string, ref: string) {
   const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`, {
