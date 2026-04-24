@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
@@ -60,6 +60,51 @@ export default function ReviewQueue() {
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+
+  const createSuppression = async (item: ReviewItem) => {
+    const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
+    const suppressionKey = item.suppression_key || `${item.suggestion_type}:${item.target_entity_type || "none"}:${item.target_entity_id || "none"}:${normalizedValue}`;
+    await supabase.from("ai_suggestion_suppressions" as any).upsert({
+      user_id: item.user_id,
+      suggestion_type: item.suggestion_type,
+      target_entity_type: item.target_entity_type,
+      target_entity_id: item.target_entity_id,
+      normalized_value: normalizedValue,
+      source_category: typeof item.payload?.category_slug === "string" ? item.payload.category_slug : null,
+      suppression_key: suppressionKey,
+    } as any, { onConflict: "user_id,suppression_key" });
+  };
+
+  const revertAppliedChange = async (item: ReviewItem) => {
+    if (!item.target_entity_id && item.status !== "auto_applied_unreviewed") return;
+
+    if (item.suggestion_type === "add_contact" && item.target_entity_id) {
+      await supabase.from("contacts").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_profile_entry" && item.target_entity_id) {
+      await supabase.from("profile_entries").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_relationship" && item.target_entity_id) {
+      await supabase.from("contact_relationships").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_alias") {
+      const { contact_id, alias } = item.payload as any;
+      if (!contact_id || !alias) return;
+      const { data: contact } = await supabase.from("contacts").select("aliases").eq("id", contact_id).maybeSingle();
+      const aliases = Array.isArray(contact?.aliases) ? contact.aliases : [];
+      await supabase.from("contacts").update({ aliases: aliases.filter((a: string) => a.toLowerCase() !== String(alias).toLowerCase()) }).eq("id", contact_id);
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    }
+  };
 
   const handleAcceptProfileEntry = async (item: ReviewItem) => {
     const { contact_id, contact_name, category_slug, label, value } = item.payload as any;
