@@ -155,9 +155,10 @@ export function markdownToHtml(md: string): string {
   if (!md) return "";
   md = coalesceTaskListMd(md);
   // Tiptap's Markdown serializer represents hard breaks as a trailing
-  // backslash before the newline. Render those as line breaks instead of
-  // feeding the literal backslash back into the editor on every save cycle.
-  md = md.replace(/\\\n/g, "<br>\n");
+  // backslash before the newline. Our block parser already renders single
+  // newlines as hard breaks, so drop the marker instead of re-feeding the
+  // literal backslash into the editor on every save cycle.
+  md = md.replace(/\\\n/g, "\n");
 
   let html = md;
 
