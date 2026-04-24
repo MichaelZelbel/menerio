@@ -347,6 +347,8 @@ function serializeBlock(node: TiptapNode, depth: number): string {
       return `\`\`\`${node.attrs?.language || ""}\n${serializeText(node)}\n\`\`\``;
     case "horizontalRule":
       return "---";
+    case "table":
+      return serializeTable(node);
     case "image":
       return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
     case "videoEmbed":
@@ -400,6 +402,17 @@ function serializeTaskItem(node: TiptapNode, depth: number): string {
 function serializeText(node: TiptapNode): string {
   if (node.text) return node.text;
   return (node.content || []).map(serializeText).join("");
+}
+
+function serializeTable(node: TiptapNode): string {
+  const rows = (node.content || []).map((row) => (row.content || []).map((cell) => serializeInlineChildren(cell).trim()));
+  if (!rows.length) return "";
+  const colCount = Math.max(...rows.map((row) => row.length));
+  const pad = (row: string[]) => [...row, ...Array(Math.max(0, colCount - row.length)).fill("")];
+  const header = pad(rows[0]);
+  const separator = Array(colCount).fill("---");
+  const body = rows.slice(1).map((row) => `| ${pad(row).join(" | ")} |`);
+  return [`| ${header.join(" | ")} |`, `| ${separator.join(" | ")} |`, ...body].join("\n");
 }
 
 function applyMarks(text: string, marks: TiptapMark[]): string {
