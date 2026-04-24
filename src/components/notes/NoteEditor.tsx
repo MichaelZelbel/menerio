@@ -415,7 +415,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (note.is_external) nextContent = stripLeadingH1(nextContent, note.title);
         const html = looksLikeHtml(nextContent) ? nextContent : markdownToHtml(nextContent);
         if (editor && html !== editor.getHTML()) {
-          editor.commands.setContent(html);
+          editor.commands.setContent(html, { emitUpdate: false });
+          lastLocalContentRef.current = (data as any).content || "";
         }
         // Refresh the cached note in React Query so list/sidebar update too.
         queryClient.invalidateQueries({ queryKey: ["notes"] });
@@ -504,7 +505,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(sourceText);
+      editor.commands.setContent(sourceText, { emitUpdate: false });
+      lastLocalContentRef.current = sourceText;
       // trigger save
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
