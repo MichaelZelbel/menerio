@@ -450,7 +450,8 @@ server.registerTool(
       if (!items.length) return { content: [{ type: "text" as const, text: "No action items found." }] };
 
       const lines = items.map((item: any, i: number) => {
-        const statusIcon = { open: "⬜", in_progress: "🔄", done: "✅", dismissed: "❌" }[item.status] || "⬜";
+        const statusIcons: Record<string, string> = { open: "⬜", in_progress: "🔄", done: "✅", dismissed: "❌" };
+        const statusIcon = statusIcons[String(item.status)] || "⬜";
         const age = Math.floor((Date.now() - new Date(item.created_at).getTime()) / 86400000);
         let line = `${statusIcon} ${i + 1}. ${item.content}`;
         line += `\n   Status: ${item.status} | Priority: ${item.priority} | ${age}d old`;
