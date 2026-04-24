@@ -578,25 +578,64 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Button>
           </>
         ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={moveToTrash}>
-                <Trash2 className="mr-2 h-4 w-4" /> Move to Trash
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}>
-                <Copy className="mr-2 h-4 w-4" /> Copy to Clipboard
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
-                <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}>
-                <ExternalLink className="mr-2 h-4 w-4" /> Open in New Tab
-              </DropdownMenuItem>
+          <>
+            {/* Direct action icons — visible on wider screens, collapsed into the menu on smaller ones */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex h-8 w-8"
+              onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}
+              title="Copy to clipboard"
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex h-8 w-8"
+              onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}
+              title="Copy note link"
+            >
+              <Link2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex h-8 w-8"
+              onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}
+              title="Open in new tab"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={moveToTrash}
+              title="Move to trash"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={moveToTrash} className="lg:hidden">
+                  <Trash2 className="mr-2 h-4 w-4" /> Move to Trash
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }} className="lg:hidden">
+                  <Copy className="mr-2 h-4 w-4" /> Copy to Clipboard
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }} className="lg:hidden">
+                  <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')} className="lg:hidden">
+                  <ExternalLink className="mr-2 h-4 w-4" /> Open in New Tab
+                </DropdownMenuItem>
               {sharedNote?.is_active ? (
                 <>
                   <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
