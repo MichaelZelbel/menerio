@@ -5,16 +5,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ShieldAlert } from "lucide-react";
 
 export function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { role, loading } = useAuth();
+  const { role, loading, roleLoading } = useAuth();
   const navigate = useNavigate();
 
+  // Authorization decision MUST wait for both session and role to hydrate.
+  // Otherwise a real admin can be redirected during the brief window where
+  // `loading` is already false but `role` is still null (race condition).
+  const isResolving = loading || roleLoading;
+
   useEffect(() => {
-    if (!loading && role !== "admin") {
+    if (!isResolving && role !== "admin") {
       navigate("/dashboard", { replace: true });
     }
-  }, [loading, role, navigate]);
+  }, [isResolving, role, navigate]);
 
-  if (loading) {
+  if (isResolving) {
     return (
       <div className="flex items-center justify-center h-64">
         <Skeleton className="h-8 w-48" />
