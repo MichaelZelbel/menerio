@@ -1,38 +1,74 @@
-I found two likely root causes in the editor:
+I’m in plan mode right now, so I cannot apply the fixes in this message. You are right to call that out: anything I claimed was “changed” in plan mode would not have affected the running app. Below is the real troubleshooting finding and the concrete fix plan. Once you approve this plan, I can switch to implementation mode and apply it.
 
-1. The editor saves Markdown after each local update, then React Query invalidates and feeds the saved note back into the editor. The current guard compares raw Markdown to incoming note content, but the editor/serializer changes Markdown syntax during typing, especially for headings, hard breaks, bullets, and escaped `#`. That lets a delayed save overwrite the live ProseMirror state and produces the “formats correctly for a moment, then reverts with backslashes” behavior.
-2. The console shows TipTap duplicate extension warnings for `link` and `underline`. In TipTap v3, `StarterKit` already includes these, but the editor also registers them separately. This can make markdown shortcuts and input rules unstable.
+## Updated findings
 
-Plan:
+1. The link regression is now part of the core bug, not a separate visual issue.
+   - Normal Markdown links like `[label](url)` still have converter tests, but links are disappearing in real notes because the editor now saves through the project’s lightweight `htmlToMarkdown(editor.getHTML())` converter.
+   - That converter does not preserve TipTap-specific inline nodes like `wikilink` spans, and it is regex-based rather than using the editor’s document model. So the save path can strip or flatten links/wikilinks even if the initial render path can display them.
 
-1. Stabilize the TipTap extension setup
-   - Configure `StarterKit` to disable its built-in `link` and `underline` extensions.
-   - Keep the explicit `LinkExt.configure({ openOnClick: false })` and `UnderlineExt` instances so toolbar behavior remains the same.
-   - This should remove the duplicate extension warning.
+2. The connection to “this afternoon” is the editor troubleshooting work, not the toolbar button work.
+   - The earlier “always visible trash/action icons” change was only in the toolbar UI and is unlikely to affect typing, markdown shortcuts, links, or autosave.
+   - The regression-causing area is the later editor sync/autosave work in `src/components/notes/NoteEditor.tsx` and `src/utils/markdown-converter.ts`:
+     - new pending-save / last-local guards were added,
+     - Markdown was converted to HTML before `setContent`,
+     - the save path was later changed from TipTap Markdown serialization to the custom `htmlToMarkdown(editor.getHTML())` path,
+     - hard-break handling was changed in `markdownToHtml`.
+   - That explains why headings, bullets, backslashes, saves, and links all broke together: they all pass through the same editor serialization/sync pipeline.
 
-2. Stop server echo updates from resetting active typing
-   - Replace the raw `lastLocalContentRef` equality check with a normalized “last saved / last local” content comparison.
-   - Compare canonical editor HTML or canonical Markdown rather than raw strings, so `# headline`, escaped `\#`, hard breaks, and list serialization differences do not look like external changes.
-   - Do not call `editor.commands.setContent(...)` for the same note while the editor is focused and the incoming content is just the result of the user’s own autosave.
+3. The latest attempted fix likely traded one failure for another.
+   - Using custom HTML-to-Markdown avoided some TipTap Markdown escaping behavior, but it also bypassed TipTap’s richer document-aware serializer.
+   - The pending-save guard is also too broad: once `pendingSaveContentRef` is set, the editor can refuse to accept the server’s returned content, leaving the app state stale and making it look like edits did not save after navigation.
 
-3. Fix autosave race conditions
-   - Track pending autosave content per note id.
-   - When the mutation returns and React Query invalidates notes, mark the returned content as acknowledged instead of re-importing it into TipTap.
-   - Clear timers and refs correctly when switching notes.
+## Plan to fix it safely
 
-4. Make source-mode conversion consistent
-   - When leaving Markdown source mode, convert Markdown to TipTap HTML the same way initial note load does.
-   - Avoid passing raw Markdown into `setContent` in one place and converted HTML in another.
+1. Restore a reliable save path
+   - Stop using the regex `htmlToMarkdown(editor.getHTML())` as the primary editor autosave serializer.
+   - Use TipTap’s Markdown storage serializer again for normal saves, because it understands the editor document better than regex over HTML.
+   - Add a small post-processing normalization step for known bad serializer output only:
+     - normalize hard-break markers so they don’t multiply as visible backslashes,
+     - preserve headings/lists as Markdown syntax,
+     - preserve Markdown links and wikilinks.
 
-5. Add regression coverage
-   - Add/extend tests around Markdown conversion for:
-     - headings (`# Title`) not becoming escaped regular text,
-     - bullets not gaining extra blank/hard-break lines,
-     - hard-break backslashes not multiplying over repeated round-trips.
-   - Run the existing test suite and TypeScript check.
+2. Add explicit wikilink serialization support
+   - Update save serialization so TipTap `wikilink` nodes become Obsidian-compatible Markdown:
+     - `[[Title]]` when display text equals the note title,
+     - `[[Title|Display]]` when an alias/display text is present.
+   - Update the editor load path so existing `[[...]]` content remains visible instead of being flattened or lost.
+   - Keep normal URL links as `[text](url)`.
 
-Expected result:
-- Typing `# Heading` / `## Heading` should remain a heading after autosave.
-- Bullets should keep the cursor inside the list item, not one line below it.
-- Backslashes should no longer appear or multiply after typing/pasting and autosave.
-- TipTap duplicate extension warnings should disappear.
+3. Simplify autosave acknowledgment instead of blocking synchronization
+   - Replace the current `pendingSaveContentRef` logic with a narrower “last submitted content for this note” acknowledgment.
+   - On save success, update that acknowledged value and clear pending state.
+   - On React Query refetch, skip `setContent` only when the incoming server content is exactly the save we just submitted or canonically equivalent.
+   - Do not block future note updates merely because a pending ref is non-null.
+
+4. Prevent editor resets while actively typing
+   - Keep the guard that avoids `editor.commands.setContent(...)` while the editor is focused, unless the note ID changed or an explicit external/AI update arrives.
+   - Keep `setContent(..., { emitUpdate: false })` and `setEditable(..., false)` so sync operations do not trigger fake autosaves.
+
+5. Repair the Markdown conversion helpers where needed
+   - Keep `markdownToHtml` deterministic for initial loading/source mode, but fix link/wikilink/hard-break cases instead of relying on broad regex behavior.
+   - Ensure single-line paragraphs, headings, bullet lists, task lists, normal links, and wikilinks round-trip without data loss.
+
+6. Add regression tests before finishing
+   - Add tests for:
+     - `# Heading` remains a heading after round-trip,
+     - `- bullet` remains a proper bullet without cursor-offset-causing extra breaks,
+     - hard-break backslashes do not multiply,
+     - `[label](https://...)` remains a visible link,
+     - `[[Target]]` and `[[Target|Alias]]` survive editor serialization.
+   - Run the relevant tests and TypeScript/build checks.
+
+## Expected result
+
+- Typing `# Heading` stays a heading after autosave.
+- Bullets keep the cursor in the correct list item.
+- Existing and new links display again.
+- Wikilinks remain visible and clickable.
+- Edits save and still appear after navigating away and back.
+- The app no longer fights active typing with delayed server echo updates.
+
+<lov-actions>
+<lov-open-history>View History</lov-open-history>
+<lov-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</lov-link>
+</lov-actions>

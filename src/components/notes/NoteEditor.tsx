@@ -101,7 +101,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
-import { htmlToMarkdown, markdownToHtml } from "@/utils/markdown-converter";
+import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -139,8 +139,12 @@ function normalizeEditorHtml(html: string): string {
   return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
 }
 
-function editorToMarkdown(editor: { getHTML: () => string }): string {
-  return htmlToMarkdown(editor.getHTML()).trimEnd();
+function normalizeSavedMarkdown(md: string | null | undefined): string {
+  return (md ?? "").replace(/\r\n/g, "\n").trimEnd();
+}
+
+function editorToMarkdown(editor: { getJSON: () => any }): string {
+  return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
 /** Sync manual_link connections based on wikilinks in content */
@@ -362,7 +366,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       saveTimer.current = setTimeout(() => {
         updateNote.mutate(
           { id: note.id, content: md },
-          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+          {
+            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+          }
         );
         triggerGitHubSync(note.id);
 
@@ -408,10 +415,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const editorContent = contentToEditorHtml(note.content, note);
     const currentHtml = editor.getHTML();
     const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
-    const incomingMatchesPendingSave = pendingSaveContentRef.current === (note.content ?? "");
-    const incomingMatchesLastLocal = lastLocalContentRef.current === (note.content ?? "");
+    const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
+    const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
 
-    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
+    if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
@@ -536,7 +543,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         pendingSaveContentRef.current = md;
         updateNote.mutate(
           { id: note.id, content: md },
-          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+          {
+            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+          }
         );
         triggerGitHubSync(note.id);
       }, 800);
@@ -810,8 +820,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             onChange={(e) => {
               setSourceText(e.target.value);
               if (saveTimer.current) clearTimeout(saveTimer.current);
+              pendingSaveContentRef.current = e.target.value;
+              lastLocalContentRef.current = e.target.value;
               saveTimer.current = setTimeout(() => {
-                updateNote.mutate({ id: note.id, content: e.target.value });
+                const nextContent = e.target.value;
+                updateNote.mutate(
+                  { id: note.id, content: nextContent },
+                  {
+                    onSuccess: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
+                    onError: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
+                  }
+                );
                 triggerGitHubSync(note.id);
               }, 800);
             }}

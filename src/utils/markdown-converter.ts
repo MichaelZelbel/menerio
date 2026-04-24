@@ -27,6 +27,15 @@ export interface ParsedMarkdownNote {
   entity_type?: string | null;
 }
 
+type TiptapMark = { type: string; attrs?: Record<string, unknown> | null };
+type TiptapNode = {
+  type: string;
+  text?: string;
+  attrs?: Record<string, unknown> | null;
+  marks?: TiptapMark[];
+  content?: TiptapNode[];
+};
+
 // ─── HTML ↔ Markdown primitives ───────────────────────────────────────
 
 /**
@@ -121,6 +130,11 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, (_, src) => `![](${src})`);
 
   // Links
+  md = md.replace(/<span[^>]*data-wikilink="true"[^>]*data-note-title="([^"]*)"[^>]*data-display-text="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi, (_, title, display) => {
+    const label = decodeEntities(display || title);
+    const target = decodeEntities(title);
+    return label && label !== target ? `[[${target}|${label}]]` : `[[${target}]]`;
+  });
   md = md.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => `[${inlineHtml(text)}](${href})`);
 
   // Inline formatting
@@ -146,6 +160,17 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/\n{3,}/g, "\n\n");
 
   return md.trim() + "\n";
+}
+
+/**
+ * Serialize the live TipTap document to Markdown without going through HTML.
+ * This keeps editor-only nodes such as wikilinks intact and avoids the
+ * tiptap-markdown hard-break escaping loop seen during autosave.
+ */
+export function tiptapJsonToMarkdown(doc: TiptapNode | null | undefined): string {
+  if (!doc) return "";
+  const md = serializeBlock(doc, 0).replace(/\n{3,}/g, "\n\n").trimEnd();
+  return md;
 }
 
 /**
@@ -297,6 +322,114 @@ export function markdownToHtml(md: string): string {
   return result;
 }
 
+function serializeBlock(node: TiptapNode, depth: number): string {
+  const children = () => serializeInlineChildren(node);
+  switch (node.type) {
+    case "doc":
+      return (node.content || []).map((child) => serializeBlock(child, depth)).filter(Boolean).join("\n\n");
+    case "paragraph":
+      return children();
+    case "heading": {
+      const level = Math.min(Math.max(Number(node.attrs?.level) || 1, 1), 6);
+      return `${"#".repeat(level)} ${children()}`.trimEnd();
+    }
+    case "bulletList":
+      return serializeList(node, depth, false);
+    case "orderedList":
+      return serializeList(node, depth, true);
+    case "listItem":
+      return serializeListItem(node, depth);
+    case "taskList":
+      return (node.content || []).map((item) => serializeTaskItem(item, depth)).join("\n");
+    case "blockquote":
+      return (node.content || []).map((child) => serializeBlock(child, depth)).join("\n\n").split("\n").map((line) => `> ${line}`).join("\n");
+    case "codeBlock":
+      return `\`\`\`${node.attrs?.language || ""}\n${serializeText(node)}\n\`\`\``;
+    case "horizontalRule":
+      return "---";
+    case "table":
+      return serializeTable(node);
+    case "image":
+      return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+    case "videoEmbed":
+      return `![video](${node.attrs?.src || ""})`;
+    case "pdfEmbed":
+      return `![pdf](${node.attrs?.src || ""})`;
+    case "audioEmbed":
+      return `![audio](${node.attrs?.src || ""})`;
+    default:
+      return node.text ? serializeInlineNode(node) : (node.content || []).map((child) => serializeBlock(child, depth)).join("\n\n");
+  }
+}
+
+function serializeInlineChildren(node: TiptapNode): string {
+  return (node.content || []).map(serializeInlineNode).join("");
+}
+
+function serializeInlineNode(node: TiptapNode): string {
+  if (node.type === "text") return applyMarks(escapeMarkdownText(node.text || ""), node.marks || []);
+  if (node.type === "hardBreak") return "\n";
+  if (node.type === "wikilink") {
+    const title = String(node.attrs?.noteTitle || "");
+    const display = String(node.attrs?.displayText || "");
+    return display && display !== title ? `[[${title}|${display}]]` : `[[${title}]]`;
+  }
+  if (node.type === "image") return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+  return serializeInlineChildren(node);
+}
+
+function serializeList(node: TiptapNode, depth: number, ordered: boolean): string {
+  let index = Number(node.attrs?.start) || 1;
+  return (node.content || []).map((item) => {
+    const marker = ordered ? `${index++}.` : "-";
+    return `${"  ".repeat(depth)}${marker} ${serializeListItem(item, depth + 1)}`;
+  }).join("\n");
+}
+
+function serializeListItem(node: TiptapNode, depth: number): string {
+  const parts = node.content || [];
+  const first = parts[0]?.type === "paragraph" ? serializeInlineChildren(parts[0]) : serializeBlock(parts[0], depth);
+  const rest = parts.slice(1).map((child) => serializeBlock(child, depth)).filter(Boolean);
+  return [first, ...rest].filter(Boolean).join("\n");
+}
+
+function serializeTaskItem(node: TiptapNode, depth: number): string {
+  const checked = node.attrs?.checked === true ? "x" : " ";
+  const body = serializeListItem(node, depth + 1);
+  return `${"  ".repeat(depth)}- [${checked}] ${body}`;
+}
+
+function serializeText(node: TiptapNode): string {
+  if (node.text) return node.text;
+  return (node.content || []).map(serializeText).join("");
+}
+
+function serializeTable(node: TiptapNode): string {
+  const rows = (node.content || []).map((row) => (row.content || []).map((cell) => serializeInlineChildren(cell).trim()));
+  if (!rows.length) return "";
+  const colCount = Math.max(...rows.map((row) => row.length));
+  const pad = (row: string[]) => [...row, ...Array(Math.max(0, colCount - row.length)).fill("")];
+  const header = pad(rows[0]);
+  const separator = Array(colCount).fill("---");
+  const body = rows.slice(1).map((row) => `| ${pad(row).join(" | ")} |`);
+  return [`| ${header.join(" | ")} |`, `| ${separator.join(" | ")} |`, ...body].join("\n");
+}
+
+function applyMarks(text: string, marks: TiptapMark[]): string {
+  return marks.reduce((value, mark) => {
+    if (mark.type === "bold") return `**${value}**`;
+    if (mark.type === "italic") return `*${value}*`;
+    if (mark.type === "strike") return `~~${value}~~`;
+    if (mark.type === "code") return `\`${value}\``;
+    if (mark.type === "link") return `[${value}](${mark.attrs?.href || ""})`;
+    return value;
+  }, text);
+}
+
+function escapeMarkdownText(text: string): string {
+  return text.replace(/\\([#*_[\]()`])/g, "$1");
+}
+
 // ─── Inline Markdown → HTML ──────────────────────────────────────────
 
 function inlineMarkdown(text: string): string {
@@ -307,6 +440,12 @@ function inlineMarkdown(text: string): string {
 
   // Obsidian image embeds
   r = r.replace(/!\[\[([^\]]+)\]\]/g, '<img src="$1" alt="$1">');
+
+  // Obsidian wikilinks
+  r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
+    const label = display || target;
+    return `<span data-wikilink="true" data-note-id="" data-note-title="${encodeAttribute(target)}" data-display-text="${encodeAttribute(display || "")}" class="wikilink-node" contenteditable="false">[[${label}]]</span>`;
+  });
 
   // Links
   r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
@@ -354,6 +493,10 @@ function encodeEntities(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function encodeAttribute(text: string): string {
+  return encodeEntities(text).replace(/"/g, "&quot;");
 }
 
 // ─── Wikilinks ───────────────────────────────────────────────────────
