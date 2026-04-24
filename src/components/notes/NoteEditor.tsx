@@ -543,7 +543,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         pendingSaveContentRef.current = md;
         updateNote.mutate(
           { id: note.id, content: md },
-          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+          {
+            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+          }
         );
         triggerGitHubSync(note.id);
       }, 800);
@@ -817,8 +820,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             onChange={(e) => {
               setSourceText(e.target.value);
               if (saveTimer.current) clearTimeout(saveTimer.current);
+              pendingSaveContentRef.current = e.target.value;
+              lastLocalContentRef.current = e.target.value;
               saveTimer.current = setTimeout(() => {
-                updateNote.mutate({ id: note.id, content: e.target.value });
+                const nextContent = e.target.value;
+                updateNote.mutate(
+                  { id: note.id, content: nextContent },
+                  {
+                    onSuccess: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
+                    onError: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
+                  }
+                );
                 triggerGitHubSync(note.id);
               }, 800);
             }}
