@@ -114,6 +114,46 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
   return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
 }
 
+async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
+  const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
+  const confidence = suggestion.confidence_score ?? 0;
+  const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
+
+  if (!canAutoApply) {
+    return { ...suggestion, status: "pending_review" };
+  }
+
+  try {
+    if (suggestion.suggestion_type === "add_contact") {
+      const name = String(suggestion.payload.name || "").trim();
+      if (!name) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("contacts")
+        .insert({ user_id: suggestion.user_id, name })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_alias") {
+      const contactId = suggestion.payload.contact_id as string | undefined;
+      const alias = String(suggestion.payload.alias || "").trim();
+      if (!contactId || !alias) return { ...suggestion, status: "pending_review" };
+      const { data: contact } = await supabase.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+      const aliases = Array.isArray((contact as any)?.aliases) ? (contact as any).aliases : [];
+      if (!aliases.some((a: string) => a.toLowerCase() === alias.toLowerCase())) {
+        await supabase.from("contacts").update({ aliases: [...aliases, alias] }).eq("id", contactId);
+      }
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: contactId, applied_at: new Date().toISOString() };
+    }
+  } catch (err) {
+    console.error("auto-apply suggestion failed:", err);
+  }
+
+  return { ...suggestion, status: "pending_review" };
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
