@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
     }
   } catch (err) {
     console.error("receive-note error:", err);
-    return json({ error: err.message || "Internal error" }, 500);
+    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });
 

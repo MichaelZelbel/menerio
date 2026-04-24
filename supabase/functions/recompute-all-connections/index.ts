@@ -208,6 +208,6 @@ Deno.serve(async (req: Request) => {
     });
   } catch (err) {
     console.error("recompute-all-connections error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);
   }
 });
