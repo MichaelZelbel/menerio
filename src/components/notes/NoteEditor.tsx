@@ -101,7 +101,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
-import { markdownToHtml } from "@/utils/markdown-converter";
+import { htmlToMarkdown, markdownToHtml } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -137,6 +137,10 @@ function contentToEditorHtml(content: string | null | undefined, note: Pick<Note
 
 function normalizeEditorHtml(html: string): string {
   return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
+}
+
+function editorToMarkdown(editor: { getHTML: () => string }): string {
+  return htmlToMarkdown(editor.getHTML()).trimEnd();
 }
 
 /** Sync manual_link connections based on wikilinks in content */
@@ -351,7 +355,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
-      const md = (e.storage as any).markdown?.getMarkdown?.() ?? e.getHTML();
+      const md = editorToMarkdown(e);
       lastLocalContentRef.current = md;
       pendingSaveContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -414,7 +418,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (incomingMatchesPendingSave || incomingMatchesEditor) {
       pendingSaveContentRef.current = null;
     }
-    editor.setEditable(!note.is_trashed && !note.is_external);
+    editor.setEditable(!note.is_trashed && !note.is_external, false);
   }, [note.id, note.content, note.title, note.is_external, note.is_trashed, editor]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
@@ -517,7 +521,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (!editor) return;
     if (!sourceMode) {
       // Rich → Source
-      const md = (editor.storage as any).markdown?.getMarkdown?.() || editor.getHTML();
+      const md = editorToMarkdown(editor);
       setSourceText(md);
       setSourceMode(true);
     } else {
@@ -528,7 +532,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       // trigger save
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        const md = (editor.storage as any).markdown?.getMarkdown?.() ?? editor.getHTML();
+        const md = editorToMarkdown(editor);
         pendingSaveContentRef.current = md;
         updateNote.mutate(
           { id: note.id, content: md },
