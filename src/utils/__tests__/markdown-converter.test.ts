@@ -8,6 +8,7 @@ import {
   filePathToNoteTitle,
   internalLinksToWikilinks,
   wikilinksToInternalLinks,
+  tiptapJsonToMarkdown,
   NoteForExport,
 } from "../markdown-converter";
 
@@ -120,6 +121,13 @@ describe("markdownToHtml", () => {
     expect(markdownToHtml("[link](https://example.com)")).toContain('<a href="https://example.com">link</a>');
   });
 
+  it("renders Obsidian wikilinks as visible editor nodes", () => {
+    const html = markdownToHtml("See [[Target Note|the note]] today");
+    expect(html).toContain('data-wikilink="true"');
+    expect(html).toContain('data-note-title="Target Note"');
+    expect(html).toContain('[[the note]]');
+  });
+
   it("converts images", () => {
     expect(markdownToHtml("![alt](img.png)")).toContain('<img src="img.png" alt="alt">');
   });
@@ -219,6 +227,29 @@ describe("round-trip HTML → MD → HTML", () => {
     const backToHtml = markdownToHtml(md);
     expect(backToHtml).toContain("<strong>bold</strong>");
     expect(backToHtml).toContain("<em>italic</em>");
+  });
+});
+
+describe("TipTap JSON → Markdown", () => {
+  it("serializes headings, bullets, normal links, and wikilinks without HTML loss", () => {
+    const md = tiptapJsonToMarkdown({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Title" }] },
+        { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Item" }] }] }] },
+        { type: "paragraph", content: [
+          { type: "text", text: "Open ", marks: [] },
+          { type: "text", text: "site", marks: [{ type: "link", attrs: { href: "https://example.com" } }] },
+          { type: "text", text: " and " },
+          { type: "wikilink", attrs: { noteTitle: "Target", displayText: "Alias" } },
+        ] },
+      ],
+    });
+
+    expect(md).toContain("# Title");
+    expect(md).toContain("- Item");
+    expect(md).toContain("[site](https://example.com)");
+    expect(md).toContain("[[Target|Alias]]");
   });
 });
 
