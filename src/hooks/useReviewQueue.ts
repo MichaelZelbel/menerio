@@ -6,6 +6,15 @@ export interface ReviewItem {
   id: string;
   user_id: string;
   source_note_id: string | null;
+  target_entity_type: string | null;
+  target_entity_id: string | null;
+  source_title: string | null;
+  extracted_value: string | null;
+  confidence_score: number | null;
+  is_sensitive: boolean;
+  applied_at: string | null;
+  blocked_at: string | null;
+  suppression_key: string | null;
   suggestion_type: string;
   title: string;
   description: string | null;
@@ -26,7 +35,7 @@ export function useReviewQueue() {
       const { data, error } = await supabase
         .from("review_queue" as any)
         .select("*, source_note:notes!review_queue_source_note_id_fkey(title)")
-        .eq("status", "pending")
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as ReviewItem[];
@@ -41,7 +50,7 @@ export function useReviewQueue() {
       const { count, error } = await supabase
         .from("review_queue" as any)
         .select("id", { count: "exact", head: true })
-        .eq("status", "pending");
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
       if (error) throw error;
       return count || 0;
     },
@@ -50,10 +59,10 @@ export function useReviewQueue() {
   });
 
   const updateStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: "accepted" | "skipped" | "dismissed" }) => {
+    mutationFn: async ({ id, status, extra }: { id: string; status: "kept" | "removed" | "blocked" | "pending_review" | "auto_applied_unreviewed"; extra?: Record<string, unknown> }) => {
       const { error } = await supabase
         .from("review_queue" as any)
-        .update({ status, reviewed_at: new Date().toISOString() } as any)
+        .update({ status, reviewed_at: new Date().toISOString(), ...extra } as any)
         .eq("id", id);
       if (error) throw error;
     },
