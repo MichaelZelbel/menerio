@@ -74,6 +74,46 @@ function nameAppearsInText(name: string, text: string): boolean {
   return nameWords.some((w) => w.length >= 3 && lower.includes(w));
 }
 
+function normalizeSuggestionValue(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
+  return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
+}
+
+function isSensitiveSuggestion(suggestionType: string, payload: Record<string, unknown>, text = "") {
+  const haystack = `${suggestionType} ${text} ${Object.values(payload).join(" ")}`.toLowerCase();
+  return SENSITIVE_TERMS.some((term) => haystack.includes(term));
+}
+
+async function getSuggestionPreferences(userId: string) {
+  const { data } = await supabase
+    .from("ai_suggestion_preferences")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  return {
+    mode: (data as any)?.suggestion_mode || "auto",
+    sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    autoAddSensitive: (data as any)?.auto_add_sensitive === true,
+  };
+}
+
+async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSuggestion[]) {
+  if (suggestions.length === 0) return suggestions;
+  const keys = suggestions.map((s) => s.suppression_key).filter(Boolean) as string[];
+  if (keys.length === 0) return suggestions;
+  const { data } = await supabase
+    .from("ai_suggestion_suppressions")
+    .select("suppression_key")
+    .eq("user_id", userId)
+    .in("suppression_key", keys);
+  const blocked = new Set((data || []).map((r: any) => r.suppression_key));
+  return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
