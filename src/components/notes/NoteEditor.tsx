@@ -101,7 +101,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
-import { htmlToMarkdown, markdownToHtml } from "@/utils/markdown-converter";
+import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -139,8 +139,8 @@ function normalizeEditorHtml(html: string): string {
   return html.replace(/\s+/g, " ").replace(/>\s+</g, "><").trim();
 }
 
-function editorToMarkdown(editor: { getHTML: () => string }): string {
-  return htmlToMarkdown(editor.getHTML()).trimEnd();
+function editorToMarkdown(editor: { getJSON: () => any }): string {
+  return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
 /** Sync manual_link connections based on wikilinks in content */
