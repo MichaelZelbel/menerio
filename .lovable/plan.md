@@ -1,81 +1,71 @@
-I’m in plan mode right now, so I cannot apply the fixes in this message. You are right to call that out: anything I claimed was “changed” in plan mode would not have affected the running app. Below is the real troubleshooting finding and the concrete fix plan. Once you approve this plan, I can switch to implementation mode and apply it.
+## Plan: make GitHub sync create the repository when missing
 
-## Updated findings
+### What is happening now
 
-1. The link regression is now part of the core bug, not a separate visual issue.
-   - Normal Markdown links like `[label](url)` still have converter tests, but links are disappearing in real notes because the editor now saves through the project’s lightweight `htmlToMarkdown(editor.getHTML())` converter.
-   - That converter does not preserve TipTap-specific inline nodes like `wikilink` spans, and it is regex-based rather than using the editor’s document model. So the save path can strip or flatten links/wikilinks even if the initial render path can display them.
+The current GitHub sync code assumes the repository already exists:
 
-2. The connection to “this afternoon” is the editor troubleshooting work, not the toolbar button work.
-   - The earlier “always visible trash/action icons” change was only in the toolbar UI and is unlikely to affect typing, markdown shortcuts, links, or autosave.
-   - The regression-causing area is the later editor sync/autosave work in `src/components/notes/NoteEditor.tsx` and `src/utils/markdown-converter.ts`:
-     - new pending-save / last-local guards were added,
-     - Markdown was converted to HTML before `setContent`,
-     - the save path was later changed from TipTap Markdown serialization to the custom `htmlToMarkdown(editor.getHTML())` path,
-     - hard-break handling was changed in `markdownToHtml`.
-   - That explains why headings, bullets, backslashes, saves, and links all broke together: they all pass through the same editor serialization/sync pipeline.
+- The settings page saves `repo_owner`, `repo_name`, token, branch, and vault path directly into `github_connections`.
+- `Test Connection` calls `GET /repos/{owner}/{repo}` from the browser. If the repo does not exist, it only reports an error.
+- `Export All Notes` calls `github-sync-export`, which tries to read/write files in the configured repo.
+- `Sync Now` calls `github-sync-pull`, which first tries to fetch the repo tree via `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`.
+- If the repo does not exist, those GitHub calls fail with 404. In `github-sync-pull`, that means the sync can fail before pushing notes.
 
-3. The latest attempted fix likely traded one failure for another.
-   - Using custom HTML-to-Markdown avoided some TipTap Markdown escaping behavior, but it also bypassed TipTap’s richer document-aware serializer.
-   - The pending-save guard is also too broad: once `pendingSaveContentRef` is set, the editor can refuse to accept the server’s returned content, leaving the app state stale and making it look like edits did not save after navigation.
+This explains the confusing state you saw: `last_sync_at` can be updated by sync code/scheduled sync UI paths even when the target repository was never actually created. So the settings can appear recently synced while GitHub still has no repository.
 
-4. New confirmed root cause after checking the real screenshot note.
-   - The database row for `Hyperframes` no longer contains the URLs; a client autosave at 23:08 submitted only:
-     `# Resources\n\n- GitHub repo:\n\n- Skool Community Post:\n\n- Nate Herk YouTube video:`.
-   - So the screenshot note is no longer only a render problem: it was overwritten by the broken editor sync/save path.
-   - The exact bug was in `NoteEditor.tsx`: on note switches, `lastLocalContentRef` was set to the incoming note content before the comparison, making `incomingMatchesLastLocal` true and preventing `editor.commands.setContent(...)`. The editor could then keep stale/stripped content and autosave that into the newly selected note.
-   - A second rendering bug existed for older notes: the custom Markdown loader parsed only flat lists, so indented list items like `  - [https://test.com](https://test.com)` were dropped from the rendered editor even though the database still had the link.
+### User-facing behavior to add
 
-## Plan to fix it safely
+1. When a user provides a valid token, owner, and repository name, Menerio should automatically ensure the repository exists before writing or syncing.
+2. If the repository is missing and the owner is the authenticated GitHub user, Menerio should create it automatically.
+3. If the repository is missing and the owner is an organization, Menerio should try to create it under that org.
+4. If GitHub rejects creation because the token lacks permission, Menerio should show a clear error explaining what permission/scope is missing.
+5. `Last sync` should only reflect a real successful sync/export, not a misleading no-op.
 
-1. Restore a reliable save path
-   - Stop using the regex `htmlToMarkdown(editor.getHTML())` as the primary editor autosave serializer.
-   - Use TipTap’s Markdown storage serializer again for normal saves, because it understands the editor document better than regex over HTML.
-   - Add a small post-processing normalization step for known bad serializer output only:
-     - normalize hard-break markers so they don’t multiply as visible backslashes,
-     - preserve headings/lists as Markdown syntax,
-     - preserve Markdown links and wikilinks.
+### Implementation steps
 
-2. Add explicit wikilink serialization support
-   - Update save serialization so TipTap `wikilink` nodes become Obsidian-compatible Markdown:
-     - `[[Title]]` when display text equals the note title,
-     - `[[Title|Display]]` when an alias/display text is present.
-   - Update the editor load path so existing `[[...]]` content remains visible instead of being flattened or lost.
-   - Keep normal URL links as `[text](url)`.
+1. Add repository bootstrap helpers to the GitHub Edge Functions
+   - Add `githubGetAuthenticatedUser(token)`.
+   - Add `githubGetRepo(token, owner, repo)`.
+   - Add `githubCreateUserRepo(token, repoName)` using `POST /user/repos`.
+   - Add `githubCreateOrgRepo(token, org, repoName)` using `POST /orgs/{org}/repos`.
+   - Add `ensureGithubRepository(token, owner, repo, branch)` that:
+     - returns immediately if the repo exists,
+     - creates it if GitHub returns 404,
+     - verifies/returns a helpful error for 401/403/422,
+     - treats initial default branch creation correctly.
 
-3. Simplify autosave acknowledgment instead of blocking synchronization
-   - Replace the current `pendingSaveContentRef` logic with a narrower “last submitted content for this note” acknowledgment.
-   - On save success, update that acknowledged value and clear pending state.
-   - On React Query refetch, skip `setContent` only when the incoming server content is exactly the save we just submitted or canonically equivalent.
-   - Do not block future note updates merely because a pending ref is non-null.
+2. Use the helper before export writes
+   - In `supabase/functions/github-sync-export/index.ts`, call `ensureGithubRepository(...)` before bulk export and before single-note export/delete.
+   - This guarantees `Export All Notes` can create the configured repo, then write Markdown files.
 
-4. Prevent editor resets while actively typing
-   - Keep the guard that avoids `editor.commands.setContent(...)` while the editor is focused, unless the note ID changed or an explicit external/AI update arrives.
-   - Keep `setContent(..., { emitUpdate: false })` and `setEditable(..., false)` so sync operations do not trigger fake autosaves.
+3. Use the helper before bidirectional sync/pull
+   - In `supabase/functions/github-sync-pull/index.ts`, call `ensureGithubRepository(...)` before fetching the Git tree.
+   - For a newly created empty repo, handle the empty-tree case gracefully and continue to the “push pending local notes” step, instead of failing before it can write anything.
 
-5. Repair the Markdown conversion helpers where needed
-   - Keep `markdownToHtml` deterministic for initial loading/source mode, but fix link/wikilink/hard-break cases instead of relying on broad regex behavior.
-   - Ensure single-line paragraphs, headings, bullet lists, task lists, normal links, and wikilinks round-trip without data loss.
+4. Fix misleading sync status
+   - Make `github-sync-pull` count push failures instead of silently swallowing them.
+   - Only update `github_connections.last_sync_at` after a successful sync attempt that actually completed the GitHub operations.
+   - Return useful response fields such as `repository_created`, `pushed`, `errors`, and per-note failure details.
 
-6. Add regression tests before finishing
-   - Add tests for:
-     - `# Heading` remains a heading after round-trip,
-     - `- bullet` remains a proper bullet without cursor-offset-causing extra breaks,
-     - hard-break backslashes do not multiply,
-     - `[label](https://...)` remains a visible link,
-     - `[[Target]]` and `[[Target|Alias]]` survive editor serialization.
-   - Run the relevant tests and TypeScript/build checks.
+5. Improve Settings UX
+   - Update `Test Connection` behavior so a missing repo is not just a failure. It should say something like: “Repository does not exist yet. It will be created on first export/sync.”
+   - Optionally add a small note under the repo fields: “If this repository does not exist, Menerio will create it when syncing, provided your token has permission.”
+   - Improve the `Export All Notes` error toast to surface the backend error message when repository creation fails.
 
-## Expected result
+6. Validate with real behavior, not just unit assumptions
+   - Test the helper paths against GitHub API semantics in code-level checks/mocks where possible.
+   - Verify the app no longer reports successful sync if GitHub write/create fails.
+   - After implementation, the expected manual verification is:
+     - enter a repo name that does not exist,
+     - click `Export All Notes`,
+     - confirm the repository exists on GitHub,
+     - confirm Markdown files are present,
+     - confirm `last_sync_at` updates only after that successful export.
 
-- Typing `# Heading` stays a heading after autosave.
-- Bullets keep the cursor in the correct list item.
-- Existing and new links display again.
-- Wikilinks remain visible and clickable.
-- Edits save and still appear after navigating away and back.
-- The app no longer fights active typing with delayed server echo updates.
+### Technical notes
 
-<lov-actions>
-<lov-open-history>View History</lov-open-history>
-<lov-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</lov-link>
-</lov-actions>
+- Repository creation requires a token with sufficient permissions:
+  - classic PAT: `repo` scope for private repos, or `public_repo` for public-only behavior,
+  - fine-grained PAT: repository administration/content permissions sufficient to create repositories and write contents.
+- For organization repos, GitHub also requires the token owner to have permission to create repos in that organization.
+- I will keep this in the existing GitHub sync Edge Functions rather than adding a database migration, because the current schema already stores the needed repo settings.
+- I will not change the note editor/content conversion as part of this fix; this is scoped to GitHub repository creation and reliable sync status.
