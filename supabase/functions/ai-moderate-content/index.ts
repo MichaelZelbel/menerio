@@ -207,7 +207,7 @@ async function classifyContent(content: string, apiKey: string): Promise<{ is_vi
   }
 }
 
-async function incrementStrikes(admin: ReturnType<typeof createClient>, userId: string) {
+async function incrementStrikes(admin: any, userId: string) {
   const { data: existing } = await admin
     .from("user_suspensions")
     .select("id, strike_count")
@@ -215,14 +215,15 @@ async function incrementStrikes(admin: ReturnType<typeof createClient>, userId: 
     .maybeSingle();
 
   if (existing) {
-    const newCount = existing.strike_count + 1;
+    const row = existing as { id: string; strike_count: number };
+    const newCount = row.strike_count + 1;
     const updates: Record<string, unknown> = { strike_count: newCount };
     if (newCount >= STRIKE_LIMIT) {
       updates.suspended = true;
       updates.suspended_at = new Date().toISOString();
       updates.suspension_reason = "Automatic suspension: repeated content violations";
     }
-    await admin.from("user_suspensions").update(updates).eq("id", existing.id);
+    await admin.from("user_suspensions").update(updates).eq("id", row.id);
   } else {
     await admin.from("user_suspensions").insert({
       user_id: userId,
@@ -238,7 +239,7 @@ function extractTitle(content: string): string {
 }
 
 async function sendViolationEmail(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   userId: string,
   noteTitle: string,
   category: string,

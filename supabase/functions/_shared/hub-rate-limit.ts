@@ -60,18 +60,18 @@ export async function checkRateLimit(
           ),
         };
       }
-      await supabaseAdmin.rpc("increment_hub_usage", {
+      const { error: incrementError } = await supabaseAdmin.rpc("increment_hub_usage", {
         p_key_id: keyId,
         p_window_start: windowStart,
-      }).catch(() => {
+      });
+      if (incrementError) {
         // Fallback: just update directly
-        supabaseAdmin
+        await supabaseAdmin
           .from("hub_api_usage")
           .update({ request_count: existing.request_count + 1 })
           .eq("key_id", keyId)
-          .eq("window_start", windowStart)
-          .then(() => {});
-      });
+          .eq("window_start", windowStart);
+      }
     }
     return { allowed: true };
   }

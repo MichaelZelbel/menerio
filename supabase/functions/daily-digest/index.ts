@@ -324,6 +324,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ ok: true, digests_sent: processed, total_users: (allUsers || []).length });
   } catch (err) {
     console.error("daily-digest error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);
   }
 });

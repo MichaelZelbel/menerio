@@ -114,6 +114,6 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Unexpected state" }, 500);
   } catch (err) {
     console.error("patch-response error:", err);
-    return json({ error: err.message || "Internal error" }, 500);
+    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });

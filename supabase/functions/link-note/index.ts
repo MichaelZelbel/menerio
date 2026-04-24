@@ -89,6 +89,6 @@ Deno.serve(async (req: Request) => {
     return json({ status: "linked" });
   } catch (err) {
     console.error("link-note error:", err);
-    return json({ error: err.message || "Internal error" }, 500);
+    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });

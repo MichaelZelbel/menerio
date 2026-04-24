@@ -38,6 +38,7 @@ async function ilikeFallback(userId: string, query: string, limit: number) {
   if (error) throw error;
   return (data || []).map((n: Record<string, unknown>) => ({
     ...n,
+    id: String(n.id),
     similarity: null,
     match_source: "note" as const,
   }));
@@ -206,6 +207,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   } catch (err) {
     console.error("search-notes-semantic error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);
   }
 });
