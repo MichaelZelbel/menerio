@@ -27,6 +27,15 @@ export interface ParsedMarkdownNote {
   entity_type?: string | null;
 }
 
+type TiptapMark = { type: string; attrs?: Record<string, unknown> | null };
+type TiptapNode = {
+  type: string;
+  text?: string;
+  attrs?: Record<string, unknown> | null;
+  marks?: TiptapMark[];
+  content?: TiptapNode[];
+};
+
 // ─── HTML ↔ Markdown primitives ───────────────────────────────────────
 
 /**
@@ -146,6 +155,17 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/\n{3,}/g, "\n\n");
 
   return md.trim() + "\n";
+}
+
+/**
+ * Serialize the live TipTap document to Markdown without going through HTML.
+ * This keeps editor-only nodes such as wikilinks intact and avoids the
+ * tiptap-markdown hard-break escaping loop seen during autosave.
+ */
+export function tiptapJsonToMarkdown(doc: TiptapNode | null | undefined): string {
+  if (!doc) return "";
+  const md = serializeBlock(doc, 0).replace(/\n{3,}/g, "\n\n").trimEnd();
+  return md;
 }
 
 /**
