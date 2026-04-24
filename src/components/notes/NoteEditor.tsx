@@ -216,6 +216,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const lastLocalContentRef = useRef(note.content ?? "");
 
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
@@ -339,6 +340,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = (e.storage as any).markdown?.getMarkdown?.() ?? e.getHTML();
+      lastLocalContentRef.current = md;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateNote.mutate({ id: note.id, content: md });
@@ -376,6 +378,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setShowInfo(false);
     setSourceMode(false);
     if (processTimer.current) clearTimeout(processTimer.current);
+    if ((note.content ?? "") === lastLocalContentRef.current) {
+      if (editor) editor.setEditable(!note.is_trashed && !note.is_external);
+      return;
+    }
     let normalizedContent = normalizeNoteContent(note.content);
     if (note.is_external) normalizedContent = stripLeadingH1(normalizedContent, note.title);
     // Convert Markdown → HTML before handing to TipTap so block constructs
@@ -384,7 +390,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       ? normalizedContent
       : markdownToHtml(normalizedContent);
     if (editor && editorContent !== editor.getHTML()) {
-      editor.commands.setContent(editorContent);
+      editor.commands.setContent(editorContent, { emitUpdate: false });
+      lastLocalContentRef.current = note.content ?? "";
     }
     if (editor) {
       editor.setEditable(!note.is_trashed && !note.is_external);
