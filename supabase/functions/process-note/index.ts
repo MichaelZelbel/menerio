@@ -96,6 +96,45 @@ const PROFILE_CATEGORY_SLUGS = [
   "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
 ];
 
+type ReviewSuggestion = {
+  user_id: string;
+  source_note_id: string;
+  suggestion_type: string;
+  title: string;
+  description: string;
+  payload: Record<string, unknown>;
+  status: string;
+  target_entity_type?: string | null;
+  target_entity_id?: string | null;
+  source_title?: string | null;
+  extracted_value?: string | null;
+  confidence_score?: number | null;
+  is_sensitive?: boolean;
+  applied_at?: string | null;
+  suppression_key?: string | null;
+};
+
+const SENSITIVITY_THRESHOLDS: Record<string, number> = {
+  conservative: 0.85,
+  balanced: 0.7,
+  exploratory: 0.55,
+};
+
+const DEFAULT_CONFIDENCE: Record<string, number> = {
+  add_contact: 0.8,
+  add_alias: 0.78,
+  add_profile_entry: 0.74,
+  add_relationship: 0.72,
+  add_event_temerio: 0.66,
+  add_event_cherishly: 0.66,
+};
+
+const SENSITIVE_TERMS = [
+  "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
+  "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
+  "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
+];
+
 const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
 
 Return a JSON object with two keys:
