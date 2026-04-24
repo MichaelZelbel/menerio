@@ -296,14 +296,15 @@ async function handleBulkSync(
     results.push({ note_id: note.id, title: note.title, success: r.success, error: r.error });
   }
 
-  // Update last_sync_at
-  await supabase
-    .from("github_connections")
-    .update({ last_sync_at: new Date().toISOString() })
-    .eq("user_id", userId);
-
   const succeeded = results.filter((r) => r.success).length;
   const failed = results.filter((r) => !r.success).length;
+
+  if (failed === 0) {
+    await supabase
+      .from("github_connections")
+      .update({ last_sync_at: new Date().toISOString() })
+      .eq("user_id", userId);
+  }
 
   return new Response(
     JSON.stringify({ success: failed === 0, total: results.length, succeeded, failed, repository_created: repositoryCreated, results }),
