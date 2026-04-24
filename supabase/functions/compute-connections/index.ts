@@ -200,6 +200,6 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, connections_upserted: upserted });
   } catch (err) {
     console.error("compute-connections error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);
   }
 });

@@ -203,6 +203,6 @@ Deno.serve(async (req) => {
     return json(period);
   } catch (err) {
     console.error("ensure-token-allowance error:", err);
-    return json({ error: err.message || "Internal server error" }, 500);
+    return json({ error: err instanceof Error ? err.message : "Internal server error" }, 500);
   }
 });
