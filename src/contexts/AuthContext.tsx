@@ -17,6 +17,14 @@ interface AuthContextType {
   profile: Profile | null;
   role: AppRole | null;
   loading: boolean;
+  /**
+   * True while the user's role is being fetched from the database.
+   * Authorization decisions (e.g. AdminRoute) MUST wait for this to be false
+   * before treating a missing role as a denial — otherwise a real admin can
+   * be redirected during the brief window between session hydration and role
+   * hydration.
+   */
+  roleLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<boolean>;
   signOut: () => Promise<void>;
@@ -34,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const [roleLoading, setRoleLoading] = useState(true);
   const { toast } = useToast();
 
   const fetchProfile = useCallback(async (userId: string) => {
@@ -46,16 +55,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchRole = useCallback(async (userId: string) => {
-    const { data, error } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .single();
-    if (!error && data) setRole(data.role as AppRole);
+    try {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId)
+        .single();
+      if (!error && data) {
+        setRole(data.role as AppRole);
+      }
+    } finally {
+      // Always release the gate, even on error / no-row, so route guards
+      // can make a decision rather than hanging on the skeleton forever.
+      setRoleLoading(false);
+    }
   }, []);
 
   const refreshProfile = useCallback(async () => {
     if (user) {
+      setRoleLoading(true);
       await fetchProfile(user.id);
       await fetchRole(user.id);
     }
@@ -63,11 +81,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
+      (event, newSession) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
+          setRoleLoading(true);
+          // Defer Supabase calls out of the auth callback to avoid deadlocks.
           setTimeout(() => {
             fetchProfile(newSession.user.id);
             fetchRole(newSession.user.id);
@@ -75,11 +95,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           setProfile(null);
           setRole(null);
+          setRoleLoading(false);
         }
 
         if (event === "SIGNED_OUT") {
           setProfile(null);
           setRole(null);
+          setRoleLoading(false);
         }
 
         setLoading(false);
@@ -90,8 +112,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(existingSession);
       setUser(existingSession?.user ?? null);
       if (existingSession?.user) {
+        setRoleLoading(true);
         fetchProfile(existingSession.user.id);
         fetchRole(existingSession.user.id);
+      } else {
+        setRoleLoading(false);
       }
       setLoading(false);
     });
@@ -154,7 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, session, profile, role, loading, signIn, signUp, signOut, signInWithOAuth, resetPassword, updatePassword, refreshProfile }}
+      value={{ user, session, profile, role, loading, roleLoading, signIn, signUp, signOut, signInWithOAuth, resetPassword, updatePassword, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>
