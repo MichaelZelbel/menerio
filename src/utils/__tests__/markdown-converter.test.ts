@@ -184,6 +184,13 @@ describe("markdownToHtml", () => {
     expect(html).toBe("<ul><li><p>One</p></li><li><p>Two</p></li></ul>");
   });
 
+  it("preserves links inside indented bullet lists", () => {
+    const html = markdownToHtml("- Parent\n  - [https://test.com](https://test.com)\n  - Child");
+    expect(html).toContain("<ul><li><p>Parent</p><ul>");
+    expect(html).toContain('<a href="https://test.com">https://test.com</a>');
+    expect(html).toContain("<li><p>Child</p></li>");
+  });
+
   it("coalesces blank-line-separated task list items into a single list", () => {
     const md = "- [x] Item A.\n\n- [x] Item B.\n\n- [ ] Item C.";
     const html = markdownToHtml(md);
