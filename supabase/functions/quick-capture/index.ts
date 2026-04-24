@@ -70,6 +70,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: "unauthorized" }, 401);
     }
 
+    if (!userId) return json({ error: "unauthorized" }, 401);
+
     // Pre-check balance
     const balance = await checkBalance(supabase, userId);
     if (!balance.allowed) {
