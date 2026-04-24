@@ -349,6 +349,12 @@ function serializeBlock(node: TiptapNode, depth: number): string {
       return "---";
     case "image":
       return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+    case "videoEmbed":
+      return `![video](${node.attrs?.src || ""})`;
+    case "pdfEmbed":
+      return `![pdf](${node.attrs?.src || ""})`;
+    case "audioEmbed":
+      return `![audio](${node.attrs?.src || ""})`;
     default:
       return node.text ? serializeInlineNode(node) : (node.content || []).map((child) => serializeBlock(child, depth)).join("\n\n");
   }
