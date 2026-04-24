@@ -652,6 +652,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          </>
         )}
       </div>
 
