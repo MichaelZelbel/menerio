@@ -89,7 +89,7 @@ export function useGitHubBulkSync() {
         body: { bulk: true },
       });
       if (res.error) throw res.error;
-      return res.data as { total: number; succeeded: number; failed: number; results: any[] };
+      return res.data as { total: number; succeeded: number; failed: number; repository_created?: boolean; results: any[] };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["github-sync-log"] });
