@@ -1,24 +1,30 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Brain, Copy, Check, Terminal, Monitor, Code2, Sparkles, Eye, EyeOff, Key, RefreshCw, Loader2 } from "lucide-react";
+import {
+  Copy,
+  Check,
+  Terminal,
+  Monitor,
+  Code2,
+  Sparkles,
+  Eye,
+  EyeOff,
+  Key,
+  Clock,
+} from "lucide-react";
 import { toast } from "sonner";
 
-const SUPABASE_PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
 const MCP_URL = "https://mcp.menerio.com";
-const LOCAL_STORAGE_KEY = "menerio_mcp_key";
-
-const MCP_KEY_NAME = "MCP Connection";
-const MCP_SCOPES = ["profile", "notes", "contacts", "actions", "graph", "media", "stats"];
 
 const TOOLS = [
   { name: "search_thoughts", desc: "Semantic search across all your captured thoughts by meaning" },
@@ -28,117 +34,62 @@ const TOOLS = [
   { name: "get_action_items", desc: "All open action items extracted from notes" },
   { name: "get_person_notes", desc: "All notes mentioning a specific person" },
   { name: "search_images", desc: "Search across all analyzed images and PDFs by description or extracted text" },
-  { name: "get_note_media", desc: "Get all media analysis results (images, PDFs) for a specific note" },
-  { name: "get_user_profile", desc: "Retrieve the user's profile — identity, preferences, values, goals, and agent instructions" },
+  { name: "get_note_media", desc: "Get all media analysis results for a specific note" },
+  { name: "get_user_profile", desc: "Retrieve identity, preferences, values, goals, and agent instructions" },
 ];
 
+function formatExpiry(expiresAtSeconds: number | undefined): string {
+  if (!expiresAtSeconds) return "—";
+  const ms = expiresAtSeconds * 1000 - Date.now();
+  if (ms <= 0) return "expired";
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 export function MCPConnectionManager() {
-  const { user, session } = useAuth();
+  const { session } = useAuth();
   const [copied, setCopied] = useState<string | null>(null);
-  const [mcpKey, setMcpKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [existingKeyInfo, setExistingKeyInfo] = useState<{ key_prefix: string; is_active: boolean; created_at: string } | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const [, forceTick] = useState(0);
 
-  // Load key from localStorage on mount
+  const accessToken = session?.access_token ?? "";
+  const expiresAt = session?.expires_at;
+
+  // Tick every 30s so the "valid for" countdown stays fresh
   useEffect(() => {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) setMcpKey(stored);
+    const id = setInterval(() => forceTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
   }, []);
-
-  // Check if an MCP key already exists on the server
-  useEffect(() => {
-    if (!session?.access_token) return;
-    (async () => {
-      const { data, error } = await supabase.functions.invoke("hub-api-keys", {
-        method: "GET",
-      });
-      if (!error && data?.keys) {
-        const existing = data.keys.find((k: any) => k.name === MCP_KEY_NAME && k.is_active);
-        if (existing) {
-          setExistingKeyInfo({ key_prefix: existing.key_prefix, is_active: existing.is_active, created_at: existing.created_at });
-        }
-      }
-    })();
-  }, [session?.access_token]);
-
-  const generateKey = async () => {
-    if (!session?.access_token) {
-      toast.error("You must be logged in to generate a key.");
-      return;
-    }
-
-    setGenerating(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("hub-api-keys/generate", {
-        method: "POST",
-        body: { name: MCP_KEY_NAME, scopes: MCP_SCOPES },
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      const newKey = data.api_key;
-      setMcpKey(newKey);
-      localStorage.setItem(LOCAL_STORAGE_KEY, newKey);
-      setShowKey(true);
-      setExistingKeyInfo({ key_prefix: data.key_prefix, is_active: true, created_at: data.created_at });
-      toast.success("MCP key generated! Copy it now — you won't see it again.");
-    } catch (err: any) {
-      toast.error(`Failed to generate key: ${err.message}`);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const regenerateKey = async () => {
-    if (!session?.access_token) return;
-
-    setGenerating(true);
-    try {
-      // Revoke existing MCP keys first
-      const { data: listData } = await supabase.functions.invoke("hub-api-keys", {
-        method: "GET",
-      });
-      if (listData?.keys) {
-        for (const key of listData.keys) {
-          if (key.name === MCP_KEY_NAME && key.is_active) {
-            await supabase.functions.invoke(`hub-api-keys/${key.id}`, {
-              method: "DELETE",
-            });
-          }
-        }
-      }
-
-      // Generate new one
-      await generateKey();
-    } catch (err: any) {
-      toast.error(`Failed to regenerate key: ${err.message}`);
-      setGenerating(false);
-    }
-  };
-
-  const keyOrPlaceholder = mcpKey || "YOUR_MCP_KEY";
-  const chatGptUrl = `${MCP_URL}?key=${keyOrPlaceholder}`;
 
   const handleCopy = async (text: string, key: string) => {
     await navigator.clipboard.writeText(text);
     setCopied(key);
+    toast.success("Copied to clipboard");
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const CopyButton = ({ text, id }: { text: string; id: string }) => (
+  const CopyButton = ({ text, id, label }: { text: string; id: string; label?: string }) => (
     <Button
       variant="outline"
-      size="icon"
+      size={label ? "sm" : "icon"}
       className="shrink-0"
       onClick={() => handleCopy(text, id)}
     >
       {copied === id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+      {label && <span className="ml-1.5">{label}</span>}
     </Button>
   );
 
-  const claudeSnippet = `{
+  const tokenOrPlaceholder = accessToken || "YOUR_ACCESS_TOKEN";
+  const maskedToken = accessToken
+    ? `${accessToken.slice(0, 12)}${"•".repeat(24)}${accessToken.slice(-6)}`
+    : "";
+
+  const claudeSnippet = useMemo(
+    () => `{
   "mcpServers": {
     "menerio": {
       "command": "npx",
@@ -146,17 +97,54 @@ export function MCPConnectionManager() {
         "-y", "mcp-remote",
         "${MCP_URL}",
         "--header",
-        "x-brain-key: ${keyOrPlaceholder}"
+        "Authorization: Bearer ${tokenOrPlaceholder}"
       ]
     }
   }
-}`;
+}`,
+    [tokenOrPlaceholder]
+  );
 
-  const cursorSnippet = claudeSnippet;
+  const claudeCodeCommand = useMemo(
+    () =>
+      `claude mcp add --transport http menerio ${MCP_URL} --header "Authorization: Bearer ${tokenOrPlaceholder}"`,
+    [tokenOrPlaceholder]
+  );
 
-  const claudeCodeCommand = `claude mcp add --transport http menerio ${MCP_URL} --header "x-brain-key: ${keyOrPlaceholder}"`;
+  const agentPrompt = useMemo(
+    () => `You have access to Menerio — the user's personal AI memory and second brain.
 
-  const maskedKey = mcpKey ? `${mcpKey.slice(0, 8)}${"•".repeat(20)}${mcpKey.slice(-4)}` : "";
+# Connection
+- MCP Server URL: ${MCP_URL}
+- Auth header: \`Authorization: Bearer <token>\`
+- The user pastes a fresh token (valid ~1 hour). When it expires, ask the user for a new one from Menerio → Settings → MCP.
+
+# What Menerio is
+Menerio stores the user's thoughts, notes, contacts (People), action items, media (images/PDFs with AI descriptions), a knowledge graph of links between notes, and a structured profile (identity, preferences, values, goals, agent instructions).
+
+# Available tools
+- \`search_thoughts(query, limit?, threshold?)\` — semantic search across notes. Use first when the user asks about a topic, idea, or anything they've previously captured.
+- \`list_recent(limit?, type?, topic?, person?, days?)\` — recent notes, filterable.
+- \`capture_thought(content)\` — save a new thought. Title, embedding, topics, people and action items are extracted automatically.
+- \`get_stats()\` — totals, top topics, people, recent activity.
+- \`get_action_items(status?, priority?, person?, include_done?)\` — open to-dos extracted from notes.
+- \`get_person_notes(name)\` — all notes mentioning a specific person.
+- \`search_images(query)\` — search analyzed images and PDFs by description or extracted text.
+- \`get_note_media(note_id)\` — media analysis attached to a note.
+- \`get_user_profile(include_instructions?, include_notes?, scope?)\` — identity, preferences, values, goals, agent instructions. Call this once at the start of a session so you know who the user is.
+
+# How to behave
+- On first use in a conversation, call \`get_user_profile\` so your answers are personalised. Honour any \`agent_instructions\` returned.
+- When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_thoughts\` before answering from memory.
+- When the user shares a new fact, decision, idea, observation, or meeting note worth keeping, call \`capture_thought\` — don't ask for permission for short factual captures, do confirm for long-form content.
+- Output style: concise. For lists of notes, show one bullet per item with title + date. Only show full content when explicitly asked.
+- After any \`capture_thought\`, end with a one-line confirmation including the detected type and topics.
+- Never invent note ids, titles, or dates. If a search returns nothing, say so.
+- If a tool call returns "Invalid or expired session token", tell the user to grab a fresh token from Menerio → Settings → MCP and paste it.
+
+Use these tools whenever the user asks you to recall, search, save, or organise anything from their personal memory.`,
+    []
+  );
 
   return (
     <div className="space-y-6">
@@ -165,70 +153,52 @@ export function MCPConnectionManager() {
         <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
         <p className="text-muted-foreground">
           <span className="font-medium text-foreground">Tip:</span> Make sure your{" "}
-          <a href="/dashboard/profile" className="underline text-primary hover:text-primary/80">profile</a>{" "}
-          is filled in so your new AI tool can understand who you are. The more context it has, the better it works.
+          <a href="/dashboard/profile" className="underline text-primary hover:text-primary/80">
+            profile
+          </a>{" "}
+          is filled in so your AI tool can understand who you are. The more context it has, the better it works.
         </p>
       </div>
 
-      {/* MCP Key + Connection URL */}
+      {/* Access Token */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" /> MCP Access Key
+            <Key className="h-5 w-5" /> Your Access Token
           </CardTitle>
           <CardDescription>
-            Generate a personal access key to connect AI tools to your Menerio brain.
+            Paste this into your AI agent to connect it to your Menerio brain. The token is tied to your current
+            login and refreshes automatically while you're signed in.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!mcpKey ? (
-            <div className="space-y-3">
-              {existingKeyInfo ? (
-                <div className="rounded-md bg-muted p-3 text-sm space-y-1">
-                  <p className="text-muted-foreground">
-                    You have an active MCP key (<code className="text-xs">{existingKeyInfo.key_prefix}…</code>), but the full key is no longer available.
-                  </p>
-                  <p className="text-muted-foreground">
-                    If you've lost it, generate a new one below. The old key will be revoked.
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Click the button below to generate your personal MCP access key. You'll need it to connect Claude, ChatGPT, Cursor, and other AI tools.
-                </p>
-              )}
-              <Button onClick={existingKeyInfo ? regenerateKey : generateKey} disabled={generating}>
-                {generating ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-                ) : existingKeyInfo ? (
-                  <><RefreshCw className="h-4 w-4 mr-2" /> Regenerate Key</>
-                ) : (
-                  <><Key className="h-4 w-4 mr-2" /> Generate MCP Key</>
-                )}
-              </Button>
-            </div>
+          {!accessToken ? (
+            <p className="text-sm text-muted-foreground">
+              You need to be signed in to see your access token.
+            </p>
           ) : (
-            <div className="space-y-3">
+            <>
               <div className="flex items-center gap-2">
                 <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
-                  {showKey ? mcpKey : maskedKey}
+                  {showToken ? accessToken : maskedToken}
                 </code>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowKey(!showKey)}
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                <Button variant="ghost" size="icon" onClick={() => setShowToken((s) => !s)}>
+                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
-                <CopyButton text={mcpKey} id="mcp-key" />
+                <CopyButton text={accessToken} id="token" />
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={regenerateKey} disabled={generating}>
-                  {generating ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1.5" />}
-                  Regenerate
-                </Button>
+
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1.5">
+                  <Clock className="h-3 w-3" />
+                  Valid for ~{formatExpiry(expiresAt)}
+                </Badge>
+                <span>
+                  Refreshes automatically while you're signed in. Just come back here for a new one when your
+                  agent needs it.
+                </span>
               </div>
-            </div>
+            </>
           )}
 
           <div className="space-y-2 pt-2 border-t">
@@ -243,6 +213,29 @@ export function MCPConnectionManager() {
         </CardContent>
       </Card>
 
+      {/* Agent Prompt */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" /> Agent Setup Prompt
+          </CardTitle>
+          <CardDescription>
+            Paste this into your AI agent's system prompt or instructions. It tells the agent what Menerio is, which
+            tools are available, and how to use them well.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            readOnly
+            value={agentPrompt}
+            className="min-h-[280px] font-mono text-xs leading-relaxed"
+          />
+          <div className="flex justify-end">
+            <CopyButton text={agentPrompt} id="prompt" label="Copy prompt" />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Available Tools */}
       <Card>
         <CardHeader>
@@ -250,7 +243,7 @@ export function MCPConnectionManager() {
             <Sparkles className="h-5 w-5" /> Available Tools
           </CardTitle>
           <CardDescription>
-            These tools are available to any AI client connected to your MCP server.
+            These tools are exposed to any AI agent connected to your MCP server.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -271,28 +264,30 @@ export function MCPConnectionManager() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Terminal className="h-5 w-5" /> Connection Guides
+            <Terminal className="h-5 w-5" /> Compatible Clients
           </CardTitle>
           <CardDescription>
-            Step-by-step instructions for connecting popular AI tools.
+            Copy-paste configs for popular MCP-compatible AI tools. Replace the token whenever you need a fresh
+            one — just come back to this page and copy it again.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Accordion type="single" collapsible className="w-full">
-            {/* Claude */}
             <AccordionItem value="claude">
               <AccordionTrigger>
                 <div className="flex items-center gap-2">
                   <Monitor className="h-4 w-4" />
-                  <span>Claude</span>
+                  <span>Claude Desktop</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>Open the Claude app (desktop or web)</li>
-                  <li>Go to <strong>Settings</strong> → <strong>Integrations</strong></li>
-                  <li>Click <strong>Add Integration</strong> and choose <strong>Custom MCP</strong></li>
-                  <li>Paste the JSON config below</li>
+                  <li>Open Claude Desktop</li>
+                  <li>
+                    Go to <strong>Settings</strong> → <strong>Developer</strong> → <strong>Edit Config</strong>
+                  </li>
+                  <li>Paste the JSON below into <code className="text-xs">claude_desktop_config.json</code></li>
+                  <li>Restart Claude Desktop</li>
                 </ol>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
@@ -300,47 +295,9 @@ export function MCPConnectionManager() {
                     <CopyButton text={claudeSnippet} id="claude" />
                   </div>
                 </div>
-                {!mcpKey && (
-                  <p className="text-xs text-muted-foreground">
-                    Generate your MCP key above to auto-populate the config.
-                  </p>
-                )}
               </AccordionContent>
             </AccordionItem>
 
-            {/* ChatGPT */}
-            <AccordionItem value="chatgpt">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  <span>ChatGPT</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>Go to <strong>Settings</strong> → <strong>Apps</strong> → <strong>Advanced Settings</strong></li>
-                  <li>Enable the <strong>Developer</strong> toggle</li>
-                  <li>Click <strong>Create App</strong></li>
-                  <li>For Authentication, select <strong>None</strong> (the key is embedded in the URL)</li>
-                  <li>Paste the URL below and save</li>
-                </ol>
-                <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
-                    {chatGptUrl}
-                  </pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton text={chatGptUrl} id="chatgpt" />
-                  </div>
-                </div>
-                {!mcpKey && (
-                  <p className="text-xs text-muted-foreground">
-                    Generate your MCP key above to get a ready-to-paste URL.
-                  </p>
-                )}
-              </AccordionContent>
-            </AccordionItem>
-
-            {/* Claude Code */}
             <AccordionItem value="claude-code">
               <AccordionTrigger>
                 <div className="flex items-center gap-2">
@@ -349,7 +306,7 @@ export function MCPConnectionManager() {
                 </div>
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Run this command in your terminal:</p>
+                <p className="text-sm text-muted-foreground">Run this in your terminal:</p>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
                     {claudeCodeCommand}
@@ -358,37 +315,48 @@ export function MCPConnectionManager() {
                     <CopyButton text={claudeCodeCommand} id="claude-code" />
                   </div>
                 </div>
-                {!mcpKey && (
-                  <p className="text-xs text-muted-foreground">
-                    Generate your MCP key above to auto-populate the command.
-                  </p>
-                )}
               </AccordionContent>
             </AccordionItem>
 
-            {/* Cursor / VS Code */}
             <AccordionItem value="cursor">
               <AccordionTrigger>
                 <div className="flex items-center gap-2">
                   <Code2 className="h-4 w-4" />
-                  <span>Cursor / VS Code Copilot</span>
+                  <span>Cursor / VS Code</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Add this to your <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or VS Code MCP settings:
+                  Add this to <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or your VS
+                  Code MCP settings:
                 </p>
                 <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{cursorSnippet}</pre>
+                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
                   <div className="absolute top-2 right-2">
-                    <CopyButton text={cursorSnippet} id="cursor" />
+                    <CopyButton text={claudeSnippet} id="cursor" />
                   </div>
                 </div>
-                {!mcpKey && (
-                  <p className="text-xs text-muted-foreground">
-                    Generate your MCP key above to auto-populate the config.
-                  </p>
-                )}
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="other">
+              <AccordionTrigger>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  <span>Any other MCP client</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="space-y-3 text-sm text-muted-foreground">
+                <p>Menerio speaks the standard MCP Streamable HTTP protocol. For any client:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>
+                    Endpoint: <code className="text-xs bg-muted px-1 rounded">{MCP_URL}</code>
+                  </li>
+                  <li>
+                    Header: <code className="text-xs bg-muted px-1 rounded">Authorization: Bearer &lt;token&gt;</code>
+                  </li>
+                  <li>Transport: HTTP (Streamable)</li>
+                </ul>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
