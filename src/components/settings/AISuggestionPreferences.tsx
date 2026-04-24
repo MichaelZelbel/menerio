@@ -77,11 +77,12 @@ export function AISuggestionPreferences() {
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
-        if (data) {
+        const row = data as any;
+        if (row) {
           setPrefs({
-            suggestion_mode: data.suggestion_mode || defaults.suggestion_mode,
-            suggestion_sensitivity: data.suggestion_sensitivity || defaults.suggestion_sensitivity,
-            auto_add_sensitive: data.auto_add_sensitive ?? defaults.auto_add_sensitive,
+            suggestion_mode: row.suggestion_mode || defaults.suggestion_mode,
+            suggestion_sensitivity: row.suggestion_sensitivity || defaults.suggestion_sensitivity,
+            auto_add_sensitive: row.auto_add_sensitive ?? defaults.auto_add_sensitive,
           });
         }
         setLoading(false);
