@@ -152,9 +152,14 @@ Deno.serve(async (req) => {
     const branch = ghConn.branch || "main";
     const vaultPath = ghConn.vault_path || "/";
 
+    const shouldEnsureRepo = bulk || action !== "delete";
+    const repoState = shouldEnsureRepo
+      ? await ensureGithubRepository(ghToken, owner, repo, branch)
+      : { created: false };
+
     // Handle bulk sync
     if (bulk) {
-      return await handleBulkSync(serviceClient, userId, ghToken, owner, repo, branch, vaultPath);
+      return await handleBulkSync(serviceClient, userId, ghToken, owner, repo, branch, vaultPath, repoState.created);
     }
 
     if (!note_id || !action) {
@@ -174,6 +179,7 @@ Deno.serve(async (req) => {
     }
 
     const result = await syncSingleNote(serviceClient, userId, ghToken, owner, repo, branch, vaultPath, note, action);
+    if (repoState.created) result.repository_created = true;
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("github-sync-export error:", err);
@@ -266,6 +272,7 @@ async function handleBulkSync(
   repo: string,
   branch: string,
   vaultPath: string,
+  repositoryCreated = false,
 ) {
   // Get all non-trashed notes
   const { data: notes, error } = await supabase
@@ -296,7 +303,7 @@ async function handleBulkSync(
   const failed = results.filter((r) => !r.success).length;
 
   return new Response(
-    JSON.stringify({ success: true, total: results.length, succeeded, failed, results }),
+    JSON.stringify({ success: failed === 0, total: results.length, succeeded, failed, repository_created: repositoryCreated, results }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
 }
