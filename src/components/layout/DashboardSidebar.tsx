@@ -11,7 +11,6 @@ import {
   Crown,
   ShieldCheck,
   Plug,
-  CalendarDays,
   UserCircle,
   User,
   
@@ -70,7 +69,6 @@ export function DashboardSidebar() {
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     
     { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
-    { title: "Weekly Review", url: "/dashboard/review", icon: CalendarDays },
     { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
     { title: "Media Library", url: "/dashboard/media", icon: Image },
   ];
