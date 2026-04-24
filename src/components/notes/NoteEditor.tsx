@@ -529,12 +529,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         const md = (editor.storage as any).markdown?.getMarkdown?.() ?? editor.getHTML();
-        updateNote.mutate({ id: note.id, content: md });
+        pendingSaveContentRef.current = md;
+        updateNote.mutate(
+          { id: note.id, content: md },
+          { onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; } }
+        );
         triggerGitHubSync(note.id);
       }, 800);
       setSourceMode(false);
     }
-  }, [editor, sourceMode, sourceText, note.id, updateNote, triggerGitHubSync]);
+  }, [editor, sourceMode, sourceText, note, updateNote, triggerGitHubSync]);
 
   return (
     <div className="flex h-full">
