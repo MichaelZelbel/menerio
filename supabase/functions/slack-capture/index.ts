@@ -87,6 +87,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ ok: true, note_id: note.id, title });
   } catch (err) {
     console.error("slack-capture error:", err);
-    return json({ error: err.message }, 500);
+    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });
