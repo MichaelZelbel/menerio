@@ -212,15 +212,10 @@ async function generateReviewItems(
     const noteType = metadata.type as string | undefined;
     const summary = (metadata.summary as string) || noteTitle;
 
-    const suggestions: Array<{
-      user_id: string;
-      source_note_id: string;
-      suggestion_type: string;
-      title: string;
-      description: string;
-      payload: Record<string, unknown>;
-      status: string;
-    }> = [];
+    const preferences = await getSuggestionPreferences(userId);
+    if (preferences.mode === "off") return;
+
+    const suggestions: ReviewSuggestion[] = [];
 
     // Check which apps are connected
     const { data: connectedApps } = await supabase
@@ -252,7 +247,12 @@ async function generateReviewItems(
             emotion_valence: 0.7,
             category: "life",
           },
-          status: "pending",
+          status: "pending_review",
+          source_title: noteTitle,
+          extracted_value: headline,
+          confidence_score: DEFAULT_CONFIDENCE.add_event_temerio,
+          is_sensitive: isSensitiveSuggestion("add_event_temerio", { headline, summary }, noteContent),
+          suppression_key: buildSuppressionKey("add_event_temerio", "event", null, headline),
         });
       }
 
@@ -271,7 +271,12 @@ async function generateReviewItems(
             emotion_valence: 0.8,
             category: "life",
           },
-          status: "pending",
+          status: "pending_review",
+          source_title: noteTitle,
+          extracted_value: headline,
+          confidence_score: DEFAULT_CONFIDENCE.add_event_cherishly,
+          is_sensitive: isSensitiveSuggestion("add_event_cherishly", { headline, summary }, noteContent),
+          suppression_key: buildSuppressionKey("add_event_cherishly", "event", null, headline),
         });
       }
     }
@@ -317,7 +322,14 @@ async function generateReviewItems(
             title: `Add "${person}" as alias for ${fuzzyMatch.name}`,
             description: `"${person}" in "${noteTitle}" looks like ${fuzzyMatch.name}. Add as alternate spelling?`,
             payload: { contact_id: fuzzyMatch.id, contact_name: fuzzyMatch.name, alias: person },
-            status: "pending",
+            status: "pending_review",
+            target_entity_type: "contact",
+            target_entity_id: fuzzyMatch.id,
+            source_title: noteTitle,
+            extracted_value: person,
+            confidence_score: DEFAULT_CONFIDENCE.add_alias,
+            is_sensitive: isSensitiveSuggestion("add_alias", { person, contact_name: fuzzyMatch.name }, noteContent),
+            suppression_key: buildSuppressionKey("add_alias", "contact", fuzzyMatch.id, person),
           });
           continue;
         }
@@ -335,7 +347,13 @@ async function generateReviewItems(
           title: `Add "${person}" to your People`,
           description: `${person} was mentioned in "${noteTitle}" but isn't in your contacts yet.`,
           payload: { name: person },
-          status: "pending",
+          status: "pending_review",
+          target_entity_type: "contact",
+          source_title: noteTitle,
+          extracted_value: person,
+          confidence_score: DEFAULT_CONFIDENCE.add_contact,
+          is_sensitive: isSensitiveSuggestion("add_contact", { name: person }, noteContent),
+          suppression_key: buildSuppressionKey("add_contact", "contact", null, person),
         });
       }
     }
