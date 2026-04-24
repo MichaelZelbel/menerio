@@ -385,6 +385,40 @@ export default function ReviewQueue() {
     showToast.success("Change kept");
   };
 
+  const handleRemove = async (item: ReviewItem) => {
+    try {
+      await revertAppliedChange(item);
+      updateStatus.mutate({ id: item.id, status: "removed" });
+      showToast.info("Change removed");
+    } catch (err: any) {
+      showToast.error("Could not remove change: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleBlock = async (item: ReviewItem) => {
+    try {
+      await revertAppliedChange(item);
+      await createSuppression(item);
+      updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+      showToast.info("Blocked from future automatic additions");
+    } catch (err: any) {
+      showToast.error("Could not block change: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleKeepAll = () => {
+    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    showToast.success("All visible changes kept");
+  };
+
+  const handleRemoveAll = async () => {
+    for (const item of items) {
+      await revertAppliedChange(item);
+      updateStatus.mutate({ id: item.id, status: "removed" });
+    }
+    showToast.info("All visible changes removed");
+  };
+
   const handleEventDialogClose = () => {
     if (activeItemId) {
       updateStatus.mutate({ id: activeItemId, status: "kept" });
@@ -397,7 +431,7 @@ export default function ReviewQueue() {
   if (isLoading) {
     return (
       <div className="p-6 space-y-4">
-        <h1 className="text-2xl font-bold font-display">Review Queue</h1>
+        <h1 className="text-2xl font-bold font-display">Review AI Changes</h1>
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-32 w-full" />
         ))}
@@ -408,11 +442,27 @@ export default function ReviewQueue() {
   return (
     <div className="p-6 space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold font-display">Review Queue</h1>
+        <h1 className="text-2xl font-bold font-display">Review AI Changes</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          AI-generated suggestions from your notes. Review, accept, or dismiss.
+          Menerio automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
         </p>
       </div>
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending}>
+            <Check className="h-4 w-4 mr-1" />
+            Keep all
+          </Button>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending}>
+            <X className="h-4 w-4 mr-1" />
+            Remove all
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
+            Review later
+          </Button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <Card>
@@ -420,7 +470,7 @@ export default function ReviewQueue() {
             <Inbox className="h-12 w-12 text-muted-foreground/40 mb-4" />
             <p className="text-muted-foreground font-medium">All caught up!</p>
             <p className="text-sm text-muted-foreground/70 mt-1">
-              New suggestions will appear here as you add notes.
+              New AI changes will appear here as you add notes.
             </p>
           </CardContent>
         </Card>
@@ -439,6 +489,10 @@ export default function ReviewQueue() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <CardTitle className="text-base">{item.title}</CardTitle>
                         <Badge variant="outline" className="text-[10px]">{config.label}</Badge>
+                        <Badge variant={item.status === "auto_applied_unreviewed" ? "default" : "secondary"} className="text-[10px]">
+                          {item.status === "auto_applied_unreviewed" ? "Already added" : "Needs approval"}
+                        </Badge>
+                        {item.is_sensitive && <Badge variant="outline" className="text-[10px]">Sensitive</Badge>}
                       </div>
                       {item.description && (
                         <CardDescription className="mt-1">{item.description}</CardDescription>
@@ -464,27 +518,27 @@ export default function ReviewQueue() {
                         size="sm"
                         variant="ghost"
                         className="text-destructive hover:text-destructive"
-                        onClick={() => handleNever(item.id)}
+                        onClick={() => handleBlock(item)}
                         disabled={updateStatus.isPending}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Never
+                        Never add again
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleSkip(item.id)}
+                        onClick={() => handleRemove(item)}
                         disabled={updateStatus.isPending}
                       >
-                        Skip
+                        Remove
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => handleAccept(item)}
+                        onClick={() => handleKeep(item)}
                         disabled={updateStatus.isPending}
                       >
                         <Check className="h-4 w-4 mr-1" />
-                        Accept
+                        Keep
                       </Button>
                     </div>
                   </div>
