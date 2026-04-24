@@ -36,6 +36,7 @@ import { ImportMigrate } from "@/components/settings/ImportMigrate";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
+import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -221,6 +222,7 @@ export default function Settings() {
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
+          <TabsTrigger value="ai-suggestions" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> AI Suggestions</TabsTrigger>
           <TabsTrigger value="connections" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Apps</TabsTrigger>
           <TabsTrigger value="mcp" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> MCP</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
@@ -336,6 +338,10 @@ export default function Settings() {
         {/* ── Notifications Tab ── */}
         <TabsContent value="notifications">
           <NotificationPreferences />
+        </TabsContent>
+
+        <TabsContent value="ai-suggestions">
+          <AISuggestionPreferences />
         </TabsContent>
 
 
