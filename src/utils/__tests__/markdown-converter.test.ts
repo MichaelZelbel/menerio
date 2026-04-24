@@ -121,6 +121,11 @@ describe("markdownToHtml", () => {
     expect(markdownToHtml("[link](https://example.com)")).toContain('<a href="https://example.com">link</a>');
   });
 
+  it("preserves mailto links next to hard-break markers", () => {
+    const html = markdownToHtml("Email:\\\n[user@example.com](mailto:user@example.com)\\\nDone");
+    expect(html).toContain('<a href="mailto:user@example.com">user@example.com</a>');
+  });
+
   it("renders Obsidian wikilinks as visible editor nodes", () => {
     const html = markdownToHtml("See [[Target Note|the note]] today");
     expect(html).toContain('data-wikilink="true"');
@@ -189,6 +194,13 @@ describe("markdownToHtml", () => {
     expect(html).toContain("<ul><li><p>Parent</p><ul>");
     expect(html).toContain('<a href="https://test.com">https://test.com</a>');
     expect(html).toContain("<li><p>Child</p></li>");
+  });
+
+  it("preserves multiple links in older resource-style notes", () => {
+    const html = markdownToHtml("# Sources\n\n- Check competitor: [https://mymarky.ai/](https://mymarky.ai/)\n- Check Late: [https://appsumo.com/products/late/](https://appsumo.com/products/late/)");
+    expect(html.match(/<a href=/g)?.length).toBe(2);
+    expect(html).toContain('href="https://mymarky.ai/"');
+    expect(html).toContain('href="https://appsumo.com/products/late/"');
   });
 
   it("coalesces blank-line-separated task list items into a single list", () => {
