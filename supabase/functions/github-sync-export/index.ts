@@ -6,6 +6,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type DbClient = any;
+type SyncResult = Record<string, unknown> & { success: boolean; error?: string; path?: string };
+
 /** Returns true when content looks like HTML (has block-level tags) */
 function looksLikeHtml(content: string): boolean {
   return /<(?:p|h[1-6]|ul|ol|li|blockquote|pre|img|table)\b/i.test(content);
@@ -188,7 +191,7 @@ Deno.serve(async (req) => {
 });
 
 async function syncSingleNote(
-  supabase: ReturnType<typeof createClient>,
+  supabase: DbClient,
   userId: string,
   ghToken: string,
   owner: string,
@@ -197,7 +200,7 @@ async function syncSingleNote(
   vaultPath: string,
   note: Record<string, unknown>,
   action: string
-) {
+): Promise<SyncResult> {
   const meta = (note.metadata || {}) as Record<string, unknown>;
   const fileName = sanitizeFileName(String(note.title || "Untitled"));
   const subDir = meta.is_quick_capture ? "Inbox" : "";
@@ -265,7 +268,7 @@ async function syncSingleNote(
 }
 
 async function handleBulkSync(
-  supabase: ReturnType<typeof createClient>,
+  supabase: DbClient,
   userId: string,
   ghToken: string,
   owner: string,
