@@ -431,7 +431,7 @@ async function generateReviewItems(
         .from("review_queue")
         .select("id, suggestion_type, source_note_id, title, status")
         .eq("user_id", userId)
-        .in("status", ["pending", "accepted", "dismissed", "skipped"]);
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "removed", "blocked", "accepted", "dismissed", "skipped"]);
 
       const existingSet = new Set(
         (existing || [])
@@ -449,7 +449,7 @@ async function generateReviewItems(
         if (skippedMatch) {
           await supabase
             .from("review_queue")
-            .update({ status: "pending", reviewed_at: null })
+            .update({ status: "pending_review", reviewed_at: null })
             .eq("id", skippedMatch.id);
           console.log(`Re-pending skipped suggestion: ${skippedMatch.title}`);
         }
