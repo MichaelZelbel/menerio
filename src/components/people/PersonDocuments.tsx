@@ -45,7 +45,7 @@ export function PersonDocuments({ personId, personName }: { personId: string; pe
     if (!user) return;
     const { data, error } = await supabase.from("person_documents" as any).select("*").eq("user_id", user.id).eq("person_id", personId).order("updated_at", { ascending: false });
     if (error) toast({ variant: "destructive", title: "Failed to load documents", description: error.message });
-    setDocuments((data || []) as PersonDocument[]);
+    setDocuments((data || []) as unknown as PersonDocument[]);
     setLoading(false);
   }, [personId, toast]);
 
@@ -60,7 +60,7 @@ export function PersonDocuments({ personId, personName }: { personId: string; pe
     if (!user) return;
     const { data, error } = await supabase.from("person_documents" as any).insert({ user_id: user.id, person_id: personId, title: memoryType === "short_term" ? "New Note" : "New Memory", content: "", memory_type: memoryType, doc_type: "other" }).select().single();
     if (error) return toast({ variant: "destructive", title: "Failed to create document", description: error.message });
-    openDocument(data as PersonDocument);
+    openDocument(data as unknown as PersonDocument);
     await loadDocuments();
   };
 
