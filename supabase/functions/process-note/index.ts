@@ -440,9 +440,13 @@ async function generateReviewItems(
       );
 
       if (newSuggestions.length > 0) {
-        const { error } = await supabase.from("review_queue").insert(newSuggestions);
+        const unsuppressed = await filterSuppressedSuggestions(userId, newSuggestions);
+        const preparedSuggestions = await Promise.all(
+          unsuppressed.map((suggestion) => prepareSuggestionForInsert(suggestion, preferences)),
+        );
+        const { error } = await supabase.from("review_queue").insert(preparedSuggestions);
         if (error) console.error("review_queue insert error:", error);
-        else console.log(`Created ${newSuggestions.length} review suggestions for note ${noteId} (${suggestions.length - newSuggestions.length} duplicates skipped)`);
+        else console.log(`Created ${preparedSuggestions.length} review suggestions for note ${noteId} (${suggestions.length - newSuggestions.length} duplicates skipped)`);
       } else {
         console.log(`All ${suggestions.length} suggestions already exist for note ${noteId}, skipping`);
       }
