@@ -967,6 +967,145 @@ export type Database = {
         }
         Relationships: []
       }
+      moment_participants: {
+        Row: {
+          moment_id: string
+          person_id: string
+        }
+        Insert: {
+          moment_id: string
+          person_id: string
+        }
+        Update: {
+          moment_id?: string
+          person_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moment_participants_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "moments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moment_provenance: {
+        Row: {
+          created_at: string
+          document_id: string
+          id: string
+          language: string | null
+          moment_id: string
+          page_number: number | null
+          snippet_en: string | null
+          snippet_original: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          document_id: string
+          id?: string
+          language?: string | null
+          moment_id: string
+          page_number?: number | null
+          snippet_en?: string | null
+          snippet_original?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          document_id?: string
+          id?: string
+          language?: string | null
+          moment_id?: string
+          page_number?: number | null
+          snippet_en?: string | null
+          snippet_original?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moment_provenance_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "moments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moments: {
+        Row: {
+          attachments: Json | null
+          category: string | null
+          confidence_date: number
+          confidence_truth: number
+          created_at: string
+          deleted_at: string | null
+          description: string | null
+          happened_at: string
+          happened_end: string | null
+          id: string
+          impact_level: number
+          is_potential_major: boolean
+          merge_auto: boolean
+          moment_uid: string
+          person_id: string | null
+          source: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+          verified: boolean
+        }
+        Insert: {
+          attachments?: Json | null
+          category?: string | null
+          confidence_date?: number
+          confidence_truth?: number
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          happened_at: string
+          happened_end?: string | null
+          id?: string
+          impact_level?: number
+          is_potential_major?: boolean
+          merge_auto?: boolean
+          moment_uid?: string
+          person_id?: string | null
+          source?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+          verified?: boolean
+        }
+        Update: {
+          attachments?: Json | null
+          category?: string | null
+          confidence_date?: number
+          confidence_truth?: number
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          happened_at?: string
+          happened_end?: string | null
+          id?: string
+          impact_level?: number
+          is_potential_major?: boolean
+          merge_auto?: boolean
+          moment_uid?: string
+          person_id?: string | null
+          source?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+          verified?: boolean
+        }
+        Relationships: []
+      }
       note_connections: {
         Row: {
           connection_type: string
