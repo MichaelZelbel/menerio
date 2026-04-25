@@ -467,6 +467,9 @@ async function generateProfileSuggestions(
   if (matchedPeople.length === 0) return;
 
   try {
+      const preferences = await getSuggestionPreferences(userId);
+      if (preferences.mode === "off") return;
+
     // Check balance before making another LLM call
     const balance = await checkBalance(supabase, userId);
     if (!balance.allowed) {
@@ -630,7 +633,7 @@ async function generateProfileSuggestions(
       .select("payload, status")
       .eq("user_id", userId)
       .eq("suggestion_type", "add_profile_entry")
-      .in("status", ["pending", "accepted", "dismissed"]);
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
 
     const queueSet = new Set(
       (existingQueueItems || []).map((q: any) =>
@@ -638,15 +641,7 @@ async function generateProfileSuggestions(
       ),
     );
 
-    const suggestions: Array<{
-      user_id: string;
-      source_note_id: string;
-      suggestion_type: string;
-      title: string;
-      description: string;
-      payload: Record<string, unknown>;
-      status: string;
-    }> = [];
+    const suggestions: ReviewSuggestion[] = [];
 
     for (const fact of validFacts) {
       const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
@@ -674,7 +669,13 @@ async function generateProfileSuggestions(
           label: fact.label,
           value: fact.value,
         },
-        status: "pending",
+        status: "pending_review",
+        target_entity_type: "profile_entry",
+        source_title: noteTitle,
+        extracted_value: `${fact.label}: ${fact.value}`,
+        confidence_score: DEFAULT_CONFIDENCE.add_profile_entry,
+        is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
+        suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
       });
 
       // Track to avoid duplicates within same batch
@@ -682,7 +683,8 @@ async function generateProfileSuggestions(
     }
 
     if (suggestions.length > 0) {
-      const { error } = await supabase.from("review_queue").insert(suggestions);
+      const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
+      const { error } = await supabase.from("review_queue").insert(unsuppressed);
       if (error) console.error("Profile suggestion insert error:", error);
       else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
     } else {
