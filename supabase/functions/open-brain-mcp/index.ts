@@ -715,6 +715,55 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "list_people",
+  {
+    title: "List People",
+    description: "List all people the user has recorded in Menerio.",
+    inputSchema: { limit: z.number().optional().default(100) },
+  },
+  async ({ limit }) => {
+    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", currentUserId).is("merged_into", null).order("name").limit(limit);
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool(data);
+  }
+);
+
+server.registerTool(
+  "list_moments",
+  {
+    title: "List Moments",
+    description: "List Moments with human-equivalent fields. Optionally filter by person name.",
+    inputSchema: { person_name: z.string().optional(), limit: z.number().optional().default(50) },
+  },
+  async ({ person_name, limit }) => {
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).order("happened_at", { ascending: false }).limit(limit);
+    if (person_name) {
+      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", currentUserId).ilike("name", `%${person_name}%`).is("merged_into", null);
+      if (!matches?.length) return jsonTool({ message: "No people matching that name." });
+      q = q.in("person_id", matches.map((p: any) => p.id));
+    }
+    const { data, error } = await q;
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
+  }
+);
+
+server.registerTool(
+  "search_moments",
+  {
+    title: "Search Moments",
+    description: "Search Moments by keyword and return human-equivalent Moment fields.",
+    inputSchema: { query: z.string(), limit: z.number().optional().default(20) },
+  },
+  async ({ query, limit }) => {
+    const escaped = query.replace(/[%_]/g, "");
+    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.%${escaped}%,description.ilike.%${escaped}%`).order("happened_at", { ascending: false }).limit(limit);
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
+  }
+);
+
 // Tool 10: Get Connected Notes (Graph)
 server.registerTool(
   "get_connected_notes",
