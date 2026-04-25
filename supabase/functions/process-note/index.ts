@@ -701,7 +701,7 @@ async function generateProfileSuggestions(
         .select("title, status")
         .eq("user_id", userId)
         .eq("suggestion_type", "add_relationship")
-        .in("status", ["pending", "accepted", "dismissed"]);
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
 
       const relQueueSet = new Set(
         (existingRelQueue || []).map((q: any) => q.title)
@@ -780,13 +780,20 @@ async function generateProfileSuggestions(
             contact_name_a: nameA,
             contact_name_b: nameB,
           },
-          status: "pending",
+          status: "pending_review",
+          target_entity_type: "relationship",
+          source_title: noteTitle,
+          extracted_value: `${nameA} ${rel.label_a_to_b} ${nameB}`,
+          confidence_score: DEFAULT_CONFIDENCE.add_relationship,
+          is_sensitive: isSensitiveSuggestion("add_relationship", { ...rel, nameA, nameB }, noteContent),
+          suppression_key: buildSuppressionKey("add_relationship", "relationship", null, `${nameA}:${rel.label_a_to_b}:${nameB}`),
         });
         relQueueSet.add(title);
       }
 
       if (relSuggestions.length > 0) {
-        const { error } = await supabase.from("review_queue").insert(relSuggestions);
+        const unsuppressed = await filterSuppressedSuggestions(userId, relSuggestions);
+        const { error } = await supabase.from("review_queue").insert(unsuppressed);
         if (error) console.error("Relationship suggestion insert error:", error);
         else console.log(`Created ${relSuggestions.length} relationship suggestions for note ${noteId}`);
       }
