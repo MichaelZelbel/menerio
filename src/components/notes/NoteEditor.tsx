@@ -422,6 +422,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     setTitle(note.title);
+    setFolderPath(note.folder_path || "");
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
@@ -448,7 +449,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.is_external, note.is_trashed, editor]);
+  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -479,13 +480,65 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient]);
 
+  const checkDuplicateTitle = async (nextTitle: string) => {
+    const cleanTitle = nextTitle.trim();
+    if (!cleanTitle || cleanTitle === note.title) return null;
+    const { data } = await supabase
+      .from("notes" as any)
+      .select("id, title, content, tags, metadata, folder_path, user_id, is_trashed")
+      .eq("user_id", note.user_id)
+      .eq("folder_path", note.folder_path || "")
+      .eq("is_trashed", false)
+      .ilike("title", cleanTitle)
+      .neq("id", note.id)
+      .limit(1)
+      .maybeSingle();
+    return data as unknown as Note | null;
+  };
+
   const handleTitleChange = (val: string) => {
     setTitle(val);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
+      const duplicate = await checkDuplicateTitle(val);
+      if (duplicate) {
+        setDuplicateTarget(duplicate);
+        setPendingDuplicateTitle(val);
+        return;
+      }
       updateNote.mutate({ id: note.id, title: val });
       triggerGitHubSync(note.id);
     }, 800);
+  };
+
+  const updateFolderPath = async (nextPath: string) => {
+    const normalized = normalizeFolderPath(nextPath);
+    setFolderPath(normalized);
+    updateNote.mutate({ id: note.id, folder_path: normalized });
+    triggerGitHubSync(note.id);
+    if (normalized) {
+      const name = normalized.split("/").pop() || normalized;
+      const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
+      await supabase.from("note_folders" as any).upsert({ path: normalized, name, parent_path }, { onConflict: "user_id,path" });
+    }
+  };
+
+  const mergeDuplicate = async () => {
+    if (!duplicateTarget) return;
+    const currentContent = pendingSaveContentRef.current ?? editorToMarkdown(editor as any) ?? note.content ?? "";
+    const mergedContent = `${duplicateTarget.content || ""}\n\n---\n\n## Merged on ${format(new Date(), "yyyy-MM-dd")}\n\n${currentContent}`.trimEnd();
+    const tags = [...new Set([...(duplicateTarget.tags || []), ...(note.tags || [])])];
+    await updateNote.mutateAsync({ id: duplicateTarget.id, content: mergedContent, tags });
+    await updateNote.mutateAsync({ id: note.id, is_trashed: true, trashed_at: new Date().toISOString() });
+    setDuplicateTarget(null);
+    showToast.success("Notes merged");
+    navigate(`/dashboard/notes/${duplicateTarget.id}`);
+  };
+
+  const keepDuplicateSafely = () => {
+    updateNote.mutate({ id: note.id, title: pendingDuplicateTitle, metadata: { ...(note.metadata || {}), allow_duplicate_title: true } });
+    setDuplicateTarget(null);
+    triggerGitHubSync(note.id);
   };
 
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
