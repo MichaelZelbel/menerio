@@ -525,7 +525,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const mergeDuplicate = async () => {
     if (!duplicateTarget) return;
-    const currentContent = pendingSaveContentRef.current ?? editorToMarkdown(editor as any) ?? note.content ?? "";
+    const currentContent = pendingSaveContentRef.current ?? (editor ? editorToMarkdown(editor) : note.content ?? "");
     const mergedContent = `${duplicateTarget.content || ""}\n\n---\n\n## Merged on ${format(new Date(), "yyyy-MM-dd")}\n\n${currentContent}`.trimEnd();
     const tags = [...new Set([...(duplicateTarget.tags || []), ...(note.tags || [])])];
     await updateNote.mutateAsync({ id: duplicateTarget.id, content: mergedContent, tags });
@@ -889,6 +889,19 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
+        {!note.is_trashed && !note.is_external && (
+          <div className="flex items-center gap-2 mb-4 text-xs text-muted-foreground">
+            <Folder className="h-3.5 w-3.5 shrink-0" />
+            <Input
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              onBlur={(e) => updateFolderPath(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+              placeholder="Vault root"
+              className="h-7 max-w-sm text-xs"
+            />
+          </div>
+        )}
         {sourceMode ? (
           <textarea
             value={sourceText}
@@ -1003,6 +1016,24 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       </div>
 
       {/* Delete confirmation */}
+      <AlertDialog open={!!duplicateTarget} onOpenChange={(open) => { if (!open) setDuplicateTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Title already exists in this folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              Choose how Menerio should handle this duplicate title. GitHub filenames will always remain collision-safe.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-between gap-2">
+            <AlertDialogCancel onClick={() => { setTitle(note.title); setDuplicateTarget(null); }}>
+              Rename
+            </AlertDialogCancel>
+            <Button variant="outline" onClick={mergeDuplicate}>Merge</Button>
+            <AlertDialogAction onClick={keepDuplicateSafely}>Keep duplicate</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
