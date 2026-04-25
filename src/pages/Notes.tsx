@@ -126,6 +126,44 @@ export default function Notes() {
   const createNote = useCreateNote();
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
+  const [savedFolders, setSavedFolders] = useState<string[]>([]);
+
+  const refreshFolders = useCallback(async () => {
+    const { data } = await supabase
+      .from("note_folders" as any)
+      .select("path")
+      .order("path", { ascending: true });
+    setSavedFolders(((data || []) as Array<{ path: string }>).map((f) => f.path));
+  }, []);
+
+  useEffect(() => {
+    refreshFolders();
+  }, [refreshFolders]);
+
+  const folderPaths = useMemo(() => {
+    return [...new Set([
+      ...savedFolders,
+      ...allNotes.map((n) => n.folder_path || "").filter(Boolean),
+    ])].sort((a, b) => a.localeCompare(b));
+  }, [allNotes, savedFolders]);
+
+  const createFolder = useCallback(async () => {
+    const path = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!path) return;
+    const name = path.split("/").pop() || path;
+    const parent_path = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+    const { error } = await supabase.from("note_folders" as any).upsert(
+      { path, name, parent_path },
+      { onConflict: "user_id,path" }
+    );
+    if (error) {
+      showToast.error("Failed to create folder");
+      return;
+    }
+    setNewFolderPath("");
+    await refreshFolders();
+    setFolderFilter(path);
+  }, [newFolderPath, refreshFolders]);
 
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -269,9 +307,10 @@ export default function Notes() {
     setTopicFilter(null);
     setPersonFilter(null);
     setMetaTypeFilter(null);
+    setFolderFilter(null);
   };
 
-  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter;
+  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter || folderFilter;
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
