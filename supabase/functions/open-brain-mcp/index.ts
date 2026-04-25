@@ -5,6 +5,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -18,6 +19,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Per-request user ID — set before each MCP request is handled
 let currentUserId = "";
+
+const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown"] as const;
+const MOMENT_FIELD_NAMES = ["title", "description", "happened_at", "happened_end", "status", "impact_level", "confidence_date", "confidence_truth", "category", "person_name", "participant_names", "document_ids"] as const;
+const MOMENT_RESPONSE_FIELDS = ["id", "moment_uid", "user_id", "source", "created_at", "updated_at", "person_id", ...MOMENT_FIELD_NAMES, "primary_person", "participants", "documents"] as const;
 
 async function getEmbedding(text: string): Promise<number[]> {
   const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
