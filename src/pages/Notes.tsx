@@ -777,6 +777,12 @@ export default function Notes() {
                 <button onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
+            {folderFilter !== null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
+                {folderFilter || "Vault root"}
+                <button onClick={() => setFolderFilter(null)}><X className="h-2.5 w-2.5" /></button>
+              </span>
+            )}
             <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">
               Clear all
             </button>
