@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
@@ -60,6 +60,51 @@ export default function ReviewQueue() {
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+
+  const createSuppression = async (item: ReviewItem) => {
+    const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
+    const suppressionKey = item.suppression_key || `${item.suggestion_type}:${item.target_entity_type || "none"}:${item.target_entity_id || "none"}:${normalizedValue}`;
+    await supabase.from("ai_suggestion_suppressions" as any).upsert({
+      user_id: item.user_id,
+      suggestion_type: item.suggestion_type,
+      target_entity_type: item.target_entity_type,
+      target_entity_id: item.target_entity_id,
+      normalized_value: normalizedValue,
+      source_category: typeof item.payload?.category_slug === "string" ? item.payload.category_slug : null,
+      suppression_key: suppressionKey,
+    } as any, { onConflict: "user_id,suppression_key" });
+  };
+
+  const revertAppliedChange = async (item: ReviewItem) => {
+    if (!item.target_entity_id && item.status !== "auto_applied_unreviewed") return;
+
+    if (item.suggestion_type === "add_contact" && item.target_entity_id) {
+      await supabase.from("contacts").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_profile_entry" && item.target_entity_id) {
+      await supabase.from("profile_entries").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_relationship" && item.target_entity_id) {
+      await supabase.from("contact_relationships").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      return;
+    }
+
+    if (item.suggestion_type === "add_alias") {
+      const { contact_id, alias } = item.payload as any;
+      if (!contact_id || !alias) return;
+      const { data: contact } = await supabase.from("contacts").select("aliases").eq("id", contact_id).maybeSingle();
+      const aliases = Array.isArray(contact?.aliases) ? contact.aliases : [];
+      await supabase.from("contacts").update({ aliases: aliases.filter((a: string) => a.toLowerCase() !== String(alias).toLowerCase()) }).eq("id", contact_id);
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    }
+  };
 
   const handleAcceptProfileEntry = async (item: ReviewItem) => {
     const { contact_id, contact_name, category_slug, label, value } = item.payload as any;
@@ -188,7 +233,7 @@ export default function ReviewQueue() {
       // Invalidate contact profile queries
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${label}: ${value}" to ${contact_name}'s profile`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
@@ -217,7 +262,7 @@ export default function ReviewQueue() {
       if (error) {
         if (error.message?.includes("uq_contact_relationship")) {
           showToast.info("This relationship already exists");
-          updateStatus.mutate({ id: item.id, status: "accepted" });
+          updateStatus.mutate({ id: item.id, status: "kept" });
           return;
         }
         showToast.error("Failed to add relationship: " + error.message);
@@ -243,12 +288,12 @@ export default function ReviewQueue() {
             contact_name_b: contact_name_a,
             // No inverse_label here — it's the final record, no further mirroring
           },
-          status: "pending",
+          status: "pending_review",
         });
       }
 
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Relationship added: ${contact_name_a} → ${label} → ${contact_name_b}`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
@@ -308,7 +353,7 @@ export default function ReviewQueue() {
         }
       }
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${alias}" as alternate spelling`);
       return;
     }
@@ -325,28 +370,58 @@ export default function ReviewQueue() {
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      updateStatus.mutate({ id: item.id, status: "accepted" });
+      updateStatus.mutate({ id: item.id, status: "kept" });
       showToast.success(`Added "${name}" to your People`);
       return;
     }
 
-    updateStatus.mutate({ id: item.id, status: "accepted" });
-    showToast.success("Suggestion accepted");
+    updateStatus.mutate({ id: item.id, status: "kept" });
+    showToast.success("Change kept");
   };
 
-  const handleSkip = (id: string) => {
-    updateStatus.mutate({ id, status: "skipped" });
-    showToast.info("Skipped for now");
+  const handleKeep = (item: ReviewItem) => {
+    if (item.status === "pending" || item.status === "pending_review") return handleAccept(item);
+    updateStatus.mutate({ id: item.id, status: "kept" });
+    showToast.success("Change kept");
   };
 
-  const handleNever = (id: string) => {
-    updateStatus.mutate({ id, status: "dismissed" });
-    showToast.info("Won't suggest again");
+  const handleRemove = async (item: ReviewItem) => {
+    try {
+      await revertAppliedChange(item);
+      updateStatus.mutate({ id: item.id, status: "removed" });
+      showToast.info("Change removed");
+    } catch (err: any) {
+      showToast.error("Could not remove change: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleBlock = async (item: ReviewItem) => {
+    try {
+      await revertAppliedChange(item);
+      await createSuppression(item);
+      updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+      showToast.info("Blocked from future automatic additions");
+    } catch (err: any) {
+      showToast.error("Could not block change: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleKeepAll = () => {
+    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    showToast.success("All visible changes kept");
+  };
+
+  const handleRemoveAll = async () => {
+    for (const item of items) {
+      await revertAppliedChange(item);
+      updateStatus.mutate({ id: item.id, status: "removed" });
+    }
+    showToast.info("All visible changes removed");
   };
 
   const handleEventDialogClose = () => {
     if (activeItemId) {
-      updateStatus.mutate({ id: activeItemId, status: "accepted" });
+      updateStatus.mutate({ id: activeItemId, status: "kept" });
     }
     setEventDialogOpen(false);
     setEventDraft(null);
@@ -356,7 +431,7 @@ export default function ReviewQueue() {
   if (isLoading) {
     return (
       <div className="p-6 space-y-4">
-        <h1 className="text-2xl font-bold font-display">Review Queue</h1>
+        <h1 className="text-2xl font-bold font-display">Review AI Changes</h1>
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-32 w-full" />
         ))}
@@ -367,11 +442,27 @@ export default function ReviewQueue() {
   return (
     <div className="p-6 space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold font-display">Review Queue</h1>
+        <h1 className="text-2xl font-bold font-display">Review AI Changes</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          AI-generated suggestions from your notes. Review, accept, or dismiss.
+          Menerio automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
         </p>
       </div>
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending}>
+            <Check className="h-4 w-4 mr-1" />
+            Keep all
+          </Button>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending}>
+            <X className="h-4 w-4 mr-1" />
+            Remove all
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
+            Review later
+          </Button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <Card>
@@ -379,7 +470,7 @@ export default function ReviewQueue() {
             <Inbox className="h-12 w-12 text-muted-foreground/40 mb-4" />
             <p className="text-muted-foreground font-medium">All caught up!</p>
             <p className="text-sm text-muted-foreground/70 mt-1">
-              New suggestions will appear here as you add notes.
+              New AI changes will appear here as you add notes.
             </p>
           </CardContent>
         </Card>
@@ -398,6 +489,10 @@ export default function ReviewQueue() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <CardTitle className="text-base">{item.title}</CardTitle>
                         <Badge variant="outline" className="text-[10px]">{config.label}</Badge>
+                        <Badge variant={item.status === "auto_applied_unreviewed" ? "default" : "secondary"} className="text-[10px]">
+                          {item.status === "auto_applied_unreviewed" ? "Already added" : "Needs approval"}
+                        </Badge>
+                        {item.is_sensitive && <Badge variant="outline" className="text-[10px]">Sensitive</Badge>}
                       </div>
                       {item.description && (
                         <CardDescription className="mt-1">{item.description}</CardDescription>
@@ -423,27 +518,27 @@ export default function ReviewQueue() {
                         size="sm"
                         variant="ghost"
                         className="text-destructive hover:text-destructive"
-                        onClick={() => handleNever(item.id)}
+                        onClick={() => handleBlock(item)}
                         disabled={updateStatus.isPending}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Never
+                        Never add again
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleSkip(item.id)}
+                        onClick={() => handleRemove(item)}
                         disabled={updateStatus.isPending}
                       >
-                        Skip
+                        Remove
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => handleAccept(item)}
+                        onClick={() => handleKeep(item)}
                         disabled={updateStatus.isPending}
                       >
                         <Check className="h-4 w-4 mr-1" />
-                        Accept
+                        Keep
                       </Button>
                     </div>
                   </div>

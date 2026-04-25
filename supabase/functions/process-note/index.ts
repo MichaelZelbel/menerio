@@ -74,6 +74,113 @@ function nameAppearsInText(name: string, text: string): boolean {
   return nameWords.some((w) => w.length >= 3 && lower.includes(w));
 }
 
+function normalizeSuggestionValue(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
+  return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
+}
+
+function isSensitiveSuggestion(suggestionType: string, payload: Record<string, unknown>, text = "") {
+  const haystack = `${suggestionType} ${text} ${Object.values(payload).join(" ")}`.toLowerCase();
+  return SENSITIVE_TERMS.some((term) => haystack.includes(term));
+}
+
+async function getSuggestionPreferences(userId: string) {
+  const { data } = await supabase
+    .from("ai_suggestion_preferences")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  return {
+    mode: (data as any)?.suggestion_mode || "auto",
+    sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    autoAddSensitive: (data as any)?.auto_add_sensitive === true,
+  };
+}
+
+async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSuggestion[]) {
+  if (suggestions.length === 0) return suggestions;
+  const keys = suggestions.map((s) => s.suppression_key).filter(Boolean) as string[];
+  if (keys.length === 0) return suggestions;
+  const { data } = await supabase
+    .from("ai_suggestion_suppressions")
+    .select("suppression_key")
+    .eq("user_id", userId)
+    .in("suppression_key", keys);
+  const blocked = new Set((data || []).map((r: any) => r.suppression_key));
+  return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
+}
+
+async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
+  const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
+  const confidence = suggestion.confidence_score ?? 0;
+  const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
+
+  if (!canAutoApply) {
+    return { ...suggestion, status: "pending_review" };
+  }
+
+  try {
+    if (suggestion.suggestion_type === "add_contact") {
+      const name = String(suggestion.payload.name || "").trim();
+      if (!name) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("contacts")
+        .insert({ user_id: suggestion.user_id, name })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_alias") {
+      const contactId = suggestion.payload.contact_id as string | undefined;
+      const alias = String(suggestion.payload.alias || "").trim();
+      if (!contactId || !alias) return { ...suggestion, status: "pending_review" };
+      const { data: contact } = await supabase.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+      const aliases = Array.isArray((contact as any)?.aliases) ? (contact as any).aliases : [];
+      if (!aliases.some((a: string) => a.toLowerCase() === alias.toLowerCase())) {
+        await supabase.from("contacts").update({ aliases: [...aliases, alias] }).eq("id", contactId);
+      }
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: contactId, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_profile_entry") {
+      const contactId = suggestion.payload.contact_id as string | undefined;
+      const categoryId = suggestion.payload.category_id as string | null | undefined;
+      const label = String(suggestion.payload.label || "").trim();
+      const value = String(suggestion.payload.value || "").trim();
+      if (!contactId || !categoryId || !label || !value) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("profile_entries")
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_relationship") {
+      const { source_type, source_id, target_type, target_id, label, custom_label } = suggestion.payload as Record<string, string | null>;
+      if (!source_type || !target_type || !label) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("contact_relationships")
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label, custom_label: custom_label || null })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+  } catch (err) {
+    console.error("auto-apply suggestion failed:", err);
+  }
+
+  return { ...suggestion, status: "pending_review" };
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -94,6 +201,45 @@ const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
   "communication", "personality", "principles", "health", "hobbies",
   "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
+];
+
+type ReviewSuggestion = {
+  user_id: string;
+  source_note_id: string;
+  suggestion_type: string;
+  title: string;
+  description: string;
+  payload: Record<string, unknown>;
+  status: string;
+  target_entity_type?: string | null;
+  target_entity_id?: string | null;
+  source_title?: string | null;
+  extracted_value?: string | null;
+  confidence_score?: number | null;
+  is_sensitive?: boolean;
+  applied_at?: string | null;
+  suppression_key?: string | null;
+};
+
+const SENSITIVITY_THRESHOLDS: Record<string, number> = {
+  conservative: 0.85,
+  balanced: 0.7,
+  exploratory: 0.55,
+};
+
+const DEFAULT_CONFIDENCE: Record<string, number> = {
+  add_contact: 0.8,
+  add_alias: 0.78,
+  add_profile_entry: 0.74,
+  add_relationship: 0.72,
+  add_event_temerio: 0.66,
+  add_event_cherishly: 0.66,
+};
+
+const SENSITIVE_TERMS = [
+  "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
+  "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
+  "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
 const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
@@ -133,15 +279,10 @@ async function generateReviewItems(
     const noteType = metadata.type as string | undefined;
     const summary = (metadata.summary as string) || noteTitle;
 
-    const suggestions: Array<{
-      user_id: string;
-      source_note_id: string;
-      suggestion_type: string;
-      title: string;
-      description: string;
-      payload: Record<string, unknown>;
-      status: string;
-    }> = [];
+    const preferences = await getSuggestionPreferences(userId);
+    if (preferences.mode === "off") return;
+
+    const suggestions: ReviewSuggestion[] = [];
 
     // Check which apps are connected
     const { data: connectedApps } = await supabase
@@ -173,7 +314,12 @@ async function generateReviewItems(
             emotion_valence: 0.7,
             category: "life",
           },
-          status: "pending",
+          status: "pending_review",
+          source_title: noteTitle,
+          extracted_value: headline,
+          confidence_score: DEFAULT_CONFIDENCE.add_event_temerio,
+          is_sensitive: isSensitiveSuggestion("add_event_temerio", { headline, summary }, noteContent),
+          suppression_key: buildSuppressionKey("add_event_temerio", "event", null, headline),
         });
       }
 
@@ -192,7 +338,12 @@ async function generateReviewItems(
             emotion_valence: 0.8,
             category: "life",
           },
-          status: "pending",
+          status: "pending_review",
+          source_title: noteTitle,
+          extracted_value: headline,
+          confidence_score: DEFAULT_CONFIDENCE.add_event_cherishly,
+          is_sensitive: isSensitiveSuggestion("add_event_cherishly", { headline, summary }, noteContent),
+          suppression_key: buildSuppressionKey("add_event_cherishly", "event", null, headline),
         });
       }
     }
@@ -238,7 +389,14 @@ async function generateReviewItems(
             title: `Add "${person}" as alias for ${fuzzyMatch.name}`,
             description: `"${person}" in "${noteTitle}" looks like ${fuzzyMatch.name}. Add as alternate spelling?`,
             payload: { contact_id: fuzzyMatch.id, contact_name: fuzzyMatch.name, alias: person },
-            status: "pending",
+            status: "pending_review",
+            target_entity_type: "contact",
+            target_entity_id: fuzzyMatch.id,
+            source_title: noteTitle,
+            extracted_value: person,
+            confidence_score: DEFAULT_CONFIDENCE.add_alias,
+            is_sensitive: isSensitiveSuggestion("add_alias", { person, contact_name: fuzzyMatch.name }, noteContent),
+            suppression_key: buildSuppressionKey("add_alias", "contact", fuzzyMatch.id, person),
           });
           continue;
         }
@@ -256,7 +414,13 @@ async function generateReviewItems(
           title: `Add "${person}" to your People`,
           description: `${person} was mentioned in "${noteTitle}" but isn't in your contacts yet.`,
           payload: { name: person },
-          status: "pending",
+          status: "pending_review",
+          target_entity_type: "contact",
+          source_title: noteTitle,
+          extracted_value: person,
+          confidence_score: DEFAULT_CONFIDENCE.add_contact,
+          is_sensitive: isSensitiveSuggestion("add_contact", { name: person }, noteContent),
+          suppression_key: buildSuppressionKey("add_contact", "contact", null, person),
         });
       }
     }
@@ -267,7 +431,7 @@ async function generateReviewItems(
         .from("review_queue")
         .select("id, suggestion_type, source_note_id, title, status")
         .eq("user_id", userId)
-        .in("status", ["pending", "accepted", "dismissed", "skipped"]);
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "removed", "blocked", "accepted", "dismissed", "skipped"]);
 
       const existingSet = new Set(
         (existing || [])
@@ -285,7 +449,7 @@ async function generateReviewItems(
         if (skippedMatch) {
           await supabase
             .from("review_queue")
-            .update({ status: "pending", reviewed_at: null })
+            .update({ status: "pending_review", reviewed_at: null })
             .eq("id", skippedMatch.id);
           console.log(`Re-pending skipped suggestion: ${skippedMatch.title}`);
         }
@@ -303,9 +467,13 @@ async function generateReviewItems(
       );
 
       if (newSuggestions.length > 0) {
-        const { error } = await supabase.from("review_queue").insert(newSuggestions);
+        const unsuppressed = await filterSuppressedSuggestions(userId, newSuggestions);
+        const preparedSuggestions = await Promise.all(
+          unsuppressed.map((suggestion) => prepareSuggestionForInsert(suggestion, preferences)),
+        );
+        const { error } = await supabase.from("review_queue").insert(preparedSuggestions);
         if (error) console.error("review_queue insert error:", error);
-        else console.log(`Created ${newSuggestions.length} review suggestions for note ${noteId} (${suggestions.length - newSuggestions.length} duplicates skipped)`);
+        else console.log(`Created ${preparedSuggestions.length} review suggestions for note ${noteId} (${suggestions.length - newSuggestions.length} duplicates skipped)`);
       } else {
         console.log(`All ${suggestions.length} suggestions already exist for note ${noteId}, skipping`);
       }
@@ -326,6 +494,9 @@ async function generateProfileSuggestions(
   if (matchedPeople.length === 0) return;
 
   try {
+      const preferences = await getSuggestionPreferences(userId);
+      if (preferences.mode === "off") return;
+
     // Check balance before making another LLM call
     const balance = await checkBalance(supabase, userId);
     if (!balance.allowed) {
@@ -489,7 +660,7 @@ async function generateProfileSuggestions(
       .select("payload, status")
       .eq("user_id", userId)
       .eq("suggestion_type", "add_profile_entry")
-      .in("status", ["pending", "accepted", "dismissed"]);
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
 
     const queueSet = new Set(
       (existingQueueItems || []).map((q: any) =>
@@ -497,15 +668,7 @@ async function generateProfileSuggestions(
       ),
     );
 
-    const suggestions: Array<{
-      user_id: string;
-      source_note_id: string;
-      suggestion_type: string;
-      title: string;
-      description: string;
-      payload: Record<string, unknown>;
-      status: string;
-    }> = [];
+    const suggestions: ReviewSuggestion[] = [];
 
     for (const fact of validFacts) {
       const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
@@ -533,7 +696,13 @@ async function generateProfileSuggestions(
           label: fact.label,
           value: fact.value,
         },
-        status: "pending",
+        status: "pending_review",
+        target_entity_type: "profile_entry",
+        source_title: noteTitle,
+        extracted_value: `${fact.label}: ${fact.value}`,
+        confidence_score: DEFAULT_CONFIDENCE.add_profile_entry,
+        is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
+        suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
       });
 
       // Track to avoid duplicates within same batch
@@ -541,7 +710,8 @@ async function generateProfileSuggestions(
     }
 
     if (suggestions.length > 0) {
-      const { error } = await supabase.from("review_queue").insert(suggestions);
+      const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
+      const { error } = await supabase.from("review_queue").insert(unsuppressed);
       if (error) console.error("Profile suggestion insert error:", error);
       else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
     } else {
@@ -558,7 +728,7 @@ async function generateProfileSuggestions(
         .select("title, status")
         .eq("user_id", userId)
         .eq("suggestion_type", "add_relationship")
-        .in("status", ["pending", "accepted", "dismissed"]);
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
 
       const relQueueSet = new Set(
         (existingRelQueue || []).map((q: any) => q.title)
@@ -637,13 +807,20 @@ async function generateProfileSuggestions(
             contact_name_a: nameA,
             contact_name_b: nameB,
           },
-          status: "pending",
+          status: "pending_review",
+          target_entity_type: "relationship",
+          source_title: noteTitle,
+          extracted_value: `${nameA} ${rel.label_a_to_b} ${nameB}`,
+          confidence_score: DEFAULT_CONFIDENCE.add_relationship,
+          is_sensitive: isSensitiveSuggestion("add_relationship", { ...rel, nameA, nameB }, noteContent),
+          suppression_key: buildSuppressionKey("add_relationship", "relationship", null, `${nameA}:${rel.label_a_to_b}:${nameB}`),
         });
         relQueueSet.add(title);
       }
 
       if (relSuggestions.length > 0) {
-        const { error } = await supabase.from("review_queue").insert(relSuggestions);
+        const unsuppressed = await filterSuppressedSuggestions(userId, relSuggestions);
+        const { error } = await supabase.from("review_queue").insert(unsuppressed);
         if (error) console.error("Relationship suggestion insert error:", error);
         else console.log(`Created ${relSuggestions.length} relationship suggestions for note ${noteId}`);
       }

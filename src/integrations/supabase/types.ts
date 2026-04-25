@@ -202,6 +202,72 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_suggestion_preferences: {
+        Row: {
+          auto_add_sensitive: boolean
+          created_at: string
+          id: string
+          suggestion_mode: string
+          suggestion_sensitivity: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_add_sensitive?: boolean
+          created_at?: string
+          id?: string
+          suggestion_mode?: string
+          suggestion_sensitivity?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          auto_add_sensitive?: boolean
+          created_at?: string
+          id?: string
+          suggestion_mode?: string
+          suggestion_sensitivity?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ai_suggestion_suppressions: {
+        Row: {
+          created_at: string
+          id: string
+          normalized_value: string
+          source_category: string | null
+          suggestion_type: string
+          suppression_key: string
+          target_entity_id: string | null
+          target_entity_type: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          normalized_value: string
+          source_category?: string | null
+          suggestion_type: string
+          suppression_key: string
+          target_entity_id?: string | null
+          target_entity_type?: string | null
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          normalized_value?: string
+          source_category?: string | null
+          suggestion_type?: string
+          suppression_key?: string
+          target_entity_id?: string | null
+          target_entity_type?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       connected_apps: {
         Row: {
           api_key: string
@@ -1278,38 +1344,65 @@ export type Database = {
       }
       review_queue: {
         Row: {
+          applied_at: string | null
+          blocked_at: string | null
+          confidence_score: number | null
           created_at: string
           description: string | null
+          extracted_value: string | null
           id: string
+          is_sensitive: boolean
           payload: Json
           reviewed_at: string | null
           source_note_id: string | null
+          source_title: string | null
           status: string
           suggestion_type: string
+          suppression_key: string | null
+          target_entity_id: string | null
+          target_entity_type: string | null
           title: string
           user_id: string
         }
         Insert: {
+          applied_at?: string | null
+          blocked_at?: string | null
+          confidence_score?: number | null
           created_at?: string
           description?: string | null
+          extracted_value?: string | null
           id?: string
+          is_sensitive?: boolean
           payload?: Json
           reviewed_at?: string | null
           source_note_id?: string | null
+          source_title?: string | null
           status?: string
           suggestion_type: string
+          suppression_key?: string | null
+          target_entity_id?: string | null
+          target_entity_type?: string | null
           title: string
           user_id?: string
         }
         Update: {
+          applied_at?: string | null
+          blocked_at?: string | null
+          confidence_score?: number | null
           created_at?: string
           description?: string | null
+          extracted_value?: string | null
           id?: string
+          is_sensitive?: boolean
           payload?: Json
           reviewed_at?: string | null
           source_note_id?: string | null
+          source_title?: string | null
           status?: string
           suggestion_type?: string
+          suppression_key?: string | null
+          target_entity_id?: string | null
+          target_entity_type?: string | null
           title?: string
           user_id?: string
         }
