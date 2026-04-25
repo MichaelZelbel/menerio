@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,9 +19,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      console.error("ensure-token-allowance missing required Supabase environment variables");
+      return json({ error: "Server configuration error" }, 500);
+    }
 
     // --- Auth ---
     const authHeader = req.headers.get("Authorization");
@@ -34,14 +39,12 @@ Deno.serve(async (req) => {
       if (token === serviceRoleKey) {
         isServiceRole = true;
       } else {
-        const authClient = createClient(supabaseUrl, anonKey, {
-          global: { headers: { Authorization: authHeader } },
-        });
-        const { data, error } = await authClient.auth.getClaims(token);
-        if (error || !data?.claims) {
+        const authClient = createClient(supabaseUrl, anonKey);
+        const { data, error } = await authClient.auth.getUser(token);
+        if (error || !data?.user) {
           return json({ error: "Unauthorized" }, 401);
         }
-        callerId = data.claims.sub as string;
+        callerId = data.user.id;
       }
     } else {
       return json({ error: "Unauthorized" }, 401);

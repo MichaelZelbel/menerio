@@ -36,10 +36,15 @@ export function useAICredits() {
       setIsLoading(true);
       setError(null);
 
-      // Ensure allowance period exists
-      await supabase.functions.invoke("ensure-token-allowance", {
+      // Ensure allowance period exists. If the Edge Function is temporarily unavailable,
+      // keep the UI usable and fall back to reading any existing allowance below.
+      const { error: ensureErr } = await supabase.functions.invoke("ensure-token-allowance", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
+
+      if (ensureErr) {
+        console.warn("Unable to ensure AI allowance period:", ensureErr);
+      }
 
       // Fetch current allowance from view
       const { data, error: fetchErr } = await supabase
