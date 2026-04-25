@@ -36,7 +36,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
         .eq("user_id", user.id)
         .eq("person_id", personId)
         .order("created_at", { ascending: true });
-      setMessages(data?.length ? data as ChatMessage[] : [{ role: "assistant", content: `Hi — I'm Mira. I can help you think through conversations, memories, and context around ${personName}.` }]);
+      setMessages(data?.length ? data as unknown as ChatMessage[] : [{ role: "assistant", content: `Hi — I'm Mira. I can help you think through conversations, memories, and context around ${personName}.` }]);
       setLoadingHistory(false);
     };
     loadHistory();
