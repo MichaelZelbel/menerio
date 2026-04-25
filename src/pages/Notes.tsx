@@ -58,6 +58,7 @@ import {
   ArrowDown,
   Hash,
   User,
+  Folder,
   LayoutGrid,
   Loader2,
 } from "lucide-react";
@@ -113,6 +114,8 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
+  const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [newFolderPath, setNewFolderPath] = useState("");
   
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -134,11 +137,11 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "" });
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderFilter || "" });
     setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
-  }, [createNote, selectNote]);
+  }, [createNote, folderFilter, selectNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
@@ -222,6 +225,9 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
+    if (folderFilter !== null) {
+      notes = notes.filter((n) => (n.folder_path || "") === folderFilter);
+    }
     // Sort: pinned first, then by selected field/direction
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
@@ -237,7 +243,7 @@ export default function Notes() {
       return dir * aVal.localeCompare(bVal);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, folderFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
