@@ -147,6 +147,33 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: contactId, applied_at: new Date().toISOString() };
     }
+
+    if (suggestion.suggestion_type === "add_profile_entry") {
+      const contactId = suggestion.payload.contact_id as string | undefined;
+      const categoryId = suggestion.payload.category_id as string | null | undefined;
+      const label = String(suggestion.payload.label || "").trim();
+      const value = String(suggestion.payload.value || "").trim();
+      if (!contactId || !categoryId || !label || !value) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("profile_entries")
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_relationship") {
+      const { source_type, source_id, target_type, target_id, label, custom_label } = suggestion.payload as Record<string, string | null>;
+      if (!source_type || !target_type || !label) return { ...suggestion, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("contact_relationships")
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label, custom_label: custom_label || null })
+        .select("id")
+        .single();
+      if (error || !data) return { ...suggestion, status: "pending_review" };
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
   } catch (err) {
     console.error("auto-apply suggestion failed:", err);
   }
