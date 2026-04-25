@@ -392,7 +392,7 @@ Deno.serve(async (req) => {
     // 5. Push pending local changes (notes updated since last sync)
     const { data: allNotes } = await serviceClient
       .from("notes")
-      .select("id, title, content, metadata, tags, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed")
+      .select("id, title, content, metadata, tags, folder_path, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed")
       .eq("user_id", userId)
       .eq("is_trashed", false);
 
@@ -405,11 +405,11 @@ Deno.serve(async (req) => {
       if (!needsPush) continue;
 
       try {
-        const meta = (note.metadata || {}) as Record<string, unknown>;
         const fileName = (note.title || "Untitled").replace(/[<>:"/\\|?*]/g, "").replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled";
-        const subDir = meta.is_quick_capture ? "Inbox" : "";
         const base = vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
-        const filePath = [base, subDir, `${fileName}.md`].filter(Boolean).join("/");
+        const folder = String(note.folder_path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/");
+        const filePath = [base, folder, `${fileName}.md`].filter(Boolean).join("/");
+        const meta = (note.metadata || {}) as Record<string, unknown>;
 
         // Check if path changed (rename)
         if (syncEntry && syncEntry.github_path !== filePath) {
