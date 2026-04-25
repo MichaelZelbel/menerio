@@ -93,6 +93,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Folder,
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -194,6 +195,10 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
+function normalizeFolderPath(path: string | null | undefined): string {
+  return (path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+}
+
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
@@ -229,6 +234,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
+  const [folderPath, setFolderPath] = useState(note.folder_path || "");
+  const [duplicateTarget, setDuplicateTarget] = useState<Note | null>(null);
+  const [pendingDuplicateTitle, setPendingDuplicateTitle] = useState("");
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
