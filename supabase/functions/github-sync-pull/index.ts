@@ -144,6 +144,14 @@ function filePathToNoteTitle(filePath: string): string {
   return (filePath.split("/").pop() || filePath).replace(/\.md$/i, "");
 }
 
+function filePathToFolderPath(filePath: string, basePath: string): string {
+  let relative = filePath;
+  if (basePath && relative.startsWith(basePath + "/")) relative = relative.slice(basePath.length + 1);
+  const parts = relative.split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
 // ─── Main handler ────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -306,6 +314,7 @@ Deno.serve(async (req) => {
           await serviceClient.from("notes").update({
             title: (fm.title as string) || note.title,
             content: noteContent,
+            folder_path: filePathToFolderPath(path, basePath),
             metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             tags: tags.length > 0 ? [...new Set(tags)] : undefined,
           }).eq("id", note.id);
@@ -353,6 +362,7 @@ Deno.serve(async (req) => {
           user_id: userId,
           title,
           content: noteContent,
+          folder_path: filePathToFolderPath(path, basePath),
           metadata,
           tags: [...new Set(tags)],
           source_app: "obsidian",
