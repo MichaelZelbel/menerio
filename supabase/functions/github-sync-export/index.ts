@@ -75,6 +75,21 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, "").replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled";
 }
 
+function normalizePathPart(path: unknown): string {
+  return String(path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+}
+
+function buildNotePath(vaultPath: string, note: Record<string, unknown>, fileName?: string): string {
+  const base = normalizePathPart(vaultPath);
+  const folder = normalizePathPart(note.folder_path);
+  const name = sanitizeFileName(fileName || String(note.title || "Untitled"));
+  return [base, folder, `${name}.md`].filter(Boolean).join("/");
+}
+
+function incrementPath(path: string, index: number): string {
+  return path.replace(/\.md$/i, ` ${index}.md`);
+}
+
 function buildFrontmatter(note: Record<string, unknown>): string {
   const meta = (note.metadata || {}) as Record<string, unknown>;
   const lines: string[] = ["---"];
@@ -201,14 +216,17 @@ async function syncSingleNote(
   note: Record<string, unknown>,
   action: string
 ): Promise<SyncResult> {
-  const meta = (note.metadata || {}) as Record<string, unknown>;
-  const fileName = sanitizeFileName(String(note.title || "Untitled"));
-  const subDir = meta.is_quick_capture ? "Inbox" : "";
-  const base = vaultPath === "/" ? "" : String(vaultPath).replace(/^\/|\/$/g, "");
-  const filePath = [base, subDir, `${fileName}.md`].filter(Boolean).join("/");
+  let filePath = buildNotePath(vaultPath, note);
+  const { data: syncEntry } = await supabase
+    .from("github_sync_log")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("note_id", note.id)
+    .maybeSingle();
 
   try {
     if (action === "delete") {
+      filePath = syncEntry?.github_path || filePath;
       // Get current file SHA
       const existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
       if (existing?.sha) {
@@ -225,6 +243,16 @@ async function syncSingleNote(
     const rawContent = String(note.content || "");
     const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdown(rawContent) : rawContent;
     const fullContent = `${frontmatter}\n\n${mdBody}`;
+
+    const desiredPath = buildNotePath(vaultPath, note);
+    filePath = syncEntry?.github_path || desiredPath;
+    if (!syncEntry || syncEntry.github_path !== desiredPath) {
+      filePath = await resolveCollisionSafePath(supabase, userId, ghToken, owner, repo, branch, desiredPath, String(note.id));
+      if (syncEntry?.github_path && syncEntry.github_path !== filePath) {
+        const oldFile = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
+        if (oldFile?.sha) await githubDeleteFile(ghToken, owner, repo, syncEntry.github_path, oldFile.sha, `Rename: ${note.title}`, branch);
+      }
+    }
 
     // Check if file already exists (need SHA for updates)
     const existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
@@ -265,6 +293,36 @@ async function syncSingleNote(
     );
     return { success: false, error: String(err), path: filePath };
   }
+}
+
+async function resolveCollisionSafePath(
+  supabase: DbClient,
+  userId: string,
+  ghToken: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  desiredPath: string,
+  noteId: string,
+) {
+  for (let i = 0; i < 100; i++) {
+    const candidate = i === 0 ? desiredPath : incrementPath(desiredPath, i);
+    const { data: pathOwner } = await supabase
+      .from("github_sync_log")
+      .select("note_id")
+      .eq("user_id", userId)
+      .eq("github_path", candidate)
+      .neq("note_id", noteId)
+      .maybeSingle();
+    if (pathOwner) continue;
+    const remoteFile = await githubGetFile(ghToken, owner, repo, candidate, branch);
+    if (!remoteFile) return candidate;
+    if (remoteFile) {
+      const content = await githubGetFileContent(ghToken, owner, repo, candidate, branch).catch(() => "");
+      if (content.includes(`id: ${noteId}`) || content.includes(`id: "${noteId}"`)) return candidate;
+    }
+  }
+  throw new Error("Could not find a free GitHub path for note");
 }
 
 async function handleBulkSync(
