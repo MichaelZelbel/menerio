@@ -132,6 +132,45 @@ function formatNote(
   return parts.join("\n");
 }
 
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function normalizeMomentStatus(value: unknown) {
+  return typeof value === "string" && ALLOWED_MOMENT_STATUSES.includes(value as any) ? value : "unknown";
+}
+
+function uniqueStrings(values: unknown[] = []) {
+  return Array.from(new Set(values.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim())));
+}
+
+function jsonTool(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+async function resolveOrCreateContactsByName(names: string[]) {
+  const contacts: any[] = [];
+  for (const name of uniqueStrings(names)) {
+    const { data: existing } = await supabase
+      .from("contacts")
+      .select("id, name, relationship")
+      .eq("user_id", currentUserId)
+      .is("merged_into", null)
+      .ilike("name", name)
+      .limit(1);
+    if (existing?.[0]) {
+      contacts.push(existing[0]);
+      continue;
+    }
+    const { data, error } = await supabase.from("contacts").insert({ user_id: currentUserId, name }).select("id, name, relationship").single();
+    if (error) throw new Error(`Could not create person '${name}': ${error.message}`);
+    contacts.push(data);
+  }
+  return contacts;
+}
+
 // --- MCP Server Setup ---
 const server = new McpServer({
   name: "open-brain",
