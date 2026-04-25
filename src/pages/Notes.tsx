@@ -133,7 +133,7 @@ export default function Notes() {
       .from("note_folders" as any)
       .select("path")
       .order("path", { ascending: true });
-    setSavedFolders(((data || []) as Array<{ path: string }>).map((f) => f.path));
+    setSavedFolders(((data || []) as unknown as Array<{ path: string }>).map((f) => f.path));
   }, []);
 
   useEffect(() => {
