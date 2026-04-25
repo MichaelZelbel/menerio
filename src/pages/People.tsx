@@ -39,6 +39,9 @@ import { Link } from "react-router-dom";
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
+import { ConversationTab } from "@/components/people/ConversationTab";
+import { PersonTimeline } from "@/components/people/PersonTimeline";
+import { PersonDocuments } from "@/components/people/PersonDocuments";
 
 interface Person {
   id: string;
@@ -74,6 +77,8 @@ export default function People() {
   const [newAlias, setNewAlias] = useState("");
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [editingMappings, setEditingMappings] = useState<Record<string, { display_name?: string }> | null>(null);
+  const [activePersonTab, setActivePersonTab] = useState("overview");
+  const [conversationContext, setConversationContext] = useState("");
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -240,13 +245,16 @@ export default function People() {
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); setActivePersonTab("overview"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
-        <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList>
+        <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
+          <TabsList className="flex flex-wrap h-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="conversation">Conversation</TabsTrigger>
+            <TabsTrigger value="timeline">Timeline</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="profile">Profile</TabsTrigger>
           </TabsList>
 
@@ -426,6 +434,26 @@ export default function People() {
               )}
             </CardContent>
           </Card>
+          </TabsContent>
+
+          <TabsContent value="conversation" className="mt-0">
+            <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
+          </TabsContent>
+
+          <TabsContent value="timeline" className="mt-0">
+            <PersonTimeline
+              personId={selectedPerson.id}
+              personName={selectedPerson.name}
+              people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
+              onAskMira={(context) => {
+                setConversationContext(context);
+                setActivePersonTab("conversation");
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="documents" className="mt-0">
+            <PersonDocuments personId={selectedPerson.id} personName={selectedPerson.name} />
           </TabsContent>
 
           <TabsContent value="profile" className="mt-0">
