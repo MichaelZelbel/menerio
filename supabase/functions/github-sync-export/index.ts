@@ -430,6 +430,12 @@ async function githubGetFile(token: string, owner: string, repo: string, path: s
   return await res.json();
 }
 
+async function githubGetFileContent(token: string, owner: string, repo: string, path: string, ref: string) {
+  const file = await githubGetFile(token, owner, repo, path, ref);
+  if (!file?.content) return "";
+  return decodeURIComponent(escape(atob(file.content.replace(/\n/g, ""))));
+}
+
 async function githubPutFile(
   token: string, owner: string, repo: string, path: string,
   content: string, message: string, branch: string, sha?: string
