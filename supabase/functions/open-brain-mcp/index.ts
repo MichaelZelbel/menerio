@@ -5,6 +5,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -18,6 +19,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Per-request user ID — set before each MCP request is handled
 let currentUserId = "";
+
+const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown"] as const;
+const MOMENT_FIELD_NAMES = ["title", "description", "happened_at", "happened_end", "status", "impact_level", "confidence_date", "confidence_truth", "category", "person_name", "participant_names", "document_ids"] as const;
+const MOMENT_RESPONSE_FIELDS = ["id", "moment_uid", "user_id", "source", "created_at", "updated_at", "person_id", ...MOMENT_FIELD_NAMES, "primary_person", "participants", "documents"] as const;
 
 async function getEmbedding(text: string): Promise<number[]> {
   const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
@@ -125,6 +130,45 @@ function formatNote(
   }
 
   return parts.join("\n");
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function normalizeMomentStatus(value: unknown) {
+  return typeof value === "string" && ALLOWED_MOMENT_STATUSES.includes(value as any) ? value : "unknown";
+}
+
+function uniqueStrings(values: unknown[] = []) {
+  return Array.from(new Set(values.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim())));
+}
+
+function jsonTool(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+async function resolveOrCreateContactsByName(names: string[]) {
+  const contacts: any[] = [];
+  for (const name of uniqueStrings(names)) {
+    const { data: existing } = await supabase
+      .from("contacts")
+      .select("id, name, relationship")
+      .eq("user_id", currentUserId)
+      .is("merged_into", null)
+      .ilike("name", name)
+      .limit(1);
+    if (existing?.[0]) {
+      contacts.push(existing[0]);
+      continue;
+    }
+    const { data, error } = await supabase.from("contacts").insert({ user_id: currentUserId, name }).select("id, name, relationship").single();
+    if (error) throw new Error(`Could not create person '${name}': ${error.message}`);
+    contacts.push(data);
+  }
+  return contacts;
 }
 
 // --- MCP Server Setup ---
@@ -670,6 +714,132 @@ server.registerTool(
     }
   }
 );
+
+server.registerTool(
+  "list_people",
+  {
+    title: "List People",
+    description: "List all people the user has recorded in Menerio.",
+    inputSchema: { limit: z.number().optional().default(100) },
+  },
+  async ({ limit }) => {
+    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", currentUserId).is("merged_into", null).order("name").limit(limit);
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool(data);
+  }
+);
+
+server.registerTool(
+  "list_moments",
+  {
+    title: "List Moments",
+    description: "List Moments with human-equivalent fields. Optionally filter by person name.",
+    inputSchema: { person_name: z.string().optional(), limit: z.number().optional().default(50) },
+  },
+  async ({ person_name, limit }) => {
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).order("happened_at", { ascending: false }).limit(limit);
+    if (person_name) {
+      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", currentUserId).ilike("name", `%${person_name}%`).is("merged_into", null);
+      if (!matches?.length) return jsonTool({ message: "No people matching that name." });
+      q = q.in("person_id", matches.map((p: any) => p.id));
+    }
+    const { data, error } = await q;
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
+  }
+);
+
+server.registerTool(
+  "search_moments",
+  {
+    title: "Search Moments",
+    description: "Search Moments by keyword and return human-equivalent Moment fields.",
+    inputSchema: { query: z.string(), limit: z.number().optional().default(20) },
+  },
+  async ({ query, limit }) => {
+    const escaped = query.replace(/[%_]/g, "");
+    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.%${escaped}%,description.ilike.%${escaped}%`).order("happened_at", { ascending: false }).limit(limit);
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
+  }
+);
+
+async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
+  const participantNames = uniqueStrings([input.person_name, ...(input.participant_names ?? [])]);
+  const contacts = await resolveOrCreateContactsByName(participantNames);
+  const primary = input.person_name ? contacts.find((c) => c.name.toLowerCase() === String(input.person_name).toLowerCase()) : contacts[0];
+  const payload = {
+    user_id: currentUserId,
+    title: String(input.title || "").trim(),
+    description: input.description ? String(input.description).trim() : null,
+    happened_at: input.happened_at,
+    happened_end: input.happened_end || null,
+    status: normalizeMomentStatus(input.status),
+    impact_level: clampNumber(input.impact_level, 1, 4, 2),
+    confidence_date: clampNumber(input.confidence_date, 0, 10, 5),
+    confidence_truth: clampNumber(input.confidence_truth, 0, 10, 5),
+    category: input.category || null,
+    person_id: primary?.id || null,
+    source,
+  };
+  if (!payload.title || !payload.happened_at) throw new Error("title and happened_at are required");
+  const { data: moment, error } = await supabase.from("moments").insert(payload).select("*").single();
+  if (error) throw new Error(error.message);
+  const participantIds = Array.from(new Set(contacts.map((c) => c.id)));
+  if (participantIds.length) {
+    const { error: participantError } = await supabase.from("moment_participants").insert(participantIds.map((person_id) => ({ moment_id: moment.id, person_id })));
+    if (participantError) throw new Error(participantError.message);
+  }
+  return { ...moment, primary_person: primary || null, participants: contacts, documents: [], field_parity: { available_moment_fields: MOMENT_FIELD_NAMES, response_fields: MOMENT_RESPONSE_FIELDS } };
+}
+
+const rawMomentSchema = {
+  title: z.string().describe("Moment title/headline"),
+  description: z.string().optional().describe("Moment description"),
+  happened_at: z.string().describe("Start date/time, ISO 8601 or YYYY-MM-DD"),
+  happened_end: z.string().optional().describe("Optional end date/time, ISO 8601 or YYYY-MM-DD"),
+  status: z.enum(ALLOWED_MOMENT_STATUSES).optional().default("unknown").describe("past_fact/future_plan/ongoing/unknown"),
+  impact_level: z.number().optional().default(2).describe("1-4 structural life impact"),
+  confidence_date: z.number().optional().default(5).describe("0-10 certainty of the date"),
+  confidence_truth: z.number().optional().default(5).describe("0-10 certainty that the moment is accurate"),
+  category: z.string().optional().describe("Optional category label"),
+  person_name: z.string().optional().describe("Primary person to link or create"),
+  participant_names: z.array(z.string()).optional().describe("Additional people to link or create"),
+  document_ids: z.array(z.string()).optional().describe("Reserved for provenance links when documents are available"),
+};
+
+async function draftMomentFromDescription(description: string, params: any) {
+  const { data: contacts } = await supabase.from("contacts").select("name").eq("user_id", currentUserId).is("merged_into", null).order("name");
+  const peopleContext = contacts?.length ? `\n\nKnown people in the user's timeline: ${contacts.map((p: any) => p.name).join(", ")}` : "";
+  const hints = [params.happened_at && `Date hint: ${params.happened_at}`, params.title_hint && `Title hint: ${params.title_hint}`, params.category_hint && `Category hint: ${params.category_hint}`, params.status_hint && `Status hint: ${params.status_hint}`, params.person_name && `Primary person hint: ${params.person_name}`, params.participant_names?.length && `Participant hints: ${params.participant_names.join(", ")}`].filter(Boolean).join("\n");
+  const content = hints ? `${description}\n\nUse these caller-provided hints where appropriate:\n${hints}` : description;
+  const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "mcp-create-moment", "chat/completions", {
+    model: "google/gemini-3-flash-preview",
+    messages: [{ role: "system", content: `Extract a structured Menerio timeline Moment. Return only via the draft_moment tool. Today's date: ${new Date().toISOString().slice(0, 10)}${peopleContext}` }, { role: "user", content }],
+    tools: [{ type: "function", function: { name: "draft_moment", description: "Return a structured timeline moment draft.", parameters: { type: "object", properties: { happened_at: { type: "string" }, happened_end: { type: "string" }, title: { type: "string" }, status: { type: "string", enum: ALLOWED_MOMENT_STATUSES }, impact_level: { type: "integer", minimum: 1, maximum: 4 }, confidence_date: { type: "integer", minimum: 0, maximum: 10 }, confidence_truth: { type: "integer", minimum: 0, maximum: 10 }, participants: { type: "array", items: { type: "string" } } }, required: ["happened_at", "title", "status", "impact_level", "confidence_date", "confidence_truth"], additionalProperties: false } } }],
+    tool_choice: { type: "function", function: { name: "draft_moment" } },
+  });
+  const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall) throw new Error("AI draft did not produce a moment");
+  return { draft: JSON.parse(toolCall.function.arguments), credits };
+}
+
+server.registerTool("create_moment_with_ai", { title: "Create Moment with AI", description: "Preferred default. Create a Moment from a natural-language description; AI fills in the structured fields and saves it automatically.", inputSchema: { description: z.string(), happened_at: z.string().optional(), person_name: z.string().optional(), participant_names: z.array(z.string()).optional(), title_hint: z.string().optional(), category_hint: z.string().optional(), status_hint: z.enum(ALLOWED_MOMENT_STATUSES).optional(), impact_level_hint: z.number().optional(), confidence_date_hint: z.number().optional(), confidence_truth_hint: z.number().optional(), document_ids: z.array(z.string()).optional() } }, async (params) => {
+  try {
+    const { draft, credits } = await draftMomentFromDescription(params.description, params);
+    const names = uniqueStrings([params.person_name, ...(params.participant_names ?? []), ...(draft.participants ?? [])]);
+    const moment = await createMomentWithLinks({ ...draft, description: params.description, title: params.title_hint ?? draft.title, happened_at: params.happened_at ?? draft.happened_at, category: params.category_hint ?? draft.category, status: params.status_hint ?? draft.status, impact_level: params.impact_level_hint ?? draft.impact_level, confidence_date: params.confidence_date_hint ?? draft.confidence_date, confidence_truth: params.confidence_truth_hint ?? draft.confidence_truth, person_name: params.person_name ?? names[0], participant_names: names, document_ids: params.document_ids ?? [] }, "mcp_ai");
+    return jsonTool({ tool: "create_moment_with_ai", approval_required: false, ai_enrichment_used: "draft-event", credits, moment });
+  } catch (err: unknown) { return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" }); }
+});
+
+server.registerTool("create_moment_raw", { title: "Create Moment Raw", description: "Low-level exact structured Moment creation for imports, migrations, replay, tests, or fully specified machine-written data. Do not use this for normal conversational capture. Prefer create_moment_with_ai when the user describes what happened in natural language.", inputSchema: rawMomentSchema }, async (params) => {
+  try { return jsonTool({ tool: "create_moment_raw", moment: await createMomentWithLinks(params, "mcp") }); } catch (err: unknown) { return jsonTool({ error: err instanceof Error ? err.message : "Unknown error", preferred_tool: "create_moment_with_ai" }); }
+});
+
+server.registerTool("create_moment", { title: "Create Moment", description: "Deprecated compatibility alias for create_moment_raw. Low-level exact structured writes only; do not use for conversational capture. Prefer create_moment_with_ai for normal user-described Moments.", inputSchema: rawMomentSchema }, async (params) => {
+  try { return jsonTool({ tool: "create_moment (deprecated raw alias)", note: "create_moment is a deprecated compatibility alias. Prefer create_moment_with_ai for conversational capture.", moment: await createMomentWithLinks(params, "mcp") }); } catch (err: unknown) { return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" }); }
+});
 
 // Tool 10: Get Connected Notes (Graph)
 server.registerTool(
