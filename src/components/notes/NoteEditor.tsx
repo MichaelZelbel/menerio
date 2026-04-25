@@ -93,6 +93,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Folder,
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -194,6 +195,10 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
+function normalizeFolderPath(path: string | null | undefined): string {
+  return (path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+}
+
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
@@ -229,6 +234,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
+  const [folderPath, setFolderPath] = useState(note.folder_path || "");
+  const [duplicateTarget, setDuplicateTarget] = useState<Note | null>(null);
+  const [pendingDuplicateTitle, setPendingDuplicateTitle] = useState("");
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
@@ -414,6 +422,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     setTitle(note.title);
+    setFolderPath(note.folder_path || "");
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
@@ -440,7 +449,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.is_external, note.is_trashed, editor]);
+  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -471,13 +480,65 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient]);
 
+  const checkDuplicateTitle = async (nextTitle: string) => {
+    const cleanTitle = nextTitle.trim();
+    if (!cleanTitle || cleanTitle === note.title) return null;
+    const { data } = await supabase
+      .from("notes" as any)
+      .select("id, title, content, tags, metadata, folder_path, user_id, is_trashed")
+      .eq("user_id", note.user_id)
+      .eq("folder_path", note.folder_path || "")
+      .eq("is_trashed", false)
+      .ilike("title", cleanTitle)
+      .neq("id", note.id)
+      .limit(1)
+      .maybeSingle();
+    return data as unknown as Note | null;
+  };
+
   const handleTitleChange = (val: string) => {
     setTitle(val);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
+      const duplicate = await checkDuplicateTitle(val);
+      if (duplicate) {
+        setDuplicateTarget(duplicate);
+        setPendingDuplicateTitle(val);
+        return;
+      }
       updateNote.mutate({ id: note.id, title: val });
       triggerGitHubSync(note.id);
     }, 800);
+  };
+
+  const updateFolderPath = async (nextPath: string) => {
+    const normalized = normalizeFolderPath(nextPath);
+    setFolderPath(normalized);
+    updateNote.mutate({ id: note.id, folder_path: normalized });
+    triggerGitHubSync(note.id);
+    if (normalized) {
+      const name = normalized.split("/").pop() || normalized;
+      const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
+      await supabase.from("note_folders" as any).upsert({ path: normalized, name, parent_path }, { onConflict: "user_id,path" });
+    }
+  };
+
+  const mergeDuplicate = async () => {
+    if (!duplicateTarget) return;
+    const currentContent = pendingSaveContentRef.current ?? (editor ? editorToMarkdown(editor) : note.content ?? "");
+    const mergedContent = `${duplicateTarget.content || ""}\n\n---\n\n## Merged on ${format(new Date(), "yyyy-MM-dd")}\n\n${currentContent}`.trimEnd();
+    const tags = [...new Set([...(duplicateTarget.tags || []), ...(note.tags || [])])];
+    await updateNote.mutateAsync({ id: duplicateTarget.id, content: mergedContent, tags });
+    await updateNote.mutateAsync({ id: note.id, is_trashed: true, trashed_at: new Date().toISOString() });
+    setDuplicateTarget(null);
+    showToast.success("Notes merged");
+    navigate(`/dashboard/notes/${duplicateTarget.id}`);
+  };
+
+  const keepDuplicateSafely = () => {
+    updateNote.mutate({ id: note.id, title: pendingDuplicateTitle, metadata: { ...(note.metadata || {}), allow_duplicate_title: true } });
+    setDuplicateTarget(null);
+    triggerGitHubSync(note.id);
   };
 
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
@@ -828,6 +889,19 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
+        {!note.is_trashed && !note.is_external && (
+          <div className="flex items-center gap-2 mb-4 text-xs text-muted-foreground">
+            <Folder className="h-3.5 w-3.5 shrink-0" />
+            <Input
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              onBlur={(e) => updateFolderPath(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+              placeholder="Vault root"
+              className="h-7 max-w-sm text-xs"
+            />
+          </div>
+        )}
         {sourceMode ? (
           <textarea
             value={sourceText}
@@ -942,6 +1016,24 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       </div>
 
       {/* Delete confirmation */}
+      <AlertDialog open={!!duplicateTarget} onOpenChange={(open) => { if (!open) setDuplicateTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Title already exists in this folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              Choose how Menerio should handle this duplicate title. GitHub filenames will always remain collision-safe.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-between gap-2">
+            <AlertDialogCancel onClick={() => { setTitle(note.title); setDuplicateTarget(null); }}>
+              Rename
+            </AlertDialogCancel>
+            <Button variant="outline" onClick={mergeDuplicate}>Merge</Button>
+            <AlertDialogAction onClick={keepDuplicateSafely}>Keep duplicate</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -28,6 +28,7 @@ export interface Note {
   source_app: string | null;
   source_id: string | null;
   source_url: string | null;
+  folder_path: string;
   is_external: boolean;
   sync_status: string;
   structured_fields: Record<string, unknown>;
@@ -51,12 +52,15 @@ type NoteInsert = {
   title?: string;
   content?: string;
   tags?: string[];
+  folder_path?: string;
 };
 
 type NoteUpdate = {
   title?: string;
   content?: string;
   tags?: string[];
+  folder_path?: string;
+  metadata?: Record<string, unknown> | null;
   is_favorite?: boolean;
   is_pinned?: boolean;
   is_trashed?: boolean;
@@ -72,7 +76,7 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
     queryFn: async () => {
       let query = supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .order("is_pinned", { ascending: false })
         .order("updated_at", { ascending: false });
@@ -182,7 +186,7 @@ export function useIlikeSearch() {
       const q = query.toLowerCase();
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
@@ -228,7 +232,7 @@ export function useSearchNotes() {
       const q = query.toLowerCase();
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)

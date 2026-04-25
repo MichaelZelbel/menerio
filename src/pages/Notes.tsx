@@ -58,6 +58,7 @@ import {
   ArrowDown,
   Hash,
   User,
+  Folder,
   LayoutGrid,
   Loader2,
 } from "lucide-react";
@@ -113,6 +114,8 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
+  const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [newFolderPath, setNewFolderPath] = useState("");
   
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -123,6 +126,44 @@ export default function Notes() {
   const createNote = useCreateNote();
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
+  const [savedFolders, setSavedFolders] = useState<string[]>([]);
+
+  const refreshFolders = useCallback(async () => {
+    const { data } = await supabase
+      .from("note_folders" as any)
+      .select("path")
+      .order("path", { ascending: true });
+    setSavedFolders(((data || []) as unknown as Array<{ path: string }>).map((f) => f.path));
+  }, []);
+
+  useEffect(() => {
+    refreshFolders();
+  }, [refreshFolders]);
+
+  const folderPaths = useMemo(() => {
+    return [...new Set([
+      ...savedFolders,
+      ...allNotes.map((n) => n.folder_path || "").filter(Boolean),
+    ])].sort((a, b) => a.localeCompare(b));
+  }, [allNotes, savedFolders]);
+
+  const createFolder = useCallback(async () => {
+    const path = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!path) return;
+    const name = path.split("/").pop() || path;
+    const parent_path = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+    const { error } = await supabase.from("note_folders" as any).upsert(
+      { path, name, parent_path },
+      { onConflict: "user_id,path" }
+    );
+    if (error) {
+      showToast.error("Failed to create folder");
+      return;
+    }
+    setNewFolderPath("");
+    await refreshFolders();
+    setFolderFilter(path);
+  }, [newFolderPath, refreshFolders]);
 
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -134,11 +175,11 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "" });
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderFilter || "" });
     setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
-  }, [createNote, selectNote]);
+  }, [createNote, folderFilter, selectNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
@@ -222,6 +263,9 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
+    if (folderFilter !== null) {
+      notes = notes.filter((n) => (n.folder_path || "") === folderFilter);
+    }
     // Sort: pinned first, then by selected field/direction
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
@@ -237,7 +281,7 @@ export default function Notes() {
       return dir * aVal.localeCompare(bVal);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, folderFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -263,9 +307,10 @@ export default function Notes() {
     setTopicFilter(null);
     setPersonFilter(null);
     setMetaTypeFilter(null);
+    setFolderFilter(null);
   };
 
-  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter;
+  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter || folderFilter;
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
@@ -427,6 +472,56 @@ export default function Notes() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={folderFilter !== null ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                title="Folders"
+              >
+                <Folder className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-3 space-y-3">
+              <div className="space-y-1">
+                <button
+                  onClick={() => setFolderFilter(null)}
+                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === null && "bg-accent")}
+                >
+                  <FileText className="h-3.5 w-3.5" /> All folders
+                </button>
+                <button
+                  onClick={() => setFolderFilter("")}
+                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === "" && "bg-accent")}
+                >
+                  <Folder className="h-3.5 w-3.5" /> Vault root
+                </button>
+                {folderPaths.map((path) => (
+                  <button
+                    key={path}
+                    onClick={() => setFolderFilter(path)}
+                    className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === path && "bg-accent")}
+                  >
+                    <Folder className="h-3.5 w-3.5" />
+                    <span className="truncate">{path}</span>
+                  </button>
+                ))}
+              </div>
+              <Separator />
+              <div className="flex gap-2">
+                <Input
+                  value={newFolderPath}
+                  onChange={(e) => setNewFolderPath(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") createFolder(); }}
+                  placeholder="Projects/Menerio"
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" className="h-8" onClick={createFolder}>Add</Button>
+              </div>
+            </PopoverContent>
+          </Popover>
 
           {/* Tags / Vault Insights popover */}
           <Popover>
@@ -680,6 +775,12 @@ export default function Notes() {
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
                 {metaTypeFilter.replace("_", " ")}
                 <button onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
+              </span>
+            )}
+            {folderFilter !== null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
+                {folderFilter || "Vault root"}
+                <button onClick={() => setFolderFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
             <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">
