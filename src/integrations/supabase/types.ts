@@ -1199,12 +1199,46 @@ export type Database = {
           },
         ]
       }
+      note_folders: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          parent_path: string
+          path: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          parent_path?: string
+          path: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          parent_path?: string
+          path?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notes: {
         Row: {
           content: string
           created_at: string | null
           embedding: string | null
           entity_type: string | null
+          folder_path: string
           id: string
           is_external: boolean | null
           is_favorite: boolean | null
@@ -1228,6 +1262,7 @@ export type Database = {
           created_at?: string | null
           embedding?: string | null
           entity_type?: string | null
+          folder_path?: string
           id?: string
           is_external?: boolean | null
           is_favorite?: boolean | null
@@ -1251,6 +1286,7 @@ export type Database = {
           created_at?: string | null
           embedding?: string | null
           entity_type?: string | null
+          folder_path?: string
           id?: string
           is_external?: boolean | null
           is_favorite?: boolean | null
