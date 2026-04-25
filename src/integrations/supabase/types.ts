@@ -431,6 +431,11 @@ export type Database = {
           app_mappings: Json | null
           company: string | null
           contact_frequency_days: number | null
+          conversation_context: string | null
+          conversation_custom_tone: string | null
+          conversation_intent: string | null
+          conversation_preset_tone: string | null
+          conversation_updated_at: string | null
           created_at: string | null
           email: string | null
           id: string
@@ -452,6 +457,11 @@ export type Database = {
           app_mappings?: Json | null
           company?: string | null
           contact_frequency_days?: number | null
+          conversation_context?: string | null
+          conversation_custom_tone?: string | null
+          conversation_intent?: string | null
+          conversation_preset_tone?: string | null
+          conversation_updated_at?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -473,6 +483,11 @@ export type Database = {
           app_mappings?: Json | null
           company?: string | null
           contact_frequency_days?: number | null
+          conversation_context?: string | null
+          conversation_custom_tone?: string | null
+          conversation_intent?: string | null
+          conversation_preset_tone?: string | null
+          conversation_updated_at?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -498,6 +513,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      conversation_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          person_id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          person_id: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          person_id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       discord_connections: {
         Row: {
@@ -1307,6 +1349,48 @@ export type Database = {
         }
         Relationships: []
       }
+      person_documents: {
+        Row: {
+          content: string
+          created_at: string
+          doc_type: string
+          embedding: string | null
+          embedding_updated_at: string | null
+          id: string
+          memory_type: string
+          person_id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          doc_type?: string
+          embedding?: string | null
+          embedding_updated_at?: string | null
+          id?: string
+          memory_type?: string
+          person_id: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          doc_type?: string
+          embedding?: string | null
+          embedding_updated_at?: string | null
+          id?: string
+          memory_type?: string
+          person_id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profile_categories: {
         Row: {
           contact_id: string | null
@@ -1851,6 +1935,21 @@ export type Database = {
           metadata: Json
           similarity: number
           tags: string[]
+          title: string
+        }[]
+      }
+      match_person_documents: {
+        Args: {
+          match_count?: number
+          match_person_id: string
+          match_threshold?: number
+          match_user_id: string
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
           title: string
         }[]
       }
