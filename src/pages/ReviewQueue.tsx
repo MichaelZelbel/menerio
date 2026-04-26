@@ -516,16 +516,17 @@ export default function ReviewQueue() {
 
       {hasReviewItems && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || items.length === 0}>
-            <Check className="h-4 w-4 mr-1" />
-            Keep all
-          </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || items.length === 0}>
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={updateStatus.isPending || !hasReviewItems}>
             <X className="h-4 w-4 mr-1" />
-            Remove all
+            Never Again
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
-            Review later
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || !hasReviewItems}>
+            <RotateCcw className="h-4 w-4 mr-1" />
+            Roll Back
+          </Button>
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || !hasReviewItems}>
+            <Check className="h-4 w-4 mr-1" />
+            Keep
           </Button>
         </div>
       )}
