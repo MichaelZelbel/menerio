@@ -2209,6 +2209,10 @@ export type Database = {
           title: string
         }[]
       }
+      wiki_apply_ingest: {
+        Args: { p_actions: Json; p_note_id: string; p_source_links: Json }
+        Returns: Json
+      }
       wiki_resync_links: { Args: { p_page_id: string }; Returns: undefined }
     }
     Enums: {
