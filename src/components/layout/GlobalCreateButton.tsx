@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, FileText, UserPlus, ChevronDown, Sparkles, CalendarPlus } from "lucide-react";
+import { Plus, FileText, UserPlus, ChevronDown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,7 +12,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { CreateEventDialog } from "@/components/notes/CreateEventDialog";
 
 const SUPABASE_URL = "https://tjeapelvjlmbxafsmjef.supabase.co";
 
@@ -21,8 +19,6 @@ export function GlobalCreateButton() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { user } = useAuth();
-  const [showEventDialog, setShowEventDialog] = useState(false);
-
   const { data: connectedApps } = useQuery({
     queryKey: ["connected-apps-create", user?.id],
     queryFn: async () => {
@@ -39,8 +35,7 @@ export function GlobalCreateButton() {
   });
 
   const querinoApp = connectedApps?.find((a) => a.app_name === "querino");
-  const temerioApp = connectedApps?.find((a) => a.app_name === "temerio");
-  const hasIntegrations = !!querinoApp || !!temerioApp;
+  const hasIntegrations = !!querinoApp;
 
   const handleNewNote = () => {
     navigate("/dashboard/notes?action=create");
@@ -89,21 +84,10 @@ export function GlobalCreateButton() {
                 New Prompt (Querino)
               </DropdownMenuItem>
             )}
-            {temerioApp && (
-              <DropdownMenuItem onClick={() => setShowEventDialog(true)}>
-                <CalendarPlus className="mr-2 h-4 w-4" />
-                New Event (Temerio)
-              </DropdownMenuItem>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
-      <CreateEventDialog
-        open={showEventDialog}
-        onOpenChange={setShowEventDialog}
-        draft={null}
-      />
     </>
   );
 }

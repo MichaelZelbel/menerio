@@ -6,13 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CreateEventDialog, type EventDraft } from "@/components/notes/CreateEventDialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  CalendarDays,
-  Heart,
   UserPlus,
   Link2,
   Check,
@@ -42,9 +39,7 @@ const DEFAULT_PROFILE_CATEGORIES = [
   { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Morning/night, introvert/extrovert, pet peeves", sort_order: 16, visibility_scope: "all" },
 ];
 
-const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; color: string }> = {
-  add_event_temerio: { icon: CalendarDays, label: "Add Event to Temerio", color: "text-blue-500" },
-  add_event_cherishly: { icon: Heart, label: "Add Event to Cherishly", color: "text-pink-500" },
+const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
   add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
@@ -57,9 +52,6 @@ export default function ReviewQueue() {
   const { items, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
-  const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
 
   const createSuppression = async (item: ReviewItem) => {
     const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
@@ -311,20 +303,6 @@ export default function ReviewQueue() {
       return handleAcceptRelationship(item);
     }
 
-    if (type === "add_event_temerio" || type === "add_event_cherishly") {
-      const draft: EventDraft = {
-        headline: item.payload.headline || item.title,
-        description: item.payload.description || "",
-        happened_at: item.payload.happened_at || new Date().toISOString().slice(0, 16),
-        status: "past_fact",
-        participants: item.payload.people_names || [],
-      };
-      setEventDraft(draft);
-      setActiveItemId(item.id);
-      setEventDialogOpen(true);
-      return;
-    }
-
     if (type === "add_alias") {
       const { contact_id, alias } = item.payload as any;
       if (!contact_id || !alias) {
@@ -417,15 +395,6 @@ export default function ReviewQueue() {
       updateStatus.mutate({ id: item.id, status: "removed" });
     }
     showToast.info("All visible changes removed");
-  };
-
-  const handleEventDialogClose = () => {
-    if (activeItemId) {
-      updateStatus.mutate({ id: activeItemId, status: "kept" });
-    }
-    setEventDialogOpen(false);
-    setEventDraft(null);
-    setActiveItemId(null);
   };
 
   if (isLoading) {
@@ -549,15 +518,6 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {eventDraft && (
-        <CreateEventDialog
-          open={eventDialogOpen}
-          onOpenChange={(open) => {
-            if (!open) handleEventDialogClose();
-          }}
-          draft={eventDraft}
-        />
-      )}
     </div>
   );
 }

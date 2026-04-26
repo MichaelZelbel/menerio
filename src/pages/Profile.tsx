@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { User, Plus, RefreshCw } from "lucide-react";
+import { User, Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,10 +14,9 @@ import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { showToast } from "@/lib/toast";
 
 export default function Profile() {
   const {
@@ -37,48 +36,13 @@ export default function Profile() {
     deleteView,
   } = useProfile();
 
-  const { user, role } = useAuth();
+  const { user } = useAuth();
 
   const [seeded, setSeeded] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
-
-  // Sync profile to connected apps (e.g. Clarinio)
-  const syncProfile = useMutation({
-    mutationFn: async (targetApp: string) => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const resp = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/push-profile`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ target_app: targetApp }),
-        }
-      );
-      const result = await resp.json();
-      if (!resp.ok) throw new Error(result.error || "Sync failed");
-      return result;
-    },
-    onSuccess: (result) => {
-      const cats = result.categories || {};
-      const ents = result.entries || {};
-      showToast.success(
-        `Profile synced! Categories: ${cats.created || 0} new, ${cats.updated || 0} updated. Entries: ${ents.created || 0} new, ${ents.updated || 0} updated.`
-      );
-    },
-    onError: (err: Error) => {
-      showToast.error(err.message || "Failed to sync profile");
-    },
-  });
 
   // Get note count for nudge logic
   const { data: noteCount = 0 } = useQuery({
@@ -150,18 +114,6 @@ export default function Profile() {
               Your personal context layer for AI agents. Fill in what matters — everything is optional.
             </p>
           </div>
-          {role === "admin" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 shrink-0"
-              onClick={() => syncProfile.mutate("clarinio")}
-              disabled={syncProfile.isPending}
-            >
-              <RefreshCw className={`h-4 w-4 ${syncProfile.isPending ? "animate-spin" : ""}`} />
-              Sync to Clarinio
-            </Button>
-          )}
         </div>
 
         <Tabs defaultValue="profile">

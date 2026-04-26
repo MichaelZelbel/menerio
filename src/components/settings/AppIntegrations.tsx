@@ -8,8 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -29,22 +27,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { Copy, Check, Trash2, Plug, ExternalLink, Loader2, ChevronDown, Plus } from "lucide-react";
-
-/* ────────────────────────────── Known Apps Registry ────────────────────────────── */
+import { Copy, Check, Trash2, Plug, Loader2 } from "lucide-react";
 
 interface KnownApp {
   id: string;
   name: string;
   description: string;
-  /** Base URL of the app's Supabase project */
   supabaseUrl: string;
-  /** Path appended to supabaseUrl to form the webhook */
   webhookPath: string;
   icon: string;
   iconImage?: string;
@@ -60,41 +49,7 @@ const KNOWN_APPS: KnownApp[] = [
     icon: "🔬",
     iconImage: querinoLogo,
   },
-  {
-    id: "temerio",
-    name: "Temerio",
-    description: "Task & project management — syncs tasks and milestones.",
-    supabaseUrl: "https://temerio.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "📋",
-  },
-  {
-    id: "cherishly",
-    name: "Cherishly",
-    description: "Relationship tracker — syncs memories and moments.",
-    supabaseUrl: "https://cherishly.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "💝",
-  },
-  {
-    id: "clarinio",
-    name: "Clarinio",
-    description: "Personal profile mirror — two-way sync of your profile data.",
-    supabaseUrl: "https://clarinio.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "🪞",
-  },
-  {
-    id: "planinio",
-    name: "Planinio",
-    description: "Social media studio — syncs ideas, content & posts.",
-    supabaseUrl: "https://suzqnyvfjbmnoipnlobk.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "📱",
-  },
 ];
-
-/* ────────────────────────────── Types ────────────────────────────── */
 
 interface ConnectedApp {
   id: string;
@@ -114,22 +69,12 @@ function generateApiKey(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 }
 
-/* ────────────────────────────── Component ────────────────────────────── */
-
 export function AppIntegrations() {
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const qc = useQueryClient();
-
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [connectingAppId, setConnectingAppId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  // Advanced custom connection state
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [customDialogOpen, setCustomDialogOpen] = useState(false);
-  const [customAppName, setCustomAppName] = useState("");
-  const [customDisplayName, setCustomDisplayName] = useState("");
-  const [customWebhookUrl, setCustomWebhookUrl] = useState("");
 
   const { data: apps = [], isLoading } = useQuery<ConnectedApp[]>({
     queryKey: ["connected_apps", user?.id],
@@ -143,26 +88,24 @@ export function AppIntegrations() {
         .from("connected_apps" as any)
         .select("*")
         .eq("user_id", user!.id)
+        .in("app_name", KNOWN_APPS.map((app) => app.id))
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data as unknown as ConnectedApp[]) || [];
     },
   });
 
-  /* ── Connect a known app ── */
   const connectKnownApp = useMutation({
     mutationFn: async (known: KnownApp) => {
       const apiKey = generateApiKey();
       const webhookUrl = `${known.supabaseUrl}${known.webhookPath}`;
-      const { error } = await supabase
-        .from("connected_apps" as any)
-        .insert({
-          user_id: user!.id,
-          app_name: known.id,
-          display_name: known.name,
-          webhook_url: webhookUrl,
-          api_key: apiKey,
-        });
+      const { error } = await supabase.from("connected_apps" as any).insert({
+        user_id: user!.id,
+        app_name: known.id,
+        display_name: known.name,
+        webhook_url: webhookUrl,
+        api_key: apiKey,
+      });
       if (error) throw error;
       return apiKey;
     },
@@ -171,58 +114,23 @@ export function AppIntegrations() {
       qc.invalidateQueries({ queryKey: ["connected_apps"] });
       showToast.success("App connected!");
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setConnectingAppId(null);
       showToast.error(err.message || "Failed to connect app");
     },
   });
 
-  /* ── Connect a custom app (advanced) ── */
-  const connectCustomApp = useMutation({
-    mutationFn: async () => {
-      const apiKey = generateApiKey();
-      const { error } = await supabase
-        .from("connected_apps" as any)
-        .insert({
-          user_id: user!.id,
-          app_name: customAppName.toLowerCase().trim(),
-          display_name: customDisplayName.trim(),
-          webhook_url: customWebhookUrl.trim() || null,
-          api_key: apiKey,
-        });
-      if (error) throw error;
-      return apiKey;
-    },
-    onSuccess: (apiKey) => {
-      setNewApiKey(apiKey);
-      setConnectingAppId("custom");
-      qc.invalidateQueries({ queryKey: ["connected_apps"] });
-      showToast.success("App connected!");
-    },
-    onError: (err: any) => {
-      showToast.error(err.message || "Failed to create connection");
-    },
-  });
-
   const toggleActive = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase
-        .from("connected_apps" as any)
-        .update({ is_active })
-        .eq("id", id);
+      const { error } = await supabase.from("connected_apps" as any).update({ is_active }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["connected_apps"] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connected_apps"] }),
   });
 
   const deleteApp = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("connected_apps" as any)
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("connected_apps" as any).delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -230,11 +138,6 @@ export function AppIntegrations() {
       showToast.success("Connection removed");
     },
   });
-
-  const handleConnectKnown = (known: KnownApp) => {
-    setConnectingAppId(known.id);
-    connectKnownApp.mutate(known);
-  };
 
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -245,30 +148,18 @@ export function AppIntegrations() {
   const handleCloseApiKeyDialog = () => {
     setNewApiKey(null);
     setConnectingAppId(null);
-    setCustomDialogOpen(false);
-    setCustomAppName("");
-    setCustomDisplayName("");
-    setCustomWebhookUrl("");
     setCopied(false);
   };
 
-  const handleCreateCustom = () => {
-    if (!customAppName.trim() || !customDisplayName.trim()) return;
-    connectCustomApp.mutate();
-  };
-
-  const connectedAppNames = new Set(apps.map((a) => a.app_name));
-
   return (
     <div className="space-y-6">
-      {/* ── App Catalog ── */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plug className="h-5 w-5" /> App Integrations
           </CardTitle>
           <CardDescription>
-            Connect external apps to sync data with Menerio. Click "Connect" and paste the generated key in the other app.
+            Connect Querino to sync research artefacts with Menerio.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -278,13 +169,10 @@ export function AppIntegrations() {
             </div>
           ) : (
             <div className="space-y-3">
-              {(role === "admin" ? KNOWN_APPS : KNOWN_APPS.filter((k) => k.id === "querino")).map((known) => {
+              {KNOWN_APPS.map((known) => {
                 const existing = apps.find((a) => a.app_name === known.id);
                 return (
-                  <div
-                    key={known.id}
-                    className="flex items-center justify-between rounded-lg border p-4"
-                  >
+                  <div key={known.id} className="flex items-center justify-between rounded-lg border p-4">
                     <div className="flex items-center gap-3">
                       {known.iconImage ? (
                         <img src={known.iconImage} alt={known.name} className="h-7 w-7 rounded" />
@@ -296,17 +184,11 @@ export function AppIntegrations() {
                           <span className="font-medium text-foreground">{known.name}</span>
                           {existing && (
                             existing.connection_status === "pending" ? (
-                              <Badge variant="warning" className="text-[10px] px-1.5">
-                                Awaiting handshake…
-                              </Badge>
+                              <Badge variant="warning" className="text-[10px] px-1.5">Awaiting handshake…</Badge>
                             ) : !existing.is_active ? (
-                              <Badge variant="secondary" className="text-[10px] px-1.5">
-                                Paused
-                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] px-1.5">Paused</Badge>
                             ) : (
-                              <Badge variant="success" className="text-[10px] px-1.5">
-                                Connected
-                              </Badge>
+                              <Badge variant="success" className="text-[10px] px-1.5">Connected</Badge>
                             )
                           )}
                         </div>
@@ -321,9 +203,7 @@ export function AppIntegrations() {
                       <div className="flex items-center gap-3">
                         <Switch
                           checked={existing.is_active}
-                          onCheckedChange={(checked) =>
-                            toggleActive.mutate({ id: existing.id, is_active: checked })
-                          }
+                          onCheckedChange={(checked) => toggleActive.mutate({ id: existing.id, is_active: checked })}
                         />
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
@@ -353,7 +233,10 @@ export function AppIntegrations() {
                     ) : (
                       <Button
                         size="sm"
-                        onClick={() => handleConnectKnown(known)}
+                        onClick={() => {
+                          setConnectingAppId(known.id);
+                          connectKnownApp.mutate(known);
+                        }}
                         disabled={connectKnownApp.isPending && connectingAppId === known.id}
                       >
                         {connectKnownApp.isPending && connectingAppId === known.id && (
@@ -365,106 +248,17 @@ export function AppIntegrations() {
                   </div>
                 );
               })}
-
-              {/* Show any custom-connected apps that aren't in KNOWN_APPS */}
-              {apps
-                .filter((a) => !KNOWN_APPS.some((k) => k.id === a.app_name))
-                .map((app) => (
-                  <div
-                    key={app.id}
-                    className="flex items-center justify-between rounded-lg border p-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">🔌</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">{app.display_name}</span>
-                          {app.connection_status === "pending" ? (
-                            <Badge variant="warning" className="text-[10px] px-1.5">Awaiting handshake…</Badge>
-                          ) : !app.is_active ? (
-                            <Badge variant="secondary" className="text-[10px] px-1.5">Paused</Badge>
-                          ) : (
-                            <Badge variant="success" className="text-[10px] px-1.5">Connected</Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground font-mono">{app.app_name}</p>
-                        {app.webhook_url && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                            <ExternalLink className="h-3 w-3" />
-                            {app.webhook_url}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Switch
-                        checked={app.is_active}
-                        onCheckedChange={(checked) =>
-                          toggleActive.mutate({ id: app.id, is_active: checked })
-                        }
-                      />
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Remove {app.display_name}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will revoke the API key. The app will no longer be able to sync.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => deleteApp.mutate(app.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Remove
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </div>
-                ))}
             </div>
           )}
-
-          {/* ── Advanced: Custom App ── */}
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-6">
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-                <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
-                Advanced: Connect a custom app
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-3">
-              <p className="text-xs text-muted-foreground mb-3">
-                For developers building custom integrations. You'll need to provide the app details manually.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setCustomDialogOpen(true)}
-              >
-                <Plus className="h-4 w-4" /> Add Custom Connection
-              </Button>
-            </CollapsibleContent>
-          </Collapsible>
         </CardContent>
       </Card>
 
-      {/* ── API Key Reveal Dialog (shown after connecting any app) ── */}
       <Dialog open={!!newApiKey} onOpenChange={(open) => { if (!open) handleCloseApiKeyDialog(); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Connection Key Generated</DialogTitle>
             <DialogDescription>
-              Copy this key and paste it into the other app's Menerio settings. You won't see it again.
+              Copy this key and paste it into Querino's Menerio settings. You won't see it again.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -476,66 +270,10 @@ export function AppIntegrations() {
                 {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Paste this key in the other app's settings under "Menerio Connection" or similar.
-            </p>
+            <p className="text-xs text-muted-foreground">Paste this key in Querino's settings under Menerio Connection.</p>
           </div>
           <DialogFooter>
             <Button onClick={handleCloseApiKeyDialog}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Custom App Dialog ── */}
-      <Dialog open={customDialogOpen && !newApiKey} onOpenChange={(open) => { if (!open) handleCloseApiKeyDialog(); else setCustomDialogOpen(true); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Connect a Custom App</DialogTitle>
-            <DialogDescription>
-              For developers: add a custom app that can interact with your Menerio data.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="customAppName">App Identifier</Label>
-              <Input
-                id="customAppName"
-                value={customAppName}
-                onChange={(e) => setCustomAppName(e.target.value)}
-                placeholder="my-app"
-              />
-              <p className="text-xs text-muted-foreground">Lowercase identifier, e.g. "my-crm"</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="customDisplayName">Display Name</Label>
-              <Input
-                id="customDisplayName"
-                value={customDisplayName}
-                onChange={(e) => setCustomDisplayName(e.target.value)}
-                placeholder="My CRM"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="customWebhookUrl">
-                Webhook URL <span className="text-muted-foreground">(optional)</span>
-              </Label>
-              <Input
-                id="customWebhookUrl"
-                type="url"
-                value={customWebhookUrl}
-                onChange={(e) => setCustomWebhookUrl(e.target.value)}
-                placeholder="https://your-app.supabase.co/functions/v1/webhook"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={handleCreateCustom}
-              disabled={!customAppName.trim() || !customDisplayName.trim() || connectCustomApp.isPending}
-            >
-              {connectCustomApp.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create & Generate Key
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

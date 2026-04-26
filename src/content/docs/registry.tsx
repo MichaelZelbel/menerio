@@ -327,20 +327,19 @@ const reviewQueue: DocPage = {
     { id: "suggestion-types", title: "Suggestion Types" },
     { id: "accepting-and-dismissing", title: "Accepting & Dismissing" },
   ],
-  searchText: "review queue suggestions AI events temerio cherishly contacts accept dismiss inbox",
+  searchText: "review queue suggestions AI contacts profile relationships accept dismiss inbox",
   content: () => (
     <>
       <h2 id="what-is-the-review-queue">What is the Review Queue?</h2>
-      <p>Every time you save a note, the AI scans it for actionable patterns — events with dates and people, new contacts, and cross-app opportunities. Instead of acting silently, it places <strong>suggestions</strong> into your Review Queue so you stay in control.</p>
+      <p>Every time you save a note, the AI scans it for actionable patterns — new contacts, aliases, profile facts, relationships, and note links. Instead of acting silently, it places <strong>suggestions</strong> into your Review Queue so you stay in control.</p>
       <Callout type="tip" title="No extra credits">Suggestions are generated from metadata the AI already extracted — no additional LLM calls, no extra credits.</Callout>
 
       <h2 id="suggestion-types">Suggestion Types</h2>
       <ul>
-        <li><strong>Add Event to Temerio</strong> — a date and people were detected, and you have Temerio connected. The event dialog opens pre-filled so you just confirm.</li>
-        <li><strong>Add Event to Cherishly</strong> — same detection, but for saving a cherished memory in Cherishly.</li>
         <li><strong>Add to People</strong> — a person was mentioned who isn't in your contacts yet. Accepting takes you to the People page with the name pre-filled.</li>
+        <li><strong>Profile Fact</strong> — a stable fact about you or a contact was detected and can be saved to the relevant profile.</li>
+        <li><strong>Relationship</strong> — a connection between people was detected and can be reviewed before saving.</li>
       </ul>
-      <p>Only suggestions relevant to your connected apps appear. If you haven't connected Temerio, you won't see Temerio suggestions.</p>
 
       <h2 id="accepting-and-dismissing">Accepting & Dismissing</h2>
       <p>Each suggestion card has two buttons:</p>
@@ -358,7 +357,7 @@ const reviewQueue: DocPage = {
 const appIntegrations: DocPage = {
   slug: "app-integrations",
   title: "App Integrations",
-  description: "Connect external apps like Querino, Clarinio, Planinio, and more.",
+  description: "Connect Querino to sync research artefacts into Menerio.",
   category: "Integrations",
   headings: [
     { id: "how-it-works", title: "How It Works" },
@@ -367,7 +366,7 @@ const appIntegrations: DocPage = {
     { id: "open-in-app", title: "Open in Source App" },
     { id: "duplicate-local", title: "Duplicate to Menerio" },
   ],
-  searchText: "integrations apps external Querino Temerio Cherishly Clarinio Planinio sync bridge API connected open duplicate",
+  searchText: "integrations apps external Querino sync bridge API connected open duplicate",
   content: () => (
     <>
       <h2 id="how-it-works">How It Works</h2>
@@ -375,13 +374,9 @@ const appIntegrations: DocPage = {
       <Callout type="info">The sync is one-way: from each app into Menerio. Your locally created notes are never sent out unless you explicitly choose to.</Callout>
 
       <h2 id="connected-apps">Connected Apps</h2>
-      <p>Go to <strong>Settings → Integrations</strong> to see which apps are connected. Menerio supports:</p>
+      <p>Go to <strong>Settings → Apps</strong> to see which apps are connected. Menerio currently supports:</p>
       <ul>
-        <li><strong>Querino</strong> — research and bookmarks</li>
-        <li><strong>Temerio</strong> — time-based entries</li>
-        <li><strong>Cherishly</strong> — relationship moments</li>
-        <li><strong>Clarinio</strong> — structured feedback</li>
-        <li><strong>Planinio</strong> — social media studio (Ideas, Content, Posts)</li>
+        <li><strong>Querino</strong> — research artefacts and bookmarks</li>
       </ul>
       <p>Each connection uses a secure bridge key and auto-activates once verified.</p>
 

@@ -60,7 +60,7 @@ Routes are lazy-loaded for code splitting.
 | **Sync / Import** | `github-sync-export`, `github-sync-pull`, `github-import-vault`, `github-sync-scheduled` |
 | **Capture** | `quick-capture`, `ingest-thought`, `telegram-capture`, `discord-capture`, `slack-capture` |
 | **Moderation** | `moderate-content`, `ai-moderate-content` |
-| **Inter-app** | `send-patch`, `patch-response`, `receive-note`, `receive-profile`, `push-profile`, `send-to-temerio`, `verify-connection` |
+| **Inter-app** | `send-patch`, `patch-response`, `receive-note`, `verify-connection` |
 | **Other** | `daily-digest`, `weekly-review`, `extract-event`, `delete-my-account`, `ensure-token-allowance`, `get-shared-note`, `link-note` |
 
 Shared helpers live in `supabase/functions/_shared/` (auth, rate limiting, LLM credit accounting).

@@ -123,7 +123,6 @@ Deno.serve(async (req: Request) => {
         return json({ error: updateErr.message }, 500);
       }
 
-      await upsertExternalMoment(userId, appName, source_id, title, externalBody, structured_fields);
       triggerProcessNote(existing.id);
       return json({ action: "updated", note_id: existing.id }, 200);
     } else {
@@ -139,7 +138,6 @@ Deno.serve(async (req: Request) => {
         return json({ error: insertErr.message }, 500);
       }
 
-      await upsertExternalMoment(userId, appName, source_id, title, externalBody, structured_fields);
       triggerProcessNote(inserted.id);
       return json({ action: "created", note_id: inserted.id }, 201);
     }
@@ -158,52 +156,4 @@ function triggerProcessNote(noteId: string) {
     },
     body: JSON.stringify({ note_id: noteId }),
   }).catch((err) => console.error("process-note trigger error:", err));
-}
-
-async function upsertExternalMoment(
-  userId: string,
-  appName: string,
-  sourceId: string,
-  title: string,
-  description: string,
-  structuredFields: unknown,
-) {
-  if (appName !== "temerio") return;
-  if (!structuredFields || typeof structuredFields !== "object") return;
-
-  const fields = structuredFields as Record<string, unknown>;
-  if (typeof fields.happened_at !== "string" || !fields.happened_at) return;
-
-  const momentData = {
-    user_id: userId,
-    title,
-    description,
-    happened_at: fields.happened_at,
-    happened_end: typeof fields.happened_end === "string" ? fields.happened_end : null,
-    status: typeof fields.status === "string" ? fields.status : "unknown",
-    impact_level: typeof fields.impact_level === "number" ? fields.impact_level : 2,
-    confidence_date: typeof fields.confidence_date === "number" ? fields.confidence_date : 5,
-    confidence_truth: typeof fields.confidence_truth === "number" ? fields.confidence_truth : 5,
-    source: "temerio",
-    attachments: { source_app: appName, source_id: sourceId },
-  };
-
-  const { data: existing, error: existingErr } = await supabase
-    .from("moments")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("source", "temerio")
-    .eq("attachments->>source_id", sourceId)
-    .maybeSingle();
-
-  if (existingErr) {
-    console.error("Moment lookup error:", existingErr);
-    return;
-  }
-
-  const { error } = existing
-    ? await supabase.from("moments").update(momentData).eq("id", existing.id)
-    : await supabase.from("moments").insert(momentData);
-
-  if (error) console.error("Moment mirror error:", error);
 }
