@@ -57,7 +57,7 @@ function ParticleField() {
   })), []);
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+    <div className="pointer-events-none absolute inset-0 hidden overflow-hidden dark:block" aria-hidden="true">
       {seeds.map((p, i) => (
         <span
           key={i}
@@ -104,9 +104,9 @@ function CaptureShowcase() {
       <div className="pointer-events-none absolute -right-16 -top-16 z-20 hidden md:block">
         <Meni size={122} />
       </div>
-      <div className="flex h-[340px] min-h-[340px] flex-col overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-primary)/.25)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.95),hsl(var(--landing-card-deep)/.95))] px-[22px] py-[18px] text-left shadow-[0_20px_60px_hsl(var(--landing-ink)/.5),0_0_40px_hsl(var(--landing-sky-primary)/.18)]">
-        <div className="mb-4 flex items-center justify-between border-b border-[hsl(var(--landing-plain-white)/.06)] pb-3">
-          <span className="rounded bg-[hsl(var(--landing-sky-primary)/.18)] px-2 py-1 font-mono text-[9.5px] uppercase tracking-[.12em] text-[hsl(var(--landing-sky-highlight))]">NEW NOTE</span>
+      <div className="flex h-[340px] min-h-[340px] flex-col overflow-hidden rounded-[18px] border border-[hsl(var(--border-strong)/.14)] bg-[hsl(var(--surface))] px-[22px] py-[18px] text-left shadow-[0_14px_40px_rgba(15,35,70,.08)] dark:border-[hsl(var(--landing-sky-primary)/.25)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.95),hsl(var(--landing-card-deep)/.95))] dark:shadow-[0_20px_60px_hsl(var(--landing-ink)/.5),0_0_40px_hsl(var(--landing-sky-primary)/.18)]">
+        <div className="mb-4 flex items-center justify-between border-b border-[hsl(var(--border)/.08)] pb-3 dark:border-[hsl(var(--landing-plain-white)/.06)]">
+          <span className="rounded bg-[hsl(var(--brand)/.10)] px-2 py-1 font-mono text-[9.5px] uppercase tracking-[.12em] text-[hsl(var(--brand))] dark:bg-[hsl(var(--landing-sky-primary)/.18)] dark:text-[hsl(var(--landing-sky-highlight))]">NEW NOTE</span>
           <span className="font-mono text-[11px] text-[hsl(var(--landing-faint))]">just now</span>
         </div>
 
@@ -116,9 +116,9 @@ function CaptureShowcase() {
         </div>
 
         <div className={cn("my-4 flex h-[16px] items-center gap-2 font-mono text-[11px] text-[hsl(var(--landing-faint))] transition-opacity duration-300", phase === "typing" ? "invisible opacity-0" : "visible opacity-100")}>
-          <span className="h-px flex-1 bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
+          <span className="h-px flex-1 bg-[hsl(var(--border)/.08)] dark:bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
           <span>menerio is reading…</span>
-          <span className="h-px flex-1 bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
+          <span className="h-px flex-1 bg-[hsl(var(--border)/.08)] dark:bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
         </div>
 
         <div className={cn("flex min-h-[130px] flex-col gap-3 transition-opacity duration-300", phase === "tagged" ? "opacity-100" : "opacity-0")}>
@@ -133,7 +133,7 @@ function CaptureShowcase() {
         </div>
       </div>
       <div className="mt-7 flex justify-center gap-2" aria-hidden="true">
-        {thoughts.map((_, i) => <span key={i} className={cn("h-1 w-[22px] rounded-full bg-[hsl(var(--landing-plain-white)/.1)] transition-all", i === idx && "bg-[hsl(var(--landing-sky-primary))] shadow-[0_0_8px_hsl(var(--landing-sky-primary)/.6)]")} />)}
+        {thoughts.map((_, i) => <span key={i} className={cn("h-1 w-[22px] rounded-full bg-[hsl(var(--text-faint)/.35)] transition-all dark:bg-[hsl(var(--landing-plain-white)/.1)]", i === idx && "bg-[hsl(var(--brand))] dark:bg-[hsl(var(--landing-sky-primary))] dark:shadow-[0_0_8px_hsl(var(--landing-sky-primary)/.6)]")} />)}
       </div>
     </div>
   );
