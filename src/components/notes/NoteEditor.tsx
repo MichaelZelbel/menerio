@@ -74,7 +74,6 @@ import {
   Tag,
   X,
   Info,
-  CalendarPlus,
   Loader2,
   Send,
   Sparkles,
@@ -97,7 +96,6 @@ import {
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CreateEventDialog, EventDraft } from "./CreateEventDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
@@ -224,9 +222,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [showHistory, setShowHistory] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
-  const [showEventDialog, setShowEventDialog] = useState(false);
-  const [isExtractingEvent, setIsExtractingEvent] = useState(false);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const showLocalGraph = showLocalGraphProp ?? false;
   const [showLinkToNote, setShowLinkToNote] = useState(false);
@@ -574,24 +569,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     updateNote.mutate({ id: note.id, tags: (note.tags || []).filter((t) => t !== tag) });
   };
 
-  const extractEvent = async () => {
-    const text = `${title}\n\n${editor?.getText() || ""}`.trim();
-    if (!text || text.length < 10) { showToast.error("Note is too short to extract an event"); return; }
-    setIsExtractingEvent(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("extract-event", { body: { content: text } });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setEventDraft(data.event as EventDraft);
-      setShowEventDialog(true);
-    } catch (err: any) {
-      console.error("Event extraction failed:", err);
-      showToast.error(err.message || "Failed to extract event from note");
-    } finally {
-      setIsExtractingEvent(false);
-    }
-  };
-
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
   const charCount = plainText.length;
@@ -655,11 +632,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         {syncLog && (
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(!showHistory)} title="Version history">
             <GitCommit className="h-4 w-4" />
-          </Button>
-        )}
-        {!note.is_trashed && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={extractEvent} disabled={isExtractingEvent} title="Create event in Temerio">
-            {isExtractingEvent ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
           </Button>
         )}
         {!note.is_trashed && !note.is_external && (
@@ -1051,7 +1023,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </AlertDialogContent>
       </AlertDialog>
 
-      <CreateEventDialog open={showEventDialog} onOpenChange={setShowEventDialog} draft={eventDraft} />
       <ForwardToAppDialog open={showForwardDialog} onOpenChange={setShowForwardDialog} note={note} />
 
       {/* Wikilink autocomplete */}
