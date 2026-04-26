@@ -521,7 +521,7 @@ export default function ReviewQueue() {
                     <BookOpen className="h-5 w-5 mt-0.5 text-primary" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant={revision.change_type === "created" ? "default" : "secondary"} className="text-[10px]">
+                        <Badge variant={revision.change_type === "created" ? "default" : "secondary"} className={revision.change_type === "created" ? "text-[10px] bg-success text-success-foreground" : "text-[10px]"}>
                           {revision.change_type}
                         </Badge>
                         <CardTitle className="text-base">
@@ -554,7 +554,7 @@ export default function ReviewQueue() {
                       ) : (
                         <>
                           {diff.removed.map((line) => <p key={`old-${line}`} className="text-destructive">− {truncateText(line, 160)}</p>)}
-                          {diff.added.map((line) => <p key={`new-${line}`} className="text-green-600 dark:text-green-400">+ {truncateText(line, 160)}</p>)}
+                          {diff.added.map((line) => <p key={`new-${line}`} className="text-success">+ {truncateText(line, 160)}</p>)}
                         </>
                       )}
                     </div>
