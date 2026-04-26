@@ -244,6 +244,15 @@ serve(async (req) => {
     const pageById = new Map(allPages.map((page) => [page.id, page]));
 
     if (allPages.length === 0) {
+      const counts = {
+        unresolved_wikilinks: 0,
+        orphan_pages: 0,
+        age_stale_pages: 0,
+        contradictions: 0,
+        drift: 0,
+        gaps: 0,
+        stale_syntheses: 0,
+      };
       const emptyResult = {
         unresolved_wikilinks: [],
         orphan_pages: [],
@@ -254,8 +263,8 @@ serve(async (req) => {
         stale_syntheses: [],
         llm_error: null,
       };
-      await db.from("wiki_log").insert({ user_id: userId, operation: "lint", details: { counts: {}, duration_ms: Date.now() - startedAt } });
-      return jsonResponse({ ok: true, findings: emptyResult });
+      await db.from("wiki_log").insert({ user_id: userId, operation: "lint", details: { counts, duration_ms: Date.now() - startedAt } });
+      return jsonResponse({ ok: true, findings: emptyResult, counts });
     }
 
     const { data: links, error: linksError } = await db
