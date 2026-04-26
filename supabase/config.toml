@@ -101,3 +101,6 @@ verify_jwt = false
 
 [functions.backfill-markdown]
 verify_jwt = false
+
+[functions.wiki-ingest]
+verify_jwt = false

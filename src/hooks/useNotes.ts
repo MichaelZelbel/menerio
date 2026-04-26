@@ -67,6 +67,19 @@ type NoteUpdate = {
   trashed_at?: string | null;
 };
 
+function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE") {
+  supabase.functions
+    .invoke("wiki-ingest", {
+      body: {
+        note_id: noteId,
+        change_type: changeType,
+      },
+    })
+    .catch((err) => {
+      console.error("wiki-ingest invocation failed:", err);
+    });
+}
+
 export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
   const { user } = useAuth();
 
@@ -110,8 +123,9 @@ export function useCreateNote() {
       if (error) throw error;
       return data as unknown as Note;
     },
-    onSuccess: () => {
+    onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      invokeWikiIngest(note.id, "INSERT");
     },
     onError: () => {
       showToast.error("Failed to create note");
@@ -133,8 +147,9 @@ export function useUpdateNote() {
       if (error) throw error;
       return data as unknown as Note;
     },
-    onSuccess: () => {
+    onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      invokeWikiIngest(note.id, "UPDATE");
     },
   });
 }
