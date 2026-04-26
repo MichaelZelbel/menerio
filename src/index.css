@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&family=Inter:wght@300;400;500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Inter:wght@300;400;500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,7 +8,7 @@
   :root {
     --font-body: 'Inter', system-ui, sans-serif;
     --font-display: 'DM Sans', system-ui, sans-serif;
-    --font-hero: 'Baloo 2', 'Inter', system-ui, sans-serif;
+    --font-hero: 'Fredoka', 'Inter', system-ui, sans-serif;
 
     /* Primary — Deep Sapphire Blue */
     --primary: 220 70% 45%;
@@ -252,6 +252,14 @@
   .landing-particle { animation-name: landing-particle; animation-timing-function: linear; animation-iteration-count: infinite; }
   .capture-caret { animation: capture-caret .9s steps(1) infinite; }
   .capture-pill-enter { animation: capture-pill-in .4s cubic-bezier(.2,.8,.2,1) both; }
+
+  .landing-headline {
+    font-family: var(--font-hero) !important;
+    font-synthesis: none;
+    font-optical-sizing: auto;
+    font-style: normal;
+    letter-spacing: 0;
+  }
 }
 
 /* TipTap Editor Styles */

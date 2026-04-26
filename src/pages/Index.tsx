@@ -184,7 +184,7 @@ const Index = () => {
               <span className="relative z-10 rounded-full border border-[hsl(var(--landing-sky-primary)/.3)] bg-[hsl(var(--landing-sky-deep)/.25)] px-2.5 py-[3px] font-mono text-[11px] lowercase tracking-[.15em] text-[hsl(var(--landing-sky-primary))]">meni</span>
             </div>
             <div className="text-center md:text-left">
-              <h1 className="font-[var(--font-hero)] text-[clamp(66px,8.5vw,126px)] font-extrabold leading-[.82] tracking-normal text-[hsl(var(--landing-text))] [text-shadow:0_4px_30px_hsl(var(--landing-ink)/.5)]">
+              <h1 className="landing-headline text-[clamp(66px,8.5vw,126px)] font-bold leading-[.84] text-[hsl(var(--landing-text))] [text-shadow:0_4px_30px_hsl(var(--landing-ink)/.5)]">
                 One Brain.<br />
                 <span className="bg-[linear-gradient(180deg,hsl(var(--landing-sky-light)),hsl(var(--landing-sky-primary))_50%,hsl(var(--landing-sky-deep)))] bg-clip-text text-transparent drop-shadow-[0_0_50px_hsl(var(--landing-sky-primary)/.5)]">Every AI.</span>
               </h1>
@@ -213,7 +213,7 @@ const Index = () => {
           <div className="mx-auto max-w-[1160px]">
             <div className="mx-auto mb-14 max-w-[760px] text-center">
               <p className="mb-4 font-mono text-[12px] font-semibold uppercase tracking-[.22em] text-[hsl(var(--landing-sky-highlight))]">Features</p>
-              <h2 className="font-[var(--font-hero)] text-[clamp(46px,5.6vw,78px)] font-extrabold leading-[.86] tracking-normal text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+              <h2 className="landing-headline text-[clamp(46px,5.6vw,78px)] font-bold leading-[.9] text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
                 Your thoughts, supercharged by AI
               </h2>
               <p className="mx-auto mt-5 max-w-[650px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
@@ -244,7 +244,7 @@ const Index = () => {
             <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-full border border-[hsl(var(--landing-sky-primary)/.28)] bg-[hsl(var(--landing-sky-primary)/.13)] text-[hsl(var(--landing-sky-highlight))] shadow-[0_0_30px_hsl(var(--landing-sky-primary)/.18)]">
               <Brain className="h-7 w-7" />
             </div>
-            <h2 className="font-[var(--font-hero)] text-[clamp(46px,5.3vw,76px)] font-extrabold leading-[.86] tracking-normal text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+            <h2 className="landing-headline text-[clamp(46px,5.3vw,76px)] font-bold leading-[.9] text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
               Ready to build your brain?
             </h2>
             <p className="mx-auto mt-5 max-w-[640px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
