@@ -543,10 +543,12 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {wikiRevisions.map((revision) => {
-            const diff = buildLineDiff(revision.previous_content, revision.new_content);
-            return (
-              <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
+          {combinedReviewItems.map((entry) => {
+            if (entry.kind === "wiki") {
+              const { revision } = entry;
+              const diff = buildLineDiff(revision.previous_content, revision.new_content);
+              return (
+                <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
                 <CardHeader className="pb-2">
                   <div className="flex items-start gap-3">
                     <BookOpen className="h-5 w-5 mt-0.5 text-primary" />
@@ -597,20 +599,25 @@ export default function ReviewQueue() {
                     </Button>
                     <div className="flex gap-2">
                       <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
+                        <X className="h-4 w-4 mr-1" />
+                        Never Again
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
                         <RotateCcw className="h-4 w-4 mr-1" />
-                        Roll back
+                        Roll Back
                       </Button>
                       <Button size="sm" onClick={() => handleWikiLooksGood(revision)}>
                         <Check className="h-4 w-4 mr-1" />
-                        Looks good
+                        Keep
                       </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            );
-          })}
-          {items.map((item) => {
+              );
+            }
+
+            const { item } = entry;
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
 
@@ -622,10 +629,6 @@ export default function ReviewQueue() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <CardTitle className="text-base">{item.title}</CardTitle>
-                        <Badge variant="outline" className="text-[10px]">{config.label}</Badge>
-                        <Badge variant={item.status === "auto_applied_unreviewed" ? "default" : "secondary"} className="text-[10px]">
-                          {item.status === "auto_applied_unreviewed" ? "Already added" : "Needs approval"}
-                        </Badge>
                         {item.is_sensitive && <Badge variant="outline" className="text-[10px]">Sensitive</Badge>}
                       </div>
                       {item.description && (
@@ -656,7 +659,7 @@ export default function ReviewQueue() {
                         disabled={updateStatus.isPending}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Never add again
+                        Never Again
                       </Button>
                       <Button
                         size="sm"
@@ -664,7 +667,8 @@ export default function ReviewQueue() {
                         onClick={() => handleRemove(item)}
                         disabled={updateStatus.isPending}
                       >
-                        Remove
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Roll Back
                       </Button>
                       <Button
                         size="sm"
