@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, Brain, CheckCircle2, FileText, Github, Globe, Linkedin, Loader2, Mail, Plug, Search, Shield, Twitter } from "lucide-react";
@@ -119,7 +119,7 @@ function CaptureShowcase() {
   );
 }
 
-function PillGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function PillGroup({ label, children }: { label: string; children: ReactNode }) {
   return <div><div className="mb-2 font-mono text-[10px] uppercase tracking-[.15em] text-[hsl(var(--landing-faint))]">{label}</div><div className="flex flex-wrap gap-2">{children}</div></div>;
 }
 
