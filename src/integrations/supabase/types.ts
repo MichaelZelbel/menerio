@@ -2214,6 +2214,7 @@ export type Database = {
         Returns: Json
       }
       wiki_resync_links: { Args: { p_page_id: string }; Returns: undefined }
+      wiki_rollback_revision: { Args: { p_revision_id: string }; Returns: Json }
     }
     Enums: {
       app_role: "free" | "premium" | "premium_gift" | "admin"
