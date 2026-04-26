@@ -22,6 +22,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Notes = lazy(() => import("./pages/Notes"));
+const WikiHome = lazy(() => import("./pages/WikiHome"));
 const Settings = lazy(() => import("./pages/Settings"));
 
 const Privacy = lazy(() => import("./pages/Privacy"));
@@ -112,6 +113,17 @@ const App = () => (
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                  </Route>
+
+                  <Route
+                    path="/wiki"
+                    element={
+                      <ProtectedRoute>
+                        <DashboardLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<WikiHome />} />
                   </Route>
 
                   <Route path="*" element={<NotFound />} />
