@@ -25,6 +25,24 @@ export interface ReviewItem {
   source_note?: { title: string } | null;
 }
 
+export interface WikiRevisionReviewItem {
+  id: string;
+  user_id: string;
+  wiki_page_id: string | null;
+  page_slug: string;
+  page_title: string;
+  change_type: "created" | "updated";
+  previous_content: string | null;
+  new_content: string;
+  source_note_id: string | null;
+  change_summary: string | null;
+  status: "applied";
+  created_at: string;
+  reviewed_at: string | null;
+  rolled_back_at: string | null;
+  source_note?: { id: string; title: string } | null;
+}
+
 export function useReviewQueue() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -58,6 +76,37 @@ export function useReviewQueue() {
     refetchInterval: 60_000,
   });
 
+  const { data: wikiRevisions = [], isLoading: isLoadingWikiRevisions } = useQuery({
+    queryKey: ["wiki-revision-review-queue", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wiki_revisions" as any)
+        .select("*, source_note:notes!wiki_revisions_source_note_id_fkey(id,title)")
+        .eq("status", "applied")
+        .in("change_type", ["created", "updated"])
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data || []) as unknown as WikiRevisionReviewItem[];
+    },
+    enabled: !!user,
+    refetchInterval: 60_000,
+  });
+
+  const { data: wikiRevisionCount = 0 } = useQuery({
+    queryKey: ["wiki-revision-review-count", user?.id],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("wiki_revisions" as any)
+        .select("id", { count: "exact", head: true })
+        .eq("status", "applied")
+        .in("change_type", ["created", "updated"]);
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!user,
+    refetchInterval: 60_000,
+  });
+
   const updateStatus = useMutation({
     mutationFn: async ({ id, status, extra }: { id: string; status: "kept" | "removed" | "blocked" | "pending_review" | "auto_applied_unreviewed"; extra?: Record<string, unknown> }) => {
       const { error } = await supabase
@@ -72,5 +121,11 @@ export function useReviewQueue() {
     },
   });
 
-  return { items, isLoading, pendingCount, updateStatus };
+  return {
+    items,
+    wikiRevisions,
+    isLoading: isLoading || isLoadingWikiRevisions,
+    pendingCount: pendingCount + wikiRevisionCount,
+    updateStatus,
+  };
 }

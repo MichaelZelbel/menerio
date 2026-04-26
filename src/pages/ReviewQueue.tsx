@@ -1,11 +1,22 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
-import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
+import { useReviewQueue, type ReviewItem, type WikiRevisionReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
@@ -17,6 +28,9 @@ import {
   FileText,
   Inbox,
   User,
+  BookOpen,
+  Eye,
+  RotateCcw,
 } from "lucide-react";
 
 const DEFAULT_PROFILE_CATEGORIES = [
@@ -47,11 +61,62 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
 };
 
+const truncateText = (text: string | null | undefined, length = 200) => {
+  const value = (text || "").replace(/\s+/g, " ").trim();
+  return value.length > length ? `${value.slice(0, length)}…` : value;
+};
+
+const buildLineDiff = (before: string | null, after: string) => {
+  const oldLines = (before || "").split("\n").filter((line) => line.trim());
+  const newLines = after.split("\n").filter((line) => line.trim());
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const removed = oldLines.filter((line) => !newSet.has(line)).slice(0, 3);
+  const added = newLines.filter((line) => !oldSet.has(line)).slice(0, 3);
+  return { removed, added };
+};
+
 export default function ReviewQueue() {
   const { user } = useAuth();
-  const { items, isLoading, updateStatus } = useReviewQueue();
+  const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
+  const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
+
+  const refreshReviewQueues = () => {
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue-count"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revision-review-queue"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revision-review-count"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-pages"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] });
+  };
+
+  const handleWikiLooksGood = async (revision: WikiRevisionReviewItem) => {
+    const { error } = await supabase
+      .from("wiki_revisions" as any)
+      .update({ status: "reviewed", reviewed_at: new Date().toISOString() })
+      .eq("id", revision.id);
+    if (error) {
+      showToast.error("Could not review wiki update: " + error.message);
+      return;
+    }
+    refreshReviewQueues();
+    showToast.success("Wiki update reviewed");
+  };
+
+  const handleWikiRollback = async () => {
+    if (!rollbackWikiRevision) return;
+    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: rollbackWikiRevision.id });
+    if (error) {
+      showToast.error("Could not roll back wiki update: " + error.message);
+      return;
+    }
+    setRollbackWikiRevision(null);
+    refreshReviewQueues();
+    showToast.success("Rolled back");
+  };
 
   const createSuppression = async (item: ReviewItem) => {
     const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
@@ -397,6 +462,8 @@ export default function ReviewQueue() {
     showToast.info("All visible changes removed");
   };
 
+  const hasReviewItems = items.length + wikiRevisions.length > 0;
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-4">
@@ -417,13 +484,13 @@ export default function ReviewQueue() {
         </p>
       </div>
 
-      {items.length > 0 && (
+      {hasReviewItems && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending}>
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || items.length === 0}>
             <Check className="h-4 w-4 mr-1" />
             Keep all
           </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending}>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || items.length === 0}>
             <X className="h-4 w-4 mr-1" />
             Remove all
           </Button>
@@ -433,7 +500,7 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {!hasReviewItems ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <Inbox className="h-12 w-12 text-muted-foreground/40 mb-4" />
@@ -445,6 +512,73 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
+          {wikiRevisions.map((revision) => {
+            const diff = buildLineDiff(revision.previous_content, revision.new_content);
+            return (
+              <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start gap-3">
+                    <BookOpen className="h-5 w-5 mt-0.5 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={revision.change_type === "created" ? "default" : "secondary"} className={revision.change_type === "created" ? "text-[10px] bg-success text-success-foreground" : "text-[10px]"}>
+                          {revision.change_type}
+                        </Badge>
+                        <CardTitle className="text-base">
+                          <Link to={`/wiki/${revision.page_slug}`} className="hover:text-primary">
+                            {revision.page_title}
+                          </Link>
+                        </CardTitle>
+                        {revision.source_note && (
+                          <Link
+                            to={`/dashboard/notes/${revision.source_note_id}`}
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            via {truncateText(revision.source_note.title, 42)}
+                          </Link>
+                        )}
+                      </div>
+                      {revision.change_summary && (
+                        <CardDescription className="mt-1">{revision.change_summary}</CardDescription>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {revision.change_type === "created" ? (
+                    <p className="text-sm text-muted-foreground">{truncateText(revision.new_content)}</p>
+                  ) : (
+                    <div className="space-y-1 text-sm">
+                      {diff.removed.length === 0 && diff.added.length === 0 ? (
+                        <p className="text-muted-foreground">Updated content</p>
+                      ) : (
+                        <>
+                          {diff.removed.map((line) => <p key={`old-${line}`} className="text-destructive">− {truncateText(line, 160)}</p>)}
+                          {diff.added.map((line) => <p key={`new-${line}`} className="text-success">+ {truncateText(line, 160)}</p>)}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedWikiRevision(revision)}>
+                      <Eye className="h-4 w-4 mr-1" />
+                      View diff
+                    </Button>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Roll back
+                      </Button>
+                      <Button size="sm" onClick={() => handleWikiLooksGood(revision)}>
+                        <Check className="h-4 w-4 mr-1" />
+                        Looks good
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
           {items.map((item) => {
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
@@ -518,6 +652,42 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      <Dialog open={!!selectedWikiRevision} onOpenChange={(open) => !open && setSelectedWikiRevision(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Wiki revision diff</DialogTitle>
+          </DialogHeader>
+          {selectedWikiRevision && (
+            <div className="grid gap-4 md:grid-cols-2 max-h-[70vh] overflow-y-auto">
+              <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Before</p>
+                <pre className="whitespace-pre-wrap text-sm font-sans">{selectedWikiRevision.previous_content || ""}</pre>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">After</p>
+                <pre className="whitespace-pre-wrap text-sm font-sans">{selectedWikiRevision.new_content}</pre>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!rollbackWikiRevision} onOpenChange={(open) => !open && setRollbackWikiRevision(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Roll back this change?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The wiki page will be restored to its previous content.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleWikiRollback} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Roll back
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
