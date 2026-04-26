@@ -176,7 +176,6 @@ export default function People() {
   const startEditing = (person: Person) => {
     setEditingAliases([...(person.aliases || [])]);
     setEditingNotes(person.notes || "");
-    setEditingMappings({ ...(person.app_mappings || {}) });
     setNewAlias("");
   };
 
@@ -192,33 +191,16 @@ export default function People() {
     setEditingAliases(editingAliases.filter((a) => a !== alias));
   };
 
-  const setAppMapping = (appKey: string, displayName: string) => {
-    if (!editingMappings) return;
-    setEditingMappings({
-      ...editingMappings,
-      [appKey]: { display_name: displayName || undefined },
-    });
-  };
-
   const saveChanges = () => {
     if (!selectedPerson) return;
     const updates: any = {};
     if (editingAliases !== null) updates.aliases = editingAliases;
     if (editingNotes !== null) updates.notes = editingNotes || null;
-    if (editingMappings !== null) {
-      // Clean out empty mappings
-      const cleaned: Record<string, { display_name?: string }> = {};
-      for (const [k, v] of Object.entries(editingMappings)) {
-        if (v.display_name) cleaned[k] = v;
-      }
-      updates.app_mappings = cleaned;
-    }
     updatePerson.mutate(updates, {
       onSuccess: () => {
         showToast.success("Saved");
         setEditingAliases(null);
         setEditingNotes(null);
-        setEditingMappings(null);
       },
     });
   };
@@ -229,13 +211,11 @@ export default function People() {
   if (selectedPerson) {
     const aliases = isEditing ? editingAliases! : (selectedPerson.aliases || []);
     const notes = isEditing ? editingNotes! : (selectedPerson.notes || "");
-    const mappings = isEditing ? editingMappings! : (selectedPerson.app_mappings || {});
-
     return (
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); setActivePersonTab("overview"); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setActivePersonTab("overview"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
@@ -305,7 +285,7 @@ export default function People() {
                     </>
                   ) : (
                     <>
-                      <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); setEditingMappings(null); }}>
+                      <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); }}>
                         Cancel
                       </Button>
                       <Button size="sm" onClick={saveChanges} disabled={updatePerson.isPending}>
