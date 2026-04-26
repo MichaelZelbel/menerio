@@ -209,11 +209,11 @@ const Index = () => {
           </div>
         </section>
 
-        <section className="relative z-10 border-t border-[hsl(var(--landing-plain-white)/.08)] px-6 pb-14 pt-24 md:px-9 lg:pb-16 lg:pt-28">
+        <section className="relative z-10 border-t border-[hsl(var(--border)/.08)] px-6 pb-14 pt-24 md:px-9 lg:pb-16 lg:pt-28 dark:border-[hsl(var(--landing-plain-white)/.08)]">
           <div className="mx-auto max-w-[1160px]">
             <div className="mx-auto mb-14 max-w-[760px] text-center">
               <p className="mb-4 font-mono text-[12px] font-semibold uppercase tracking-[.22em] text-[hsl(var(--landing-sky-highlight))]">Features</p>
-              <h2 className="landing-headline text-[clamp(46px,5.6vw,78px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+              <h2 className="landing-headline text-[clamp(46px,5.6vw,78px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] dark:[text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
                 Your thoughts, supercharged by AI
               </h2>
               <p className="mx-auto mt-5 max-w-[650px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
@@ -225,10 +225,10 @@ const Index = () => {
               {homepageFeatures.map((feature) => (
                 <article
                   key={feature.title}
-                  className="group relative overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-primary)/.16)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.74),hsl(var(--landing-card-deep)/.82))] p-6 text-left shadow-[0_18px_50px_hsl(var(--landing-ink)/.22)] transition duration-300 hover:-translate-y-1 hover:border-[hsl(var(--landing-sky-primary)/.35)] hover:shadow-[0_22px_70px_hsl(var(--landing-ink)/.34),0_0_34px_hsl(var(--landing-sky-primary)/.12)]"
+                  className="group relative overflow-hidden rounded-[18px] border border-[hsl(var(--border)/.08)] bg-[hsl(var(--surface))] p-6 text-left shadow-[0_6px_18px_rgba(15,35,70,.04)] transition duration-300 hover:-translate-y-1 hover:border-[hsl(var(--brand)/.3)] hover:shadow-[0_14px_32px_rgba(31,96,224,.08)] dark:border-[hsl(var(--landing-sky-primary)/.16)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.74),hsl(var(--landing-card-deep)/.82))] dark:shadow-[0_18px_50px_hsl(var(--landing-ink)/.22)] dark:hover:border-[hsl(var(--landing-sky-primary)/.35)] dark:hover:shadow-[0_22px_70px_hsl(var(--landing-ink)/.34),0_0_34px_hsl(var(--landing-sky-primary)/.12)]"
                 >
-                  <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.45),transparent)] opacity-70" />
-                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[hsl(var(--landing-sky-primary)/.22)] bg-[hsl(var(--landing-sky-primary)/.12)] text-[hsl(var(--landing-sky-highlight))] shadow-[0_0_20px_hsl(var(--landing-sky-primary)/.14)] transition group-hover:bg-[hsl(var(--landing-sky-primary)/.18)]">
+                  <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.45),transparent)] opacity-0 dark:opacity-70" />
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[hsl(var(--brand)/.18)] bg-[hsl(var(--brand-soft))] text-[hsl(var(--brand))] transition group-hover:bg-[hsl(var(--brand-soft))] dark:border-[hsl(var(--landing-sky-primary)/.22)] dark:bg-[hsl(var(--landing-sky-primary)/.12)] dark:text-[hsl(var(--landing-sky-highlight))] dark:shadow-[0_0_20px_hsl(var(--landing-sky-primary)/.14)] dark:group-hover:bg-[hsl(var(--landing-sky-primary)/.18)]">
                     <feature.icon className="h-5 w-5" />
                   </div>
                   <h3 className="mb-3 font-[var(--font-display)] text-xl font-bold text-[hsl(var(--landing-text))]">{feature.title}</h3>
@@ -241,14 +241,14 @@ const Index = () => {
 
         <section className="relative z-10 px-6 pb-14 pt-0 text-center md:px-9 lg:pb-16">
           <div className="mx-auto max-w-[760px]">
-            <h2 className="landing-headline text-[clamp(46px,5.3vw,76px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+            <h2 className="landing-headline text-[clamp(46px,5.3vw,76px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] dark:[text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
               Ready to build your brain?
             </h2>
             <p className="mx-auto mt-4 max-w-[640px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
               Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
             </p>
             <div className="mt-8 flex justify-center">
-              <Button onClick={() => navigate('/auth?tab=signup')} className="group h-11 rounded-[10px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-6 py-0 text-[13px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+              <Button onClick={() => navigate('/auth?tab=signup')} className="group h-11 rounded-[10px] border border-transparent bg-[hsl(var(--brand))] px-6 py-0 text-[13px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_8px_20px_rgba(31,96,224,.25)] hover:brightness-105 hover:shadow-[0_10px_24px_rgba(31,96,224,.32)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] dark:shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] dark:hover:brightness-110">
                 Start Your Brain <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Button>
             </div>
