@@ -357,7 +357,7 @@ const reviewQueue: DocPage = {
 const appIntegrations: DocPage = {
   slug: "app-integrations",
   title: "App Integrations",
-  description: "Connect Querino to sync research artefacts into Menerio."
+  description: "Connect Querino to sync research artefacts into Menerio.",
   category: "Integrations",
   headings: [
     { id: "how-it-works", title: "How It Works" },
@@ -366,7 +366,7 @@ const appIntegrations: DocPage = {
     { id: "open-in-app", title: "Open in Source App" },
     { id: "duplicate-local", title: "Duplicate to Menerio" },
   ],
-  searchText: "integrations apps external Querino sync bridge API connected open duplicate"
+  searchText: "integrations apps external Querino sync bridge API connected open duplicate",
   content: () => (
     <>
       <h2 id="how-it-works">How It Works</h2>

@@ -309,3 +309,85 @@ export default function People() {
             onMergeSuggested={() => setMergeOpen(true)}
           />
 
+          <Card>
+            <CardContent className="pt-6">
+              {isEditing ? (
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setEditingNotes(e.target.value)}
+                    placeholder="Add private notes about this person..."
+                    className="min-h-24"
+                  />
+                </div>
+              ) : notes ? (
+                <p className="text-sm whitespace-pre-wrap">{notes}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">No notes yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                Related Notes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {relatedNotes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No related notes found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {relatedNotes.map((note: any) => (
+                    <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 hover:bg-accent">
+                      <p className="text-sm font-medium">{note.title || "Untitled"}</p>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="conversation" className="mt-0">
+          <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
+        </TabsContent>
+
+        <TabsContent value="timeline" className="mt-0">
+          <PersonTimeline
+            personId={selectedPerson.id}
+            personName={selectedPerson.name}
+            people={people.map((person) => ({ id: person.id, name: person.name }))}
+            onAskMira={(context) => {
+              setConversationContext(context);
+              setActivePersonTab("conversation");
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="documents" className="mt-0">
+          <PersonDocuments personId={selectedPerson.id} personName={selectedPerson.name} />
+        </TabsContent>
+
+        <TabsContent value="profile" className="mt-0">
+          <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
+        </TabsContent>
+      </Tabs>
+
+      <MergePersonDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        sourcePerson={selectedPerson}
+        allPeople={people}
+        onMergeComplete={() => {
+          setMergeOpen(false);
+          setSelectedPersonId(null);
+        }}
+      />
+    </div>
+  );
+}
+
