@@ -239,19 +239,16 @@ const Index = () => {
           </div>
         </section>
 
-        <section className="relative z-10 px-6 pb-28 pt-6 md:px-9 lg:pb-32">
-          <div className="mx-auto max-w-[980px] overflow-hidden rounded-[26px] border border-[hsl(var(--landing-sky-primary)/.24)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.88),hsl(var(--landing-card-deep)/.94))] px-6 py-16 text-center shadow-[0_24px_80px_hsl(var(--landing-ink)/.38),0_0_46px_hsl(var(--landing-sky-primary)/.13)] md:px-12 md:py-20">
-            <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-full border border-[hsl(var(--landing-sky-primary)/.28)] bg-[hsl(var(--landing-sky-primary)/.13)] text-[hsl(var(--landing-sky-highlight))] shadow-[0_0_30px_hsl(var(--landing-sky-primary)/.18)]">
-              <Brain className="h-7 w-7" />
-            </div>
+        <section className="relative z-10 px-6 pb-28 pt-12 text-center md:px-9 lg:pb-32 lg:pt-16">
+          <div className="mx-auto max-w-[760px]">
             <h2 className="landing-headline text-[clamp(46px,5.3vw,76px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
               Ready to build your brain?
             </h2>
-            <p className="mx-auto mt-5 max-w-[640px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
+            <p className="mx-auto mt-4 max-w-[640px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
               Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
             </p>
-            <div className="mt-9 flex justify-center">
-              <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-8 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+            <div className="mt-8 flex justify-center">
+              <Button onClick={() => navigate('/auth?tab=signup')} className="group h-11 rounded-[10px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-6 py-0 text-[13px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
                 Start Your Brain <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Button>
             </div>
