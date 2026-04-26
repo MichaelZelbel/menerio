@@ -8,8 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -29,12 +27,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { Copy, Check, Trash2, Plug, ExternalLink, Loader2, ChevronDown, Plus } from "lucide-react";
+import { Copy, Check, Trash2, Plug, Loader2 } from "lucide-react";
 
 /* ────────────────────────────── Known Apps Registry ────────────────────────────── */
 
@@ -59,38 +52,6 @@ const KNOWN_APPS: KnownApp[] = [
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "🔬",
     iconImage: querinoLogo,
-  },
-  {
-    id: "temerio",
-    name: "Temerio",
-    description: "Task & project management — syncs tasks and milestones.",
-    supabaseUrl: "https://temerio.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "📋",
-  },
-  {
-    id: "cherishly",
-    name: "Cherishly",
-    description: "Relationship tracker — syncs memories and moments.",
-    supabaseUrl: "https://cherishly.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "💝",
-  },
-  {
-    id: "clarinio",
-    name: "Clarinio",
-    description: "Personal profile mirror — two-way sync of your profile data.",
-    supabaseUrl: "https://clarinio.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "🪞",
-  },
-  {
-    id: "planinio",
-    name: "Planinio",
-    description: "Social media studio — syncs ideas, content & posts.",
-    supabaseUrl: "https://suzqnyvfjbmnoipnlobk.supabase.co",
-    webhookPath: "/functions/v1/menerio-webhook",
-    icon: "📱",
   },
 ];
 
@@ -117,19 +78,12 @@ function generateApiKey(): string {
 /* ────────────────────────────── Component ────────────────────────────── */
 
 export function AppIntegrations() {
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const qc = useQueryClient();
 
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [connectingAppId, setConnectingAppId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  // Advanced custom connection state
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [customDialogOpen, setCustomDialogOpen] = useState(false);
-  const [customAppName, setCustomAppName] = useState("");
-  const [customDisplayName, setCustomDisplayName] = useState("");
-  const [customWebhookUrl, setCustomWebhookUrl] = useState("");
 
   const { data: apps = [], isLoading } = useQuery<ConnectedApp[]>({
     queryKey: ["connected_apps", user?.id],
@@ -177,33 +131,6 @@ export function AppIntegrations() {
     },
   });
 
-  /* ── Connect a custom app (advanced) ── */
-  const connectCustomApp = useMutation({
-    mutationFn: async () => {
-      const apiKey = generateApiKey();
-      const { error } = await supabase
-        .from("connected_apps" as any)
-        .insert({
-          user_id: user!.id,
-          app_name: customAppName.toLowerCase().trim(),
-          display_name: customDisplayName.trim(),
-          webhook_url: customWebhookUrl.trim() || null,
-          api_key: apiKey,
-        });
-      if (error) throw error;
-      return apiKey;
-    },
-    onSuccess: (apiKey) => {
-      setNewApiKey(apiKey);
-      setConnectingAppId("custom");
-      qc.invalidateQueries({ queryKey: ["connected_apps"] });
-      showToast.success("App connected!");
-    },
-    onError: (err: any) => {
-      showToast.error(err.message || "Failed to create connection");
-    },
-  });
-
   const toggleActive = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
       const { error } = await supabase
@@ -245,19 +172,8 @@ export function AppIntegrations() {
   const handleCloseApiKeyDialog = () => {
     setNewApiKey(null);
     setConnectingAppId(null);
-    setCustomDialogOpen(false);
-    setCustomAppName("");
-    setCustomDisplayName("");
-    setCustomWebhookUrl("");
     setCopied(false);
   };
-
-  const handleCreateCustom = () => {
-    if (!customAppName.trim() || !customDisplayName.trim()) return;
-    connectCustomApp.mutate();
-  };
-
-  const connectedAppNames = new Set(apps.map((a) => a.app_name));
 
   return (
     <div className="space-y-6">
@@ -278,7 +194,7 @@ export function AppIntegrations() {
             </div>
           ) : (
             <div className="space-y-3">
-              {(role === "admin" ? KNOWN_APPS : KNOWN_APPS.filter((k) => k.id === "querino")).map((known) => {
+              {KNOWN_APPS.map((known) => {
                 const existing = apps.find((a) => a.app_name === known.id);
                 return (
                   <div
@@ -365,28 +281,7 @@ export function AppIntegrations() {
                   </div>
                 );
               })}
-
-              {/* Show any custom-connected apps that aren't in KNOWN_APPS */}
-              {apps
-                .filter((a) => !KNOWN_APPS.some((k) => k.id === a.app_name))
-                .map((app) => (
-                  <div
-                    key={app.id}
-                    className="flex items-center justify-between rounded-lg border p-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">🔌</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">{app.display_name}</span>
-                          {app.connection_status === "pending" ? (
-                            <Badge variant="warning" className="text-[10px] px-1.5">Awaiting handshake…</Badge>
-                          ) : !app.is_active ? (
-                            <Badge variant="secondary" className="text-[10px] px-1.5">Paused</Badge>
-                          ) : (
-                            <Badge variant="success" className="text-[10px] px-1.5">Connected</Badge>
-                          )}
-                        </div>
+            </div>
                         <p className="text-xs text-muted-foreground font-mono">{app.app_name}</p>
                         {app.webhook_url && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
@@ -432,29 +327,6 @@ export function AppIntegrations() {
                 ))}
             </div>
           )}
-
-          {/* ── Advanced: Custom App ── */}
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-6">
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-                <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
-                Advanced: Connect a custom app
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-3">
-              <p className="text-xs text-muted-foreground mb-3">
-                For developers building custom integrations. You'll need to provide the app details manually.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setCustomDialogOpen(true)}
-              >
-                <Plus className="h-4 w-4" /> Add Custom Connection
-              </Button>
-            </CollapsibleContent>
-          </Collapsible>
         </CardContent>
       </Card>
 
@@ -485,27 +357,7 @@ export function AppIntegrations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ── Custom App Dialog ── */}
-      <Dialog open={customDialogOpen && !newApiKey} onOpenChange={(open) => { if (!open) handleCloseApiKeyDialog(); else setCustomDialogOpen(true); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Connect a Custom App</DialogTitle>
-            <DialogDescription>
-              For developers: add a custom app that can interact with your Menerio data.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="customAppName">App Identifier</Label>
-              <Input
-                id="customAppName"
-                value={customAppName}
-                onChange={(e) => setCustomAppName(e.target.value)}
-                placeholder="my-app"
-              />
-              <p className="text-xs text-muted-foreground">Lowercase identifier, e.g. "my-crm"</p>
-            </div>
+    </div>
             <div className="space-y-2">
               <Label htmlFor="customDisplayName">Display Name</Label>
               <Input
