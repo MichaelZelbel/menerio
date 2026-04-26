@@ -224,11 +224,12 @@ serve(async (req) => {
 
   try {
     const internalUserId = req.headers.get("x-menerio-user-id");
+    const token = extractBearer(req);
     if (internalUserId) {
+      if (token !== SUPABASE_SERVICE_ROLE_KEY) return jsonResponse({ error: "Unauthenticated" }, 401);
       userId = internalUserId;
       db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     } else {
-      const token = extractBearer(req);
       if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
 
       const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
