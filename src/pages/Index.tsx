@@ -68,8 +68,8 @@ function CaptureShowcase() {
 
   return (
     <div className="relative mx-auto w-full max-w-[580px]">
-      <div className="pointer-events-none absolute -right-24 -top-12 z-10 hidden md:block">
-        <Meni size={86} />
+      <div className="pointer-events-none absolute -right-16 -top-16 z-20 hidden md:block">
+        <Meni size={122} />
       </div>
       <div className="flex h-[340px] min-h-[340px] flex-col overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-primary)/.25)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.95),hsl(var(--landing-card-deep)/.95))] px-[22px] py-[18px] text-left shadow-[0_20px_60px_hsl(var(--landing-ink)/.5),0_0_40px_hsl(var(--landing-sky-primary)/.18)]">
         <div className="mb-4 flex items-center justify-between border-b border-[hsl(var(--landing-plain-white)/.06)] pb-3">
@@ -146,11 +146,11 @@ const Index = () => {
           <div className="mx-auto mb-[14px] grid max-w-[980px] items-center gap-9 text-left md:grid-cols-[auto_1fr]">
             <div className="relative mx-auto flex flex-col items-center gap-1.5 md:mx-0">
               <div className="absolute -inset-5 rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-primary)/.35),transparent_65%)] blur-xl" />
-              <Meni size={168} className="relative z-10 drop-shadow-[0_12px_30px_hsl(var(--landing-sky-primary)/.45)]" />
+              <Meni size={204} className="relative z-10 drop-shadow-[0_12px_30px_hsl(var(--landing-sky-primary)/.45)]" />
               <span className="relative z-10 rounded-full border border-[hsl(var(--landing-sky-primary)/.3)] bg-[hsl(var(--landing-sky-deep)/.25)] px-2.5 py-[3px] font-mono text-[11px] lowercase tracking-[.15em] text-[hsl(var(--landing-sky-primary))]">meni</span>
             </div>
             <div className="text-center md:text-left">
-              <h1 className="font-display text-[clamp(54px,7.4vw,112px)] font-extrabold leading-[.96] text-[hsl(var(--landing-text))] [text-shadow:0_4px_30px_hsl(var(--landing-ink)/.5)]">
+              <h1 className="font-[var(--font-hero)] text-[clamp(62px,8vw,116px)] font-black leading-[.92] text-[hsl(var(--landing-text))] [text-shadow:0_4px_30px_hsl(var(--landing-ink)/.5)]">
                 One Brain.<br />
                 <span className="bg-[linear-gradient(180deg,hsl(var(--landing-sky-light)),hsl(var(--landing-sky-primary))_50%,hsl(var(--landing-sky-deep)))] bg-clip-text text-transparent drop-shadow-[0_0_50px_hsl(var(--landing-sky-primary)/.5)]">Every AI.</span>
               </h1>
@@ -163,7 +163,7 @@ const Index = () => {
           </div>
 
           <div className="mb-[22px] flex justify-center">
-            <Button onClick={() => navigate('/auth?tab=signup')} className="group rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-7 py-[15px] text-[15px] font-semibold text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+            <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-7 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
               Get Started — Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Button>
           </div>
