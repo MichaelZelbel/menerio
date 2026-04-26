@@ -78,9 +78,45 @@ const buildLineDiff = (before: string | null, after: string) => {
 
 export default function ReviewQueue() {
   const { user } = useAuth();
-  const { items, isLoading, updateStatus } = useReviewQueue();
+  const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
+  const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
+
+  const refreshReviewQueues = () => {
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue-count"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revision-review-queue"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revision-review-count"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-pages"] });
+    queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] });
+  };
+
+  const handleWikiLooksGood = async (revision: WikiRevisionReviewItem) => {
+    const { error } = await supabase
+      .from("wiki_revisions" as any)
+      .update({ status: "reviewed", reviewed_at: new Date().toISOString() })
+      .eq("id", revision.id);
+    if (error) {
+      showToast.error("Could not review wiki update: " + error.message);
+      return;
+    }
+    refreshReviewQueues();
+    showToast.success("Wiki update reviewed");
+  };
+
+  const handleWikiRollback = async () => {
+    if (!rollbackWikiRevision) return;
+    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: rollbackWikiRevision.id });
+    if (error) {
+      showToast.error("Could not roll back wiki update: " + error.message);
+      return;
+    }
+    setRollbackWikiRevision(null);
+    refreshReviewQueues();
+    showToast.success("Rolled back");
+  };
 
   const createSuppression = async (item: ReviewItem) => {
     const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
