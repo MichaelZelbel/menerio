@@ -1,0 +1,299 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { format, formatDistanceToNow } from "date-fns";
+import { ArrowLeft, ExternalLink, History, Save } from "lucide-react";
+import { toast } from "sonner";
+import { SEOHead } from "@/components/SEOHead";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { useAuth } from "@/contexts/AuthContext";
+
+type WikiPageRow = Database["public"]["Tables"]["wiki_pages"]["Row"];
+type WikiRevisionRow = Database["public"]["Tables"]["wiki_revisions"]["Row"];
+type WikiSource = { id: string; note_id: string; created_at: string; notes: { id: string; title: string; content: string; created_at: string } | null };
+type Backlink = { id: string; source_page_id: string; source: Pick<WikiPageRow, "id" | "slug" | "title" | "summary"> | null };
+type RevisionWithSource = WikiRevisionRow & { notes?: { title: string } | null };
+
+const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "destructive"> = {
+  created: "success",
+  updated: "info",
+  manual_edit: "secondary",
+  rolled_back: "destructive",
+};
+
+const labelize = (value: string) => value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const relativeTime = (date: string) => formatDistanceToNow(new Date(date), { addSuffix: true });
+const truncate = (value: string, length = 240) => (value.length > length ? `${value.slice(0, length).trim()}…` : value);
+
+function WikiPageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-5 w-96" />
+      <Card><CardContent className="space-y-3 p-6"><Skeleton className="h-5 w-full" /><Skeleton className="h-5 w-full" /><Skeleton className="h-5 w-2/3" /></CardContent></Card>
+      <div className="grid gap-6 lg:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /></div>
+    </div>
+  );
+}
+
+export default function WikiPage() {
+  const { slug = "" } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const editorWrapRef = useRef<HTMLDivElement>(null);
+  const latestMarkdownRef = useRef("");
+  const [editMode, setEditMode] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const [selectedRevision, setSelectedRevision] = useState<RevisionWithSource | null>(null);
+
+  const { data: page, isLoading: pageLoading } = useQuery<WikiPageRow | null>({
+    queryKey: ["wiki-page", slug],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("wiki_pages").select("*").eq("slug", slug).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    if (!page) return;
+    setTitleDraft(page.title);
+    latestMarkdownRef.current = page.content;
+  }, [page]);
+
+  const { data: revisions = [], isLoading: revisionsLoading } = useQuery<RevisionWithSource[]>({
+    queryKey: ["wiki-revisions", slug, page?.id],
+    enabled: !!page,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wiki_revisions" as any)
+        .select("*, notes:source_note_id(title)")
+        .eq("wiki_page_id", page!.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return ((data || []) as unknown) as RevisionWithSource[];
+    },
+  });
+
+  const { data: backlinks = [], isLoading: backlinksLoading } = useQuery<Backlink[]>({
+    queryKey: ["wiki-backlinks", slug, page?.id],
+    enabled: !!page,
+    queryFn: async () => {
+      const { data: links, error } = await supabase
+        .from("wiki_links")
+        .select("id, source_page_id")
+        .or(`target_slug.eq.${slug},target_page_id.eq.${page!.id}`);
+      if (error) throw error;
+      const sourceIds = [...new Set((links || []).map((link) => link.source_page_id))];
+      if (sourceIds.length === 0) return [];
+      const { data: sourcePages, error: sourceError } = await supabase
+        .from("wiki_pages")
+        .select("id, slug, title, summary")
+        .in("id", sourceIds);
+      if (sourceError) throw sourceError;
+      const sourceMap = new Map((sourcePages || []).map((source) => [source.id, source]));
+      return (links || []).map((link) => ({ ...link, source: sourceMap.get(link.source_page_id) || null }));
+    },
+  });
+
+  const { data: sources = [], isLoading: sourcesLoading } = useQuery<WikiSource[]>({
+    queryKey: ["wiki-sources", page?.id],
+    enabled: !!page,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wiki_page_sources" as any)
+        .select("id, note_id, created_at, notes:note_id(id, title, content, created_at)")
+        .eq("wiki_page_id", page!.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return ((data || []) as unknown) as WikiSource[];
+    },
+  });
+
+  const refreshWikiLinkStubs = useCallback(async () => {
+    const root = editorWrapRef.current;
+    if (!root) return;
+    const links = Array.from(root.querySelectorAll<HTMLAnchorElement>(".wiki-link[data-slug]"));
+    const slugs = [...new Set(links.map((link) => link.dataset.slug).filter(Boolean) as string[])];
+    if (slugs.length === 0) return;
+    const { data, error } = await supabase.from("wiki_pages").select("slug").in("slug", slugs);
+    if (error) return;
+    const existing = new Set((data || []).map((row) => row.slug));
+    links.forEach((link) => {
+      const exists = existing.has(link.dataset.slug || "");
+      link.classList.toggle("wiki-link-stub", !exists);
+      link.title = exists ? link.dataset.slug || "" : "This page does not exist yet.";
+    });
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(refreshWikiLinkStubs, 50);
+    return () => window.clearTimeout(timer);
+  }, [page?.content, editMode, refreshWikiLinkStubs]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!page || !user) throw new Error("Not authenticated");
+      const newContent = latestMarkdownRef.current;
+      const newTitle = titleDraft.trim() || page.title;
+      const { error: revisionError } = await supabase.from("wiki_revisions").insert({
+        user_id: user.id,
+        wiki_page_id: page.id,
+        page_slug: page.slug,
+        page_title: newTitle,
+        change_type: "manual_edit",
+        previous_content: page.content,
+        new_content: newContent,
+        change_summary: "Manual edit",
+        source_note_id: null,
+        status: "applied",
+      });
+      if (revisionError) throw revisionError;
+      const { error: updateError } = await supabase
+        .from("wiki_pages")
+        .update({ title: newTitle, content: newContent })
+        .eq("id", page.id);
+      if (updateError) throw updateError;
+      const { error: rpcError } = await supabase.rpc("wiki_resync_links", { p_page_id: page.id });
+      if (rpcError) throw rpcError;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["wiki-page", slug] }),
+        queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] }),
+        queryClient.invalidateQueries({ queryKey: ["wiki-backlinks"] }),
+      ]);
+      toast.success("Saved");
+      setEditMode(false);
+    },
+    onError: () => toast.error("Could not save wiki page"),
+  });
+
+  const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
+
+  if (pageLoading) return <WikiPageSkeleton />;
+
+  if (!page) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <SEOHead title="Wiki page not found — Menerio" noIndex />
+        <Card className="max-w-lg border-dashed text-center">
+          <CardContent className="py-12">
+            <CardTitle className="mb-2">This page doesn't exist yet.</CardTitle>
+            <CardDescription>The wiki creates pages automatically as you write notes — keep writing, and pages will appear here.</CardDescription>
+            <Button className="mt-6" onClick={() => navigate("/wiki")}><ArrowLeft className="h-4 w-4" /> Back to Wiki</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <SEOHead title={`${page.title} — Wiki — Menerio`} noIndex />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Link to="/wiki" className="hover:text-foreground">Wiki</Link><span>/</span><span>{labelize(page.page_type)}</span><span>/</span><span className="text-foreground">{page.title}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-display font-bold">{page.title}</h1>
+            <Badge variant="secondary">{labelize(page.page_type)}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">{pageMeta}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {editMode ? (
+            <>
+              <Button variant="outline" onClick={() => { setEditMode(false); setTitleDraft(page.title); latestMarkdownRef.current = page.content; }}>Cancel</Button>
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}><Save className="h-4 w-4" /> Save</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => setEditMode(true)}>Edit</Button>
+              <Button variant="secondary" onClick={() => setRevisionsOpen(true)}><History className="h-4 w-4" /> View revisions</Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Content</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          {editMode && <Input value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} />}
+          <div ref={editorWrapRef}>
+            <RichTextEditor
+              value={editMode ? latestMarkdownRef.current || page.content : page.content}
+              editable={editMode}
+              showToolbar={editMode}
+              onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
+              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/wiki/${targetSlug}`); }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Backlinks</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {backlinksLoading ? <Skeleton className="h-16" /> : backlinks.length === 0 ? <p className="text-sm text-muted-foreground">No pages link here yet.</p> : backlinks.map((backlink) => backlink.source && (
+              <Link key={backlink.id} to={`/wiki/${backlink.source.slug}`} className="block rounded-md border border-border p-3 hover:bg-accent">
+                <p className="text-sm font-medium">{backlink.source.title}</p>
+                {backlink.source.summary && <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{backlink.source.summary}</p>}
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Sources</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {sourcesLoading ? <Skeleton className="h-20" /> : sources.length === 0 ? <p className="text-sm text-muted-foreground">No sources cited yet.</p> : sources.map((source) => source.notes && (
+              <div key={source.id} className="rounded-md border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium">{source.notes.title || "Untitled"}</p><p className="mt-1 text-xs text-muted-foreground">{format(new Date(source.notes.created_at), "MMM d, yyyy")}</p></div>
+                  <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/notes/${source.notes!.id}`)}><ExternalLink className="h-3.5 w-3.5" /> Open note</Button>
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">{truncate(source.notes.content || "")}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Sheet open={revisionsOpen} onOpenChange={setRevisionsOpen}>
+        <SheetContent className="overflow-y-auto sm:max-w-xl">
+          <SheetHeader><SheetTitle>Revisions</SheetTitle><SheetDescription>{page.title}</SheetDescription></SheetHeader>
+          <div className="mt-6 space-y-3">
+            {revisionsLoading ? <Skeleton className="h-24" /> : revisions.map((revision) => (
+              <button key={revision.id} onClick={() => setSelectedRevision(revision)} className="w-full rounded-md border border-border p-3 text-left hover:bg-accent">
+                <div className="mb-2 flex items-center justify-between gap-2"><Badge variant={revisionBadgeVariant[revision.change_type] || "secondary"}>{labelize(revision.change_type)}</Badge><span className="text-xs text-muted-foreground">{relativeTime(revision.created_at)}</span></div>
+                <p className="text-sm font-medium">{revision.change_summary || "No summary"}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{revision.source_note_id ? revision.notes?.title || "Source note" : "Manual edit"} · {revision.status}</p>
+              </button>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Dialog open={!!selectedRevision} onOpenChange={(open) => !open && setSelectedRevision(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader><DialogTitle>Revision diff</DialogTitle></DialogHeader>
+          {selectedRevision && <div className="grid gap-4 md:grid-cols-2"><div><p className="mb-2 text-sm font-medium">Previous</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{selectedRevision.previous_content || ""}</pre></div><div><p className="mb-2 text-sm font-medium">New</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{selectedRevision.new_content}</pre></div></div>}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

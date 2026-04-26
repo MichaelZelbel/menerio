@@ -452,6 +452,7 @@ function applyMarks(text: string, marks: TiptapMark[]): string {
     if (mark.type === "italic") return `*${value}*`;
     if (mark.type === "strike") return `~~${value}~~`;
     if (mark.type === "code") return `\`${value}\``;
+    if (mark.type === "wikiLink") return `[[${String(mark.attrs?.slug || value)}]]`;
     if (mark.type === "link") return `[${value}](${mark.attrs?.href || ""})`;
     return value;
   }, text);
