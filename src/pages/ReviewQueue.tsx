@@ -39,7 +39,7 @@ const DEFAULT_PROFILE_CATEGORIES = [
   { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Morning/night, introvert/extrovert, pet peeves", sort_order: 16, visibility_scope: "all" },
 ];
 
-const typeConfig: Record<string, { icon: typeof CalendarDays; label: string; color: string }> = {
+const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
   add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
@@ -397,15 +397,6 @@ export default function ReviewQueue() {
     showToast.info("All visible changes removed");
   };
 
-  const handleEventDialogClose = () => {
-    if (activeItemId) {
-      updateStatus.mutate({ id: activeItemId, status: "kept" });
-    }
-    setEventDialogOpen(false);
-    setEventDraft(null);
-    setActiveItemId(null);
-  };
-
   if (isLoading) {
     return (
       <div className="p-6 space-y-4">
@@ -527,15 +518,6 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {eventDraft && (
-        <CreateEventDialog
-          open={eventDialogOpen}
-          onOpenChange={(open) => {
-            if (!open) handleEventDialogClose();
-          }}
-          draft={eventDraft}
-        />
-      )}
     </div>
   );
 }
