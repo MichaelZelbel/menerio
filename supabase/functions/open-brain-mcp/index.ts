@@ -150,6 +150,37 @@ function jsonTool(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+const WIKI_PAGE_TYPES = ["entity", "concept", "source", "overview", "synthesis", "person"] as const;
+
+function extractWikiSlugs(content: string) {
+  return Array.from(new Set(Array.from(content.matchAll(/\[\[([a-z0-9-]+)\]\]/g)).map((match) => match[1])));
+}
+
+async function resyncWikiLinksForCurrentUser(pageId: string, content: string) {
+  const targetSlugs = extractWikiSlugs(content);
+  await supabase.from("wiki_links").delete().eq("user_id", currentUserId).eq("source_page_id", pageId);
+
+  if (!targetSlugs.length) return;
+
+  const { data: targets, error } = await supabase
+    .from("wiki_pages")
+    .select("id, slug")
+    .eq("user_id", currentUserId)
+    .in("slug", targetSlugs);
+  if (error) throw new Error(`Could not resolve wiki links: ${error.message}`);
+
+  const targetBySlug = new Map((targets || []).map((page: any) => [page.slug, page.id]));
+  const rows = targetSlugs.map((slug) => ({
+    user_id: currentUserId,
+    source_page_id: pageId,
+    target_slug: slug,
+    target_page_id: targetBySlug.get(slug) || null,
+  }));
+
+  const { error: insertError } = await supabase.from("wiki_links").insert(rows);
+  if (insertError) throw new Error(`Could not insert wiki links: ${insertError.message}`);
+}
+
 async function resolveOrCreateContactsByName(names: string[]) {
   const contacts: any[] = [];
   for (const name of uniqueStrings(names)) {
