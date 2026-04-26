@@ -172,21 +172,21 @@ const Index = () => {
         <ParticleField />
 
         <section className="relative z-10 mx-auto max-w-[1280px] px-6 pb-20 pt-[60px] text-center md:px-9">
-          <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--landing-sky-primary)/.25)] bg-[hsl(var(--landing-sky-primary)/.12)] px-3.5 py-[7px] text-[12.5px] font-semibold text-[hsl(var(--landing-sky-highlight))]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-success))] shadow-[0_0_8px_hsl(var(--landing-success)/.8)]" />
+          <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-transparent bg-[hsl(var(--pill-bg))] px-3.5 py-[7px] text-[12.5px] font-semibold text-[hsl(var(--pill-fg))] shadow-[0_6px_18px_rgba(31,96,224,.25)] dark:border-[hsl(var(--landing-sky-primary)/.25)] dark:bg-[hsl(var(--landing-sky-primary)/.12)] dark:text-[hsl(var(--landing-sky-highlight))] dark:shadow-none">
+            <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--pill-fg))] dark:bg-[hsl(var(--landing-success))] dark:shadow-[0_0_8px_hsl(var(--landing-success)/.8)]" />
             A personal AI brain · MCP-native · Open source
           </div>
 
           <div className="mx-auto mb-[14px] grid max-w-[980px] items-center gap-9 text-left md:grid-cols-[auto_1fr]">
             <div className="relative mx-auto flex flex-col items-center gap-1.5 md:mx-0">
-              <div className="absolute -inset-5 rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-primary)/.35),transparent_65%)] blur-xl" />
-              <Meni size={204} className="relative z-10 drop-shadow-[0_12px_30px_hsl(var(--landing-sky-primary)/.45)]" />
-              <span className="relative z-10 rounded-full border border-[hsl(var(--landing-sky-primary)/.3)] bg-[hsl(var(--landing-sky-deep)/.25)] px-2.5 py-[3px] font-mono text-[11px] lowercase tracking-[.15em] text-[hsl(var(--landing-sky-primary))]">meni</span>
+              <div className="absolute -inset-5 rounded-full bg-[radial-gradient(circle,hsl(var(--brand)/.08),transparent_65%)] blur-xl dark:bg-[radial-gradient(circle,hsl(var(--landing-sky-primary)/.35),transparent_65%)]" />
+              <Meni size={204} className="relative z-10 drop-shadow-[0_12px_30px_hsl(var(--brand)/.18)] dark:drop-shadow-[0_12px_30px_hsl(var(--landing-sky-primary)/.45)]" />
+              <span className="relative z-10 rounded-full border border-[hsl(var(--border-strong)/.14)] bg-[hsl(var(--surface))] px-2.5 py-[3px] font-mono text-[11px] lowercase tracking-[.15em] text-[hsl(var(--brand))] dark:border-[hsl(var(--landing-sky-primary)/.3)] dark:bg-[hsl(var(--landing-sky-deep)/.25)] dark:text-[hsl(var(--landing-sky-primary))]">meni</span>
             </div>
             <div className="text-center md:text-left">
-              <h1 className="landing-headline text-[clamp(54px,6vw,88px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] [text-shadow:0_4px_30px_rgba(0,0,0,.5)]">
+              <h1 className="landing-headline text-[clamp(54px,6vw,88px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] dark:[text-shadow:0_4px_30px_rgba(0,0,0,.5)]">
                 One Brain.<br />
-                <span className="bg-[linear-gradient(180deg,#A6D9FF_0%,#3C9ADD_50%,#1A6EAE_100%)] bg-clip-text text-transparent [filter:drop-shadow(0_0_50px_rgba(60,154,221,.5))]">Every AI.</span>
+                <span className="bg-[var(--brand-gradient)] bg-clip-text text-transparent dark:bg-[linear-gradient(180deg,#A6D9FF_0%,#3C9ADD_50%,#1A6EAE_100%)] dark:[filter:drop-shadow(0_0_50px_rgba(60,154,221,.5))]">Every AI.</span>
               </h1>
               <p className="mx-auto mt-[18px] max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))] md:mx-0">Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.</p>
             </div>
@@ -197,15 +197,15 @@ const Index = () => {
           </div>
 
           <div className="mb-[22px] flex justify-center">
-            <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-7 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+            <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[hsl(var(--brand))] px-7 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_8px_20px_rgba(31,96,224,.25)] hover:brightness-105 hover:shadow-[0_10px_24px_rgba(31,96,224,.32)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] dark:shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] dark:hover:brightness-110">
               Get Started — Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Button>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-[13px] text-[hsl(var(--landing-body))]">
-            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Capture from web, mobile, voice</span>
-            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Available in Claude, ChatGPT, Gemini</span>
-            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Open source · AGPL-3.0</span>
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--landing-success))]" />Capture from web, mobile, voice</span>
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--landing-success))]" />Available in Claude, ChatGPT, Gemini</span>
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--landing-success))]" />Open source · AGPL-3.0</span>
           </div>
         </section>
 
