@@ -23,23 +23,23 @@ const socialLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t bg-card">
-      <div className="container py-16">
-        <div className="grid gap-12 md:grid-cols-2 lg:grid-cols-4">
+    <footer className="border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
+      <div className="mx-auto max-w-[1180px] px-6 py-12 md:px-9">
+        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
           {/* Brand + Newsletter */}
-          <div className="lg:col-span-2">
-            <Link to="/" className="flex items-center gap-2 mb-4">
+          <div>
+            <Link to="/" className="mb-3 flex items-center gap-3">
               <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
-              <span className="text-xl font-bold font-display text-foreground">Menerio</span>
+              <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span>
             </Link>
-            <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-              Your AI-powered knowledge system. One brain, every AI. Capture, search, and connect your thoughts.
+            <p className="max-w-sm text-sm leading-relaxed text-[hsl(var(--landing-muted))]">
+              One brain. Every AI. Capture, search, and connect your thoughts.
             </p>
           </div>
 
           {/* Product */}
           <div>
-            <h4 className="mb-4 text-sm font-semibold text-foreground">Product</h4>
+            <h4 className="mb-3 font-display text-sm font-bold text-[hsl(var(--landing-text))]">Product</h4>
             <ul className="space-y-3">
               {productLinks.map((link) => (
                 <li key={link.to}>
@@ -48,14 +48,14 @@ export function Footer() {
                       href={link.to}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      className="text-sm text-[hsl(var(--landing-muted))] transition-colors hover:text-[hsl(var(--landing-sky-highlight))]"
                     >
                       {link.label}
                     </a>
                   ) : (
                     <Link
                       to={link.to}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      className="text-sm text-[hsl(var(--landing-muted))] transition-colors hover:text-[hsl(var(--landing-sky-highlight))]"
                     >
                       {link.label}
                     </Link>
@@ -68,13 +68,13 @@ export function Footer() {
 
           {/* Legal */}
           <div>
-            <h4 className="mb-4 text-sm font-semibold text-foreground">Legal</h4>
+            <h4 className="mb-3 font-display text-sm font-bold text-[hsl(var(--landing-text))]">Legal</h4>
             <ul className="space-y-3">
               {legalLinks.map((link) => (
                 <li key={link.to}>
                   <Link
                     to={link.to}
-                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    className="text-sm text-[hsl(var(--landing-muted))] transition-colors hover:text-[hsl(var(--landing-sky-highlight))]"
                   >
                     {link.label}
                   </Link>
@@ -86,9 +86,9 @@ export function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="border-t">
-        <div className="container flex flex-col items-center justify-between gap-4 py-6 sm:flex-row">
-          <p className="text-xs text-muted-foreground">
+      <div className="border-t border-[hsl(var(--landing-plain-white)/.05)]">
+        <div className="mx-auto flex max-w-[1180px] flex-col items-center justify-between gap-4 px-6 py-5 text-xs text-[hsl(var(--landing-faint))] sm:flex-row md:px-9">
+          <p>
             © {new Date().getFullYear()} Menerio. All rights reserved.
           </p>
           <div className="flex items-center gap-3">
@@ -97,9 +97,9 @@ export function Footer() {
                 key={social.label}
                 href={social.href}
                 aria-label={social.label}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--landing-plain-white)/.04)] text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--landing-sky-primary)/.12)] hover:text-[hsl(var(--landing-sky-highlight))]"
               >
-                <social.icon className="h-4 w-4" />
+                <social.icon className="h-3.5 w-3.5" />
               </a>
             ))}
           </div>
