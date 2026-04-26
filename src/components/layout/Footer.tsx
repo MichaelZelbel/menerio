@@ -23,7 +23,7 @@ const socialLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
+    <footer className="border-t border-[hsl(var(--border)/.08)] bg-[hsl(var(--background-soft))] text-[hsl(var(--landing-text))] dark:border-[hsl(var(--landing-plain-white)/.06)] dark:bg-[hsl(var(--landing-page))]">
       <div className="mx-auto max-w-[1180px] px-6 py-12 md:px-9">
         <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
           {/* Brand + Newsletter */}
@@ -86,7 +86,7 @@ export function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="border-t border-[hsl(var(--landing-plain-white)/.05)]">
+      <div className="border-t border-[hsl(var(--border)/.08)] dark:border-[hsl(var(--landing-plain-white)/.05)]">
         <div className="mx-auto flex max-w-[1180px] flex-col items-center justify-between gap-4 px-6 py-5 text-xs text-[hsl(var(--landing-faint))] sm:flex-row md:px-9">
           <p>
             © {new Date().getFullYear()} Menerio. All rights reserved.
@@ -97,7 +97,7 @@ export function Footer() {
                 key={social.label}
                 href={social.href}
                 aria-label={social.label}
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--landing-plain-white)/.04)] text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--landing-sky-primary)/.12)] hover:text-[hsl(var(--landing-sky-highlight))]"
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--brand)/.08)] text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--brand)/.12)] hover:text-[hsl(var(--brand))] dark:bg-[hsl(var(--landing-plain-white)/.04)] dark:hover:bg-[hsl(var(--landing-sky-primary)/.12)] dark:hover:text-[hsl(var(--landing-sky-highlight))]"
               >
                 <social.icon className="h-3.5 w-3.5" />
               </a>
