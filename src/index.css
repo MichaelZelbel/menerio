@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&family=Nunito+Sans:wght@800;900;1000&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&family=Inter:wght@300;400;500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,7 +8,7 @@
   :root {
     --font-body: 'Inter', system-ui, sans-serif;
     --font-display: 'DM Sans', system-ui, sans-serif;
-    --font-hero: 'Nunito Sans', 'Inter', system-ui, sans-serif;
+    --font-hero: 'Baloo 2', 'Inter', system-ui, sans-serif;
 
     /* Primary — Deep Sapphire Blue */
     --primary: 220 70% 45%;
