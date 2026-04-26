@@ -271,7 +271,7 @@
 ### TS-NOTES-014: External Note — Read-Only Toolbar
 
 - **Objective:** Validate that external (synced) notes show a simplified read-only action bar instead of the full editor toolbar
-- **Preconditions:** An external note exists (synced from Planinio, Querino, or another connected app via `receive-note`)
+- **Preconditions:** An external note exists (synced from Querino via `receive-note`)
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Select an external note (identified by the orange source-app badge)
@@ -285,7 +285,7 @@
 - **Steps:**
   1. Open the external note
   2. Click "Open in {app}" button in the read-only bar
-- **Expected Outcome:** A new browser tab opens with the `source_url`, navigating to the note in the originating app (e.g., Planinio, Querino).
+- **Expected Outcome:** A new browser tab opens with the `source_url`, navigating to the note in Querino.
 
 ### TS-NOTES-016: External Note — Duplicate to Local Note
 
