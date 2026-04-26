@@ -209,7 +209,7 @@ const Index = () => {
           </div>
         </section>
 
-        <section className="relative z-10 border-t border-[hsl(var(--landing-plain-white)/.08)] px-6 py-24 md:px-9 lg:py-28">
+        <section className="relative z-10 border-t border-[hsl(var(--landing-plain-white)/.08)] px-6 pb-14 pt-24 md:px-9 lg:pb-16 lg:pt-28">
           <div className="mx-auto max-w-[1160px]">
             <div className="mx-auto mb-14 max-w-[760px] text-center">
               <p className="mb-4 font-mono text-[12px] font-semibold uppercase tracking-[.22em] text-[hsl(var(--landing-sky-highlight))]">Features</p>
@@ -239,7 +239,7 @@ const Index = () => {
           </div>
         </section>
 
-        <section className="relative z-10 px-6 pb-28 pt-12 text-center md:px-9 lg:pb-32 lg:pt-16">
+        <section className="relative z-10 px-6 pb-14 pt-0 text-center md:px-9 lg:pb-16">
           <div className="mx-auto max-w-[760px]">
             <h2 className="landing-headline text-[clamp(46px,5.3vw,76px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
               Ready to build your brain?
