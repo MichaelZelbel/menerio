@@ -462,6 +462,8 @@ export default function ReviewQueue() {
     showToast.info("All visible changes removed");
   };
 
+  const hasReviewItems = items.length + wikiRevisions.length > 0;
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-4">
@@ -482,13 +484,13 @@ export default function ReviewQueue() {
         </p>
       </div>
 
-      {items.length > 0 && (
+      {hasReviewItems && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending}>
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || items.length === 0}>
             <Check className="h-4 w-4 mr-1" />
             Keep all
           </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending}>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || items.length === 0}>
             <X className="h-4 w-4 mr-1" />
             Remove all
           </Button>
@@ -498,7 +500,7 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {!hasReviewItems ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <Inbox className="h-12 w-12 text-muted-foreground/40 mb-4" />
