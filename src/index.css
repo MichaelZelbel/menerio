@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Inter:wght@300;400;500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,9 +6,10 @@
 
 @layer base {
   :root {
-    --font-body: 'Inter', system-ui, sans-serif;
+    --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
     --font-display: 'DM Sans', system-ui, sans-serif;
-    --font-hero: 'Fredoka', 'Inter', system-ui, sans-serif;
+    --font-hero: 'Bricolage Grotesque', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* Primary — Deep Sapphire Blue */
     --primary: 220 70% 45%;
@@ -258,7 +259,10 @@
     font-synthesis: none;
     font-optical-sizing: auto;
     font-style: normal;
+    font-weight: 800;
+    line-height: 0.96;
     letter-spacing: 0;
+    margin-bottom: 18px;
   }
 }
 
