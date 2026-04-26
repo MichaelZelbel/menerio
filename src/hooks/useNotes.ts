@@ -67,17 +67,37 @@ type NoteUpdate = {
   trashed_at?: string | null;
 };
 
-function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE") {
-  supabase.functions
-    .invoke("wiki-ingest", {
-      body: {
-        note_id: noteId,
-        change_type: changeType,
-      },
-    })
-    .catch((err) => {
-      console.error("wiki-ingest invocation failed:", err);
-    });
+const wikiIngestTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const wikiIngestInFlight = new Set<string>();
+
+function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE", delayMs = 12_000) {
+  const existingTimer = wikiIngestTimers.get(noteId);
+  if (existingTimer) clearTimeout(existingTimer);
+
+  const timer = setTimeout(() => {
+    wikiIngestTimers.delete(noteId);
+    if (wikiIngestInFlight.has(noteId)) return;
+    wikiIngestInFlight.add(noteId);
+
+    supabase.functions
+      .invoke("wiki-ingest", {
+        body: {
+          note_id: noteId,
+          change_type: changeType,
+        },
+      })
+      .then(({ error }) => {
+        if (error) console.warn("wiki-ingest invocation failed:", error);
+      })
+      .catch((err) => {
+        console.warn("wiki-ingest invocation failed:", err);
+      })
+      .finally(() => {
+        wikiIngestInFlight.delete(noteId);
+      });
+  }, delayMs);
+
+  wikiIngestTimers.set(noteId, timer);
 }
 
 export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
@@ -125,7 +145,9 @@ export function useCreateNote() {
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
-      invokeWikiIngest(note.id, "INSERT");
+      if ((note.title || note.content || "").trim().length >= 20) {
+        invokeWikiIngest(note.id, "INSERT");
+      }
     },
     onError: () => {
       showToast.error("Failed to create note");
@@ -147,9 +169,11 @@ export function useUpdateNote() {
       if (error) throw error;
       return data as unknown as Note;
     },
-    onSuccess: (note) => {
+    onSuccess: (note, variables) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
-      invokeWikiIngest(note.id, "UPDATE");
+      if (variables.title !== undefined || variables.content !== undefined) {
+        invokeWikiIngest(note.id, "UPDATE");
+      }
     },
   });
 }
