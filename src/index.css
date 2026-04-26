@@ -54,9 +54,9 @@
     --text-2: 217 25% 32%;
     --text-muted: 216 19% 50%;
     --text-faint: 215 20% 67%;
-    --brand: 220 75% 50%;
+    --brand: 221 83% 53%;
     --brand-soft: 219 100% 95%;
-    --brand-gradient: linear-gradient(180deg, hsl(217 91% 60%) 0%, hsl(220 75% 50%) 50%, hsl(222 76% 43%) 100%);
+    --brand-gradient: linear-gradient(180deg, hsl(221 100% 66%) 0%, hsl(221 83% 53%) 48%, hsl(224 76% 45%) 100%);
     --accent-pink: 340 75% 55%;
     --accent-pink-soft: 339 100% 95%;
     --accent-pink-text: 340 73% 42%;
@@ -89,6 +89,14 @@
     --landing-plain-white: 0 0% 100%;
     --landing-ink: 220 33% 8%;
     --landing-shadow: 207 68% 7%;
+    --mascot-sky-white: 207 80% 95%;
+    --mascot-sky-light: 205 100% 83%;
+    --mascot-sky-highlight: 191 100% 74%;
+    --mascot-sky-soft: 207 80% 79%;
+    --mascot-sky-primary: 203 70% 55%;
+    --mascot-plain-white: 0 0% 100%;
+    --mascot-ink: 220 33% 8%;
+    --mascot-shadow: 207 68% 7%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -172,6 +180,14 @@
     --landing-plain-white: 0 0% 100%;
     --landing-ink: 220 33% 8%;
     --landing-shadow: 207 68% 7%;
+    --mascot-sky-white: 207 80% 95%;
+    --mascot-sky-light: 205 100% 83%;
+    --mascot-sky-highlight: 191 100% 74%;
+    --mascot-sky-soft: 207 80% 79%;
+    --mascot-sky-primary: 203 70% 55%;
+    --mascot-plain-white: 0 0% 100%;
+    --mascot-ink: 220 33% 8%;
+    --mascot-shadow: 207 68% 7%;
 
     --destructive: 0 65% 55%;
     --destructive-foreground: 0 0% 100%;
