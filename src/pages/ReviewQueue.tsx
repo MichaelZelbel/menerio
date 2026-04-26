@@ -106,11 +106,17 @@ export default function ReviewQueue() {
     showToast.success("Wiki update reviewed");
   };
 
+  const rollbackWikiRevisionById = async (revisionId: string) => {
+    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: revisionId });
+    if (error) throw error;
+  };
+
   const handleWikiRollback = async () => {
     if (!rollbackWikiRevision) return;
-    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: rollbackWikiRevision.id });
-    if (error) {
-      showToast.error("Could not roll back wiki update: " + error.message);
+    try {
+      await rollbackWikiRevisionById(rollbackWikiRevision.id);
+    } catch (error: any) {
+      showToast.error("Could not roll back wiki update: " + (error.message || "Unknown error"));
       return;
     }
     setRollbackWikiRevision(null);
@@ -459,10 +465,40 @@ export default function ReviewQueue() {
       await revertAppliedChange(item);
       updateStatus.mutate({ id: item.id, status: "removed" });
     }
+    for (const revision of wikiRevisions) {
+      await rollbackWikiRevisionById(revision.id);
+    }
+    refreshReviewQueues();
     showToast.info("All visible changes removed");
   };
 
+  const handleNeverAgainAll = async () => {
+    for (const item of items) {
+      await revertAppliedChange(item);
+      await createSuppression(item);
+      updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+    }
+    for (const revision of wikiRevisions) {
+      await rollbackWikiRevisionById(revision.id);
+    }
+    refreshReviewQueues();
+    showToast.info("All visible changes blocked where possible and rolled back");
+  };
+
+  const handleKeepAll = async () => {
+    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    for (const revision of wikiRevisions) {
+      await handleWikiLooksGood(revision);
+    }
+    refreshReviewQueues();
+    showToast.success("All visible changes kept");
+  };
+
   const hasReviewItems = items.length + wikiRevisions.length > 0;
+  const combinedReviewItems = [
+    ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
+    ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   if (isLoading) {
     return (
