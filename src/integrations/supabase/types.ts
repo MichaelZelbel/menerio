@@ -1871,6 +1871,226 @@ export type Database = {
         }
         Relationships: []
       }
+      wiki_links: {
+        Row: {
+          created_at: string
+          id: string
+          source_page_id: string
+          target_page_id: string | null
+          target_slug: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          source_page_id: string
+          target_page_id?: string | null
+          target_slug: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          source_page_id?: string
+          target_page_id?: string | null
+          target_slug?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wiki_links_source_page_id_fkey"
+            columns: ["source_page_id"]
+            isOneToOne: false
+            referencedRelation: "wiki_pages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wiki_links_target_page_id_fkey"
+            columns: ["target_page_id"]
+            isOneToOne: false
+            referencedRelation: "wiki_pages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wiki_log: {
+        Row: {
+          created_at: string
+          details: Json
+          id: string
+          operation: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          id?: string
+          operation: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          id?: string
+          operation?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wiki_page_sources: {
+        Row: {
+          created_at: string
+          id: string
+          note_id: string
+          user_id: string
+          wiki_page_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          note_id: string
+          user_id: string
+          wiki_page_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          note_id?: string
+          user_id?: string
+          wiki_page_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wiki_page_sources_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wiki_page_sources_wiki_page_id_fkey"
+            columns: ["wiki_page_id"]
+            isOneToOne: false
+            referencedRelation: "wiki_pages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wiki_pages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          page_type: string
+          slug: string
+          source_count: number
+          summary: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          page_type?: string
+          slug: string
+          source_count?: number
+          summary?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          page_type?: string
+          slug?: string
+          source_count?: number
+          summary?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wiki_revisions: {
+        Row: {
+          change_summary: string | null
+          change_type: string
+          created_at: string
+          id: string
+          new_content: string
+          page_slug: string
+          page_title: string
+          previous_content: string | null
+          reviewed_at: string | null
+          rolled_back_at: string | null
+          source_note_id: string | null
+          source_revision_id: string | null
+          status: string
+          user_id: string
+          wiki_page_id: string | null
+        }
+        Insert: {
+          change_summary?: string | null
+          change_type: string
+          created_at?: string
+          id?: string
+          new_content: string
+          page_slug: string
+          page_title: string
+          previous_content?: string | null
+          reviewed_at?: string | null
+          rolled_back_at?: string | null
+          source_note_id?: string | null
+          source_revision_id?: string | null
+          status?: string
+          user_id: string
+          wiki_page_id?: string | null
+        }
+        Update: {
+          change_summary?: string | null
+          change_type?: string
+          created_at?: string
+          id?: string
+          new_content?: string
+          page_slug?: string
+          page_title?: string
+          previous_content?: string | null
+          reviewed_at?: string | null
+          rolled_back_at?: string | null
+          source_note_id?: string | null
+          source_revision_id?: string | null
+          status?: string
+          user_id?: string
+          wiki_page_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wiki_revisions_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wiki_revisions_source_revision_id_fkey"
+            columns: ["source_revision_id"]
+            isOneToOne: false
+            referencedRelation: "wiki_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wiki_revisions_wiki_page_id_fkey"
+            columns: ["wiki_page_id"]
+            isOneToOne: false
+            referencedRelation: "wiki_pages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       v_ai_allowance_current: {
@@ -1989,6 +2209,7 @@ export type Database = {
           title: string
         }[]
       }
+      wiki_resync_links: { Args: { p_page_id: string }; Returns: undefined }
     }
     Enums: {
       app_role: "free" | "premium" | "premium_gift" | "admin"
