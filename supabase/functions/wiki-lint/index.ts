@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
@@ -222,17 +223,23 @@ serve(async (req) => {
   let userId: string | null = null;
 
   try {
-    const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
+    const internalUserId = req.headers.get("x-menerio-user-id");
+    if (internalUserId) {
+      userId = internalUserId;
+      db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    } else {
+      const token = extractBearer(req);
+      if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
 
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
-    userId = userData.user.id;
+      const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data: userData, error: userError } = await authClient.auth.getUser(token);
+      if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
+      userId = userData.user.id;
 
-    db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
+      db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+    }
 
     const { data: pages, error: pagesError } = await db
       .from("wiki_pages")
