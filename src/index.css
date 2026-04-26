@@ -44,6 +44,27 @@
     --info: 205 78% 50%;
     --info-foreground: 0 0% 100%;
 
+    /* Landing page accent tokens */
+    --landing-page: 224 50% 5%;
+    --landing-panel: 222 45% 12%;
+    --landing-sky-white: 207 80% 95%;
+    --landing-sky-light: 205 100% 83%;
+    --landing-sky-highlight: 191 100% 74%;
+    --landing-sky-soft: 207 80% 79%;
+    --landing-sky-mid: 207 80% 68%;
+    --landing-sky-primary: 203 70% 55%;
+    --landing-sky-deep: 206 74% 39%;
+    --landing-pink: 333 100% 81%;
+    --landing-pink-deep: 339 75% 55%;
+    --landing-pink-text: 337 100% 89%;
+    --landing-text: 216 43% 95%;
+    --landing-body: 217 26% 82%;
+    --landing-muted: 225 13% 66%;
+    --landing-faint: 224 11% 48%;
+    --landing-plain-white: 0 0% 100%;
+    --landing-ink: 220 33% 8%;
+    --landing-shadow: 207 68% 7%;
+
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
@@ -100,6 +121,26 @@
     --error-foreground: 0 0% 100%;
     --info: 205 70% 55%;
     --info-foreground: 0 0% 100%;
+
+    --landing-page: 224 50% 5%;
+    --landing-panel: 222 45% 12%;
+    --landing-sky-white: 207 80% 95%;
+    --landing-sky-light: 205 100% 83%;
+    --landing-sky-highlight: 191 100% 74%;
+    --landing-sky-soft: 207 80% 79%;
+    --landing-sky-mid: 207 80% 68%;
+    --landing-sky-primary: 203 70% 55%;
+    --landing-sky-deep: 206 74% 39%;
+    --landing-pink: 333 100% 81%;
+    --landing-pink-deep: 339 75% 55%;
+    --landing-pink-text: 337 100% 89%;
+    --landing-text: 216 43% 95%;
+    --landing-body: 217 26% 82%;
+    --landing-muted: 225 13% 66%;
+    --landing-faint: 224 11% 48%;
+    --landing-plain-white: 0 0% 100%;
+    --landing-ink: 220 33% 8%;
+    --landing-shadow: 207 68% 7%;
 
     --destructive: 0 65% 55%;
     --destructive-foreground: 0 0% 100%;
