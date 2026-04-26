@@ -232,8 +232,6 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_alias: 0.78,
   add_profile_entry: 0.74,
   add_relationship: 0.72,
-  add_event_temerio: 0.66,
-  add_event_cherishly: 0.66,
 };
 
 const SENSITIVE_TERMS = [
@@ -283,70 +281,6 @@ async function generateReviewItems(
     if (preferences.mode === "off") return;
 
     const suggestions: ReviewSuggestion[] = [];
-
-    // Check which apps are connected
-    const { data: connectedApps } = await supabase
-      .from("connected_apps")
-      .select("app_name")
-      .eq("user_id", userId)
-      .eq("connection_status", "active")
-      .eq("is_active", true);
-
-    const activeApps = new Set((connectedApps || []).map((a: any) => a.app_name));
-
-    // Event detection: dates + people → suggest Temerio / Cherishly
-    if (dates.length > 0 && (people.length > 0 || noteType === "meeting_note")) {
-      const headline = noteTitle || summary;
-      const happened_at = dates[0] + "T12:00";
-
-      if (activeApps.has("temerio")) {
-        suggestions.push({
-          user_id: userId,
-          source_note_id: noteId,
-          suggestion_type: "add_event_temerio",
-          title: `Add "${headline}" as a Temerio event`,
-          description: `Detected date ${dates[0]} and people: ${people.join(", ") || "—"}. This looks like an event worth tracking.`,
-          payload: {
-            headline,
-            description: summary,
-            happened_at,
-            people_names: people,
-            emotion_valence: 0.7,
-            category: "life",
-          },
-          status: "pending_review",
-          source_title: noteTitle,
-          extracted_value: headline,
-          confidence_score: DEFAULT_CONFIDENCE.add_event_temerio,
-          is_sensitive: isSensitiveSuggestion("add_event_temerio", { headline, summary }, noteContent),
-          suppression_key: buildSuppressionKey("add_event_temerio", "event", null, headline),
-        });
-      }
-
-      if (activeApps.has("cherishly")) {
-        suggestions.push({
-          user_id: userId,
-          source_note_id: noteId,
-          suggestion_type: "add_event_cherishly",
-          title: `Add "${headline}" to Cherishly`,
-          description: `A moment with ${people.join(", ") || "someone special"} on ${dates[0]}. Save it as a cherished memory?`,
-          payload: {
-            headline,
-            description: summary,
-            happened_at,
-            people_names: people,
-            emotion_valence: 0.8,
-            category: "life",
-          },
-          status: "pending_review",
-          source_title: noteTitle,
-          extracted_value: headline,
-          confidence_score: DEFAULT_CONFIDENCE.add_event_cherishly,
-          is_sensitive: isSensitiveSuggestion("add_event_cherishly", { headline, summary }, noteContent),
-          suppression_key: buildSuppressionKey("add_event_cherishly", "event", null, headline),
-        });
-      }
-    }
 
     // Person detection: check if mentioned people exist as contacts (alias-aware)
     if (people.length > 0) {
