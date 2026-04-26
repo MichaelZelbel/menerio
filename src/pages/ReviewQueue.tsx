@@ -512,6 +512,73 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
+          {wikiRevisions.map((revision) => {
+            const diff = buildLineDiff(revision.previous_content, revision.new_content);
+            return (
+              <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start gap-3">
+                    <BookOpen className="h-5 w-5 mt-0.5 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={revision.change_type === "created" ? "default" : "secondary"} className="text-[10px]">
+                          {revision.change_type}
+                        </Badge>
+                        <CardTitle className="text-base">
+                          <Link to={`/wiki/${revision.page_slug}`} className="hover:text-primary">
+                            {revision.page_title}
+                          </Link>
+                        </CardTitle>
+                        {revision.source_note && (
+                          <Link
+                            to={`/dashboard/notes/${revision.source_note_id}`}
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            via {truncateText(revision.source_note.title, 42)}
+                          </Link>
+                        )}
+                      </div>
+                      {revision.change_summary && (
+                        <CardDescription className="mt-1">{revision.change_summary}</CardDescription>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {revision.change_type === "created" ? (
+                    <p className="text-sm text-muted-foreground">{truncateText(revision.new_content)}</p>
+                  ) : (
+                    <div className="space-y-1 text-sm">
+                      {diff.removed.length === 0 && diff.added.length === 0 ? (
+                        <p className="text-muted-foreground">Updated content</p>
+                      ) : (
+                        <>
+                          {diff.removed.map((line) => <p key={`old-${line}`} className="text-destructive">− {truncateText(line, 160)}</p>)}
+                          {diff.added.map((line) => <p key={`new-${line}`} className="text-green-600 dark:text-green-400">+ {truncateText(line, 160)}</p>)}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedWikiRevision(revision)}>
+                      <Eye className="h-4 w-4 mr-1" />
+                      View diff
+                    </Button>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Roll back
+                      </Button>
+                      <Button size="sm" onClick={() => handleWikiLooksGood(revision)}>
+                        <Check className="h-4 w-4 mr-1" />
+                        Looks good
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
           {items.map((item) => {
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
