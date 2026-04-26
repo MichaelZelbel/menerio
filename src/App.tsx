@@ -23,6 +23,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Notes = lazy(() => import("./pages/Notes"));
 const WikiHome = lazy(() => import("./pages/WikiHome"));
+const WikiLintPlaceholder = lazy(() => import("./pages/WikiLintPlaceholder"));
 const WikiPage = lazy(() => import("./pages/WikiPage"));
 const Settings = lazy(() => import("./pages/Settings"));
 
@@ -125,6 +126,7 @@ const App = () => (
                     }
                   >
                     <Route index element={<WikiHome />} />
+                    <Route path="lint" element={<WikiLintPlaceholder />} />
                     <Route path=":slug" element={<WikiPage />} />
                   </Route>
 
