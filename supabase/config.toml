@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.wiki-ingest]
 verify_jwt = false
+
+[functions.wiki-lint]
+verify_jwt = false
