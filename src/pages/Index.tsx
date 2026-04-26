@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Navigate, Link, useNavigate } from "react-router-dom";
-import { ArrowRight, CheckCircle2, Github, Linkedin, Loader2, Mail, Twitter } from "lucide-react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Meni } from "@/components/Meni";
 import { Button } from "@/components/ui/button";
@@ -13,26 +13,6 @@ const thoughts = [
   { text: "We should test the checkout flow before launching the sale.", people: [], categories: ["Task", "Checkout", "Launch"] },
   { text: "Maya wants to move the team offsite to Lisbon in September.", people: ["Maya"], categories: ["Plan", "Travel", "Team"] },
 ];
-
-function MenerioMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 40 40" aria-hidden="true" className={cn("h-9 w-9", className)}>
-      <defs>
-        <linearGradient id="menerio-mark-a" x1="5" x2="35" y1="5" y2="35">
-          <stop stopColor="hsl(var(--landing-plain-white))" />
-          <stop offset=".38" stopColor="hsl(var(--landing-lavender))" />
-          <stop offset="1" stopColor="hsl(var(--landing-sky-primary))" />
-        </linearGradient>
-        <linearGradient id="menerio-mark-b" x1="8" x2="32" y1="34" y2="4">
-          <stop stopColor="hsl(var(--landing-violet-deep))" />
-          <stop offset="1" stopColor="hsl(var(--landing-sky-light))" />
-        </linearGradient>
-      </defs>
-      <path d="M5 7c0-1.7 1.3-3 3-3h5.1c1.1 0 2.1.6 2.6 1.6L20 14l4.3-8.4c.5-1 1.5-1.6 2.6-1.6H32c1.7 0 3 1.3 3 3v26c0 1.7-1.3 3-3 3h-5.3c-1.7 0-3-1.3-3-3V18.4l-3.7 7.2-3.7-7.2V33c0 1.7-1.3 3-3 3H8c-1.7 0-3-1.3-3-3V7Z" fill="url(#menerio-mark-a)" />
-      <path d="M20 14 31.5 4H35v25.2c0 1.8-2.2 2.7-3.5 1.4L20 19.1 8.5 30.6C7.2 31.9 5 31 5 29.2V4h3.5L20 14Z" fill="url(#menerio-mark-b)" opacity=".62" />
-    </svg>
-  );
-}
 
 function ParticleField() {
   const seeds = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
@@ -138,55 +118,6 @@ function CategoryPill({ label, delay }: { label: string; delay: number }) {
   return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--landing-sky-primary)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-sky-primary)/.18),hsl(var(--landing-sky-primary)/.08))] py-[5px] pl-[11px] pr-[11px] text-[12.5px] font-medium text-[hsl(var(--landing-sky-white))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-sky-primary))] shadow-[0_0_6px_hsl(var(--landing-sky-primary))]" />{label}</span>;
 }
 
-function LandingNav() {
-  const navigate = useNavigate();
-  return (
-    <header className="sticky top-0 z-50 border-b border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-panel)/.78)] backdrop-blur-[14px]">
-      <div className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-[18px] md:px-9">
-        <Link to="/" className="flex items-center gap-2.5 font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">
-          <MenerioMark />
-          <span>Menerio</span>
-        </Link>
-        <nav className="hidden items-center gap-1 text-sm font-medium text-[hsl(var(--landing-muted))] md:flex">
-          {['Home', 'Features', 'Integrations', 'Docs', 'Pricing'].map((item) => (
-            <a key={item} href={item === 'Home' ? '#' : `#${item.toLowerCase()}`} className={cn("rounded-full px-4 py-2 transition hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]", item === 'Home' && "bg-[hsl(var(--landing-sky-primary)/.14)] font-semibold text-[hsl(var(--landing-sky-primary))]")}>{item}</a>
-          ))}
-        </nav>
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/auth')} className="hidden text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-text))] sm:inline-flex">Sign In</button>
-          <Button onClick={() => navigate('/auth?tab=signup')} className="rounded-xl border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-5 py-[11px] text-sm font-semibold text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
-            Get Started — Free
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function LandingFooter() {
-  const links = [{ icon: Twitter, label: "Twitter" }, { icon: Github, label: "GitHub" }, { icon: Linkedin, label: "LinkedIn" }, { icon: Mail, label: "Email" }];
-  return (
-    <footer id="docs" className="border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-page))] px-6 py-12">
-      <div className="mx-auto grid max-w-[1180px] gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
-        <div>
-          <Link to="/" className="mb-3 flex items-center gap-3"><MenerioMark /><span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span></Link>
-          <p className="max-w-sm text-sm leading-relaxed text-[hsl(var(--landing-muted))]">One brain. Every AI. Capture, search, and connect your thoughts.</p>
-        </div>
-        <FooterColumn title="Product" links={[{ label: "Docs", to: "/docs" }, { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true }]} />
-        <FooterColumn title="Legal" links={[{ label: "Privacy Policy", to: "/privacy" }, { label: "Terms of Service", to: "/terms" }, { label: "Cookie Policy", to: "/cookies" }]} />
-      </div>
-      <div className="mx-auto mt-9 flex max-w-[1180px] flex-col items-center justify-between gap-4 border-t border-[hsl(var(--landing-plain-white)/.05)] pt-5 text-xs text-[hsl(var(--landing-faint))] sm:flex-row">
-        <p>© 2026 Menerio. All rights reserved.</p>
-        <div className="flex gap-4">{links.map(({ icon: Icon, label }) => <a key={label} href="#" aria-label={label} className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--landing-plain-white)/.04)] text-[hsl(var(--landing-muted))] transition hover:bg-[hsl(var(--landing-sky-primary)/.12)] hover:text-[hsl(var(--landing-sky-highlight))]"><Icon className="h-3.5 w-3.5" /></a>)}</div>
-      </div>
-    </footer>
-  );
-}
-
-function FooterColumn({ title, links }: { title: string; links: { label: string; to: string; external?: boolean }[] }) {
-  return <div><h3 className="mb-3 font-display text-sm font-bold text-[hsl(var(--landing-text))]">{title}</h3><ul className="space-y-3">{links.map((link) => <li key={link.to}>{link.external ? <a href={link.to} target="_blank" rel="noopener noreferrer" className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</a> : <Link to={link.to} className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</Link>}</li>)}</ul></div>;
-}
-
 const Index = () => {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
@@ -197,8 +128,7 @@ const Index = () => {
   return (
     <div className="min-h-screen overflow-hidden bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
       <SEOHead title="Menerio — One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
-      <LandingNav />
-      <main className="relative min-h-[calc(100vh-81px)] overflow-hidden">
+      <main className="relative min-h-[calc(100vh-65px)] overflow-hidden">
         <div className="absolute inset-0">
           <div className="landing-aurora-drift absolute -left-[200px] -top-[150px] h-[700px] w-[1100px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)] blur-3xl" />
           <div className="landing-aurora-drift absolute -right-[150px] top-[100px] h-[600px] w-[900px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.25),transparent_70%)] blur-3xl [animation-duration:26s]" />
@@ -245,7 +175,6 @@ const Index = () => {
           </div>
         </section>
       </main>
-      <LandingFooter />
     </div>
   );
 };

@@ -54,16 +54,14 @@ export function Header() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-50 w-full border-b transition-all duration-200",
-        scrolled
-          ? "bg-background/80 backdrop-blur-lg border-border shadow-sm"
-          : "bg-background border-transparent"
+        "sticky top-0 z-50 w-full border-b border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-panel)/.86)] backdrop-blur-[14px] transition-all duration-200",
+        scrolled && "shadow-[0_10px_30px_hsl(var(--landing-ink)/.24)]"
       )}
     >
-      <div className="container flex h-16 items-center justify-between">
+      <div className="mx-auto flex h-16 max-w-[1240px] items-center justify-between px-6 md:px-9">
         <Link to="/" className="flex items-center gap-2">
           <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
-          <span className="text-xl font-bold font-display text-foreground">Menerio</span>
+          <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
@@ -72,8 +70,8 @@ export function Header() {
               key={link.to}
               to={link.to}
               end={link.to === "/"}
-              className="px-3 py-2 text-sm font-medium text-muted-foreground rounded-md transition-colors hover:text-foreground hover:bg-accent"
-              activeClassName="text-foreground bg-accent"
+              className="rounded-full px-4 py-2 text-sm font-medium text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]"
+              activeClassName="bg-[hsl(var(--landing-sky-primary)/.14)] text-[hsl(var(--landing-sky-primary))]"
             >
               {link.label}
             </NavLink>
@@ -119,28 +117,28 @@ export function Header() {
             </DropdownMenu>
           ) : (
             <>
-              <Button variant="ghost" size="sm" onClick={() => navigate("/auth")}>Sign In</Button>
-              <Button size="sm" onClick={() => navigate("/auth?tab=signup")}>Get Started</Button>
+              <Button variant="ghost" size="sm" className="text-[hsl(var(--landing-muted))] hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]" onClick={() => navigate("/auth")}>Sign In</Button>
+              <Button size="sm" className="rounded-xl bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-5 text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.35),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110" onClick={() => navigate("/auth?tab=signup")}>Get Started</Button>
             </>
           )}
         </div>
 
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+        <Button variant="ghost" size="icon" className="text-[hsl(var(--landing-text))] hover:bg-[hsl(var(--landing-plain-white)/.06)] md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
       </div>
 
       {mobileOpen && (
-        <div className="md:hidden border-t bg-background animate-fade-in">
-          <nav className="container flex flex-col gap-1 py-4">
+        <div className="animate-fade-in border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-panel))] md:hidden">
+          <nav className="mx-auto flex max-w-[1240px] flex-col gap-1 px-6 py-4">
             {navLinks.map((link) => (
-              <NavLink key={link.to} to={link.to} end={link.to === "/"} className="px-3 py-2.5 text-sm font-medium text-muted-foreground rounded-md transition-colors hover:text-foreground hover:bg-accent" activeClassName="text-foreground bg-accent" onClick={() => setMobileOpen(false)}>
+              <NavLink key={link.to} to={link.to} end={link.to === "/"} className="rounded-lg px-3 py-2.5 text-sm font-medium text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]" activeClassName="bg-[hsl(var(--landing-sky-primary)/.14)] text-[hsl(var(--landing-sky-primary))]" onClick={() => setMobileOpen(false)}>
                 {link.label}
               </NavLink>
             ))}
-            <div className="mt-3 flex flex-col gap-2 border-t pt-4">
+            <div className="mt-3 flex flex-col gap-2 border-t border-[hsl(var(--landing-plain-white)/.06)] pt-4">
               <div className="flex items-center justify-between px-3 py-1">
-                <span className="text-sm text-muted-foreground">Theme</span>
+                <span className="text-sm text-[hsl(var(--landing-muted))]">Theme</span>
                 <ThemeToggle />
               </div>
               {isLoggedIn ? (
