@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowRight, Brain, CheckCircle2, Database, FileText, Loader2, Lock, Network, Search } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Meni } from "@/components/Meni";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,39 @@ const thoughts = [
   { text: "Jordan said the signup page feels confusing on mobile.", people: ["Jordan"], categories: ["Feedback", "Signup Page", "Mobile"] },
   { text: "We should test the checkout flow before launching the sale.", people: [], categories: ["Task", "Checkout", "Launch"] },
   { text: "Maya wants to move the team offsite to Lisbon in September.", people: ["Maya"], categories: ["Plan", "Travel", "Team"] },
+];
+
+const homepageFeatures = [
+  {
+    icon: Brain,
+    title: "AI-Powered Memory",
+    description: "Every note is automatically embedded and classified. Your AI understands your thoughts by meaning, not just keywords.",
+  },
+  {
+    icon: Search,
+    title: "Semantic Search",
+    description: "Find anything by what it means, not just what it says. Ask questions and get relevant results from your entire knowledge base.",
+  },
+  {
+    icon: FileText,
+    title: "Rich Note-Taking",
+    description: "Capture thoughts, ideas, meeting notes, and references. Tag, pin, and organize everything your way.",
+  },
+  {
+    icon: Network,
+    title: "MCP-Ready",
+    description: "Connect any AI tool — Claude, ChatGPT, Cursor — to your brain via the Model Context Protocol. One brain, every AI.",
+  },
+  {
+    icon: Database,
+    title: "Open & Portable",
+    description: "Your knowledge lives in your database. No vendor lock-in, no SaaS middlemen. Export anytime.",
+  },
+  {
+    icon: Lock,
+    title: "Private & Secure",
+    description: "Row-level security ensures only you can access your thoughts. Your brain belongs to you.",
+  },
 ];
 
 function ParticleField() {
@@ -128,11 +161,12 @@ const Index = () => {
   return (
     <div className="min-h-screen overflow-hidden bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
       <SEOHead title="Menerio — One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
-      <main className="relative min-h-[calc(100vh-65px)] overflow-hidden">
+      <main className="relative overflow-hidden">
         <div className="absolute inset-0">
           <div className="landing-aurora-drift absolute -left-[200px] -top-[150px] h-[700px] w-[1100px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)] blur-3xl" />
           <div className="landing-aurora-drift absolute -right-[150px] top-[100px] h-[600px] w-[900px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.25),transparent_70%)] blur-3xl [animation-duration:26s]" />
           <div className="landing-aurora-drift absolute left-[30%] top-[400px] h-[500px] w-[1200px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.3),transparent_70%)] blur-3xl [animation-duration:30s]" />
+          <div className="landing-aurora-drift absolute bottom-[280px] right-[-280px] h-[620px] w-[920px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.16),transparent_70%)] blur-3xl [animation-duration:32s]" />
           <div className="absolute inset-0 opacity-[.06] mix-blend-overlay [background-image:radial-gradient(hsl(var(--landing-plain-white))_1px,transparent_1px)] [background-size:3px_3px]" />
         </div>
         <ParticleField />
@@ -172,6 +206,55 @@ const Index = () => {
             <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Capture from web, mobile, voice</span>
             <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Available in Claude, ChatGPT, Gemini</span>
             <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Open source · AGPL-3.0</span>
+          </div>
+        </section>
+
+        <section className="relative z-10 border-t border-[hsl(var(--landing-plain-white)/.08)] px-6 py-24 md:px-9 lg:py-28">
+          <div className="mx-auto max-w-[1160px]">
+            <div className="mx-auto mb-14 max-w-[760px] text-center">
+              <p className="mb-4 font-mono text-[12px] font-semibold uppercase tracking-[.22em] text-[hsl(var(--landing-sky-highlight))]">Features</p>
+              <h2 className="font-[var(--font-hero)] text-[clamp(42px,5.3vw,72px)] font-black leading-[.96] text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+                Your thoughts, supercharged by AI
+              </h2>
+              <p className="mx-auto mt-5 max-w-[650px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
+                Not just another notes app. A database-backed knowledge system built for the age of AI agents.
+              </p>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {homepageFeatures.map((feature) => (
+                <article
+                  key={feature.title}
+                  className="group relative overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-primary)/.16)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.74),hsl(var(--landing-card-deep)/.82))] p-6 text-left shadow-[0_18px_50px_hsl(var(--landing-ink)/.22)] transition duration-300 hover:-translate-y-1 hover:border-[hsl(var(--landing-sky-primary)/.35)] hover:shadow-[0_22px_70px_hsl(var(--landing-ink)/.34),0_0_34px_hsl(var(--landing-sky-primary)/.12)]"
+                >
+                  <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.45),transparent)] opacity-70" />
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[hsl(var(--landing-sky-primary)/.22)] bg-[hsl(var(--landing-sky-primary)/.12)] text-[hsl(var(--landing-sky-highlight))] shadow-[0_0_20px_hsl(var(--landing-sky-primary)/.14)] transition group-hover:bg-[hsl(var(--landing-sky-primary)/.18)]">
+                    <feature.icon className="h-5 w-5" />
+                  </div>
+                  <h3 className="mb-3 font-[var(--font-display)] text-xl font-bold text-[hsl(var(--landing-text))]">{feature.title}</h3>
+                  <p className="text-[15px] leading-relaxed text-[hsl(var(--landing-body))]">{feature.description}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="relative z-10 px-6 pb-28 pt-6 md:px-9 lg:pb-32">
+          <div className="mx-auto max-w-[980px] overflow-hidden rounded-[26px] border border-[hsl(var(--landing-sky-primary)/.24)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.88),hsl(var(--landing-card-deep)/.94))] px-6 py-16 text-center shadow-[0_24px_80px_hsl(var(--landing-ink)/.38),0_0_46px_hsl(var(--landing-sky-primary)/.13)] md:px-12 md:py-20">
+            <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-full border border-[hsl(var(--landing-sky-primary)/.28)] bg-[hsl(var(--landing-sky-primary)/.13)] text-[hsl(var(--landing-sky-highlight))] shadow-[0_0_30px_hsl(var(--landing-sky-primary)/.18)]">
+              <Brain className="h-7 w-7" />
+            </div>
+            <h2 className="font-[var(--font-hero)] text-[clamp(42px,5vw,70px)] font-black leading-[.96] text-[hsl(var(--landing-text))] [text-shadow:0_4px_28px_hsl(var(--landing-ink)/.45)]">
+              Ready to build your brain?
+            </h2>
+            <p className="mx-auto mt-5 max-w-[640px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">
+              Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
+            </p>
+            <div className="mt-9 flex justify-center">
+              <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-8 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+                Start Your Brain <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </Button>
+            </div>
           </div>
         </section>
       </main>
