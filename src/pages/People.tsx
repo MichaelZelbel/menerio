@@ -360,7 +360,7 @@ export default function People() {
           <PersonTimeline
             personId={selectedPerson.id}
             personName={selectedPerson.name}
-            people={people.map((person) => ({ id: person.id, name: person.name }))}
+            people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
             onAskMira={(context) => {
               setConversationContext(context);
               setActivePersonTab("conversation");
