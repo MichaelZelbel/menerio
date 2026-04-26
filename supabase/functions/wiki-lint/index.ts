@@ -244,6 +244,7 @@ serve(async (req) => {
     const { data: pages, error: pagesError } = await db
       .from("wiki_pages")
       .select("id, slug, title, page_type, content, updated_at")
+      .eq("user_id", userId)
       .order("updated_at", { ascending: false });
     if (pagesError) throw pagesError;
 
@@ -276,7 +277,8 @@ serve(async (req) => {
 
     const { data: links, error: linksError } = await db
       .from("wiki_links")
-      .select("source_page_id, target_slug, target_page_id");
+      .select("source_page_id, target_slug, target_page_id")
+      .eq("user_id", userId);
     if (linksError) throw linksError;
 
     const unresolvedWikilinks = (links || [])
@@ -300,6 +302,7 @@ serve(async (req) => {
     const { count: recentNotesCount, error: recentNotesError } = await db
       .from("notes")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
       .gte("created_at", cutoff30);
     if (recentNotesError) throw recentNotesError;
 
@@ -311,12 +314,13 @@ serve(async (req) => {
         const { data: sources, error: sourcesError } = await db
           .from("wiki_page_sources")
           .select("wiki_page_id, note_id")
+          .eq("user_id", userId)
           .in("wiki_page_id", candidateIds);
         if (sourcesError) throw sourcesError;
 
         const noteIds = [...new Set((sources || []).map((source: any) => source.note_id).filter(Boolean))];
         const { data: sourceNotes, error: sourceNotesError } = noteIds.length > 0
-          ? await db.from("notes").select("id, created_at").in("id", noteIds)
+          ? await db.from("notes").select("id, created_at").eq("user_id", userId).in("id", noteIds)
           : { data: [], error: null };
         if (sourceNotesError) throw sourceNotesError;
 
