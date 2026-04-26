@@ -71,9 +71,9 @@ const coreFeatures = [
   },
   {
     icon: Network,
-    title: "Knowledge Graph",
+    title: "Note Graph",
     description:
-      "Visualize how your ideas connect. The interactive knowledge graph reveals hidden patterns and relationships between your notes automatically.",
+      "Visualize how your notes connect. The interactive note graph reveals hidden patterns and relationships between your notes automatically.",
     highlights: ["Interactive visualization", "Auto-connections", "Cluster detection"],
   },
   {

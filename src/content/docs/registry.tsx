@@ -75,7 +75,7 @@ const noteTaking: DocPage = {
       <p>Drag and drop images, PDFs, audio, or video files directly into the editor. They're uploaded to secure cloud storage and embedded inline. Menerio's AI automatically analyses media — it extracts text from PDFs, describes images, and transcribes audio.</p>
 
       <h2 id="wikilinks">Wikilinks</h2>
-      <p>Type <code>[[</code> to create a link to another note. An autocomplete menu appears so you can find and link notes instantly. Wikilinks create visible connections in your Knowledge Graph and show up in the Backlinks panel.</p>
+      <p>Type <code>[[</code> to create a link to another note. An autocomplete menu appears so you can find and link notes instantly. Wikilinks create visible connections in your Note Graph and show up in the Backlinks panel.</p>
       <Callout type="info">Wikilinks are bidirectional — if Note A links to Note B, Note B automatically shows Note A in its backlinks.</Callout>
 
       <h2 id="quick-capture">Quick Capture</h2>
@@ -104,7 +104,7 @@ const searchAndOrganise: DocPage = {
 
       <h2 id="smart-search">Smart Search (Semantic)</h2>
       <p>Toggle <strong>"Smart Search"</strong> to switch from keyword matching to AI-powered semantic search. Instead of exact words, it finds notes by meaning. For example, searching "meeting outcomes" will surface notes about decisions made in meetings, even if those exact words don't appear.</p>
-      <Callout type="tip">Smart Search uses the same vector embeddings that power your Knowledge Graph — every note is automatically vectorised when created or updated.</Callout>
+      <Callout type="tip">Smart Search uses the same vector embeddings that power your Note Graph — every note is automatically vectorised when created or updated.</Callout>
 
       <h2 id="filters">Filters & Sorting</h2>
       <p>Use the filter and sort controls to narrow results:</p>
@@ -173,7 +173,7 @@ const aiProcessing: DocPage = {
 
 const knowledgeGraph: DocPage = {
   slug: "knowledge-graph",
-  title: "Knowledge Graph",
+  title: "Note Graph",
   description: "Visualise how your notes connect and discover hidden relationships.",
   category: "AI Features",
   headings: [
@@ -183,11 +183,11 @@ const knowledgeGraph: DocPage = {
     { id: "analytics", title: "Graph Analytics" },
     { id: "export-graph", title: "Export" },
   ],
-  searchText: "knowledge graph connections network visualise links semantic wikilink clusters bridge orphan analytics export",
+  searchText: "note graph knowledge graph connections network visualise links semantic wikilink clusters bridge orphan analytics export",
   content: () => (
     <>
       <h2 id="overview">Overview</h2>
-      <p>The Knowledge Graph is a visual map of every note in your vault and how they relate. Open it from the sidebar under <strong>Knowledge Graph</strong>. Each node is a note; each edge is a connection the AI discovered or you created manually.</p>
+      <p>The Note Graph is a visual map of every note in your vault and how they relate. Open it from the sidebar under <strong>Note Graph</strong>. Each node is a note; each edge is a connection the AI discovered or you created manually.</p>
       <Callout type="tip">Click any node to navigate to that note. Hover to highlight its direct connections.</Callout>
 
       <h2 id="connection-types">Connection Types</h2>
@@ -523,7 +523,7 @@ const dailyWorkflow: DocPage = {
       <p>Don't worry about organising — the AI tags and connects everything for you.</p>
 
       <h2 id="evening">Evening: Reflect</h2>
-      <p>Browse your Knowledge Graph to see how today's notes connect to older ones. Use the <strong>Weekly Review</strong> (available every Sunday) for a deeper retrospective on patterns, themes, and progress.</p>
+      <p>Browse your Note Graph to see how today's notes connect to older ones. Use the <strong>Weekly Review</strong> (available every Sunday) for a deeper retrospective on patterns, themes, and progress.</p>
     </>
   ),
 };
@@ -640,7 +640,7 @@ const faq: DocPage = {
 
       <h2 id="pricing">Pricing</h2>
       <h3>Is there a free plan?</h3>
-      <p>Yes. The free plan includes all core features — notes, AI processing, Knowledge Graph, contacts, and integrations — with a monthly AI credit limit.</p>
+      <p>Yes. The free plan includes all core features — notes, AI processing, Note Graph, contacts, and integrations — with a monthly AI credit limit.</p>
       <h3>What does Premium include?</h3>
       <p>Premium unlocks higher AI credit limits, priority processing, and early access to new features. You can upgrade from Settings → Subscription.</p>
 
@@ -693,7 +693,7 @@ export const docCategories: DocCategory[] = [
     slug: "ai-features",
     pages: [
       { slug: "ai-processing", title: "AI Processing" },
-      { slug: "knowledge-graph", title: "Knowledge Graph" },
+      { slug: "knowledge-graph", title: "Note Graph" },
       { slug: "media-analysis", title: "Media & Attachments" },
     ],
   },

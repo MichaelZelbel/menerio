@@ -71,7 +71,7 @@ export function DashboardSidebar() {
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     
     { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
-    { title: "Knowledge Graph", url: "/dashboard/graph", icon: Network },
+    { title: "Note Graph", url: "/dashboard/graph", icon: Network },
     { title: "Media Library", url: "/dashboard/media", icon: Image },
   ];
 
