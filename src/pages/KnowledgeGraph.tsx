@@ -397,12 +397,12 @@ export default function KnowledgeGraph() {
 
   return (
     <div className={fullscreen ? "fixed inset-0 z-50 bg-background flex flex-col" : "flex flex-col h-full"}>
-      <SEOHead title="Knowledge Graph — Menerio" noIndex />
+      <SEOHead title="Note Graph — Menerio" noIndex />
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background shrink-0">
         <div>
-          <h1 className="text-lg font-display font-bold">Knowledge Graph</h1>
+          <h1 className="text-lg font-display font-bold">Note Graph</h1>
           <p className="text-xs text-muted-foreground">
             {processedGraph.nodes.length} nodes · {processedGraph.links.length} edges
           </p>
