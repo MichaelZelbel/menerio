@@ -186,7 +186,7 @@ const Index = () => {
             <div className="text-center md:text-left">
               <h1 className="landing-headline text-[clamp(54px,6vw,88px)] text-[hsl(var(--landing-text))] [letter-spacing:-.04em] dark:[text-shadow:0_4px_30px_rgba(0,0,0,.5)]">
                 One Brain.<br />
-                <span className="bg-[var(--brand-gradient)] bg-clip-text text-transparent dark:bg-[linear-gradient(180deg,#A6D9FF_0%,#3C9ADD_50%,#1A6EAE_100%)] dark:[filter:drop-shadow(0_0_50px_rgba(60,154,221,.5))]">Every AI.</span>
+                <span className="hero-gradient-text">Every AI.</span>
               </h1>
               <p className="mx-auto mt-[18px] max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))] md:mx-0">Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.</p>
             </div>
@@ -225,7 +225,7 @@ const Index = () => {
               {homepageFeatures.map((feature) => (
                 <article
                   key={feature.title}
-                  className="group relative overflow-hidden rounded-[18px] border border-[hsl(var(--border)/.08)] bg-[hsl(var(--surface))] p-6 text-left shadow-[0_6px_18px_rgba(15,35,70,.04)] transition duration-300 hover:-translate-y-1 hover:border-[hsl(var(--brand)/.3)] hover:shadow-[0_14px_32px_rgba(31,96,224,.08)] dark:border-[hsl(var(--landing-sky-primary)/.16)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.74),hsl(var(--landing-card-deep)/.82))] dark:shadow-[0_18px_50px_hsl(var(--landing-ink)/.22)] dark:hover:border-[hsl(var(--landing-sky-primary)/.35)] dark:hover:shadow-[0_22px_70px_hsl(var(--landing-ink)/.34),0_0_34px_hsl(var(--landing-sky-primary)/.12)]"
+                  className="landing-feature-card group relative overflow-hidden rounded-[18px] border border-[hsl(var(--border)/.08)] bg-[hsl(var(--surface))] p-6 text-left shadow-[0_6px_18px_rgba(15,35,70,.04)] transition duration-300 hover:-translate-y-1 hover:border-[hsl(var(--brand)/.3)] hover:shadow-[0_14px_32px_rgba(31,96,224,.08)]"
                 >
                   <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.45),transparent)] opacity-0 dark:opacity-70" />
                   <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[hsl(var(--brand)/.18)] bg-[hsl(var(--brand-soft))] text-[hsl(var(--brand))] transition group-hover:bg-[hsl(var(--brand-soft))] dark:border-[hsl(var(--landing-sky-primary)/.22)] dark:bg-[hsl(var(--landing-sky-primary)/.12)] dark:text-[hsl(var(--landing-sky-highlight))] dark:shadow-[0_0_20px_hsl(var(--landing-sky-primary)/.14)] dark:group-hover:bg-[hsl(var(--landing-sky-primary)/.18)]">
