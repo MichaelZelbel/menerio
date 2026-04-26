@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   UserPlus,
   Link2,
@@ -80,7 +80,6 @@ export default function ReviewQueue() {
   const { user } = useAuth();
   const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
   const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
 
