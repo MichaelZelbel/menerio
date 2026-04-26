@@ -1,11 +1,22 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
-import { useReviewQueue, type ReviewItem } from "@/hooks/useReviewQueue";
+import { useReviewQueue, type ReviewItem, type WikiRevisionReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
@@ -17,6 +28,9 @@ import {
   FileText,
   Inbox,
   User,
+  BookOpen,
+  Eye,
+  RotateCcw,
 } from "lucide-react";
 
 const DEFAULT_PROFILE_CATEGORIES = [
@@ -45,6 +59,21 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
+};
+
+const truncateText = (text: string | null | undefined, length = 200) => {
+  const value = (text || "").replace(/\s+/g, " ").trim();
+  return value.length > length ? `${value.slice(0, length)}…` : value;
+};
+
+const buildLineDiff = (before: string | null, after: string) => {
+  const oldLines = (before || "").split("\n").filter((line) => line.trim());
+  const newLines = after.split("\n").filter((line) => line.trim());
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const removed = oldLines.filter((line) => !newSet.has(line)).slice(0, 3);
+  const added = newLines.filter((line) => !oldSet.has(line)).slice(0, 3);
+  return { removed, added };
 };
 
 export default function ReviewQueue() {
