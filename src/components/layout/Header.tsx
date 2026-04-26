@@ -123,20 +123,20 @@ export function Header() {
           )}
         </div>
 
-        <Button variant="ghost" size="icon" className="text-[hsl(var(--landing-text))] hover:bg-[hsl(var(--landing-plain-white)/.06)] md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+        <Button variant="ghost" size="icon" className="text-[hsl(var(--landing-text))] hover:bg-[hsl(var(--brand)/.08)] dark:hover:bg-[hsl(var(--landing-plain-white)/.06)] md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
       </div>
 
       {mobileOpen && (
-        <div className="animate-fade-in border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-panel))] md:hidden">
+        <div className="animate-fade-in border-t border-[hsl(var(--border)/.08)] bg-[hsl(var(--surface))] md:hidden dark:border-[hsl(var(--landing-plain-white)/.06)] dark:bg-[hsl(var(--landing-panel))]">
           <nav className="mx-auto flex max-w-[1240px] flex-col gap-1 px-6 py-4">
             {navLinks.map((link) => (
-              <NavLink key={link.to} to={link.to} end={link.to === "/"} className="rounded-lg px-3 py-2.5 text-sm font-medium text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]" activeClassName="bg-[hsl(var(--landing-sky-primary)/.14)] text-[hsl(var(--landing-sky-primary))]" onClick={() => setMobileOpen(false)}>
+              <NavLink key={link.to} to={link.to} end={link.to === "/"} className="rounded-lg px-3 py-2.5 text-sm font-medium text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--brand)/.08)] hover:text-[hsl(var(--landing-text))] dark:hover:bg-[hsl(var(--landing-plain-white)/.04)]" activeClassName="bg-[hsl(var(--brand)/.10)] text-[hsl(var(--brand))]" onClick={() => setMobileOpen(false)}>
                 {link.label}
               </NavLink>
             ))}
-            <div className="mt-3 flex flex-col gap-2 border-t border-[hsl(var(--landing-plain-white)/.06)] pt-4">
+            <div className="mt-3 flex flex-col gap-2 border-t border-[hsl(var(--border)/.08)] pt-4 dark:border-[hsl(var(--landing-plain-white)/.06)]">
               <div className="flex items-center justify-between px-3 py-1">
                 <span className="text-sm text-[hsl(var(--landing-muted))]">Theme</span>
                 <ThemeToggle />
