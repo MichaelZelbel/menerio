@@ -15,9 +15,6 @@ verify_jwt = false
 [functions.extract-event]
 verify_jwt = false
 
-[functions.send-to-temerio]
-verify_jwt = false
-
 [functions.telegram-capture]
 verify_jwt = false
 
@@ -94,12 +91,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.verify-connection]
-verify_jwt = false
-
-[functions.push-profile]
-verify_jwt = false
-
-[functions.receive-profile]
 verify_jwt = false
 
 [functions.search-notes-semantic]
