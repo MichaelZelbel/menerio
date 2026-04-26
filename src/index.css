@@ -435,6 +435,24 @@
   cursor: pointer;
 }
 
+.tiptap-editor .tiptap .wiki-link {
+  color: hsl(var(--primary));
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tiptap-editor .tiptap .wiki-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.tiptap-editor .tiptap .wiki-link.wiki-link-stub {
+  color: hsl(var(--muted-foreground));
+  cursor: help;
+  text-decoration-style: dashed;
+}
+
 .tiptap-editor .tiptap mark {
   background-color: hsl(45, 93%, 75%);
   border-radius: 2px;
