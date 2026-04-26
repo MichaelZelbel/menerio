@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
@@ -222,21 +223,29 @@ serve(async (req) => {
   let userId: string | null = null;
 
   try {
+    const internalUserId = req.headers.get("x-menerio-user-id");
     const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
+    if (internalUserId) {
+      if (token !== SUPABASE_SERVICE_ROLE_KEY) return jsonResponse({ error: "Unauthenticated" }, 401);
+      userId = internalUserId;
+      db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    } else {
+      if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
 
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
-    userId = userData.user.id;
+      const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data: userData, error: userError } = await authClient.auth.getUser(token);
+      if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
+      userId = userData.user.id;
 
-    db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
+      db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+    }
 
     const { data: pages, error: pagesError } = await db
       .from("wiki_pages")
       .select("id, slug, title, page_type, content, updated_at")
+      .eq("user_id", userId)
       .order("updated_at", { ascending: false });
     if (pagesError) throw pagesError;
 
@@ -269,7 +278,8 @@ serve(async (req) => {
 
     const { data: links, error: linksError } = await db
       .from("wiki_links")
-      .select("source_page_id, target_slug, target_page_id");
+      .select("source_page_id, target_slug, target_page_id")
+      .eq("user_id", userId);
     if (linksError) throw linksError;
 
     const unresolvedWikilinks = (links || [])
@@ -293,6 +303,7 @@ serve(async (req) => {
     const { count: recentNotesCount, error: recentNotesError } = await db
       .from("notes")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
       .gte("created_at", cutoff30);
     if (recentNotesError) throw recentNotesError;
 
@@ -304,12 +315,13 @@ serve(async (req) => {
         const { data: sources, error: sourcesError } = await db
           .from("wiki_page_sources")
           .select("wiki_page_id, note_id")
+          .eq("user_id", userId)
           .in("wiki_page_id", candidateIds);
         if (sourcesError) throw sourcesError;
 
         const noteIds = [...new Set((sources || []).map((source: any) => source.note_id).filter(Boolean))];
         const { data: sourceNotes, error: sourceNotesError } = noteIds.length > 0
-          ? await db.from("notes").select("id, created_at").in("id", noteIds)
+          ? await db.from("notes").select("id, created_at").eq("user_id", userId).in("id", noteIds)
           : { data: [], error: null };
         if (sourceNotesError) throw sourceNotesError;
 

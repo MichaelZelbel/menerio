@@ -150,6 +150,37 @@ function jsonTool(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+const WIKI_PAGE_TYPES = ["entity", "concept", "source", "overview", "synthesis", "person"] as const;
+
+function extractWikiSlugs(content: string) {
+  return Array.from(new Set(Array.from(content.matchAll(/\[\[([a-z0-9-]+)\]\]/g)).map((match) => match[1])));
+}
+
+async function resyncWikiLinksForCurrentUser(pageId: string, content: string) {
+  const targetSlugs = extractWikiSlugs(content);
+  await supabase.from("wiki_links").delete().eq("user_id", currentUserId).eq("source_page_id", pageId);
+
+  if (!targetSlugs.length) return;
+
+  const { data: targets, error } = await supabase
+    .from("wiki_pages")
+    .select("id, slug")
+    .eq("user_id", currentUserId)
+    .in("slug", targetSlugs);
+  if (error) throw new Error(`Could not resolve wiki links: ${error.message}`);
+
+  const targetBySlug = new Map((targets || []).map((page: any) => [page.slug, page.id]));
+  const rows = targetSlugs.map((slug) => ({
+    user_id: currentUserId,
+    source_page_id: pageId,
+    target_slug: slug,
+    target_page_id: targetBySlug.get(slug) || null,
+  }));
+
+  const { error: insertError } = await supabase.from("wiki_links").insert(rows);
+  if (insertError) throw new Error(`Could not insert wiki links: ${insertError.message}`);
+}
+
 async function resolveOrCreateContactsByName(names: string[]) {
   const contacts: any[] = [];
   for (const name of uniqueStrings(names)) {
@@ -1411,6 +1442,217 @@ server.registerTool(
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "wiki_search",
+  {
+    title: "Search Wiki",
+    description: "Search wiki pages by title, slug, or content. Returns matching pages with summaries.",
+    inputSchema: {
+      query: z.string().describe("Case-insensitive substring to search for"),
+      limit: z.number().optional().default(10),
+      page_type: z.enum(WIKI_PAGE_TYPES).optional().describe("Optional wiki page type filter"),
+    },
+  },
+  async ({ query, limit, page_type }) => {
+    try {
+      const safeLimit = clampNumber(limit, 1, 50, 10);
+      const q = String(query || "").trim().replace(/[%_]/g, "\\$&");
+      let request = supabase
+        .from("wiki_pages")
+        .select("slug, title, page_type, summary, source_count, updated_at")
+        .eq("user_id", currentUserId)
+        .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+        .order("updated_at", { ascending: false })
+        .limit(safeLimit);
+
+      if (page_type) request = request.eq("page_type", page_type);
+      const { data, error } = await request;
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      return jsonTool({ pages: data || [] });
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "wiki_get_page",
+  {
+    title: "Get Wiki Page",
+    description: "Get a wiki page by slug, including full content, source notes, and backlinks.",
+    inputSchema: { slug: z.string().describe("Wiki page slug") },
+  },
+  async ({ slug }) => {
+    try {
+      const { data: page, error } = await supabase
+        .from("wiki_pages")
+        .select("id, slug, title, page_type, summary, content, source_count, created_at, updated_at")
+        .eq("user_id", currentUserId)
+        .eq("slug", slug)
+        .maybeSingle();
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      if (!page) return { content: [{ type: "text" as const, text: `No wiki page found for slug '${slug}'.` }] };
+
+      const { data: sourceRows } = await supabase
+        .from("wiki_page_sources")
+        .select("note_id")
+        .eq("user_id", currentUserId)
+        .eq("wiki_page_id", page.id);
+      const noteIds = (sourceRows || []).map((row: any) => row.note_id).filter(Boolean);
+      const { data: sourceNotes } = noteIds.length
+        ? await supabase.from("notes").select("id, title, created_at, updated_at").eq("user_id", currentUserId).in("id", noteIds)
+        : { data: [] };
+
+      const { data: backlinks } = await supabase
+        .from("wiki_links")
+        .select("source_page_id")
+        .eq("user_id", currentUserId)
+        .eq("target_page_id", page.id);
+      const backlinkIds = [...new Set((backlinks || []).map((link: any) => link.source_page_id).filter(Boolean))];
+      const { data: backlinkPages } = backlinkIds.length
+        ? await supabase.from("wiki_pages").select("slug, title, page_type, summary").eq("user_id", currentUserId).in("id", backlinkIds)
+        : { data: [] };
+
+      return jsonTool({ ...page, source_notes: sourceNotes || [], backlinks: backlinkPages || [] });
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "wiki_create_page",
+  {
+    title: "Create Wiki Page",
+    description: "Create a wiki page on the user's behalf and record a reviewed manual revision.",
+    inputSchema: {
+      slug: z.string().regex(/^[a-z0-9-]+$/).describe("Stable lowercase kebab-case slug"),
+      title: z.string().describe("Page title"),
+      page_type: z.enum(WIKI_PAGE_TYPES).describe("Wiki page type"),
+      content: z.string().describe("Full markdown content"),
+      summary: z.string().optional().describe("Short summary"),
+    },
+  },
+  async ({ slug, title, page_type, content, summary }) => {
+    try {
+      const { data: page, error } = await supabase
+        .from("wiki_pages")
+        .insert({ user_id: currentUserId, slug, title, page_type, content, summary: summary || null })
+        .select("id, slug, title, page_type, summary, content, created_at, updated_at")
+        .single();
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+
+      const { error: revisionError } = await supabase.from("wiki_revisions").insert({
+        user_id: currentUserId,
+        wiki_page_id: page.id,
+        page_slug: slug,
+        page_title: title,
+        change_type: "manual_edit",
+        previous_content: null,
+        new_content: content,
+        source_note_id: null,
+        change_summary: "Created via MCP",
+        status: "reviewed",
+        reviewed_at: new Date().toISOString(),
+      });
+      if (revisionError) throw new Error(`Page created, but revision failed: ${revisionError.message}`);
+      await resyncWikiLinksForCurrentUser(page.id, content);
+      return jsonTool({ ok: true, page });
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "wiki_update_page",
+  {
+    title: "Update Wiki Page",
+    description: "Update a wiki page on the user's behalf and record a reviewed manual revision.",
+    inputSchema: {
+      slug: z.string().describe("Existing wiki page slug"),
+      content: z.string().optional().describe("Replacement markdown content"),
+      title: z.string().optional().describe("New title"),
+      summary: z.string().optional().describe("New summary"),
+      page_type: z.enum(WIKI_PAGE_TYPES).optional().describe("New page type"),
+    },
+  },
+  async ({ slug, content, title, summary, page_type }) => {
+    try {
+      const { data: existing, error: fetchError } = await supabase
+        .from("wiki_pages")
+        .select("id, slug, title, page_type, summary, content")
+        .eq("user_id", currentUserId)
+        .eq("slug", slug)
+        .maybeSingle();
+      if (fetchError) return { content: [{ type: "text" as const, text: `Error: ${fetchError.message}` }], isError: true };
+      if (!existing) return { content: [{ type: "text" as const, text: `No wiki page found for slug '${slug}'.` }] };
+
+      const updates: Record<string, unknown> = {};
+      if (content !== undefined) updates.content = content;
+      if (title !== undefined) updates.title = title;
+      if (summary !== undefined) updates.summary = summary;
+      if (page_type !== undefined) updates.page_type = page_type;
+      if (Object.keys(updates).length === 0) return jsonTool({ ok: true, changed: false, page: existing });
+
+      const { data: updated, error: updateError } = await supabase
+        .from("wiki_pages")
+        .update(updates)
+        .eq("user_id", currentUserId)
+        .eq("id", existing.id)
+        .select("id, slug, title, page_type, summary, content, updated_at")
+        .single();
+      if (updateError) return { content: [{ type: "text" as const, text: `Error: ${updateError.message}` }], isError: true };
+
+      const { error: revisionError } = await supabase.from("wiki_revisions").insert({
+        user_id: currentUserId,
+        wiki_page_id: existing.id,
+        page_slug: updated.slug,
+        page_title: updated.title,
+        change_type: "manual_edit",
+        previous_content: existing.content,
+        new_content: updated.content,
+        source_note_id: null,
+        change_summary: "Updated via MCP",
+        status: "reviewed",
+        reviewed_at: new Date().toISOString(),
+      });
+      if (revisionError) throw new Error(`Page updated, but revision failed: ${revisionError.message}`);
+      await resyncWikiLinksForCurrentUser(existing.id, updated.content);
+      return jsonTool({ ok: true, page: updated });
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "wiki_run_lint",
+  {
+    title: "Run Wiki Lint",
+    description: "Run the wiki health check and return deterministic plus AI audit findings.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/wiki-lint`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+          "x-menerio-user-id": currentUserId,
+        },
+        body: JSON.stringify({}),
+      });
+      const text = await response.text();
+      if (!response.ok) return { content: [{ type: "text" as const, text: `Wiki lint failed: ${response.status} ${text}` }], isError: true };
+      return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
