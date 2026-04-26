@@ -144,11 +144,11 @@ function PillGroup({ label, children }: { label: string; children: ReactNode }) 
 }
 
 function PeoplePill({ name, delay }: { name: string; delay: number }) {
-  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--landing-pink)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-pink)/.18),hsl(var(--landing-pink)/.08))] py-[5px] pl-1 pr-[11px] text-[12.5px] font-medium text-[hsl(var(--landing-pink-text))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[linear-gradient(135deg,hsl(var(--landing-pink)),hsl(var(--landing-pink-deep)))] text-[11px] font-bold text-[hsl(var(--landing-plain-white))]">{name[0]}</span>{name}</span>;
+  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--accent-pink)/.25)] bg-[hsl(var(--accent-pink-soft))] py-[5px] pl-1 pr-[11px] text-[12.5px] font-medium text-[hsl(var(--accent-pink-text))] opacity-0 dark:border-[hsl(var(--landing-pink)/.4)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-pink)/.18),hsl(var(--landing-pink)/.08))] dark:text-[hsl(var(--landing-pink-text))]" style={{ animationDelay: `${delay}s` }}><span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[var(--accent-pink-gradient)] text-[11px] font-bold text-[hsl(var(--landing-plain-white))] dark:bg-[linear-gradient(135deg,hsl(var(--landing-pink)),hsl(var(--landing-pink-deep)))]">{name[0]}</span>{name}</span>;
 }
 
 function CategoryPill({ label, delay }: { label: string; delay: number }) {
-  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--landing-sky-primary)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-sky-primary)/.18),hsl(var(--landing-sky-primary)/.08))] py-[5px] pl-[11px] pr-[11px] text-[12.5px] font-medium text-[hsl(var(--landing-sky-white))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-sky-primary))] shadow-[0_0_6px_hsl(var(--landing-sky-primary))]" />{label}</span>;
+  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--brand)/.22)] bg-[hsl(var(--brand-soft))] py-[5px] pl-[11px] pr-[11px] text-[12.5px] font-medium text-[hsl(var(--brand))] opacity-0 dark:border-[hsl(var(--landing-sky-primary)/.4)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-sky-primary)/.18),hsl(var(--landing-sky-primary)/.08))] dark:text-[hsl(var(--landing-sky-white))]" style={{ animationDelay: `${delay}s` }}><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--brand))] shadow-[0_0_6px_hsl(var(--brand)/.35)] dark:bg-[hsl(var(--landing-sky-primary))] dark:shadow-[0_0_6px_hsl(var(--landing-sky-primary))]" />{label}</span>;
 }
 
 const Index = () => {
@@ -159,15 +159,15 @@ const Index = () => {
   if (session) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
+    <div className="min-h-screen overflow-hidden bg-[hsl(var(--background))] text-[hsl(var(--landing-text))] dark:bg-[hsl(var(--landing-page))]">
       <SEOHead title="Menerio — One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
       <main className="relative overflow-hidden">
         <div className="absolute inset-0">
-          <div className="landing-aurora-drift absolute -left-[200px] -top-[150px] h-[700px] w-[1100px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)] blur-3xl" />
-          <div className="landing-aurora-drift absolute -right-[150px] top-[100px] h-[600px] w-[900px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.25),transparent_70%)] blur-3xl [animation-duration:26s]" />
-          <div className="landing-aurora-drift absolute left-[30%] top-[400px] h-[500px] w-[1200px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.3),transparent_70%)] blur-3xl [animation-duration:30s]" />
-          <div className="landing-aurora-drift absolute bottom-[280px] right-[-280px] h-[620px] w-[920px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.16),transparent_70%)] blur-3xl [animation-duration:32s]" />
-          <div className="absolute inset-0 opacity-[.06] mix-blend-overlay [background-image:radial-gradient(hsl(var(--landing-plain-white))_1px,transparent_1px)] [background-size:3px_3px]" />
+          <div className="absolute -left-[160px] -top-[120px] h-[520px] w-[820px] bg-[radial-gradient(ellipse,hsl(var(--brand)/.07),transparent_70%)] blur-3xl dark:landing-aurora-drift dark:-left-[200px] dark:-top-[150px] dark:h-[700px] dark:w-[1100px] dark:bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)]" />
+          <div className="landing-aurora-drift absolute -right-[150px] top-[100px] hidden h-[600px] w-[900px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.25),transparent_70%)] blur-3xl [animation-duration:26s] dark:block" />
+          <div className="landing-aurora-drift absolute left-[30%] top-[400px] hidden h-[500px] w-[1200px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.3),transparent_70%)] blur-3xl [animation-duration:30s] dark:block" />
+          <div className="landing-aurora-drift absolute bottom-[280px] right-[-280px] hidden h-[620px] w-[920px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.16),transparent_70%)] blur-3xl [animation-duration:32s] dark:block" />
+          <div className="absolute inset-0 hidden opacity-[.06] mix-blend-overlay [background-image:radial-gradient(hsl(var(--landing-plain-white))_1px,transparent_1px)] [background-size:3px_3px] dark:block" />
         </div>
         <ParticleField />
 
