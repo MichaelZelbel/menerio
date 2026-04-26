@@ -5,7 +5,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { ArrowLeft, ExternalLink, History, Save } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
-import { RichTextEditor, type editorToMarkdown } from "@/components/RichTextEditor";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,7 +82,7 @@ export default function WikiPage() {
         .eq("wiki_page_id", page!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data || []) as RevisionWithSource[];
+      return ((data || []) as unknown) as RevisionWithSource[];
     },
   });
 
@@ -117,7 +117,7 @@ export default function WikiPage() {
         .eq("wiki_page_id", page!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data || []) as WikiSource[];
+      return ((data || []) as unknown) as WikiSource[];
     },
   });
 
