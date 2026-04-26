@@ -455,11 +455,6 @@ export default function ReviewQueue() {
     }
   };
 
-  const handleKeepAll = () => {
-    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
-    showToast.success("All visible changes kept");
-  };
-
   const handleRemoveAll = async () => {
     for (const item of items) {
       await revertAppliedChange(item);
