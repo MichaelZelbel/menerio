@@ -14,26 +14,6 @@ const thoughts = [
   { text: "Maya wants to move the team offsite to Lisbon in September.", people: ["Maya"], categories: ["Plan", "Travel", "Team"] },
 ];
 
-function MenerioMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 40 40" aria-hidden="true" className={cn("h-9 w-9", className)}>
-      <defs>
-        <linearGradient id="menerio-mark-a" x1="5" x2="35" y1="5" y2="35">
-          <stop stopColor="hsl(var(--landing-plain-white))" />
-          <stop offset=".38" stopColor="hsl(var(--landing-lavender))" />
-          <stop offset="1" stopColor="hsl(var(--landing-sky-primary))" />
-        </linearGradient>
-        <linearGradient id="menerio-mark-b" x1="8" x2="32" y1="34" y2="4">
-          <stop stopColor="hsl(var(--landing-violet-deep))" />
-          <stop offset="1" stopColor="hsl(var(--landing-sky-light))" />
-        </linearGradient>
-      </defs>
-      <path d="M5 7c0-1.7 1.3-3 3-3h5.1c1.1 0 2.1.6 2.6 1.6L20 14l4.3-8.4c.5-1 1.5-1.6 2.6-1.6H32c1.7 0 3 1.3 3 3v26c0 1.7-1.3 3-3 3h-5.3c-1.7 0-3-1.3-3-3V18.4l-3.7 7.2-3.7-7.2V33c0 1.7-1.3 3-3 3H8c-1.7 0-3-1.3-3-3V7Z" fill="url(#menerio-mark-a)" />
-      <path d="M20 14 31.5 4H35v25.2c0 1.8-2.2 2.7-3.5 1.4L20 19.1 8.5 30.6C7.2 31.9 5 31 5 29.2V4h3.5L20 14Z" fill="url(#menerio-mark-b)" opacity=".62" />
-    </svg>
-  );
-}
-
 function ParticleField() {
   const seeds = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
     x: (i * 137) % 100,
