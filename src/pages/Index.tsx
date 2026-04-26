@@ -1,23 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, Link, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
-import { ArrowRight, Brain, CheckCircle2, FileText, Github, Globe, Linkedin, Loader2, Mail, Plug, Search, Shield, Twitter } from "lucide-react";
+import { ArrowRight, CheckCircle2, Github, Linkedin, Loader2, Mail, Twitter } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Meni } from "@/components/Meni";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
-
-const features = [
-  { icon: Brain, title: "AI-Powered Memory", description: "Every note is automatically embedded and classified. Your AI understands your thoughts by meaning, not just keywords." },
-  { icon: Search, title: "Semantic Search", description: "Find anything by what it means, not just what it says. Ask questions and get relevant results from your entire knowledge base." },
-  { icon: FileText, title: "Rich Note-Taking", description: "Capture thoughts, ideas, meeting notes, and references. Tag, pin, and organize everything your way." },
-  { icon: Plug, title: "MCP-Ready", description: "Connect any AI tool — Claude, ChatGPT, Cursor — to your brain via the Model Context Protocol. One brain, every AI." },
-  { icon: Globe, title: "Open & Portable", description: "Your knowledge lives in your database. No vendor lock-in, no SaaS middlemen. Export anytime." },
-  { icon: Shield, title: "Private & Secure", description: "Row-level security ensures only you can access your thoughts. Your brain belongs to you." },
-];
 
 const thoughts = [
   { text: "Ben recommended Atomic Habits for improving my morning routine.", people: ["Ben"], categories: ["Recommendation", "Book", "Habits"] },
@@ -26,18 +14,33 @@ const thoughts = [
   { text: "Maya wants to move the team offsite to Lisbon in September.", people: ["Maya"], categories: ["Plan", "Travel", "Team"] },
 ];
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } }),
-};
+function MenerioMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" className={cn("h-9 w-9", className)}>
+      <defs>
+        <linearGradient id="menerio-mark-a" x1="5" x2="35" y1="5" y2="35">
+          <stop stopColor="hsl(var(--landing-plain-white))" />
+          <stop offset=".38" stopColor="hsl(var(--landing-lavender))" />
+          <stop offset="1" stopColor="hsl(var(--landing-sky-primary))" />
+        </linearGradient>
+        <linearGradient id="menerio-mark-b" x1="8" x2="32" y1="34" y2="4">
+          <stop stopColor="hsl(var(--landing-violet-deep))" />
+          <stop offset="1" stopColor="hsl(var(--landing-sky-light))" />
+        </linearGradient>
+      </defs>
+      <path d="M5 7c0-1.7 1.3-3 3-3h5.1c1.1 0 2.1.6 2.6 1.6L20 14l4.3-8.4c.5-1 1.5-1.6 2.6-1.6H32c1.7 0 3 1.3 3 3v26c0 1.7-1.3 3-3 3h-5.3c-1.7 0-3-1.3-3-3V18.4l-3.7 7.2-3.7-7.2V33c0 1.7-1.3 3-3 3H8c-1.7 0-3-1.3-3-3V7Z" fill="url(#menerio-mark-a)" />
+      <path d="M20 14 31.5 4H35v25.2c0 1.8-2.2 2.7-3.5 1.4L20 19.1 8.5 30.6C7.2 31.9 5 31 5 29.2V4h3.5L20 14Z" fill="url(#menerio-mark-b)" opacity=".62" />
+    </svg>
+  );
+}
 
 function ParticleField() {
-  const seeds = useMemo(() => Array.from({ length: 60 }, (_, i) => ({
-    x: (i * 97) % 100,
-    y: (i * 53) % 100,
-    s: 0.5 + ((i * 31) % 30) / 30,
-    d: (i * 17) % 18,
-    dur: 14 + ((i * 11) % 16),
+  const seeds = useMemo(() => Array.from({ length: 28 }, (_, i) => ({
+    x: (i * 137) % 100,
+    y: (i * 61) % 100,
+    s: 1 + ((i * 17) % 4),
+    d: (i * 19) % 18,
+    dur: 18 + ((i * 13) % 20),
   })), []);
 
   return (
@@ -45,8 +48,8 @@ function ParticleField() {
       {seeds.map((p, i) => (
         <span
           key={i}
-          className="landing-particle absolute rounded-full bg-[hsl(var(--landing-sky-highlight))] shadow-[0_0_12px_hsl(var(--landing-sky-highlight)/.55)]"
-          style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${p.s * 3}px`, height: `${p.s * 3}px`, animationDelay: `-${p.d}s`, animationDuration: `${p.dur}s`, opacity: 0.3 + (p.s - 0.5) * 0.6 }}
+          className="landing-particle absolute rounded-full bg-[hsl(var(--landing-sky-highlight))] shadow-[0_0_8px_hsl(var(--landing-sky-highlight)/.8)]"
+          style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${p.s}px`, height: `${p.s}px`, animationDelay: `-${p.d}s`, animationDuration: `${p.dur}s`, opacity: i % 5 === 0 ? 0.8 : 0.45 }}
         />
       ))}
     </div>
@@ -69,39 +72,43 @@ function CaptureShowcase() {
       if (charIndex <= current.text.length) {
         setTyped(current.text.slice(0, charIndex));
         charIndex += 1;
-        timers.push(window.setTimeout(tick, 28 + ((charIndex * 7) % 22)));
+        timers.push(window.setTimeout(tick, 32 + ((charIndex * 7) % 20)));
       } else {
-        timers.push(window.setTimeout(() => setPhase("analysing"), 500));
-        timers.push(window.setTimeout(() => setPhase("tagged"), 1200));
-        timers.push(window.setTimeout(() => setIdx((value) => (value + 1) % thoughts.length), 4400));
+        timers.push(window.setTimeout(() => setPhase("analysing"), 520));
+        timers.push(window.setTimeout(() => setPhase("tagged"), 1220));
+        timers.push(window.setTimeout(() => setIdx((value) => (value + 1) % thoughts.length), 4500));
       }
     };
 
-    timers.push(window.setTimeout(tick, 400));
+    timers.push(window.setTimeout(tick, 360));
     return () => timers.forEach(window.clearTimeout);
   }, [idx]);
 
   const current = thoughts[idx];
 
   return (
-    <div className="mx-auto w-full max-w-[760px]">
-      <div className="relative h-[340px] overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-mid)/.24)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.92),hsl(var(--landing-page)/.88))] shadow-[0_20px_60px_hsl(var(--landing-ink)/.5),0_0_40px_hsl(var(--landing-sky-primary)/.18)] backdrop-blur-xl">
-        <div className="flex items-center justify-between border-b border-[hsl(var(--landing-sky-mid)/.14)] p-3">
-          <span className="rounded-full border border-[hsl(var(--landing-sky-mid)/.3)] bg-[hsl(var(--landing-sky-mid)/.12)] px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[.12em] text-[hsl(var(--landing-sky-light))]">NEW NOTE</span>
+    <div className="relative mx-auto w-full max-w-[580px]">
+      <div className="pointer-events-none absolute -right-24 -top-12 z-10 hidden md:block">
+        <Meni size={86} />
+      </div>
+      <div className="flex h-[340px] min-h-[340px] flex-col overflow-hidden rounded-[18px] border border-[hsl(var(--landing-sky-primary)/.25)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.95),hsl(var(--landing-card-deep)/.95))] px-[22px] py-[18px] text-left shadow-[0_20px_60px_hsl(var(--landing-ink)/.5),0_0_40px_hsl(var(--landing-sky-primary)/.18)]">
+        <div className="mb-4 flex items-center justify-between border-b border-[hsl(var(--landing-plain-white)/.06)] pb-3">
+          <span className="rounded bg-[hsl(var(--landing-sky-primary)/.18)] px-2 py-1 font-mono text-[9.5px] uppercase tracking-[.12em] text-[hsl(var(--landing-sky-highlight))]">NEW NOTE</span>
           <span className="font-mono text-[11px] text-[hsl(var(--landing-faint))]">just now</span>
         </div>
 
-        <div className="flex h-[70px] items-center px-5 text-left text-lg leading-relaxed text-[hsl(var(--landing-text))] sm:px-7">
+        <div className="h-[70px] min-h-[70px] overflow-hidden text-[18px] leading-[1.45] text-[hsl(var(--landing-text))]">
           <span>{typed}</span>
           {phase === "typing" && <span className="capture-caret text-[hsl(var(--landing-sky-highlight))]">▍</span>}
         </div>
 
-        <div className={cn("relative mx-5 h-10 transition-opacity duration-300 sm:mx-7", phase === "typing" ? "opacity-0" : "opacity-100")}>
-          <div className="absolute inset-x-0 top-1/2 h-px bg-[hsl(var(--landing-sky-mid)/.16)]" />
-          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[hsl(var(--landing-page))] px-3 font-mono text-[10px] uppercase tracking-[.15em] text-[hsl(var(--landing-faint))]">menerio is reading…</span>
+        <div className={cn("my-4 flex h-[16px] items-center gap-2 font-mono text-[11px] text-[hsl(var(--landing-faint))] transition-opacity duration-300", phase === "typing" ? "invisible opacity-0" : "visible opacity-100")}>
+          <span className="h-px flex-1 bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
+          <span>menerio is reading…</span>
+          <span className="h-px flex-1 bg-[linear-gradient(90deg,transparent,hsl(var(--landing-sky-primary)/.3),transparent)]" />
         </div>
 
-        <div className={cn("min-h-[130px] space-y-4 px-5 pt-2 text-left transition-opacity duration-300 sm:px-7", phase === "tagged" ? "opacity-100" : "opacity-0")}>
+        <div className={cn("flex min-h-[130px] flex-col gap-3 transition-opacity duration-300", phase === "tagged" ? "opacity-100" : "opacity-0")}>
           {current.people.length > 0 && (
             <PillGroup label="people">
               {current.people.map((person, i) => <PeoplePill key={person} name={person} delay={i * 0.15} />)}
@@ -112,44 +119,72 @@ function CaptureShowcase() {
           </PillGroup>
         </div>
       </div>
-      <div className="mt-4 flex justify-center gap-2" aria-hidden="true">
-        {thoughts.map((_, i) => <span key={i} className={cn("h-2 w-7 rounded-full bg-[hsl(var(--landing-sky-mid)/.18)] transition-all", i === idx && "bg-[hsl(var(--landing-sky-highlight))] shadow-[0_0_16px_hsl(var(--landing-sky-highlight)/.65)]")} />)}
+      <div className="mt-7 flex justify-center gap-2" aria-hidden="true">
+        {thoughts.map((_, i) => <span key={i} className={cn("h-1 w-[22px] rounded-full bg-[hsl(var(--landing-plain-white)/.1)] transition-all", i === idx && "bg-[hsl(var(--landing-sky-primary))] shadow-[0_0_8px_hsl(var(--landing-sky-primary)/.6)]")} />)}
       </div>
     </div>
   );
 }
 
 function PillGroup({ label, children }: { label: string; children: ReactNode }) {
-  return <div><div className="mb-2 font-mono text-[10px] uppercase tracking-[.15em] text-[hsl(var(--landing-faint))]">{label}</div><div className="flex flex-wrap gap-2">{children}</div></div>;
+  return <div className="flex flex-wrap items-center gap-[10px]"><div className="min-w-[70px] font-mono text-[9.5px] uppercase tracking-[.15em] text-[hsl(var(--landing-faint))]">{label}</div><div className="flex flex-wrap gap-1.5">{children}</div></div>;
 }
 
 function PeoplePill({ name, delay }: { name: string; delay: number }) {
-  return <span className="capture-pill-enter inline-flex items-center gap-2 rounded-full border border-[hsl(var(--landing-pink)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-pink)/.18),hsl(var(--landing-pink)/.08))] py-1 pl-1 pr-3 text-sm font-medium text-[hsl(var(--landing-pink-text))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[linear-gradient(135deg,hsl(var(--landing-pink)),hsl(var(--landing-pink-deep)))] text-xs font-bold text-[hsl(var(--landing-plain-white))]">{name[0]}</span>{name}</span>;
+  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--landing-pink)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-pink)/.18),hsl(var(--landing-pink)/.08))] py-[5px] pl-1 pr-[11px] text-[12.5px] font-medium text-[hsl(var(--landing-pink-text))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[linear-gradient(135deg,hsl(var(--landing-pink)),hsl(var(--landing-pink-deep)))] text-[11px] font-bold text-[hsl(var(--landing-plain-white))]">{name[0]}</span>{name}</span>;
 }
 
 function CategoryPill({ label, delay }: { label: string; delay: number }) {
-  return <span className="capture-pill-enter inline-flex items-center gap-2 rounded-full border border-[hsl(var(--landing-sky-mid)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-sky-mid)/.18),hsl(var(--landing-sky-mid)/.08))] px-3 py-1.5 text-sm font-medium text-[hsl(var(--landing-sky-white))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-sky-mid))] shadow-[0_0_10px_hsl(var(--landing-sky-mid))]" />{label}</span>;
+  return <span className="capture-pill-enter inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--landing-sky-primary)/.4)] bg-[linear-gradient(180deg,hsl(var(--landing-sky-primary)/.18),hsl(var(--landing-sky-primary)/.08))] py-[5px] pl-[11px] pr-[11px] text-[12.5px] font-medium text-[hsl(var(--landing-sky-white))] opacity-0" style={{ animationDelay: `${delay}s` }}><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-sky-primary))] shadow-[0_0_6px_hsl(var(--landing-sky-primary))]" />{label}</span>;
+}
+
+function LandingNav() {
+  const navigate = useNavigate();
+  return (
+    <header className="sticky top-0 z-50 border-b border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-panel)/.78)] backdrop-blur-[14px]">
+      <div className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-[18px] md:px-9">
+        <Link to="/" className="flex items-center gap-2.5 font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">
+          <MenerioMark />
+          <span>Menerio</span>
+        </Link>
+        <nav className="hidden items-center gap-1 text-sm font-medium text-[hsl(var(--landing-muted))] md:flex">
+          {['Home', 'Features', 'Integrations', 'Docs', 'Pricing'].map((item) => (
+            <a key={item} href={item === 'Home' ? '#' : `#${item.toLowerCase()}`} className={cn("rounded-full px-4 py-2 transition hover:bg-[hsl(var(--landing-plain-white)/.04)] hover:text-[hsl(var(--landing-text))]", item === 'Home' && "bg-[hsl(var(--landing-sky-primary)/.14)] font-semibold text-[hsl(var(--landing-sky-primary))]")}>{item}</a>
+          ))}
+        </nav>
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate('/auth')} className="hidden text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-text))] sm:inline-flex">Sign In</button>
+          <Button onClick={() => navigate('/auth?tab=signup')} className="rounded-xl border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-5 py-[11px] text-sm font-semibold text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+            Get Started — Free
+          </Button>
+        </div>
+      </div>
+    </header>
+  );
 }
 
 function LandingFooter() {
   const links = [{ icon: Twitter, label: "Twitter" }, { icon: Github, label: "GitHub" }, { icon: Linkedin, label: "LinkedIn" }, { icon: Mail, label: "Email" }];
   return (
-    <footer className="border-t border-[hsl(var(--landing-sky-mid)/.14)] bg-[hsl(var(--landing-page))]">
-      <div className="container grid gap-10 py-14 md:grid-cols-3">
+    <footer id="docs" className="border-t border-[hsl(var(--landing-plain-white)/.06)] bg-[hsl(var(--landing-page))] px-6 py-12">
+      <div className="mx-auto grid max-w-[1180px] gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
-          <Link to="/" className="mb-4 flex items-center gap-3"><Meni size={48} /><span className="font-display text-xl font-bold text-[hsl(var(--landing-text))]">Menerio</span></Link>
-          <p className="max-w-xs text-sm leading-relaxed text-[hsl(var(--landing-muted))]">One brain. Every AI. Capture, search, and connect your thoughts.</p>
+          <Link to="/" className="mb-3 flex items-center gap-3"><MenerioMark /><span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span></Link>
+          <p className="max-w-sm text-sm leading-relaxed text-[hsl(var(--landing-muted))]">One brain. Every AI. Capture, search, and connect your thoughts.</p>
         </div>
         <FooterColumn title="Product" links={[{ label: "Docs", to: "/docs" }, { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true }]} />
         <FooterColumn title="Legal" links={[{ label: "Privacy Policy", to: "/privacy" }, { label: "Terms of Service", to: "/terms" }, { label: "Cookie Policy", to: "/cookies" }]} />
       </div>
-      <div className="border-t border-[hsl(var(--landing-sky-mid)/.14)]"><div className="container flex flex-col items-center justify-between gap-4 py-6 sm:flex-row"><p className="text-xs text-[hsl(var(--landing-muted))]">© 2026 Menerio. All rights reserved.</p><div className="flex gap-3">{links.map(({ icon: Icon, label }) => <a key={label} href="#" aria-label={label} className="flex h-8 w-8 items-center justify-center rounded-md text-[hsl(var(--landing-muted))] transition hover:bg-[hsl(var(--landing-sky-mid)/.12)] hover:text-[hsl(var(--landing-sky-highlight))]"><Icon className="h-4 w-4" /></a>)}</div></div></div>
+      <div className="mx-auto mt-9 flex max-w-[1180px] flex-col items-center justify-between gap-4 border-t border-[hsl(var(--landing-plain-white)/.05)] pt-5 text-xs text-[hsl(var(--landing-faint))] sm:flex-row">
+        <p>© 2026 Menerio. All rights reserved.</p>
+        <div className="flex gap-4">{links.map(({ icon: Icon, label }) => <a key={label} href="#" aria-label={label} className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--landing-plain-white)/.04)] text-[hsl(var(--landing-muted))] transition hover:bg-[hsl(var(--landing-sky-primary)/.12)] hover:text-[hsl(var(--landing-sky-highlight))]"><Icon className="h-3.5 w-3.5" /></a>)}</div>
+      </div>
     </footer>
   );
 }
 
 function FooterColumn({ title, links }: { title: string; links: { label: string; to: string; external?: boolean }[] }) {
-  return <div><h3 className="mb-4 text-sm font-semibold text-[hsl(var(--landing-text))]">{title}</h3><ul className="space-y-3">{links.map((link) => <li key={link.to}>{link.external ? <a href={link.to} target="_blank" rel="noopener noreferrer" className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</a> : <Link to={link.to} className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</Link>}</li>)}</ul></div>;
+  return <div><h3 className="mb-3 font-display text-sm font-bold text-[hsl(var(--landing-text))]">{title}</h3><ul className="space-y-3">{links.map((link) => <li key={link.to}>{link.external ? <a href={link.to} target="_blank" rel="noopener noreferrer" className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</a> : <Link to={link.to} className="text-sm text-[hsl(var(--landing-muted))] transition hover:text-[hsl(var(--landing-sky-highlight))]">{link.label}</Link>}</li>)}</ul></div>;
 }
 
 const Index = () => {
@@ -160,23 +195,56 @@ const Index = () => {
   if (session) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
+    <div className="min-h-screen overflow-hidden bg-[hsl(var(--landing-page))] text-[hsl(var(--landing-text))]">
       <SEOHead title="Menerio — One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
-      <section className="relative overflow-hidden px-4 py-[60px] sm:px-9">
-        <div className="absolute inset-0"><div className="landing-aurora-drift absolute -left-40 -top-52 h-[720px] w-[720px] rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-primary)/.24),transparent_62%)] blur-3xl" /><div className="landing-aurora-drift absolute -right-52 top-20 h-[620px] w-[620px] rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-highlight)/.16),transparent_64%)] blur-3xl [animation-duration:30s]" /><div className="landing-aurora-drift absolute bottom-0 left-1/3 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-deep)/.18),transparent_62%)] blur-3xl [animation-duration:26s]" /><div className="absolute inset-0 opacity-[.06] mix-blend-overlay [background-image:radial-gradient(hsl(var(--landing-plain-white))_1px,transparent_1px)] [background-size:18px_18px]" /></div>
-        <ParticleField />
-        <div className="relative mx-auto flex max-w-[1280px] flex-col items-center">
-          <Badge variant="info" className="mb-8 rounded-full border border-[hsl(var(--landing-sky-mid)/.24)] bg-[hsl(var(--landing-sky-mid)/.1)] px-4 py-1.5 text-sm text-[hsl(var(--landing-sky-light))]">A personal AI brain · MCP-native · Open source</Badge>
-          <div className="flex flex-col items-center justify-center gap-8 lg:flex-row lg:gap-14">
-            <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="relative flex flex-col items-center"><div className="absolute inset-8 rounded-full bg-[hsl(var(--landing-sky-highlight)/.24)] blur-3xl" /><Meni size={220} className="relative" /><span className="-mt-3 rounded-full border border-[hsl(var(--landing-sky-mid)/.24)] bg-[hsl(var(--landing-page)/.72)] px-3 py-1 font-mono text-[10px] lowercase tracking-[.14em] text-[hsl(var(--landing-muted))]">meni</span></motion.div>
-            <motion.div initial="hidden" animate="visible" className="text-center lg:text-left"><motion.h1 variants={fadeUp} custom={0} className="font-display text-[clamp(54px,6vw,88px)] font-extrabold leading-[.92] tracking-tight text-[hsl(var(--landing-text))]">One Brain.<br /><span className="bg-[linear-gradient(90deg,hsl(var(--landing-sky-light)),hsl(var(--landing-sky-primary)))] bg-clip-text text-transparent">Every AI.</span></motion.h1><motion.p variants={fadeUp} custom={1} className="mt-6 max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))]">Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.</motion.p></motion.div>
-          </div>
-          <motion.div initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .25, duration: .6 }} className="mt-10 w-full"><CaptureShowcase /></motion.div>
-          <div className="mt-8 flex flex-col items-center gap-5"><Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="group gap-2 rounded-xl px-7 text-base shadow-lg shadow-primary/25">Get Started — Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Button><div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-[hsl(var(--landing-body))]"><span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" />Capture from web, mobile, voice</span><span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" />Available in Claude, ChatGPT, Gemini</span><span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" />Open source · AGPL-3.0</span></div></div>
+      <LandingNav />
+      <main className="relative min-h-[calc(100vh-81px)] overflow-hidden">
+        <div className="absolute inset-0">
+          <div className="landing-aurora-drift absolute -left-[200px] -top-[150px] h-[700px] w-[1100px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)] blur-3xl" />
+          <div className="landing-aurora-drift absolute -right-[150px] top-[100px] h-[600px] w-[900px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-primary)/.25),transparent_70%)] blur-3xl [animation-duration:26s]" />
+          <div className="landing-aurora-drift absolute left-[30%] top-[400px] h-[500px] w-[1200px] bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.3),transparent_70%)] blur-3xl [animation-duration:30s]" />
+          <div className="absolute inset-0 opacity-[.06] mix-blend-overlay [background-image:radial-gradient(hsl(var(--landing-plain-white))_1px,transparent_1px)] [background-size:3px_3px]" />
         </div>
-      </section>
-      <section className="border-t border-[hsl(var(--landing-sky-mid)/.14)] bg-[hsl(var(--landing-page))]"><div className="container py-24"><div className="mb-14 text-center"><Badge variant="secondary" className="mb-4">Features</Badge><h2 className="font-display text-[clamp(34px,4.2vw,52px)] font-extrabold text-[hsl(var(--landing-text))]">Your thoughts, supercharged by AI</h2><p className="mx-auto mt-4 max-w-2xl text-base text-[hsl(var(--landing-muted))]">Not just another notes app. A database-backed knowledge system built for the age of AI agents.</p></div><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{features.map((feature, i) => <motion.div key={feature.title} variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }} custom={i}><Card className="group h-full rounded-2xl border-[hsl(var(--landing-sky-mid)/.18)] bg-[linear-gradient(180deg,hsl(var(--landing-panel)/.6),hsl(var(--landing-page)/.6))] p-6 shadow-none transition duration-300 hover:-translate-y-0.5 hover:border-[hsl(var(--landing-sky-mid)/.32)]"><div className="mb-4 flex h-[42px] w-[42px] items-center justify-center rounded-[10px] bg-[hsl(var(--landing-sky-primary)/.14)] text-[hsl(var(--landing-sky-mid))]"><feature.icon className="h-5 w-5" /></div><h3 className="font-display text-[17px] font-bold text-[hsl(var(--landing-text))]">{feature.title}</h3><p className="mt-2 text-[13.5px] leading-relaxed text-[hsl(var(--landing-muted))]">{feature.description}</p></Card></motion.div>)}</div></div></section>
-      <section className="px-4 pb-20 pt-10 text-center"><div className="mx-auto max-w-[800px]"><h2 className="font-display text-[clamp(36px,5vw,52px)] font-extrabold text-[hsl(var(--landing-text))]">Ready to build your brain?</h2><p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-[hsl(var(--landing-muted))]">Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.</p><Button size="xl" onClick={() => navigate("/auth?tab=signup")} className="group mt-8 gap-2 rounded-xl px-8 text-base">Start Your Brain <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Button></div></section>
+        <ParticleField />
+
+        <section className="relative z-10 mx-auto max-w-[1280px] px-6 pb-20 pt-[60px] text-center md:px-9">
+          <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--landing-sky-primary)/.25)] bg-[hsl(var(--landing-sky-primary)/.12)] px-3.5 py-[7px] text-[12.5px] font-semibold text-[hsl(var(--landing-sky-highlight))]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--landing-success))] shadow-[0_0_8px_hsl(var(--landing-success)/.8)]" />
+            A personal AI brain · MCP-native · Open source
+          </div>
+
+          <div className="mx-auto mb-[14px] grid max-w-[980px] items-center gap-9 text-left md:grid-cols-[auto_1fr]">
+            <div className="relative mx-auto flex flex-col items-center gap-1.5 md:mx-0">
+              <div className="absolute -inset-5 rounded-full bg-[radial-gradient(circle,hsl(var(--landing-sky-primary)/.35),transparent_65%)] blur-xl" />
+              <Meni size={168} className="relative z-10 drop-shadow-[0_12px_30px_hsl(var(--landing-sky-primary)/.45)]" />
+              <span className="relative z-10 rounded-full border border-[hsl(var(--landing-sky-primary)/.3)] bg-[hsl(var(--landing-sky-deep)/.25)] px-2.5 py-[3px] font-mono text-[11px] lowercase tracking-[.15em] text-[hsl(var(--landing-sky-primary))]">meni</span>
+            </div>
+            <div className="text-center md:text-left">
+              <h1 className="font-display text-[clamp(54px,7.4vw,112px)] font-extrabold leading-[.96] text-[hsl(var(--landing-text))] [text-shadow:0_4px_30px_hsl(var(--landing-ink)/.5)]">
+                One Brain.<br />
+                <span className="bg-[linear-gradient(180deg,hsl(var(--landing-sky-light)),hsl(var(--landing-sky-primary))_50%,hsl(var(--landing-sky-deep)))] bg-clip-text text-transparent drop-shadow-[0_0_50px_hsl(var(--landing-sky-primary)/.5)]">Every AI.</span>
+              </h1>
+              <p className="mx-auto mt-[18px] max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))] md:mx-0">Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.</p>
+            </div>
+          </div>
+
+          <div className="mx-auto mb-6 flex min-h-[360px] max-w-[720px] items-start justify-center">
+            <CaptureShowcase />
+          </div>
+
+          <div className="mb-[22px] flex justify-center">
+            <Button onClick={() => navigate('/auth?tab=signup')} className="group rounded-[14px] border border-transparent bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] px-7 py-[15px] text-[15px] font-semibold text-[hsl(var(--landing-plain-white))] shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] hover:brightness-110">
+              Get Started — Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-[13px] text-[hsl(var(--landing-body))]">
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Capture from web, mobile, voice</span>
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Available in Claude, ChatGPT, Gemini</span>
+            <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Open source · AGPL-3.0</span>
+          </div>
+        </section>
+      </main>
       <LandingFooter />
     </div>
   );
