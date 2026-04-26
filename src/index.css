@@ -196,6 +196,51 @@
   h6 { @apply text-base leading-normal font-semibold; }
 }
 
+@layer utilities {
+  @keyframes meni-bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  @keyframes meni-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(.1); }
+  }
+
+  @keyframes meni-sparkle {
+    0%, 100% { opacity: .45; transform: scale(.82); }
+    50% { opacity: 1; transform: scale(1.18); }
+  }
+
+  @keyframes landing-aurora {
+    0% { transform: translate3d(-3%, 2%, 0) scale(1); }
+    100% { transform: translate3d(5%, -4%, 0) scale(1.08); }
+  }
+
+  @keyframes landing-particle {
+    0% { transform: translateY(20vh); }
+    100% { transform: translateY(-120vh); }
+  }
+
+  @keyframes capture-caret {
+    0%, 45% { opacity: 1; }
+    46%, 100% { opacity: 0; }
+  }
+
+  @keyframes capture-pill-in {
+    0% { opacity: 0; transform: translateY(4px) scale(.9); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .meni-body { animation: meni-bob 4s ease-in-out infinite; transform-origin: center; }
+  .meni-eyes { animation: meni-blink 5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .meni-sparkle { animation: meni-sparkle 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .landing-aurora-drift { animation: landing-aurora 24s ease-in-out infinite alternate; }
+  .landing-particle { animation-name: landing-particle; animation-timing-function: linear; animation-iteration-count: infinite; }
+  .capture-caret { animation: capture-caret .9s steps(1) infinite; }
+  .capture-pill-enter { animation: capture-pill-in .4s cubic-bezier(.2,.8,.2,1) both; }
+}
+
 /* TipTap Editor Styles */
 .tiptap-editor .tiptap {
   outline: none;
