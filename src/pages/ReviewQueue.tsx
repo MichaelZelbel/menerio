@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   UserPlus,
   Link2,
@@ -80,7 +80,6 @@ export default function ReviewQueue() {
   const { user } = useAuth();
   const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
   const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
 
@@ -106,11 +105,17 @@ export default function ReviewQueue() {
     showToast.success("Wiki update reviewed");
   };
 
+  const rollbackWikiRevisionById = async (revisionId: string) => {
+    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: revisionId });
+    if (error) throw error;
+  };
+
   const handleWikiRollback = async () => {
     if (!rollbackWikiRevision) return;
-    const { error } = await supabase.rpc("wiki_rollback_revision" as any, { p_revision_id: rollbackWikiRevision.id });
-    if (error) {
-      showToast.error("Could not roll back wiki update: " + error.message);
+    try {
+      await rollbackWikiRevisionById(rollbackWikiRevision.id);
+    } catch (error: any) {
+      showToast.error("Could not roll back wiki update: " + (error.message || "Unknown error"));
       return;
     }
     setRollbackWikiRevision(null);
@@ -449,20 +454,45 @@ export default function ReviewQueue() {
     }
   };
 
-  const handleKeepAll = () => {
-    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
-    showToast.success("All visible changes kept");
-  };
-
   const handleRemoveAll = async () => {
     for (const item of items) {
       await revertAppliedChange(item);
       updateStatus.mutate({ id: item.id, status: "removed" });
     }
+    for (const revision of wikiRevisions) {
+      await rollbackWikiRevisionById(revision.id);
+    }
+    refreshReviewQueues();
     showToast.info("All visible changes removed");
   };
 
+  const handleNeverAgainAll = async () => {
+    for (const item of items) {
+      await revertAppliedChange(item);
+      await createSuppression(item);
+      updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+    }
+    for (const revision of wikiRevisions) {
+      await rollbackWikiRevisionById(revision.id);
+    }
+    refreshReviewQueues();
+    showToast.info("All visible changes blocked where possible and rolled back");
+  };
+
+  const handleKeepAll = async () => {
+    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    for (const revision of wikiRevisions) {
+      await handleWikiLooksGood(revision);
+    }
+    refreshReviewQueues();
+    showToast.success("All visible changes kept");
+  };
+
   const hasReviewItems = items.length + wikiRevisions.length > 0;
+  const combinedReviewItems = [
+    ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
+    ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   if (isLoading) {
     return (
@@ -486,16 +516,17 @@ export default function ReviewQueue() {
 
       {hasReviewItems && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || items.length === 0}>
-            <Check className="h-4 w-4 mr-1" />
-            Keep all
-          </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || items.length === 0}>
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={updateStatus.isPending || !hasReviewItems}>
             <X className="h-4 w-4 mr-1" />
-            Remove all
+            Never Again
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
-            Review later
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || !hasReviewItems}>
+            <RotateCcw className="h-4 w-4 mr-1" />
+            Roll Back
+          </Button>
+          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || !hasReviewItems}>
+            <Check className="h-4 w-4 mr-1" />
+            Keep
           </Button>
         </div>
       )}
@@ -512,10 +543,12 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {wikiRevisions.map((revision) => {
-            const diff = buildLineDiff(revision.previous_content, revision.new_content);
-            return (
-              <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
+          {combinedReviewItems.map((entry) => {
+            if (entry.kind === "wiki") {
+              const { revision } = entry;
+              const diff = buildLineDiff(revision.previous_content, revision.new_content);
+              return (
+                <Card key={`wiki-${revision.id}`} className="transition-all hover:shadow-lg">
                 <CardHeader className="pb-2">
                   <div className="flex items-start gap-3">
                     <BookOpen className="h-5 w-5 mt-0.5 text-primary" />
@@ -566,20 +599,25 @@ export default function ReviewQueue() {
                     </Button>
                     <div className="flex gap-2">
                       <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
+                        <X className="h-4 w-4 mr-1" />
+                        Never Again
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
                         <RotateCcw className="h-4 w-4 mr-1" />
-                        Roll back
+                        Roll Back
                       </Button>
                       <Button size="sm" onClick={() => handleWikiLooksGood(revision)}>
                         <Check className="h-4 w-4 mr-1" />
-                        Looks good
+                        Keep
                       </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            );
-          })}
-          {items.map((item) => {
+              );
+            }
+
+            const { item } = entry;
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
 
@@ -591,10 +629,6 @@ export default function ReviewQueue() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <CardTitle className="text-base">{item.title}</CardTitle>
-                        <Badge variant="outline" className="text-[10px]">{config.label}</Badge>
-                        <Badge variant={item.status === "auto_applied_unreviewed" ? "default" : "secondary"} className="text-[10px]">
-                          {item.status === "auto_applied_unreviewed" ? "Already added" : "Needs approval"}
-                        </Badge>
                         {item.is_sensitive && <Badge variant="outline" className="text-[10px]">Sensitive</Badge>}
                       </div>
                       {item.description && (
@@ -625,7 +659,7 @@ export default function ReviewQueue() {
                         disabled={updateStatus.isPending}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Never add again
+                        Never Again
                       </Button>
                       <Button
                         size="sm"
@@ -633,7 +667,8 @@ export default function ReviewQueue() {
                         onClick={() => handleRemove(item)}
                         disabled={updateStatus.isPending}
                       >
-                        Remove
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Roll Back
                       </Button>
                       <Button
                         size="sm"
