@@ -360,7 +360,7 @@ export default function People() {
           <PersonTimeline
             personId={selectedPerson.id}
             personName={selectedPerson.name}
-            people={people.map((person) => ({ id: person.id, name: person.name }))}
+            people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
             onAskMira={(context) => {
               setConversationContext(context);
               setActivePersonTab("conversation");
@@ -387,6 +387,106 @@ export default function People() {
           setSelectedPersonId(null);
         }}
       />
+    </div>
+  );
+}
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <SEOHead title="People — Menerio" noIndex />
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-normal">People</h1>
+          <p className="text-sm text-muted-foreground">Manage the people connected to your notes.</p>
+        </div>
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" /> Add person
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add person</DialogTitle>
+              <DialogDescription>Create a new contact for your personal knowledge graph.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="person-name">Name</Label>
+              <Input
+                id="person-name"
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && createName.trim()) {
+                    createPerson.mutate(createName);
+                  }
+                }}
+                placeholder="Ada Lovelace"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button onClick={() => createPerson.mutate(createName)} disabled={!createName.trim() || createPerson.isPending}>
+                {createPerson.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search people..."
+          className="pl-9"
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <Users className="h-8 w-8 text-muted-foreground" />
+            <div>
+              <p className="font-medium">No people found</p>
+              <p className="text-sm text-muted-foreground">Add a person or adjust your search.</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((person) => (
+            <button
+              key={person.id}
+              type="button"
+              onClick={() => setSelectedPersonId(person.id)}
+              className="flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-foreground">{person.name}</p>
+                  {(person.aliases || []).length > 0 && (
+                    <p className="truncate text-xs text-muted-foreground">{person.aliases.join(", ")}</p>
+                  )}
+                </div>
+              </div>
+              {(person.tags || []).length > 0 && (
+                <Badge variant="secondary" className="ml-3 shrink-0">{person.tags[0]}</Badge>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
