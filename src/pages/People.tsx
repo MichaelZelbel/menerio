@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-const useIsAdmin = () => { const { role } = useAuth(); return role === "admin"; };
 import { showToast } from "@/lib/toast";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -32,7 +31,6 @@ import {
   Trash2,
   X,
   FileText,
-  Link2,
   Merge,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -57,12 +55,6 @@ interface Person {
   updated_at: string;
 }
 
-// Connected apps we know about for identity mapping
-const KNOWN_APPS = [
-  { key: "cherishly", label: "Cherishly" },
-  { key: "temerio", label: "Temerio" },
-];
-
 export default function People() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -70,13 +62,11 @@ export default function People() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
-  const isAdmin = useIsAdmin();
   const [mergeOpen, setMergeOpen] = useState(false);
   // Inline editing state for detail view
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
-  const [editingMappings, setEditingMappings] = useState<Record<string, { display_name?: string }> | null>(null);
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
 
@@ -339,238 +329,3 @@ export default function People() {
             onMergeSuggested={() => setMergeOpen(true)}
           />
 
-          {/* App Identity Mapping — admin only */}
-          {isAdmin && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Link2 className="h-4 w-4 text-muted-foreground" />
-                App Identity Mapping
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {KNOWN_APPS.map((app) => {
-                  const mapping = mappings[app.key];
-                  return (
-                    <div key={app.key} className="flex items-center gap-3">
-                      <span className="text-sm font-medium w-24 shrink-0">{app.label}</span>
-                      {isEditing ? (
-                        <Input
-                          className="h-8 text-sm"
-                          placeholder={`Display name in ${app.label}...`}
-                          value={mapping?.display_name || ""}
-                          onChange={(e) => setAppMapping(app.key, e.target.value)}
-                        />
-                      ) : (
-                        <span className="text-sm text-muted-foreground">
-                          {mapping?.display_name || "—"}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {!isEditing && Object.keys(mappings).length === 0 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  No app mappings configured. Click Edit to add how this person is known in other apps.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-          )}
-
-          {/* Notes */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Notes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isEditing ? (
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setEditingNotes(e.target.value)}
-                  placeholder="Freeform notes about this person..."
-                  rows={3}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {notes || "No notes yet."}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Related Notes */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                Related Knowledge
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relatedNotes.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No notes mention this person yet.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedNotes.map((note: any) => (
-                    <Link
-                      key={note.id}
-                      to={`/dashboard/notes/${note.id}`}
-                      className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{note.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(note.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          </TabsContent>
-
-          <TabsContent value="conversation" className="mt-0">
-            <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
-          </TabsContent>
-
-          <TabsContent value="timeline" className="mt-0">
-            <PersonTimeline
-              personId={selectedPerson.id}
-              personName={selectedPerson.name}
-              people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
-              onAskMira={(context) => {
-                setConversationContext(context);
-                setActivePersonTab("conversation");
-              }}
-            />
-          </TabsContent>
-
-          <TabsContent value="documents" className="mt-0">
-            <PersonDocuments personId={selectedPerson.id} personName={selectedPerson.name} />
-          </TabsContent>
-
-          <TabsContent value="profile" className="mt-0">
-            <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
-          </TabsContent>
-        </Tabs>
-
-        <MergePersonDialog
-          open={mergeOpen}
-          onOpenChange={setMergeOpen}
-          sourcePerson={selectedPerson}
-          allPeople={people}
-          onMergeComplete={() => setSelectedPersonId(null)}
-        />
-      </div>
-    );
-  }
-
-  // ── List view ──
-  return (
-    <div className="max-w-3xl">
-      <SEOHead title="People — Menerio" noIndex />
-
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-display font-bold">People</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your identity layer for cross-app person mapping
-          </p>
-        </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-1.5"><Plus className="h-4 w-4" /> Add Person</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Add Person</DialogTitle>
-              <DialogDescription>Add a new person to your knowledge system.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Name *</Label>
-                <Input
-                  value={createName}
-                  onChange={(e) => setCreateName(e.target.value)}
-                  placeholder="e.g. Kalena"
-                  onKeyDown={(e) => e.key === "Enter" && createName.trim() && createPerson.mutate(createName)}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button onClick={() => createPerson.mutate(createName)} disabled={!createName.trim() || createPerson.isPending}>
-                {createPerson.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Search */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Search by name or alias..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Person List */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Users className="h-12 w-12 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">{people.length === 0 ? "No people yet. Add someone to get started." : "No people match your search."}</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setSelectedPersonId(p.id)}
-              className="w-full flex items-center justify-between rounded-lg border p-4 text-left transition-colors hover:bg-accent/50"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 shrink-0">
-                  <User className="h-4 w-4 text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{p.name}</p>
-                  {p.aliases && p.aliases.length > 0 && (
-                    <p className="text-xs text-muted-foreground truncate">
-                      aka {p.aliases.join(", ")}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {Object.keys(p.app_mappings || {}).length > 0 && (
-                <div className="flex items-center gap-1 shrink-0">
-                  {Object.keys(p.app_mappings).map((app) => (
-                    <Badge key={app} variant="outline" className="text-[10px] capitalize">
-                      {app}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
