@@ -652,6 +652,42 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      <Dialog open={!!selectedWikiRevision} onOpenChange={(open) => !open && setSelectedWikiRevision(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Wiki revision diff</DialogTitle>
+          </DialogHeader>
+          {selectedWikiRevision && (
+            <div className="grid gap-4 md:grid-cols-2 max-h-[70vh] overflow-y-auto">
+              <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Before</p>
+                <pre className="whitespace-pre-wrap text-sm font-sans">{selectedWikiRevision.previous_content || ""}</pre>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">After</p>
+                <pre className="whitespace-pre-wrap text-sm font-sans">{selectedWikiRevision.new_content}</pre>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!rollbackWikiRevision} onOpenChange={(open) => !open && setRollbackWikiRevision(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Roll back this change?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The wiki page will be restored to its previous content.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleWikiRollback} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Roll back
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
