@@ -35,6 +35,7 @@ interface RichTextEditorProps {
   className?: string;
   onChange?: (markdown: string, editor: Editor) => void;
   onEditorReady?: (editor: Editor | null) => void;
+  onWikiLinkClick?: (slug: string, element: HTMLElement) => void;
 }
 
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
@@ -49,7 +50,17 @@ export function RichTextEditor({
   className,
   onChange,
   onEditorReady,
+  onWikiLinkClick,
 }: RichTextEditorProps) {
+  const toEditorHtml = (markdown: string) =>
+    markdownToHtml(markdown).replace(
+      /<span[^>]*data-wikilink="true"[^>]*data-note-title="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi,
+      (_match, rawSlug) => {
+        const slug = String(rawSlug).replace(/&quot;/g, '"');
+        return `<a class="wiki-link" data-slug="${slug}" href="/wiki/${slug}">${slug}</a>`;
+      },
+    );
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, link: false, underline: false }),
@@ -76,8 +87,19 @@ export function RichTextEditor({
       Markdown.configure({ html: true, transformPastedText: true, transformCopiedText: false }),
       TaskListShortcut,
     ],
-    content: markdownToHtml(value),
+    content: toEditorHtml(value),
     editable,
+    editorProps: {
+      handleClick: (_view, _pos, event) => {
+        const target = event.target as HTMLElement;
+        const link = target.closest?.(".wiki-link") as HTMLElement | null;
+        const slug = link?.getAttribute("data-slug");
+        if (!link || !slug) return false;
+        event.preventDefault();
+        onWikiLinkClick?.(slug, link);
+        return true;
+      },
+    },
     onUpdate: ({ editor: updatedEditor }) => onChange?.(editorToMarkdown(updatedEditor), updatedEditor),
   });
 
@@ -94,7 +116,7 @@ export function RichTextEditor({
     if (!editor) return;
     const current = editorToMarkdown(editor);
     if (current.trimEnd() !== value.trimEnd()) {
-      editor.commands.setContent(markdownToHtml(value), false);
+      editor.commands.setContent(toEditorHtml(value), { emitUpdate: false });
     }
   }, [editor, value]);
 
