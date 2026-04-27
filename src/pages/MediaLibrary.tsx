@@ -64,6 +64,7 @@ const CONTENT_TYPES = [
 // Average tokens per image analysis (~500 prompt + ~200 completion)
 const AVG_TOKENS_PER_IMAGE = 700;
 const TOKENS_PER_CREDIT = 200;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 function BatchAnalysisPanel() {
   const [scanResult, setScanResult] = useState<{
