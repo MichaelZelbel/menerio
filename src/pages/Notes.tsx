@@ -117,7 +117,7 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
-  const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [activeFolderPath, setActiveFolderPath] = useState<string | null>("");
   const [newFolderPath, setNewFolderPath] = useState("");
   
   const [sortField, setSortField] = useState<SortField>("updated_at");
@@ -127,6 +127,7 @@ export default function Notes() {
   const { data: favNotes = [] } = useNotes("favorites");
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
+  const updateNote = useUpdateNote();
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
   const [savedFolders, setSavedFolders] = useState<string[]>([]);
