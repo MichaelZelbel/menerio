@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type DragEvent, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   ChevronDown,
@@ -142,16 +142,16 @@ export function NoteTree({
     });
   };
 
-  const handleDrop = (path: string, event: React.DragEvent) => {
+  const handleDrop = (path: string, event: DragEvent) => {
     event.preventDefault();
     const noteId = event.dataTransfer.getData("text/plain");
     setDragOverPath(null);
     if (noteId) onMoveNote(noteId, path);
   };
 
-  const renderMoveTargets = (nodes: FolderNode[]) =>
+  const renderMoveTargets = (nodes: FolderNode[], noteId: string) =>
     nodes.map((node) => (
-      <ContextMenuItem key={node.path} onClick={() => selectedId && onMoveNote(selectedId, node.path)}>
+      <ContextMenuItem key={node.path} onClick={() => onMoveNote(noteId, node.path)}>
         <Folder className="mr-2 h-3.5 w-3.5" />
         {node.path}
       </ContextMenuItem>
@@ -274,7 +274,7 @@ export function NoteTree({
                 <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
               </ContextMenuItem>
               {folderOptions.length > 0 && <ContextMenuSeparator />}
-              {renderMoveTargets(folderOptions)}
+              {renderMoveTargets(folderOptions, note.id)}
             </ContextMenuSubContent>
           </ContextMenuSub>
         </ContextMenuContent>
