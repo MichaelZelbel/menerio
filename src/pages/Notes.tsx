@@ -166,8 +166,25 @@ export default function Notes() {
     }
     setNewFolderPath("");
     await refreshFolders();
-    setFolderFilter(path);
+    setActiveFolderPath(path);
   }, [newFolderPath, refreshFolders]);
+
+  const createFolderAtPath = useCallback(async (path: string) => {
+    const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!normalized) return;
+    const name = normalized.split("/").pop() || normalized;
+    const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
+    const { error } = await supabase.from("note_folders" as any).upsert(
+      { path: normalized, name, parent_path },
+      { onConflict: "user_id,path" }
+    );
+    if (error) {
+      showToast.error("Failed to create folder");
+      return;
+    }
+    await refreshFolders();
+    setActiveFolderPath(normalized);
+  }, [refreshFolders]);
 
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -179,11 +196,19 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderFilter || "" });
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
     setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
-  }, [createNote, folderFilter, selectNote]);
+  }, [activeFolderPath, createNote, selectNote]);
+
+  const handleCreateInFolder = useCallback(async (folderPath: string) => {
+    setActiveFolderPath(folderPath);
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
+    setFilter("all");
+    setSearchMode(false);
+    selectNote(note.id);
+  }, [createNote, selectNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
