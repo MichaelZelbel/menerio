@@ -16,6 +16,11 @@ import {
 } from "@/components/ui/accordion";
 import { Loader2, CheckCircle2, ExternalLink, Copy, MessageSquare } from "lucide-react";
 
+async function sha256Hex(value: string): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function SlackIntegration() {
   const { user } = useAuth();
   const [botToken, setBotToken] = useState("");
@@ -69,13 +74,16 @@ export function SlackIntegration() {
           .eq("id", appId);
       } else {
         const apiKey = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+        const keyPrefix = apiKey.slice(0, 12);
         const { data } = await supabase
           .from("connected_apps" as any)
           .insert({
             user_id: user.id,
             app_name: "slack",
             display_name: "Slack",
-            api_key: apiKey,
+            api_key: keyPrefix,
+            key_prefix: keyPrefix,
+            key_hash: await sha256Hex(apiKey),
             permissions,
           })
           .select("id")

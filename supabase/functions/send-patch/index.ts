@@ -69,7 +69,7 @@ Deno.serve(async (req: Request) => {
     // --- Load connected app ---
     const { data: app, error: appErr } = await supabaseAdmin
       .from("connected_apps")
-      .select("id, display_name, webhook_url, api_key, is_active")
+      .select("id, display_name, webhook_url, is_active")
       .eq("user_id", userId)
       .eq("app_name", note.source_app)
       .single();
@@ -107,7 +107,6 @@ Deno.serve(async (req: Request) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": app.api_key,
         },
         body: JSON.stringify(patchPayload),
       });

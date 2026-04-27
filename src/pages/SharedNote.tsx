@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { SEOHead } from "@/components/SEOHead";
 import ReactMarkdown from "react-markdown";
+import DOMPurify from "dompurify";
 
 interface SharedNoteData {
   title: string;
@@ -82,6 +83,7 @@ export default function SharedNote() {
   }
 
   const isHtml = looksLikeHtml(note.content);
+  const safeHtml = isHtml ? DOMPurify.sanitize(note.content, { USE_PROFILES: { html: true } }) : "";
 
   return (
     <>
@@ -106,7 +108,7 @@ export default function SharedNote() {
         {isHtml ? (
           <div
             className="prose prose-neutral dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: note.content }}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
         ) : (
           <div className="prose prose-neutral dark:prose-invert max-w-none">

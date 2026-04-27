@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sha256Hex } from "../_shared/sha256.ts";
 import {
   checkBalance,
   getEmbeddingWithCredits,
@@ -52,7 +53,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data: app, error: appErr } = await supabase
         .from("connected_apps")
         .select("user_id, app_name, is_active")
-        .eq("api_key", apiKey)
+        .eq("key_hash", await sha256Hex(apiKey))
         .single();
 
       if (appErr || !app || !app.is_active) {

@@ -32,8 +32,6 @@ import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
-const SUPABASE_URL = "https://tjeapelvjlmbxafsmjef.supabase.co";
-
 interface MediaItem {
   id: string;
   note_id: string;
@@ -66,6 +64,7 @@ const CONTENT_TYPES = [
 // Average tokens per image analysis (~500 prompt + ~200 completion)
 const AVG_TOKENS_PER_IMAGE = 700;
 const TOKENS_PER_CREDIT = 200;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 function BatchAnalysisPanel() {
   const [scanResult, setScanResult] = useState<{
@@ -239,6 +238,24 @@ export default function MediaLibrary() {
     enabled: !!user,
   });
 
+  const { data: signedUrls = {} } = useQuery({
+    queryKey: ["media-library-signed-urls", mediaItems.map((m) => m.storage_path).join("|")],
+    queryFn: async () => {
+      const paths = [...new Set(mediaItems.map((m) => m.storage_path).filter(Boolean))];
+      const entries = await Promise.all(
+        paths.map(async (path) => {
+          const { data, error } = await supabase.storage
+            .from("note-attachments")
+            .createSignedUrl(path, 60 * 60);
+          return [path, error ? "" : data.signedUrl] as const;
+        })
+      );
+      return Object.fromEntries(entries) as Record<string, string>;
+    },
+    enabled: !!user && mediaItems.length > 0,
+    staleTime: 45 * 60 * 1000,
+  });
+
   // Fetch note titles for all unique note IDs
   const noteIds = useMemo(() => [...new Set(mediaItems.map(m => m.note_id))], [mediaItems]);
   const { data: noteTitles = {} } = useQuery({
@@ -286,8 +303,7 @@ export default function MediaLibrary() {
     return items;
   }, [mediaItems, contentTypeFilter, searchQuery]);
 
-  const getMediaUrl = (storagePath: string) =>
-    `${SUPABASE_URL}/storage/v1/object/public/note-attachments/${storagePath}`;
+  const getMediaUrl = (storagePath: string) => signedUrls[storagePath] || "";
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
