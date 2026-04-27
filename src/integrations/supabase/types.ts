@@ -830,6 +830,42 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_api_tokens: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          id: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          token_hash: string
+          token_prefix: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       media_analysis: {
         Row: {
           analysis_status: string
@@ -2154,6 +2190,15 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_premium_user: { Args: { _user_id: string }; Returns: boolean }
+      lookup_mcp_token: {
+        Args: { _token_hash: string }
+        Returns: {
+          expires_at: string
+          id: string
+          revoked_at: string
+          user_id: string
+        }[]
+      }
       match_media: {
         Args: {
           match_count?: number

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { McpServer } from "npm:@modelcontextprotocol/sdk@1.29.0/server/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -10,15 +10,41 @@ import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-// Legacy static key — kept for backward compatibility
-const LEGACY_MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY") || "";
-const LEGACY_BRAIN_OWNER_USER_ID = Deno.env.get("currentUserId") || "";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const MCP_TOKEN_PREFIX = "mnr_mcp_";
+const INVALID_TOKEN_FORMAT_MESSAGE =
+  "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Per-request user ID — set before each MCP request is handled
 let currentUserId = "";
+
+async function sha256Hex(value: string) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function authenticateMcpRequest(authHeader: string | undefined) {
+  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+    return { userId: null, error: { status: 401, message: "Missing Authorization header. Create a Personal MCP Token in Settings → MCP Server and send it as `Authorization: Bearer <token>`." } };
+  }
+
+  const token = authHeader.slice(7).trim();
+  if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
+  }
+
+  const tokenHash = await sha256Hex(token);
+  const { data, error } = await supabase.rpc("lookup_mcp_token", { _token_hash: tokenHash });
+  const tokenRow = Array.isArray(data) ? data[0] : null;
+
+  if (error || !tokenRow?.user_id) {
+    return { userId: null, error: { status: 401, message: "Invalid or revoked token." } };
+  }
+
+  return { userId: tokenRow.user_id as string, error: null };
+}
 
 const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown"] as const;
 const MOMENT_FIELD_NAMES = ["title", "description", "happened_at", "happened_end", "status", "impact_level", "confidence_date", "confidence_truth", "category", "person_name", "participant_names", "document_ids"] as const;
@@ -1669,62 +1695,17 @@ app.get("/favicon.png", (c) => {
   return c.redirect("https://menerio.com/favicon.png", 302);
 });
 
+app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
+
 app.all("*", async (c) => {
-  // 1. Try JWT auth via Authorization: Bearer <token> (preferred — short-lived)
   const authHeader = c.req.header("authorization") || c.req.header("Authorization");
-  if (authHeader?.toLowerCase().startsWith("bearer ")) {
-    const token = authHeader.slice(7).trim();
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return c.json({ error: "Invalid or expired session token." }, 401);
-    }
-    currentUserId = data.user.id;
-  } else {
-    // 2. Fallback: legacy x-brain-key header or ?key= parameter
-    const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
+  const auth = await authenticateMcpRequest(authHeader);
 
-    if (!provided) {
-      return c.json({
-        error: "Missing credentials. Provide an Authorization: Bearer <token> header (recommended) or x-brain-key header.",
-      }, 401);
-    }
-
-    // 2a. Legacy static key for backward compatibility
-    if (LEGACY_MCP_ACCESS_KEY && provided === LEGACY_MCP_ACCESS_KEY && LEGACY_BRAIN_OWNER_USER_ID) {
-      currentUserId = LEGACY_BRAIN_OWNER_USER_ID;
-    } else {
-      // 2b. Look up in hub_api_keys via SHA-256 hash
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(provided));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-      const { data: keyRow, error: keyError } = await supabase
-        .from("hub_api_keys")
-        .select("id, user_id, scopes, is_active, expires_at")
-        .eq("key_hash", keyHash)
-        .single();
-
-      if (keyError || !keyRow) {
-        return c.json({ error: "Invalid access key." }, 401);
-      }
-      if (!keyRow.is_active) {
-        return c.json({ error: "Access key has been revoked." }, 401);
-      }
-      if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
-        return c.json({ error: "Access key has expired." }, 401);
-      }
-
-      currentUserId = keyRow.user_id;
-
-      // Update last_used_at (fire-and-forget)
-      supabase
-        .from("hub_api_keys")
-        .update({ last_used_at: new Date().toISOString() })
-        .eq("id", keyRow.id)
-        .then(() => {});
-    }
+  if (auth.error) {
+    return c.json({ error: auth.error.message }, auth.error.status);
   }
+
+  currentUserId = auth.userId!;
 
   const transport = new StreamableHTTPTransport();
   await server.connect(transport);

@@ -1,9 +1,39 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Accordion,
   AccordionContent,
@@ -17,14 +47,17 @@ import {
   Monitor,
   Code2,
   Sparkles,
-  Eye,
-  EyeOff,
   Key,
-  Clock,
+  Plus,
+  Loader2,
+  AlertTriangle,
+  ShieldOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const MCP_URL = "https://mcp.menerio.com";
+const MCP_TOKEN_PREFIX = "mnr_mcp_";
+const TOKEN_PLACEHOLDER = `${MCP_TOKEN_PREFIX}YOUR_TOKEN`;
 
 const TOOLS = [
   { name: "search_thoughts", desc: "Semantic search across all your captured thoughts by meaning" },
@@ -43,37 +76,149 @@ const TOOLS = [
   { name: "wiki_run_lint", desc: "Run the wiki health check for broken links, orphans, drift, and contradictions" },
 ];
 
-function formatExpiry(expiresAtSeconds: number | undefined): string {
-  if (!expiresAtSeconds) return "—";
-  const ms = expiresAtSeconds * 1000 - Date.now();
-  if (ms <= 0) return "expired";
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+type McpApiToken = {
+  id: string;
+  name: string;
+  token_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
+const EXPIRATION_OPTIONS = [
+  { value: "never", label: "Never" },
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "180", label: "180 days" },
+  { value: "365", label: "365 days" },
+];
+
+function base64Url(bytes: Uint8Array) {
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function generateMcpToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `${MCP_TOKEN_PREFIX}${base64Url(bytes)}`;
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString();
+}
+
+function getTokenStatus(token: McpApiToken) {
+  if (token.revoked_at) return { label: "Revoked", variant: "destructive" as const };
+  if (token.expires_at && new Date(token.expires_at) <= new Date()) {
+    return { label: "Expired", variant: "secondary" as const };
+  }
+  return { label: "Active", variant: "outline" as const };
 }
 
 export function MCPConnectionManager() {
   const { session } = useAuth();
   const [copied, setCopied] = useState<string | null>(null);
-  const [showToken, setShowToken] = useState(false);
-  const [, forceTick] = useState(0);
+  const [tokens, setTokens] = useState<McpApiToken[]>([]);
+  const [loadingTokens, setLoadingTokens] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [expiration, setExpiration] = useState("never");
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
 
-  const accessToken = session?.access_token ?? "";
-  const expiresAt = session?.expires_at;
+  const userId = session?.user?.id;
 
-  // Tick every 30s so the "valid for" countdown stays fresh
+  const fetchTokens = async () => {
+    if (!userId) {
+      setTokens([]);
+      setLoadingTokens(false);
+      return;
+    }
+
+    setLoadingTokens(true);
+    const { data, error } = await supabase
+      .from("mcp_api_tokens" as never)
+      .select("id, name, token_prefix, created_at, last_used_at, expires_at, revoked_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast.error("Failed to load MCP tokens");
+    } else {
+      setTokens((data || []) as unknown as McpApiToken[]);
+    }
+    setLoadingTokens(false);
+  };
+
   useEffect(() => {
-    const id = setInterval(() => forceTick((t) => t + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
+    fetchTokens();
+  }, [userId]);
 
   const handleCopy = async (text: string, key: string) => {
     await navigator.clipboard.writeText(text);
     setCopied(key);
     toast.success("Copied to clipboard");
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const resetCreateDialog = () => {
+    setNewTokenName("");
+    setExpiration("never");
+    setCreating(false);
+  };
+
+  const handleCreateToken = async () => {
+    if (!userId || !newTokenName.trim()) return;
+
+    setCreating(true);
+    const rawToken = generateMcpToken();
+    const tokenHash = await sha256Hex(rawToken);
+    const expiresAt = expiration === "never"
+      ? null
+      : new Date(Date.now() + Number(expiration) * 24 * 60 * 60 * 1000).toISOString();
+
+    const { error } = await supabase.from("mcp_api_tokens" as never).insert({
+      user_id: userId,
+      name: newTokenName.trim().slice(0, 80),
+      token_hash: tokenHash,
+      token_prefix: rawToken.slice(0, 16),
+      expires_at: expiresAt,
+    } as never);
+
+    setCreating(false);
+
+    if (error) {
+      toast.error("Failed to create MCP token");
+      return;
+    }
+
+    setCreateOpen(false);
+    resetCreateDialog();
+    setRevealedToken(rawToken);
+    toast.success("Personal MCP Token created");
+    fetchTokens();
+  };
+
+  const handleRevoke = async (tokenId: string) => {
+    const { error } = await supabase
+      .from("mcp_api_tokens" as never)
+      .update({ revoked_at: new Date().toISOString() } as never)
+      .eq("id", tokenId);
+
+    if (error) {
+      toast.error("Failed to revoke MCP token");
+      return;
+    }
+
+    toast.success("MCP token revoked");
+    fetchTokens();
   };
 
   const CopyButton = ({ text, id, label }: { text: string; id: string; label?: string }) => (
@@ -83,15 +228,10 @@ export function MCPConnectionManager() {
       className="shrink-0"
       onClick={() => handleCopy(text, id)}
     >
-      {copied === id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+      {copied === id ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
       {label && <span className="ml-1.5">{label}</span>}
     </Button>
   );
-
-  const tokenOrPlaceholder = accessToken || "YOUR_ACCESS_TOKEN";
-  const maskedToken = accessToken
-    ? `${accessToken.slice(0, 12)}${"•".repeat(24)}${accessToken.slice(-6)}`
-    : "";
 
   const claudeSnippet = useMemo(
     () => `{
@@ -102,18 +242,22 @@ export function MCPConnectionManager() {
         "-y", "mcp-remote",
         "${MCP_URL}",
         "--header",
-        "Authorization: Bearer ${tokenOrPlaceholder}"
+        "Authorization: Bearer ${TOKEN_PLACEHOLDER}",
+        "--header",
+        "Accept: application/json, text/event-stream",
+        "--header",
+        "Content-Type: application/json"
       ]
     }
   }
 }`,
-    [tokenOrPlaceholder]
+    []
   );
 
   const claudeCodeCommand = useMemo(
     () =>
-      `claude mcp add --transport http menerio ${MCP_URL} --header "Authorization: Bearer ${tokenOrPlaceholder}"`,
-    [tokenOrPlaceholder]
+      `claude mcp add --transport http menerio ${MCP_URL} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}" --header "Accept: application/json, text/event-stream" --header "Content-Type: application/json"`,
+    []
   );
 
   const agentPrompt = useMemo(
@@ -121,8 +265,16 @@ export function MCPConnectionManager() {
 
 # Connection
 - MCP Server URL: ${MCP_URL}
-- Auth header: \`Authorization: Bearer <token>\`
-- The user pastes a fresh token (valid ~1 hour). When it expires, ask the user for a new one from Menerio → Settings → MCP.
+- Auth header: \`Authorization: Bearer <PROJECT_MCP_TOKEN>\`
+- Token format: the token starts with \`${MCP_TOKEN_PREFIX}\`.
+- The token is long-lived. It does not expire after 1 hour; it remains valid until the user revokes it or until its optional expiration date.
+- Required headers:
+  - \`Authorization: Bearer <PROJECT_MCP_TOKEN>\`
+  - \`Accept: application/json, text/event-stream\`
+  - \`Content-Type: application/json\`
+- Keep the endpoint exactly as shown above. Do not add /mcp, /sse, /v1, or any other path.
+- Verification flow: call \`initialize\`, then \`tools/list\`, then \`tools/call\` with the safe read-only tool \`get_user_profile\`.
+- If a tool call returns \`401 Invalid or revoked token\`, ask the user for a new Personal MCP Token from Menerio → Settings → MCP Server instead of retrying.
 
 # What Menerio is
 Menerio stores the user's thoughts, notes, contacts (People), action items, media (images/PDFs with AI descriptions), a knowledge graph of links between notes, and a structured profile (identity, preferences, values, goals, agent instructions).
@@ -151,7 +303,6 @@ Menerio stores the user's thoughts, notes, contacts (People), action items, medi
 - Output style: concise. For lists of notes, show one bullet per item with title + date. Only show full content when explicitly asked.
 - After any \`capture_thought\`, end with a one-line confirmation including the detected type and topics.
 - Never invent note ids, titles, or dates. If a search returns nothing, say so.
-- If a tool call returns "Invalid or expired session token", tell the user to grab a fresh token from Menerio → Settings → MCP and paste it.
 
 Use these tools whenever the user asks you to recall, search, save, or organise anything from their personal memory.`,
     []
@@ -159,7 +310,6 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
 
   return (
     <div className="space-y-6">
-      {/* Profile tip */}
       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 flex items-start gap-2.5 text-sm">
         <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
         <p className="text-muted-foreground">
@@ -171,48 +321,75 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
         </p>
       </div>
 
-      {/* Access Token */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" /> Your Access Token
-          </CardTitle>
-          <CardDescription>
-            Paste this into your AI agent to connect it to your Menerio brain. The token is tied to your current
-            login and refreshes automatically while you're signed in.
-          </CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="h-5 w-5" /> Personal MCP Tokens
+              </CardTitle>
+              <CardDescription>
+                Long-lived, revocable tokens for Claude Desktop, Cursor, OpenClaw, Manus, n8n, and other MCP clients.
+              </CardDescription>
+            </div>
+            <Dialog
+              open={createOpen}
+              onOpenChange={(open) => {
+                setCreateOpen(open);
+                if (!open) resetCreateDialog();
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button size="sm" disabled={!userId}>
+                  <Plus className="mr-2 h-4 w-4" /> Create token
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create Personal MCP Token</DialogTitle>
+                  <DialogDescription>
+                    Choose a label and optional expiration. The full token is shown only once after creation.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="mcp-token-name">Name</Label>
+                    <Input
+                      id="mcp-token-name"
+                      value={newTokenName}
+                      onChange={(event) => setNewTokenName(event.target.value.slice(0, 80))}
+                      maxLength={80}
+                      placeholder="Claude Desktop on MacBook"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Expiration</Label>
+                    <Select value={expiration} onValueChange={setExpiration}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EXPIRATION_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button onClick={handleCreateToken} disabled={creating || !newTokenName.trim()}>
+                    {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Create token
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!accessToken ? (
-            <p className="text-sm text-muted-foreground">
-              You need to be signed in to see your access token.
-            </p>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
-                  {showToken ? accessToken : maskedToken}
-                </code>
-                <Button variant="ghost" size="icon" onClick={() => setShowToken((s) => !s)}>
-                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-                <CopyButton text={accessToken} id="token" />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <Badge variant="outline" className="gap-1.5">
-                  <Clock className="h-3 w-3" />
-                  Valid for ~{formatExpiry(expiresAt)}
-                </Badge>
-                <span>
-                  Refreshes automatically while you're signed in. Just come back here for a new one when your
-                  agent needs it.
-                </span>
-              </div>
-            </>
-          )}
-
-          <div className="space-y-2 pt-2 border-t">
+          <div className="space-y-2">
             <p className="text-sm font-medium">MCP Server URL</p>
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
@@ -221,10 +398,97 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
               <CopyButton text={MCP_URL} id="url" />
             </div>
           </div>
+
+          {loadingTokens ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : tokens.length === 0 ? (
+            <p className="text-sm text-muted-foreground rounded-md border p-4 text-center">
+              No Personal MCP Tokens yet. Create one to connect an external MCP client.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {tokens.map((token) => {
+                const status = getTokenStatus(token);
+                const disabled = Boolean(token.revoked_at);
+                return (
+                  <div key={token.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">{token.name}</span>
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </div>
+                      <code className="block text-xs text-muted-foreground font-mono break-all">
+                        {token.token_prefix}…
+                      </code>
+                      <p className="text-xs text-muted-foreground">
+                        Created {formatDate(token.created_at)} · Last used {formatDate(token.last_used_at)} · Expires {formatDate(token.expires_at)}
+                      </p>
+                    </div>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="outline" disabled={disabled} className="shrink-0">
+                          <ShieldOff className="mr-2 h-4 w-4" /> Revoke
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Revoke MCP Token</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This immediately disconnects any client using "{token.name}". This cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleRevoke(token.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Revoke token
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Agent Prompt */}
+      <Dialog
+        open={Boolean(revealedToken)}
+        onOpenChange={(open) => {
+          if (!open) setRevealedToken(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Your new Personal MCP Token</DialogTitle>
+            <DialogDescription>Copy it now before closing this dialog.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="text-sm font-medium">This is the only time the full token will be shown. Treat it like a password.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-md bg-muted p-2 text-xs font-mono break-all select-all border">
+                  {revealedToken}
+                </code>
+                {revealedToken && <CopyButton text={revealedToken} id="new-token" />}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setRevealedToken(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -247,7 +511,6 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
         </CardContent>
       </Card>
 
-      {/* Available Tools */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -271,15 +534,13 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
         </CardContent>
       </Card>
 
-      {/* Connection Guides */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Terminal className="h-5 w-5" /> Compatible Clients
           </CardTitle>
           <CardDescription>
-            Copy-paste configs for popular MCP-compatible AI tools. Replace the token whenever you need a fresh
-            one — just come back to this page and copy it again.
+            Copy-paste configs for popular MCP-compatible AI tools. Use a Personal MCP Token from this page.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -298,6 +559,7 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
                     Go to <strong>Settings</strong> → <strong>Developer</strong> → <strong>Edit Config</strong>
                   </li>
                   <li>Paste the JSON below into <code className="text-xs">claude_desktop_config.json</code></li>
+                  <li>Replace <code className="text-xs">{TOKEN_PLACEHOLDER}</code> with a Personal MCP Token</li>
                   <li>Restart Claude Desktop</li>
                 </ol>
                 <div className="relative">
@@ -317,7 +579,7 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
                 </div>
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Run this in your terminal:</p>
+                <p className="text-sm text-muted-foreground">Run this in your terminal, then replace the token placeholder:</p>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
                     {claudeCodeCommand}
@@ -338,8 +600,7 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
               </AccordionTrigger>
               <AccordionContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Add this to <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or your VS
-                  Code MCP settings:
+                  Add this to <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or your VS Code MCP settings:
                 </p>
                 <div className="relative">
                   <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
@@ -364,7 +625,13 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
                     Endpoint: <code className="text-xs bg-muted px-1 rounded">{MCP_URL}</code>
                   </li>
                   <li>
-                    Header: <code className="text-xs bg-muted px-1 rounded">Authorization: Bearer &lt;token&gt;</code>
+                    Header: <code className="text-xs bg-muted px-1 rounded">Authorization: Bearer &lt;PROJECT_MCP_TOKEN&gt;</code>
+                  </li>
+                  <li>
+                    Header: <code className="text-xs bg-muted px-1 rounded">Accept: application/json, text/event-stream</code>
+                  </li>
+                  <li>
+                    Header: <code className="text-xs bg-muted px-1 rounded">Content-Type: application/json</code>
                   </li>
                   <li>Transport: HTTP (Streamable)</li>
                 </ul>
