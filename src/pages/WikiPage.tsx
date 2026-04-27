@@ -34,6 +34,20 @@ const labelize = (value: string) => value.replace(/[_-]+/g, " ").replace(/\b\w/g
 const relativeTime = (date: string) => formatDistanceToNow(new Date(date), { addSuffix: true });
 const truncate = (value: string, length = 240) => (value.length > length ? `${value.slice(0, length).trim()}…` : value);
 
+function normalizeWikiContent(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return "";
+  const hasMarkdownStructure = /(^|\n)(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\|.+\|)|\n\s*\n/.test(trimmed);
+  if (hasMarkdownStructure || trimmed.length < 420) return trimmed;
+
+  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) || [trimmed];
+  const paragraphs: string[] = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    paragraphs.push(sentences.slice(i, i + 3).join(" "));
+  }
+  return paragraphs.join("\n\n");
+}
+
 function WikiPageSkeleton() {
   return (
     <div className="space-y-6">
@@ -181,6 +195,7 @@ export default function WikiPage() {
   });
 
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
+  const displayContent = useMemo(() => page ? normalizeWikiContent(page.content) : "", [page]);
 
   if (pageLoading) return <WikiPageSkeleton />;
 
@@ -234,11 +249,11 @@ export default function WikiPage() {
           {editMode && <Input value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} />}
           <div ref={editorWrapRef}>
             <RichTextEditor
-              value={editMode ? latestMarkdownRef.current || page.content : page.content}
+              value={editMode ? latestMarkdownRef.current || page.content : displayContent}
               editable={editMode}
               showToolbar={editMode}
               onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
-              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/wiki/${targetSlug}`); }}
+              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/wiki/${encodeURIComponent(targetSlug)}`); }}
             />
           </div>
         </CardContent>
