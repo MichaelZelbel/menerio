@@ -10,15 +10,41 @@ import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-// Legacy static key — kept for backward compatibility
-const LEGACY_MCP_ACCESS_KEY = Deno.env.get("MCP_ACCESS_KEY") || "";
-const LEGACY_BRAIN_OWNER_USER_ID = Deno.env.get("currentUserId") || "";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const MCP_TOKEN_PREFIX = "mnr_mcp_";
+const INVALID_TOKEN_FORMAT_MESSAGE =
+  "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Per-request user ID — set before each MCP request is handled
 let currentUserId = "";
+
+async function sha256Hex(value: string) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function authenticateMcpRequest(authHeader: string | undefined) {
+  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+    return { userId: null, error: { status: 401, message: "Missing Authorization header. Create a Personal MCP Token in Settings → MCP Server and send it as `Authorization: Bearer <token>`." } };
+  }
+
+  const token = authHeader.slice(7).trim();
+  if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
+  }
+
+  const tokenHash = await sha256Hex(token);
+  const { data, error } = await supabase.rpc("lookup_mcp_token", { _token_hash: tokenHash });
+  const tokenRow = Array.isArray(data) ? data[0] : null;
+
+  if (error || !tokenRow?.user_id) {
+    return { userId: null, error: { status: 401, message: "Invalid or revoked token." } };
+  }
+
+  return { userId: tokenRow.user_id as string, error: null };
+}
 
 const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown"] as const;
 const MOMENT_FIELD_NAMES = ["title", "description", "happened_at", "happened_end", "status", "impact_level", "confidence_date", "confidence_truth", "category", "person_name", "participant_names", "document_ids"] as const;
