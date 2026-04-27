@@ -59,9 +59,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
         const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
         const meta = note.metadata as Record<string, unknown> | null;
         const isMediaMatch = matchSource === "media" || matchSource === "both";
-        const thumbnailUrl = mediaPath && mediaPath.includes("note-attachments")
-          ? `https://tjeapelvjlmbxafsmjef.supabase.co/storage/v1/object/public/note-attachments/${mediaPath}`
-          : null;
 
         return (
           <a
@@ -98,13 +95,6 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
             {/* Media match indicator */}
             {isMediaMatch && (
               <div className="flex items-center gap-2 mb-1.5">
-                {thumbnailUrl && (
-                  <img
-                    src={thumbnailUrl}
-                    alt=""
-                    className="h-10 w-10 rounded object-cover shrink-0 border border-border"
-                  />
-                )}
                 <div className="min-w-0 flex-1">
                   <span className="text-[10px] font-medium text-primary flex items-center gap-1">
                     {mediaMatchType === "pdf" || mediaMatchType === "pdf_page" ? (
