@@ -52,12 +52,24 @@ export function RichTextEditor({
   onEditorReady,
   onWikiLinkClick,
 }: RichTextEditorProps) {
+  const toWikiSlug = (value: string) =>
+    value
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
   const toEditorHtml = (markdown: string) =>
     markdownToHtml(markdown).replace(
-      /<span[^>]*data-wikilink="true"[^>]*data-note-title="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi,
-      (_match, rawSlug) => {
-        const slug = String(rawSlug).replace(/&quot;/g, '"');
-        return `<a class="wiki-link" data-slug="${slug}" href="/wiki/${slug}">${slug}</a>`;
+      /<span[^>]*data-wikilink="true"[^>]*>[\s\S]*?<\/span>/gi,
+      (match) => {
+        const target = match.match(/data-note-title="([^"]*)"/i)?.[1] || "";
+        const display = match.match(/data-display-text="([^"]*)"/i)?.[1] || "";
+        const slug = toWikiSlug(target);
+        const label = (display || target).replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim() || slug;
+        return `<a class="wiki-link" data-slug="${slug}" href="/wiki/${slug}">${label}</a>`;
       },
     );
 
