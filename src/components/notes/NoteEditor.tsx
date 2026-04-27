@@ -46,7 +46,6 @@ import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -92,7 +91,6 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
-  Folder,
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -193,10 +191,6 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
   }
 }
 
-function normalizeFolderPath(path: string | null | undefined): string {
-  return (path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
-}
-
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
@@ -229,7 +223,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [sourceText, setSourceText] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
-  const [folderPath, setFolderPath] = useState(note.folder_path || "");
   const [duplicateTarget, setDuplicateTarget] = useState<Note | null>(null);
   const [pendingDuplicateTitle, setPendingDuplicateTitle] = useState("");
   // Wikilink autocomplete state
@@ -417,7 +410,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     setTitle(note.title);
-    setFolderPath(note.folder_path || "");
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
@@ -504,18 +496,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       updateNote.mutate({ id: note.id, title: val });
       triggerGitHubSync(note.id);
     }, 800);
-  };
-
-  const updateFolderPath = async (nextPath: string) => {
-    const normalized = normalizeFolderPath(nextPath);
-    setFolderPath(normalized);
-    updateNote.mutate({ id: note.id, folder_path: normalized });
-    triggerGitHubSync(note.id);
-    if (normalized) {
-      const name = normalized.split("/").pop() || normalized;
-      const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
-      await supabase.from("note_folders" as any).upsert({ path: normalized, name, parent_path }, { onConflict: "user_id,path" });
-    }
   };
 
   const mergeDuplicate = async () => {
@@ -861,19 +841,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
-        {!note.is_trashed && !note.is_external && (
-          <div className="flex items-center gap-2 mb-4 text-xs text-muted-foreground">
-            <Folder className="h-3.5 w-3.5 shrink-0" />
-            <Input
-              value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
-              onBlur={(e) => updateFolderPath(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-              placeholder="Vault root"
-              className="h-7 max-w-sm text-xs"
-            />
-          </div>
-        )}
         {sourceMode ? (
           <textarea
             value={sourceText}

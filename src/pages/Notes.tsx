@@ -3,12 +3,14 @@ import { SEOHead } from "@/components/SEOHead";
 import {
   useNotes,
   useCreateNote,
+  useUpdateNote,
   useIlikeSearch,
   useSemanticSearch,
   Note,
   SemanticSearchResult,
 } from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
+import { NoteTree } from "@/components/notes/NoteTree";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
 
@@ -58,7 +60,7 @@ import {
   ArrowDown,
   Hash,
   User,
-  Folder,
+  FolderPlus,
   LayoutGrid,
   Loader2,
 } from "lucide-react";
@@ -114,7 +116,7 @@ export default function Notes() {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [metaTypeFilter, setMetaTypeFilter] = useState<string | null>(null);
-  const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [activeFolderPath, setActiveFolderPath] = useState<string | null>("");
   const [newFolderPath, setNewFolderPath] = useState("");
   
   const [sortField, setSortField] = useState<SortField>("updated_at");
@@ -124,6 +126,7 @@ export default function Notes() {
   const { data: favNotes = [] } = useNotes("favorites");
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
+  const updateNote = useUpdateNote();
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
   const [savedFolders, setSavedFolders] = useState<string[]>([]);
@@ -148,7 +151,8 @@ export default function Notes() {
   }, [allNotes, savedFolders]);
 
   const createFolder = useCallback(async () => {
-    const path = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    const rawPath = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    const path = activeFolderPath && rawPath && !rawPath.includes("/") ? `${activeFolderPath}/${rawPath}` : rawPath;
     if (!path) return;
     const name = path.split("/").pop() || path;
     const parent_path = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
@@ -162,8 +166,25 @@ export default function Notes() {
     }
     setNewFolderPath("");
     await refreshFolders();
-    setFolderFilter(path);
-  }, [newFolderPath, refreshFolders]);
+    setActiveFolderPath(path);
+  }, [activeFolderPath, newFolderPath, refreshFolders]);
+
+  const createFolderAtPath = useCallback(async (path: string) => {
+    const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!normalized) return;
+    const name = normalized.split("/").pop() || normalized;
+    const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
+    const { error } = await supabase.from("note_folders" as any).upsert(
+      { path: normalized, name, parent_path },
+      { onConflict: "user_id,path" }
+    );
+    if (error) {
+      showToast.error("Failed to create folder");
+      return;
+    }
+    await refreshFolders();
+    setActiveFolderPath(normalized);
+  }, [refreshFolders]);
 
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -175,11 +196,35 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderFilter || "" });
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
     setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
-  }, [createNote, folderFilter, selectNote]);
+  }, [activeFolderPath, createNote, selectNote]);
+
+  const handleCreateInFolder = useCallback(async (folderPath: string) => {
+    setActiveFolderPath(folderPath);
+    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
+    setFilter("all");
+    setSearchMode(false);
+    selectNote(note.id);
+  }, [createNote, selectNote]);
+
+  const handleCreateFolderInFolder = useCallback((folderPath: string) => {
+    const folderName = window.prompt("Folder name");
+    if (!folderName) return;
+    const normalizedName = folderName.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!normalizedName) return;
+    createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
+  }, [createFolderAtPath]);
+
+  const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
+    updateNote.mutate(
+      { id: noteId, folder_path: folderPath },
+      { onSuccess: () => showToast.success(folderPath ? `Moved to ${folderPath}` : "Moved to Vault root") }
+    );
+    setActiveFolderPath(folderPath);
+  }, [updateNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
@@ -263,9 +308,6 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
-    if (folderFilter !== null) {
-      notes = notes.filter((n) => (n.folder_path || "") === folderFilter);
-    }
     // Sort: pinned first, then by selected field/direction
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
@@ -281,7 +323,7 @@ export default function Notes() {
       return dir * aVal.localeCompare(bVal);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, folderFilter, sortField, sortDirection]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -307,10 +349,9 @@ export default function Notes() {
     setTopicFilter(null);
     setPersonFilter(null);
     setMetaTypeFilter(null);
-    setFolderFilter(null);
   };
 
-  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter || folderFilter;
+  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter;
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
@@ -475,47 +516,18 @@ export default function Notes() {
 
           <Popover>
             <PopoverTrigger asChild>
-              <Button
-                variant={folderFilter !== null ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                title="Folders"
-              >
-                <Folder className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="h-8 w-8" title="New folder">
+                <FolderPlus className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-72 p-3 space-y-3">
-              <div className="space-y-1">
-                <button
-                  onClick={() => setFolderFilter(null)}
-                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === null && "bg-accent")}
-                >
-                  <FileText className="h-3.5 w-3.5" /> All folders
-                </button>
-                <button
-                  onClick={() => setFolderFilter("")}
-                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === "" && "bg-accent")}
-                >
-                  <Folder className="h-3.5 w-3.5" /> Vault root
-                </button>
-                {folderPaths.map((path) => (
-                  <button
-                    key={path}
-                    onClick={() => setFolderFilter(path)}
-                    className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === path && "bg-accent")}
-                  >
-                    <Folder className="h-3.5 w-3.5" />
-                    <span className="truncate">{path}</span>
-                  </button>
-                ))}
-              </div>
-              <Separator />
+              <p className="text-xs font-medium text-muted-foreground">Create folder</p>
               <div className="flex gap-2">
                 <Input
                   value={newFolderPath}
                   onChange={(e) => setNewFolderPath(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") createFolder(); }}
-                  placeholder="Projects/Menerio"
+                  placeholder={activeFolderPath ? `${activeFolderPath}/New folder` : "Projects/Menerio"}
                   className="h-8 text-xs"
                 />
                 <Button size="sm" className="h-8" onClick={createFolder}>Add</Button>
@@ -777,12 +789,6 @@ export default function Notes() {
                 <button onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
-            {folderFilter !== null && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
-                {folderFilter || "Vault root"}
-                <button onClick={() => setFolderFilter(null)}><X className="h-2.5 w-2.5" /></button>
-              </span>
-            )}
             <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">
               Clear all
             </button>
@@ -800,13 +806,25 @@ export default function Notes() {
               </div>
             ))}
           </div>
-        ) : (
+        ) : searchMode ? (
           <NoteList
             notes={currentNotes}
             selectedId={selectedId}
             onSelect={selectNote}
             showSimilarity={searchMode && showingSemanticResults}
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+          />
+        ) : (
+          <NoteTree
+            notes={currentNotes}
+            folderPaths={folderPaths}
+            selectedId={selectedId}
+            activeFolderPath={activeFolderPath}
+            onSelectNote={selectNote}
+            onSelectFolder={setActiveFolderPath}
+            onCreateNoteInFolder={handleCreateInFolder}
+            onCreateFolderInFolder={handleCreateFolderInFolder}
+            onMoveNote={handleMoveNote}
           />
         )}
       </div>
