@@ -76,6 +76,10 @@ function sortFolder(node: FolderNode) {
   node.children.forEach(sortFolder);
 }
 
+function countNestedNotes(node: FolderNode): number {
+  return node.notes.length + node.children.reduce((sum, child) => sum + countNestedNotes(child), 0);
+}
+
 function collectAncestorPaths(path: string | null) {
   if (!path) return [];
   const parts = path.split("/").filter(Boolean);
@@ -162,7 +166,7 @@ export function NoteTree({
     const isOpen = expanded.has(key);
     const isActive = activeFolderPath === (node.path || "");
     const isRoot = !node.path;
-    const count = node.notes.length + node.children.reduce((sum, child) => sum + child.notes.length, 0);
+    const count = countNestedNotes(node);
 
     return (
       <div>
@@ -238,6 +242,7 @@ export function NoteTree({
             onClick={(event) => {
               if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) {
                 event.preventDefault();
+                onSelectFolder(normalizePath(note.folder_path));
                 onSelectNote(note.id);
               }
             }}
