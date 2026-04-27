@@ -277,6 +277,8 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean | null
+          key_hash: string | null
+          key_prefix: string | null
           permissions: Json | null
           updated_at: string | null
           user_id: string
@@ -290,6 +292,8 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean | null
+          key_hash?: string | null
+          key_prefix?: string | null
           permissions?: Json | null
           updated_at?: string | null
           user_id?: string
@@ -303,6 +307,8 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean | null
+          key_hash?: string | null
+          key_prefix?: string | null
           permissions?: Json | null
           updated_at?: string | null
           user_id?: string
