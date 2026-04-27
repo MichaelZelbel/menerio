@@ -60,7 +60,6 @@ import {
   ArrowDown,
   Hash,
   User,
-  Folder,
   FolderPlus,
   LayoutGrid,
   Loader2,
