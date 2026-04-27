@@ -3,12 +3,14 @@ import { SEOHead } from "@/components/SEOHead";
 import {
   useNotes,
   useCreateNote,
+  useUpdateNote,
   useIlikeSearch,
   useSemanticSearch,
   Note,
   SemanticSearchResult,
 } from "@/hooks/useNotes";
 import { NoteList } from "@/components/notes/NoteList";
+import { NoteTree } from "@/components/notes/NoteTree";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
 
@@ -59,6 +61,7 @@ import {
   Hash,
   User,
   Folder,
+  FolderPlus,
   LayoutGrid,
   Loader2,
 } from "lucide-react";
