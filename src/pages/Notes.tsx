@@ -152,7 +152,8 @@ export default function Notes() {
   }, [allNotes, savedFolders]);
 
   const createFolder = useCallback(async () => {
-    const path = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    const rawPath = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    const path = activeFolderPath && rawPath && !rawPath.includes("/") ? `${activeFolderPath}/${rawPath}` : rawPath;
     if (!path) return;
     const name = path.split("/").pop() || path;
     const parent_path = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
@@ -167,7 +168,7 @@ export default function Notes() {
     setNewFolderPath("");
     await refreshFolders();
     setActiveFolderPath(path);
-  }, [newFolderPath, refreshFolders]);
+  }, [activeFolderPath, newFolderPath, refreshFolders]);
 
   const createFolderAtPath = useCallback(async (path: string) => {
     const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
@@ -209,6 +210,22 @@ export default function Notes() {
     setSearchMode(false);
     selectNote(note.id);
   }, [createNote, selectNote]);
+
+  const handleCreateFolderInFolder = useCallback((folderPath: string) => {
+    const folderName = window.prompt("Folder name");
+    if (!folderName) return;
+    const normalizedName = folderName.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!normalizedName) return;
+    createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
+  }, [createFolderAtPath]);
+
+  const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
+    updateNote.mutate(
+      { id: noteId, folder_path: folderPath },
+      { onSuccess: () => showToast.success(folderPath ? `Moved to ${folderPath}` : "Moved to Vault root") }
+    );
+    setActiveFolderPath(folderPath);
+  }, [updateNote]);
 
   useEffect(() => {
     if (searchParams.get("action") === "create" && !createNote.isPending) {
