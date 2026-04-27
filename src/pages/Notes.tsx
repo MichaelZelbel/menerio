@@ -807,13 +807,25 @@ export default function Notes() {
               </div>
             ))}
           </div>
-        ) : (
+        ) : searchMode ? (
           <NoteList
             notes={currentNotes}
             selectedId={selectedId}
             onSelect={selectNote}
             showSimilarity={searchMode && showingSemanticResults}
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+          />
+        ) : (
+          <NoteTree
+            notes={currentNotes}
+            folderPaths={folderPaths}
+            selectedId={selectedId}
+            activeFolderPath={activeFolderPath}
+            onSelectNote={selectNote}
+            onSelectFolder={setActiveFolderPath}
+            onCreateNoteInFolder={handleCreateInFolder}
+            onCreateFolderInFolder={handleCreateFolderInFolder}
+            onMoveNote={handleMoveNote}
           />
         )}
       </div>
