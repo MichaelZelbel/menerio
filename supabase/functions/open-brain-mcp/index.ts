@@ -1695,62 +1695,17 @@ app.get("/favicon.png", (c) => {
   return c.redirect("https://menerio.com/favicon.png", 302);
 });
 
+app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
+
 app.all("*", async (c) => {
-  // 1. Try JWT auth via Authorization: Bearer <token> (preferred — short-lived)
   const authHeader = c.req.header("authorization") || c.req.header("Authorization");
-  if (authHeader?.toLowerCase().startsWith("bearer ")) {
-    const token = authHeader.slice(7).trim();
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return c.json({ error: "Invalid or expired session token." }, 401);
-    }
-    currentUserId = data.user.id;
-  } else {
-    // 2. Fallback: legacy x-brain-key header or ?key= parameter
-    const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
+  const auth = await authenticateMcpRequest(authHeader);
 
-    if (!provided) {
-      return c.json({
-        error: "Missing credentials. Provide an Authorization: Bearer <token> header (recommended) or x-brain-key header.",
-      }, 401);
-    }
-
-    // 2a. Legacy static key for backward compatibility
-    if (LEGACY_MCP_ACCESS_KEY && provided === LEGACY_MCP_ACCESS_KEY && LEGACY_BRAIN_OWNER_USER_ID) {
-      currentUserId = LEGACY_BRAIN_OWNER_USER_ID;
-    } else {
-      // 2b. Look up in hub_api_keys via SHA-256 hash
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(provided));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-      const { data: keyRow, error: keyError } = await supabase
-        .from("hub_api_keys")
-        .select("id, user_id, scopes, is_active, expires_at")
-        .eq("key_hash", keyHash)
-        .single();
-
-      if (keyError || !keyRow) {
-        return c.json({ error: "Invalid access key." }, 401);
-      }
-      if (!keyRow.is_active) {
-        return c.json({ error: "Access key has been revoked." }, 401);
-      }
-      if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
-        return c.json({ error: "Access key has expired." }, 401);
-      }
-
-      currentUserId = keyRow.user_id;
-
-      // Update last_used_at (fire-and-forget)
-      supabase
-        .from("hub_api_keys")
-        .update({ last_used_at: new Date().toISOString() })
-        .eq("id", keyRow.id)
-        .then(() => {});
-    }
+  if (auth.error) {
+    return c.json({ error: auth.error.message }, auth.error.status);
   }
+
+  currentUserId = auth.userId!;
 
   const transport = new StreamableHTTPTransport();
   await server.connect(transport);
