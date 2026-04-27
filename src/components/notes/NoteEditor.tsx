@@ -410,7 +410,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     setTitle(note.title);
-    setFolderPath(note.folder_path || "");
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
@@ -497,18 +496,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       updateNote.mutate({ id: note.id, title: val });
       triggerGitHubSync(note.id);
     }, 800);
-  };
-
-  const updateFolderPath = async (nextPath: string) => {
-    const normalized = normalizeFolderPath(nextPath);
-    setFolderPath(normalized);
-    updateNote.mutate({ id: note.id, folder_path: normalized });
-    triggerGitHubSync(note.id);
-    if (normalized) {
-      const name = normalized.split("/").pop() || normalized;
-      const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
-      await supabase.from("note_folders" as any).upsert({ path: normalized, name, parent_path }, { onConflict: "user_id,path" });
-    }
   };
 
   const mergeDuplicate = async () => {
@@ -854,19 +841,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
-        {!note.is_trashed && !note.is_external && (
-          <div className="flex items-center gap-2 mb-4 text-xs text-muted-foreground">
-            <Folder className="h-3.5 w-3.5 shrink-0" />
-            <Input
-              value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
-              onBlur={(e) => updateFolderPath(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-              placeholder="Vault root"
-              className="h-7 max-w-sm text-xs"
-            />
-          </div>
-        )}
         {sourceMode ? (
           <textarea
             value={sourceText}
