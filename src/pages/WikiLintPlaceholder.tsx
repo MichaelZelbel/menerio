@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RotateCcw } from "lucide-react";
@@ -120,6 +120,7 @@ function PageLink({ slug, title }: { slug: string; title?: string }) {
 }
 
 export default function WikiLintPlaceholder() {
+  const navigate = useNavigate();
   const { pagesQuery, lastRunQuery } = useWikiLintData();
   const [result, setResult] = useState<LintResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,8 +145,7 @@ export default function WikiLintPlaceholder() {
     }
   };
 
-  const openPage = (slug: string) => window.open(pagePath(slug), "_blank", "noopener,noreferrer");
-  const openBoth = (slugs: string[]) => slugs.slice(0, 2).forEach((slug) => openPage(slug));
+  const openPage = (slug: string) => navigate(pagePath(slug));
 
   return (
     <div className="space-y-6">
@@ -245,7 +245,7 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge>{item.pages.map((slug) => <PageLink key={slug} slug={slug} title={pageTitles.get(slug)} />)}</div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" onClick={() => openBoth(item.pages)}><ExternalLink className="h-4 w-4" /> Open both</Button>
+                <Button className="mt-3" size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
               </div>
             ))}
           </LintSection>
