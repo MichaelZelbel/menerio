@@ -54,6 +54,8 @@ Conventions:
 
 - Every page begins with a one-paragraph summary at the top, before any headers.
 
+- Write pages in readable Markdown, not as one long block. Use short paragraphs separated by blank lines. For every non-trivial page, include 2–4 useful sections such as "## What this means", "## Known facts", "## Open questions", "## Related", or a more specific heading. Prefer concise bullets for lists of facts, relationships, or decisions.
+
 - Wiki links use [[slug]] syntax. Use them generously: every named entity, concept, and person mentioned should be linked, whether or not the target page exists yet. The system tracks unresolved links separately.
 
 - Do not use markdown link syntax for internal pages.
