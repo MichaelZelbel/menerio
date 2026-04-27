@@ -292,9 +292,6 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
-    if (folderFilter !== null) {
-      notes = notes.filter((n) => (n.folder_path || "") === folderFilter);
-    }
     // Sort: pinned first, then by selected field/direction
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
@@ -310,7 +307,7 @@ export default function Notes() {
       return dir * aVal.localeCompare(bVal);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, folderFilter, sortField, sortDirection]);
+  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -336,10 +333,9 @@ export default function Notes() {
     setTopicFilter(null);
     setPersonFilter(null);
     setMetaTypeFilter(null);
-    setFolderFilter(null);
   };
 
-  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter || folderFilter;
+  const hasActiveMetaFilter = topicFilter || personFilter || metaTypeFilter;
   const isSemanticLoading = searchType === "semantic" && semanticSearch.isPending;
   const showingSemanticResults = searchType === "semantic" && semanticResults !== null;
 
