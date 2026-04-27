@@ -1,29 +1,71 @@
-Du hast recht: Das ist kein technischer Grund und keine bewusste Weigerung. Der Fehler ist, dass ich den Prototyp-Font nicht zuverlässig aus der Quelle übernommen habe, sondern wieder eine sichtbare Approximation eingebaut habe. Zusätzlich kann der Unterschied durch bestehende globale Heading-Regeln und ggf. Browser-/Cache-Verhalten so wirken, als hätte sich nichts geändert.
+Plan: Obsidian-ähnliche Navigation für Notes
 
-Plan zur Korrektur:
+Ich baue die linke Notes-Spalte so um, dass Ordner und Notizen direkt als Baum sichtbar sind, statt Ordner nur über ein separates Popover zu filtern.
 
-1. Den aktuellen falschen/ungenauen Headline-Font entfernen
-   - `Baloo 2` wird für die Landing-Page-Headlines nicht weiter als Ersatz verwendet.
-   - Die Variable `--font-hero` wird auf den tatsächlichen Prototyp-Font umgestellt, nicht auf eine ähnliche Schrift.
+Umsetzung
 
-2. Den Prototyp-Font robust einbinden
-   - Wenn der Font ein Google Font ist: exakten Fontnamen und benötigte Gewichte importieren.
-   - Wenn der Prototyp eine eingebettete/Custom-Schrift nutzt: diese als Webfont in das Projekt übernehmen und per `@font-face` laden.
-   - Wichtig: Keine Fallback-Schrift als primäre Lösung. Der erste Font in `font-family` muss der Prototyp-Font sein.
+1. Ordnerbaum in der Notes-Sidebar
+- Die linke Notes-Liste zeigt künftig:
+  - eine Root-Zeile/Vault-Root für Notizen ohne Ordner
+  - alle bestehenden `note_folders`
+  - verschachtelte Ordner über `parent_path`
+  - Notizen unter ihrem jeweiligen Ordner
+- Ordner sind auf- und zuklappbar.
+- Notizen werden wie in Obsidian kompakter dargestellt: nur Titel, optional kleine Status-Icons wie Pin/Favorit/Trash, keine Inhaltsvorschau mehr.
+- Die ausgewählte Notiz bleibt visuell markiert.
 
-3. Landing-Page-Headlines hart auf diesen Font setzen
-   - Hero-H1: `One Brain. Every AI.`
-   - Section-H2: `Your thoughts, supercharged by AI`
-   - CTA-H2: `Ready to build your brain?`
-   - Optional auch der Menerio-Schriftzug im Header/Footer, falls dieser ebenfalls laut Prototyp stilisiert sein soll.
+2. Toolbar über dem Baum
+- Die obere Toolbar bleibt kompakt und erhält Obsidian-ähnliche Aktionen:
+  - neue Notiz
+  - neuer Ordner
+  - Suche
+  - Filter/Sortierung/Insights wie bisher
+- Die bisherige Folder-Auswahl als Popover/Filter wird entfernt oder deutlich zurückgestuft, damit sie nicht mehr zwischen Titel und Tools „herumhängt“.
 
-4. Globale Heading-Regeln nicht mehr dazwischenfunken lassen
-   - Die Landing-Page-Headline-Klassen bekommen explizit `font-family`, `font-weight`, `line-height`, `letter-spacing` und ggf. `font-synthesis: none`.
-   - Damit überschreibt `h1, h2, h3 { font-family: var(--font-display) }` die Landing-Page nicht mehr visuell.
+3. Ordner erstellen
+- Neuer-Ordner-Button öffnet einen kleinen Dialog/Popover.
+- Wenn gerade ein Ordner ausgewählt ist, wird ein neuer Ordner standardmäßig darin angelegt.
+- Ordner werden weiterhin in der vorhandenen Tabelle `note_folders` gespeichert.
 
-5. Sichtbarkeit der Änderung sicherstellen
-   - Nach der Änderung TypeScript prüfen.
-   - Zusätzlich eine kurze Sichtprüfung im Preview bei der aktuellen Breite machen, damit wir nicht nur Code ändern, sondern sehen, ob sich die Headline wirklich sichtbar vom alten Zustand unterscheidet.
+4. Notizen in Ordnern erstellen
+- Rechtsklick auf einen Ordner bietet „New note in folder“.
+- Alternativ erstellt der normale New-Note-Button eine Notiz im aktuell ausgewählten/aktiven Ordner, falls vorhanden.
+- Neue Notizen bekommen automatisch das passende `folder_path`.
 
-Technischer Hinweis:
-- Die aktuell referenzierte Claude-Preview-URL liefert inzwischen teils `invalid preview token`/403, daher ist sie als Quelle nicht mehr zuverlässig abrufbar. Ich werde deshalb den bereits aus dem Prototyp bekannten Look gezielt durch den exakten verwendeten Display-Font bzw. die Projekt-/Design-Quelle nachziehen. Falls der Prototyp-Font eine proprietäre Datei war und nicht im Projekt vorhanden ist, brauche ich die Font-Datei oder einen neuen gültigen Prototyp-Link; andernfalls nutze ich den exakten öffentlich verfügbaren Font.
+5. Notizen verschieben
+- Per Rechtsklick auf eine Notiz gibt es „Move to…“ mit Root und vorhandenen Ordnern.
+- Zusätzlich unterstütze ich Drag & Drop von Notizen auf Ordner bzw. Root, sofern es mit der bestehenden UI sauber bleibt.
+- Das Verschieben aktualisiert `notes.folder_path` und invalidiert die Notes-Queries, damit Baum und Editor sofort aktualisieren.
+
+6. Folder-Feld im Editor entfernen
+- Das aktuelle Eingabefeld unter dem Notiztitel für `folder_path` wird entfernt.
+- Der Editor zeigt stattdessen höchstens eine dezente Breadcrumb/Folder-Anzeige, nicht als primäre Bearbeitungsbox.
+- Ordnerarbeit passiert in der linken Navigation.
+
+7. Such- und Filterverhalten
+- Im Suchmodus bleibt eine flache Ergebnisliste sinnvoll, weil Suchergebnisse aus verschiedenen Ordnern kommen können.
+- Außerhalb der Suche wird der Ordnerbaum angezeigt.
+- Bestehende Filter wie Favorites/Trash, Typfilter, Tags/Insights und Sortierung bleiben erhalten.
+
+Technische Details
+
+- Betroffene Dateien voraussichtlich:
+  - `src/pages/Notes.tsx`
+  - `src/components/notes/NoteList.tsx` oder eine neue Komponente wie `NoteTree.tsx`
+  - `src/components/notes/NoteEditor.tsx`
+  - ggf. `src/hooks/useNotes.ts` für kleine Hilfsfunktionen/Typen
+- Keine neue Datenbankmigration nötig: `notes.folder_path` und `note_folders` existieren bereits.
+- Ich nutze vorhandene shadcn-Komponenten (`ContextMenu`, `Popover`, `Input`, `Button`, `Collapsible`) und bestehende Supabase-Queries.
+- RLS bleibt unverändert; alle Schreiboperationen laufen über bestehende user-scoped Tabellen.
+
+Validierung
+
+- TypeScript Build/Lint prüfen.
+- Manuell prüfen:
+  - Ordner erstellen
+  - Ordner auf-/zuklappen
+  - Notiz im Ordner erstellen
+  - Notiz in anderen Ordner und Root verschieben
+  - Suche zeigt weiterhin Ergebnisse
+  - Editor speichert Titel/Inhalt weiter korrekt
+  - externe/trashed Notes bleiben geschützt wie bisher
