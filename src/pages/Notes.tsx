@@ -500,47 +500,18 @@ export default function Notes() {
 
           <Popover>
             <PopoverTrigger asChild>
-              <Button
-                variant={folderFilter !== null ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                title="Folders"
-              >
-                <Folder className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="h-8 w-8" title="New folder">
+                <FolderPlus className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-72 p-3 space-y-3">
-              <div className="space-y-1">
-                <button
-                  onClick={() => setFolderFilter(null)}
-                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === null && "bg-accent")}
-                >
-                  <FileText className="h-3.5 w-3.5" /> All folders
-                </button>
-                <button
-                  onClick={() => setFolderFilter("")}
-                  className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === "" && "bg-accent")}
-                >
-                  <Folder className="h-3.5 w-3.5" /> Vault root
-                </button>
-                {folderPaths.map((path) => (
-                  <button
-                    key={path}
-                    onClick={() => setFolderFilter(path)}
-                    className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent", folderFilter === path && "bg-accent")}
-                  >
-                    <Folder className="h-3.5 w-3.5" />
-                    <span className="truncate">{path}</span>
-                  </button>
-                ))}
-              </div>
-              <Separator />
+              <p className="text-xs font-medium text-muted-foreground">Create folder</p>
               <div className="flex gap-2">
                 <Input
                   value={newFolderPath}
                   onChange={(e) => setNewFolderPath(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") createFolder(); }}
-                  placeholder="Projects/Menerio"
+                  placeholder={activeFolderPath ? `${activeFolderPath}/New folder` : "Projects/Menerio"}
                   className="h-8 text-xs"
                 />
                 <Button size="sm" className="h-8" onClick={createFolder}>Add</Button>
