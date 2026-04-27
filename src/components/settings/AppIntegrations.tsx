@@ -69,6 +69,11 @@ function generateApiKey(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function AppIntegrations() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -98,13 +103,16 @@ export function AppIntegrations() {
   const connectKnownApp = useMutation({
     mutationFn: async (known: KnownApp) => {
       const apiKey = generateApiKey();
+      const keyPrefix = apiKey.slice(0, 12);
       const webhookUrl = `${known.supabaseUrl}${known.webhookPath}`;
       const { error } = await supabase.from("connected_apps" as any).insert({
         user_id: user!.id,
         app_name: known.id,
         display_name: known.name,
         webhook_url: webhookUrl,
-        api_key: apiKey,
+        api_key: keyPrefix,
+        key_prefix: keyPrefix,
+        key_hash: await sha256Hex(apiKey),
       });
       if (error) throw error;
       return apiKey;
