@@ -53,9 +53,11 @@ export async function uploadAttachment(
 
   if (uploadError) throw uploadError;
 
-  const { data } = supabase.storage
+  const { data, error: signedUrlError } = await supabase.storage
     .from("note-attachments")
-    .getPublicUrl(path);
+    .createSignedUrl(path, 60 * 60 * 24 * 7);
 
-  return { url: data.publicUrl, mediaType, storagePath: path };
+  if (signedUrlError) throw signedUrlError;
+
+  return { url: data.signedUrl, mediaType, storagePath: path };
 }
