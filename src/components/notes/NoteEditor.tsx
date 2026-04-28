@@ -906,6 +906,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         )}
         <div className="flex items-center gap-2 mb-4">
           <input
+            ref={titleInputRef}
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="Untitled"
@@ -1046,7 +1047,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:justify-between gap-2">
-            <AlertDialogCancel onClick={() => { setTitle(note.title); setDuplicateTarget(null); }}>
+            <AlertDialogCancel onClick={() => { setTitle(note.title); lastLocalTitleRef.current = note.title ?? ""; pendingSaveTitleRef.current = null; setDuplicateTarget(null); }}>
               Rename
             </AlertDialogCancel>
             <Button variant="outline" onClick={mergeDuplicate}>Merge</Button>
