@@ -15,10 +15,10 @@ const legalLinks = [
 ];
 
 const socialLinks = [
-  { icon: Twitter, href: "#", label: "Twitter" },
-  { icon: Github, href: "#", label: "GitHub" },
-  { icon: Linkedin, href: "#", label: "LinkedIn" },
-  { icon: Mail, href: "#", label: "Email" },
+  { icon: Twitter, href: "https://x.com/MichaelZelbel", label: "X" },
+  { icon: Github, href: "https://github.com/MichaelZelbel/menerio", label: "GitHub" },
+  { icon: Linkedin, href: "https://www.linkedin.com/in/michaelzelbel/", label: "LinkedIn" },
+  { icon: Mail, href: "mailto:support@menerio.com", label: "Email" },
 ];
 
 export function Footer() {
@@ -96,6 +96,8 @@ export function Footer() {
               <a
                 key={social.label}
                 href={social.href}
+                target={social.href.startsWith("mailto:") ? undefined : "_blank"}
+                rel={social.href.startsWith("mailto:") ? undefined : "noopener noreferrer"}
                 aria-label={social.label}
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-[hsl(var(--brand)/.08)] text-[hsl(var(--landing-muted))] transition-colors hover:bg-[hsl(var(--brand)/.12)] hover:text-[hsl(var(--brand))] dark:bg-[hsl(var(--landing-plain-white)/.04)] dark:hover:bg-[hsl(var(--landing-sky-primary)/.12)] dark:hover:text-[hsl(var(--landing-sky-highlight))]"
               >
