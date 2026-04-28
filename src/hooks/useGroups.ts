@@ -4,6 +4,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { getTemplateById, instantiateTemplate } from "@/lib/group-templates";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { syncGroupWikiMembers } from "@/lib/group-wiki-sync";
 
 type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type ContactGroupInsert = Database["public"]["Tables"]["contact_groups"]["Insert"];
@@ -21,6 +22,18 @@ const slugify = (value: string) =>
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "group";
+
+const groupWikiSkeleton = (group: Pick<ContactGroupRow, "name" | "purpose">) => `# ${group.name}
+
+## Purpose
+${group.purpose || ""}
+
+## Members
+_Synced automatically from contact_group_memberships._
+
+## Insights
+_Synthesized from notes mentioning members._
+`;
 
 function isTemplateCreateInput(input: CreateGroupInput): input is { templateId: string; name?: string } {
   return "templateId" in input;
@@ -102,7 +115,21 @@ export function useCreateGroup() {
         .single();
 
       if (error) throw error;
-      return data as ContactGroupRow;
+      const group = data as ContactGroupRow;
+
+      const { error: wikiError } = await supabase.from("wiki_pages").insert({
+        user_id: user.id,
+        slug: `group-${group.slug}`,
+        page_type: "group",
+        title: group.name,
+        summary: group.purpose,
+        metadata: { group_id: group.id },
+        content: groupWikiSkeleton(group),
+      });
+
+      if (wikiError) throw wikiError;
+      await syncGroupWikiMembers(group.id);
+      return group;
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
