@@ -43,15 +43,24 @@ export async function syncGroupWikiMembers(groupId: string) {
   if (membershipsError) throw membershipsError;
 
   const lines = (((memberships || []) as unknown) as MembershipWithPerson[])
-    .filter((membership) => membership.contacts?.name)
+    .filter((membership) => membership.contacts?.name);
+  const names = [...new Set(lines.map((membership) => membership.contacts!.name!))];
+  const { data: personPages, error: personPagesError } = names.length > 0
+    ? await supabase.from("wiki_pages").select("title, slug").eq("page_type", "person").in("title", names)
+    : { data: [], error: null };
+  if (personPagesError) throw personPagesError;
+  const personSlugByName = new Map((personPages || []).map((page) => [page.title, page.slug]));
+
+  const memberLines = lines
     .map((membership) => {
       const name = membership.contacts!.name!;
+      const slug = personSlugByName.get(name) || slugify(name);
       const status = membership.status ? ` — ${membership.status.replace(/_/g, " ")}` : "";
-      return `- [[${slugify(name)}]]${status}`;
+      return `- [[${slug}]]${status}`;
     });
 
-  const membersSection = lines.length > 0
-    ? lines.join("\n")
+  const membersSection = memberLines.length > 0
+    ? memberLines.join("\n")
     : "_No members yet._";
 
   const { data: page, error: pageError } = await supabase
