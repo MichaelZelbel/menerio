@@ -417,11 +417,13 @@ export default function Actions() {
                                 </Badge>
                               )}
                               {item.metadata?.group_id && groupContextById(item.metadata.group_id) && (
-                                <Badge variant="secondary" className="text-[10px] gap-0.5 max-w-[140px] truncate" asChild>
-                                  <Link to={`/dashboard/groups/${groupContextById(item.metadata!.group_id)?.slug}`} onClick={(event) => event.stopPropagation()}>
-                                    <Users className="h-2.5 w-2.5 shrink-0" /> {groupContextById(item.metadata.group_id)?.name}
-                                  </Link>
-                                </Badge>
+                                <Link
+                                  to={`/dashboard/groups/${groupContextById(item.metadata.group_id)?.slug}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="inline-flex max-w-[140px] items-center gap-0.5 truncate rounded-full border border-transparent bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-secondary-foreground transition-colors hover:bg-secondary/80"
+                                >
+                                  <Users className="h-2.5 w-2.5 shrink-0" /> {groupContextById(item.metadata.group_id)?.name}
+                                </Link>
                               )}
                             </div>
                           </div>
