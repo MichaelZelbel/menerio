@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ExternalLink, History, Save } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, History, Save } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { RichTextEditor } from "@/components/RichTextEditor";
@@ -33,6 +33,22 @@ const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "d
 const labelize = (value: string) => value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const relativeTime = (date: string) => formatDistanceToNow(new Date(date), { addSuffix: true });
 const truncate = (value: string, length = 240) => (value.length > length ? `${value.slice(0, length).trim()}…` : value);
+const slugifyHeading = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").replace(/-+/g, "-") || "section";
+
+type WikiHeading = { id: string; title: string; level: number };
+
+function extractHeadings(markdown: string): WikiHeading[] {
+  const seen = new Map<string, number>();
+  return markdown.split("\n").flatMap((line) => {
+    const match = line.match(/^(#{1,3})\s+(.+)$/);
+    if (!match) return [];
+    const title = match[2].replace(/[*_`\[\]()]/g, "").trim();
+    const baseId = slugifyHeading(title);
+    const count = seen.get(baseId) || 0;
+    seen.set(baseId, count + 1);
+    return [{ id: count ? `${baseId}-${count + 1}` : baseId, title, level: match[1].length }];
+  });
+}
 
 function normalizeWikiContent(content: string): string {
   const trimmed = content.trim();
