@@ -548,6 +548,25 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     updateNote.mutate({ id: note.id, tags: (note.tags || []).filter((t) => t !== tag) });
   };
 
+  const logGroupInteraction = async () => {
+    if (!user || !selectedInteractionGroup) return;
+    const { error } = await supabase.from("contact_interactions").insert({
+      user_id: user.id,
+      contact_id: selectedInteractionGroup.personId,
+      group_id: selectedInteractionGroup.groupId,
+      note_id: note.id,
+      type: interactionType,
+      summary: interactionSummary.trim() || title,
+    });
+    if (error) {
+      showToast.error(error.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["contact-interactions"] });
+    setInteractionGroupId(null);
+    showToast.success("Interaction logged");
+  };
+
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
   const charCount = plainText.length;
