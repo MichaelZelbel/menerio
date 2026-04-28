@@ -644,11 +644,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           </>
         ) : (
           <>
-            {/* Direct action icons — visible on wider screens, collapsed into the menu on smaller ones */}
+            {/* Direct action icons */}
             <Button
               variant="ghost"
               size="icon"
-              className="hidden lg:inline-flex h-8 w-8"
+              className="h-8 w-8"
               onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}
               title="Copy to clipboard"
             >
@@ -657,7 +657,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Button
               variant="ghost"
               size="icon"
-              className="hidden lg:inline-flex h-8 w-8"
+              className="h-8 w-8"
               onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}
               title="Copy note link"
             >
@@ -666,57 +666,54 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <Button
               variant="ghost"
               size="icon"
-              className="hidden lg:inline-flex h-8 w-8"
+              className="h-8 w-8"
               onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}
               title="Open in new tab"
             >
               <ExternalLink className="h-4 w-4" />
             </Button>
+            {sharedNote?.is_active ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => copyShareLink.mutate(sharedNote.share_token)}
+                  title="Copy public link"
+                >
+                  <Globe className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => unshareNote.mutate(note.id)}
+                  title="Stop sharing"
+                >
+                  <Unlink className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => shareNote.mutate({ noteId: note.id, title, content: editor?.getHTML() || note.content }, { onSuccess: (result: ShareNoteResult) => { if (result.blocked && result.moderation) setModerationBlock(result.moderation); } })}
+                disabled={shareNote.isPending}
+                title="Share note"
+              >
+                <Share2 className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              className="hidden lg:inline-flex h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={moveToTrash}
               title="Move to trash"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={moveToTrash} className="lg:hidden">
-                  <Trash2 className="mr-2 h-4 w-4" /> Move to Trash
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }} className="lg:hidden">
-                  <Copy className="mr-2 h-4 w-4" /> Copy to Clipboard
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }} className="lg:hidden">
-                  <Link2 className="mr-2 h-4 w-4" /> Copy Note Link
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')} className="lg:hidden">
-                  <ExternalLink className="mr-2 h-4 w-4" /> Open in New Tab
-                </DropdownMenuItem>
-              {sharedNote?.is_active ? (
-                <>
-                  <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
-                    <Globe className="mr-2 h-4 w-4" /> Copy Public Link
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => unshareNote.mutate(note.id)}>
-                    <Unlink className="mr-2 h-4 w-4" /> Stop Sharing
-                  </DropdownMenuItem>
-                </>
-              ) : (
-                <DropdownMenuItem onClick={() => shareNote.mutate({ noteId: note.id, title, content: editor?.getHTML() || note.content }, { onSuccess: (result: ShareNoteResult) => { if (result.blocked && result.moderation) setModerationBlock(result.moderation); } })} disabled={shareNote.isPending}>
-                  <Share2 className="mr-2 h-4 w-4" /> Share Note
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
           </>
         )}
       </div>
