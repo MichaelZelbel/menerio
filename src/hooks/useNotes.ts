@@ -170,7 +170,11 @@ export function useUpdateNote() {
       return data as unknown as Note;
     },
     onSuccess: (note, variables) => {
-      qc.invalidateQueries({ queryKey: ["notes"] });
+      qc.setQueriesData<Note[]>({ queryKey: ["notes"] }, (current) => {
+        if (!current) return current;
+        return current.map((item) => item.id === note.id ? { ...item, ...note } : item);
+      });
+      qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
       }
