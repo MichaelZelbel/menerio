@@ -26,12 +26,20 @@ async function sha256Hex(value: string) {
   return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function extractBearerToken(authHeader: string | undefined) {
+  if (!authHeader) return "";
+  const trimmed = authHeader.trim();
+  const bearerMatch = trimmed.match(/^bearer\s+(.+)$/i);
+  const raw = bearerMatch ? bearerMatch[1] : trimmed;
+  return raw.trim().replace(/^["'`]+|["'`]+$/g, "");
+}
+
 async function authenticateMcpRequest(authHeader: string | undefined) {
-  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+  const token = extractBearerToken(authHeader);
+  if (!token) {
     return { userId: null, error: { status: 401, message: "Missing Authorization header. Create a Personal MCP Token in Settings → MCP Server and send it as `Authorization: Bearer <token>`." } };
   }
 
-  const token = authHeader.slice(7).trim();
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
     return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
@@ -2005,7 +2013,7 @@ app.get("/favicon.png", (c) => {
 app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
 app.all("*", async (c) => {
-  const authHeader = c.req.header("authorization") || c.req.header("Authorization");
+  const authHeader = c.req.header("authorization") || c.req.header("Authorization") || c.req.header("x-mcp-token") || c.req.header("x-api-key");
   const auth = await authenticateMcpRequest(authHeader);
 
   if (auth.error) {
