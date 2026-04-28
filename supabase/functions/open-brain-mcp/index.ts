@@ -1819,6 +1819,63 @@ server.registerTool("add_group_member", { title: "Add Group Member", description
   }
 });
 
+server.registerTool("update_group_membership", { title: "Update Group Membership", description: "Update a Group membership's stage/status, priority, notes, attributes, or archive state.", inputSchema: { membership_id: z.string(), status: z.string().optional(), priority: z.string().optional(), notes: z.string().optional(), reason: z.string().optional(), attributes: z.record(z.any()).optional(), archived: z.boolean().optional() } }, async ({ membership_id, status, priority, notes, reason, attributes, archived }) => {
+  try {
+    if (!isUuid(membership_id)) throw new Error("Invalid membership_id");
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (status !== undefined) updates.status = status;
+    if (priority !== undefined) updates.priority = priority;
+    if (notes !== undefined) updates.notes = notes;
+    if (reason !== undefined) updates.reason = reason;
+    if (attributes !== undefined) updates.attributes = attributes;
+    if (archived !== undefined) updates.archived_at = archived ? new Date().toISOString() : null;
+    if (status !== undefined) updates.last_movement_at = new Date().toISOString();
+    const { data, error } = await supabase.from("contact_group_memberships").update(updates).eq("user_id", currentUserId).eq("id", membership_id).select("*").single();
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    return jsonTool({ ok: true, membership: data });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("log_group_interaction", { title: "Log Group Interaction", description: "Record an interaction with a person in the context of a Group.", inputSchema: { group_id_or_slug: z.string(), contact_id: z.string().optional(), contact_name: z.string().optional(), type: z.string(), summary: z.string().optional(), action_items: z.array(z.string()).optional(), note_id: z.string().optional(), interaction_date: z.string().optional() } }, async ({ group_id_or_slug, contact_id, contact_name, type, summary, action_items, note_id, interaction_date }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const contact = await resolveContact({ contact_id, contact_name });
+    const date = interaction_date || new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("contact_interactions").insert({ user_id: currentUserId, group_id: group.id, contact_id: contact.id, type, summary: summary || null, action_items: action_items || [], note_id: note_id || null, interaction_date: date }).select("*").single();
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    await supabase.from("contacts").update({ last_contact_date: date }).eq("user_id", currentUserId).eq("id", contact.id);
+    return jsonTool({ ok: true, interaction: data, group: { id: group.id, name: group.name }, person: { id: contact.id, name: contact.name } });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("create_group_next_step", { title: "Create Group Next Step", description: "Create an open next-step action for a Group membership.", inputSchema: { membership_id: z.string(), content: z.string(), priority: z.string().optional().default("normal"), due_date: z.string().optional() } }, async ({ membership_id, content, priority, due_date }) => {
+  try {
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, person_id").eq("user_id", currentUserId).eq("id", membership_id).maybeSingle();
+    if (membershipError) throw new Error(membershipError.message);
+    if (!membership) throw new Error("Membership not found");
+    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).person_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, person_id: (membership as any).person_id } }).select("*").single();
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    return jsonTool({ ok: true, action_item: data });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step", description: "Use AI to suggest one concrete next step for a Group membership without saving it.", inputSchema: { membership_id: z.string() } }, async ({ membership_id }) => {
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/suggest-group-next-step`, { method: "POST", headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", "x-menerio-user-id": currentUserId }, body: JSON.stringify({ membership_id }) });
+    const text = await response.text();
+    if (!response.ok) return { content: [{ type: "text" as const, text: `Suggest next step failed: ${response.status} ${text}` }], isError: true };
+    return { content: [{ type: "text" as const, text }] };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
 const app = new Hono();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
