@@ -230,6 +230,7 @@ export default function People() {
         <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
           <TabsList className="flex flex-wrap h-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="groups">Groups</TabsTrigger>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -358,6 +359,10 @@ export default function People() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="groups" className="mt-0">
+          <PersonGroupsTab personId={selectedPerson.id} />
         </TabsContent>
 
         <TabsContent value="conversation" className="mt-0">
