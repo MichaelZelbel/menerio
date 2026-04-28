@@ -1235,9 +1235,10 @@ server.registerTool(
       type: z.string().describe("Interaction type: meeting, call, email, message, social"),
       summary: z.string().optional().describe("Brief summary of the interaction"),
       action_items: z.array(z.string()).optional().describe("Action items from this interaction"),
+      group_id_or_slug: z.string().optional().describe("Optional group id or slug to log this interaction against a Group"),
     },
   },
-  async ({ contact_name, type, summary, action_items }) => {
+  async ({ contact_name, type, summary, action_items, group_id_or_slug }) => {
     try {
       const { data: contacts } = await supabase
         .from("contacts")
@@ -1252,6 +1253,7 @@ server.registerTool(
 
       const contact = contacts[0] as any;
       const today = new Date().toISOString().split("T")[0];
+      const group = group_id_or_slug ? await resolveGroup(group_id_or_slug) : null;
 
       const { error: intError } = await supabase.from("contact_interactions").insert({
         contact_id: contact.id,
@@ -1260,6 +1262,7 @@ server.registerTool(
         summary: summary || null,
         action_items: action_items || [],
         interaction_date: today,
+        group_id: group?.id || null,
       });
 
       if (intError) {
@@ -1268,7 +1271,7 @@ server.registerTool(
 
       await supabase.from("contacts").update({ last_contact_date: today }).eq("id", contact.id);
 
-      let msg = `Logged ${type} with ${contact.name}`;
+      let msg = `Logged ${type} with ${contact.name}${group ? ` in ${group.name}` : ""}`;
       if (action_items?.length) msg += ` | ${action_items.length} action item(s)`;
       return { content: [{ type: "text" as const, text: msg }] };
     } catch (err: unknown) {
