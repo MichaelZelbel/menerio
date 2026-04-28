@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,9 @@ import { DuplicateHints } from "@/components/people/DuplicateHints";
 import { ConversationTab } from "@/components/people/ConversationTab";
 import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
+import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
+import { useGroups } from "@/hooks/useGroups";
+import { useGroupMemberships } from "@/hooks/useGroupMemberships";
 
 interface Person {
   id: string;
@@ -69,6 +73,7 @@ export default function People() {
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -91,6 +96,8 @@ export default function People() {
   });
 
   const selectedPerson = people.find((p) => p.id === selectedPersonId);
+  const { data: groups = [] } = useGroups();
+  const { data: groupFilterMemberships = [] } = useGroupMemberships(groupFilter === "all" ? null : groupFilter);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({
@@ -164,6 +171,7 @@ export default function People() {
 
   // ── Filtered list ──
   const filtered = people.filter((p) => {
+    if (groupFilter !== "all" && !groupFilterMemberships.some((membership) => membership.person_id === p.id)) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -222,6 +230,7 @@ export default function People() {
         <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
           <TabsList className="flex flex-wrap h-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="groups">Groups</TabsTrigger>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -352,6 +361,10 @@ export default function People() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="groups" className="mt-0">
+          <PersonGroupsTab personId={selectedPerson.id} />
+        </TabsContent>
+
         <TabsContent value="conversation" className="mt-0">
           <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
         </TabsContent>
@@ -436,14 +449,27 @@ export default function People() {
         </Dialog>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search people..."
-          className="pl-9"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search people..."
+            className="pl-9"
+          />
+        </div>
+        <Select value={groupFilter} onValueChange={setGroupFilter}>
+          <SelectTrigger className="w-full sm:w-48">
+            <SelectValue placeholder="Filter by Group" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            {groups.filter((group) => !group.archived_at).map((group) => (
+              <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (

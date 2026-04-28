@@ -19,6 +19,7 @@ import {
   BookOpen,
   ClipboardList,
   Calendar,
+  Layers,
   LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
@@ -70,6 +71,7 @@ export function DashboardSidebar() {
     { title: "Lexicon", url: "/lexicon", icon: BookOpen },
     { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
+    { title: "Groups", url: "/dashboard/groups", icon: Layers },
     
     { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
     { title: "Note Graph", url: "/dashboard/graph", icon: Network },
