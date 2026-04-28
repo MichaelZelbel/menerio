@@ -72,11 +72,11 @@ export default function WikiHome() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("wiki_pages")
-        .select("id, user_id, slug, title, summary, content, page_type, source_count, created_at, updated_at")
+        .select("id, user_id, slug, title, summary, content, page_type, source_count, metadata, last_synthesized_at, created_at, updated_at")
         .order("page_type", { ascending: true })
         .order("title", { ascending: true });
       if (error) throw error;
-      return data || [];
+      return (data || []) as WikiPage[];
     },
   });
 

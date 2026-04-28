@@ -114,7 +114,7 @@ Return ONLY a JSON object, no surrounding text, no markdown code fences:
 
       "title": "Title",
 
-      "page_type": "entity|concept|source|overview|synthesis|person",
+      "page_type": "entity|concept|source|overview|synthesis|person|group",
 
       "summary": "One-line summary that will appear in the index.",
 
@@ -233,7 +233,7 @@ function extractJson(raw: string): SynthesisResult {
 }
 
 function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResult {
-  const allowedTypes = new Set(["entity", "concept", "source", "overview", "synthesis", "person"]);
+  const allowedTypes = new Set(["entity", "concept", "source", "overview", "synthesis", "person", "group"]);
   const actions = result.actions
     .filter((action) => (action.op === "create" || action.op === "update") && typeof action.slug === "string")
     .map((action) => ({
@@ -286,6 +286,133 @@ async function callSynthesis(systemPrompt: string, userContent: string): Promise
   return { raw: data.choices?.[0]?.message?.content || "", usage: data.usage };
 }
 
+function replaceInsightsSection(content: string, nextSection: string) {
+  const normalized = content.trimEnd();
+  const section = `## Insights\n${nextSection.trimEnd()}\n`;
+  const insightsBlock = /(^|\n)## Insights\n[\s\S]*?(?=\n##\s|$)/;
+  if (insightsBlock.test(normalized)) return normalized.replace(insightsBlock, `$1${section}`).trimEnd() + "\n";
+  return `${normalized}\n\n${section}`.trimEnd() + "\n";
+}
+
+function extractPeopleFromMetadata(metadata: unknown): string[] {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
+  const people = (metadata as { people?: unknown }).people;
+  const values = Array.isArray(people) ? people : typeof people === "string" ? [people] : [];
+  return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+}
+
+async function synthesizeGroupInsights(db: any, userId: string, note: any, noteId: string, contentText: string) {
+  const people = extractPeopleFromMetadata(note.metadata);
+  if (people.length === 0) return { updated: 0, skipped: "no_people_metadata" };
+
+  const { data: contacts, error: contactsError } = await db
+    .from("contacts")
+    .select("id, name")
+    .in("name", people);
+  if (contactsError) throw contactsError;
+  const personIds = [...new Set((contacts || []).map((contact: any) => contact.id))];
+  if (personIds.length === 0) return { updated: 0, skipped: "no_matching_contacts" };
+
+  const { data: memberships, error: membershipsError } = await db
+    .from("contact_group_memberships")
+    .select("group_id, person_id, contact_groups:group_id(id, slug, name)")
+    .in("person_id", personIds)
+    .is("archived_at", null);
+  if (membershipsError) throw membershipsError;
+
+  const groups = new Map<string, { id: string; slug: string; name: string; personIds: Set<string> }>();
+  for (const membership of memberships || []) {
+    const group = membership.contact_groups;
+    if (!group?.id || !group?.slug) continue;
+    const current = groups.get(group.id) || { id: group.id, slug: group.slug, name: group.name || group.slug, personIds: new Set<string>() };
+    current.personIds.add(membership.person_id);
+    groups.set(group.id, current);
+  }
+  if (groups.size === 0) return { updated: 0, skipped: "no_groups" };
+
+  let updated = 0;
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  for (const group of groups.values()) {
+    const { data: page, error: pageError } = await db
+      .from("wiki_pages")
+      .select("id, slug, title, content, last_synthesized_at")
+      .eq("slug", `group-${group.slug}`)
+      .eq("page_type", "group")
+      .maybeSingle();
+    if (pageError) throw pageError;
+    if (!page) continue;
+    if (page.last_synthesized_at && new Date(page.last_synthesized_at).getTime() > cutoff) continue;
+
+    const { data: interactions, error: interactionsError } = await db
+      .from("contact_interactions")
+      .select("interaction_date, type, summary, action_items, contact_id")
+      .in("contact_id", Array.from(group.personIds))
+      .gte("interaction_date", since)
+      .order("interaction_date", { ascending: false })
+      .limit(50);
+    if (interactionsError) throw interactionsError;
+
+    const { data: recentNotes, error: recentNotesError } = await db
+      .from("notes")
+      .select("id, title, content, metadata, created_at")
+      .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (recentNotesError) throw recentNotesError;
+    const noteExcerpts = (recentNotes || [])
+      .filter((candidate: any) => extractPeopleFromMetadata(candidate.metadata).some((person) => people.includes(person)))
+      .slice(0, 12)
+      .map((candidate: any) => `- ${candidate.title || "Untitled"}: ${noteContentToText(candidate.content).slice(0, 500)}`)
+      .join("\n") || "None";
+
+    const context = [
+      `Group: ${group.name}`,
+      `Mentioned people: ${people.join(", ")}`,
+      `Current note excerpt:\n${contentText.slice(0, 2500)}`,
+      `Recent interactions:\n${(interactions || []).map((item: any) => `- ${item.interaction_date} ${item.type}: ${item.summary || ""}`).join("\n") || "None"}`,
+      `Related note excerpts from the last 30 days:\n${noteExcerpts}`,
+      `Existing page content:\n${page.content}`,
+    ].join("\n\n");
+
+    const { raw } = await callSynthesis(
+      "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts.",
+      context,
+    );
+    const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""));
+    const insights = typeof parsed.insights === "string" && parsed.insights.trim() ? parsed.insights : "_No synthesized insights yet._";
+    const nextContent = replaceInsightsSection(page.content || "", insights);
+
+    const { error: revisionError } = await db.from("wiki_revisions").insert({
+      user_id: userId,
+      wiki_page_id: page.id,
+      page_slug: page.slug,
+      page_title: page.title,
+      change_type: "updated",
+      previous_content: page.content,
+      new_content: nextContent,
+      source_note_id: noteId,
+      change_summary: "Updated group insights from recent member context",
+      status: "applied",
+    });
+    if (revisionError) throw revisionError;
+
+    const { error: updateError } = await db
+      .from("wiki_pages")
+      .update({ content: nextContent, last_synthesized_at: new Date().toISOString() })
+      .eq("id", page.id);
+    if (updateError) throw updateError;
+    const { error: sourceError } = await db
+      .from("wiki_page_sources")
+      .upsert({ user_id: userId, wiki_page_id: page.id, note_id: noteId }, { onConflict: "wiki_page_id,note_id" });
+    if (sourceError) throw sourceError;
+    updated += 1;
+  }
+
+  return { updated };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const startedAt = Date.now();
@@ -315,7 +442,7 @@ serve(async (req) => {
 
     const { data: note, error: noteError } = await db
       .from("notes")
-      .select("id, title, content")
+      .select("id, title, content, metadata")
       .eq("id", noteId)
       .maybeSingle();
 
@@ -367,6 +494,10 @@ serve(async (req) => {
     });
     if (applyError) throw applyError;
 
+    const groupInsightsResult = changeType === "UPDATE"
+      ? await synthesizeGroupInsights(db, userId, note, noteId, contentText)
+      : { updated: 0, skipped: "not_update" };
+
     const durationMs = Date.now() - startedAt;
     await logWiki(db, userId, "ingest", {
       note_id: noteId,
@@ -375,9 +506,10 @@ serve(async (req) => {
       log_summary: parsed.log_summary,
       duration_ms: durationMs,
       apply_result: applyResult,
+      group_insights: groupInsightsResult,
     });
 
-    return jsonResponse({ ok: true, summary: parsed.log_summary, action_count: parsed.actions.length, duration_ms: durationMs });
+    return jsonResponse({ ok: true, summary: parsed.log_summary, action_count: parsed.actions.length, group_insights: groupInsightsResult, duration_ms: durationMs });
   } catch (error) {
     console.error("wiki-ingest failed", error);
     if (db && userId) {
