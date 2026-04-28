@@ -221,6 +221,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
   const [duplicateTarget, setDuplicateTarget] = useState<Note | null>(null);
   const [pendingDuplicateTitle, setPendingDuplicateTitle] = useState("");
+  const [interactionGroupId, setInteractionGroupId] = useState<string | null>(null);
+  const [interactionType, setInteractionType] = useState("meeting");
+  const [interactionSummary, setInteractionSummary] = useState(note.title);
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
@@ -549,6 +552,37 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
   const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
+  const mentionedPeople = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
+  const { data: mentionedGroupMatches = [] } = useQuery({
+    queryKey: ["note-mentioned-groups", note.id, mentionedPeople],
+    enabled: !!user && mentionedPeople.length > 0,
+    queryFn: async () => {
+      const { data: contacts, error: contactsError } = await supabase
+        .from("contacts")
+        .select("id, name")
+        .eq("user_id", user!.id)
+        .in("name", mentionedPeople);
+      if (contactsError) throw contactsError;
+      const personIds = (contacts || []).map((contact) => contact.id);
+      if (personIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("contact_group_memberships")
+        .select("person_id, contact_groups:group_id(id, name)")
+        .eq("user_id", user!.id)
+        .in("person_id", personIds)
+        .is("archived_at", null);
+      if (error) throw error;
+      const contactNameById = new Map((contacts || []).map((contact) => [contact.id, contact.name]));
+      return (data || []).map((membership: any) => ({
+        personId: membership.person_id as string,
+        personName: contactNameById.get(membership.person_id) || "",
+        groupId: membership.contact_groups?.id as string,
+        groupName: membership.contact_groups?.name as string,
+      })).filter((match) => match.groupId && match.groupName);
+    },
+  });
+  const mentionedGroups = [...new Map(mentionedGroupMatches.map((match) => [match.groupId, match])).values()];
+  const selectedInteractionGroup = mentionedGroups.find((group) => group.groupId === interactionGroupId) || null;
   const syncStatus = syncLog?.sync_status;
   const isSyncing = ghSync.isPending;
 
