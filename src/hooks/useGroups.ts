@@ -23,6 +23,9 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "group";
 
+const isUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
 const groupWikiSkeleton = (group: Pick<ContactGroupRow, "name" | "purpose">) => `# ${group.name}
 
 ## Purpose
@@ -69,11 +72,11 @@ export function useGroup(idOrSlug: string | null | undefined) {
       const query = supabase
         .from("contact_groups")
         .select("*")
-        .eq("user_id", user!.id)
-        .or(`id.eq.${idOrSlug},slug.eq.${idOrSlug}`)
-        .maybeSingle();
+        .eq("user_id", user!.id);
 
-      const { data, error } = await query;
+      const { data, error } = isUuid(idOrSlug!)
+        ? await query.eq("id", idOrSlug!).maybeSingle()
+        : await query.eq("slug", idOrSlug!).maybeSingle();
       if (error) throw error;
       return (data as ContactGroupRow | null) || null;
     },
