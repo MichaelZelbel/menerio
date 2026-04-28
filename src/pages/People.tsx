@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +44,7 @@ import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
 import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
 import { useGroups } from "@/hooks/useGroups";
-import { useGroupMemberships } from "@/hooks/useGroupMemberships";
+import { useAddMembership, useGroupMemberships } from "@/hooks/useGroupMemberships";
 
 interface Person {
   id: string;
@@ -74,6 +75,10 @@ export default function People() {
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
+  const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  const [bulkGroupId, setBulkGroupId] = useState("");
+  const addMembership = useAddMembership();
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -179,6 +184,25 @@ export default function People() {
       (p.aliases || []).some((a) => a.toLowerCase().includes(q))
     );
   });
+
+  const selectedSet = useMemo(() => new Set(selectedPeople), [selectedPeople]);
+  const toggleSelected = (personId: string) => {
+    setSelectedPeople((current) => current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]);
+  };
+  const clearSelection = () => setSelectedPeople([]);
+  const bulkAddToGroup = async () => {
+    if (!bulkGroupId || selectedPeople.length === 0) return;
+    try {
+      await Promise.all(selectedPeople.map((personId) => addMembership.mutateAsync({ groupId: bulkGroupId, personId })));
+      showToast.success(`Added ${selectedPeople.length} people to group`);
+      queryClient.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
+      clearSelection();
+      setBulkAddOpen(false);
+      setBulkGroupId("");
+    } catch (error: any) {
+      showToast.error(error.message || "Failed to add people");
+    }
+  };
 
   // ── Helpers ──
   const startEditing = (person: Person) => {
