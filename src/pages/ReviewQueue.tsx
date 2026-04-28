@@ -31,9 +31,7 @@ import {
   BookOpen,
   Eye,
   RotateCcw,
-  Clock,
   Users2,
-  Loader2,
 } from "lucide-react";
 import { useAddMembership } from "@/hooks/useGroupMemberships";
 import { useGroups } from "@/hooks/useGroups";
@@ -64,6 +62,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
+  group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
 };
 
 const truncateText = (text: string | null | undefined, length = 200) => {
@@ -182,6 +181,15 @@ export default function ReviewQueue() {
       const aliases = Array.isArray(contact?.aliases) ? contact.aliases : [];
       await supabase.from("contacts").update({ aliases: aliases.filter((a: string) => a.toLowerCase() !== String(alias).toLowerCase()) }).eq("id", contact_id);
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      return;
+    }
+
+    if (item.suggestion_type === "group_member_suggestion") {
+      const membershipId = item.target_entity_id;
+      if (!membershipId) return;
+      await supabase.from("contact_group_memberships").delete().eq("id", membershipId);
+      queryClient.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+      queryClient.invalidateQueries({ queryKey: ["contact_groups"] });
     }
   };
 
@@ -390,6 +398,52 @@ export default function ReviewQueue() {
       return handleAcceptRelationship(item);
     }
 
+    if (type === "group_member_suggestion") {
+      const { group_id, contact_id } = item.payload as any;
+      if (!group_id || !contact_id) {
+        showToast.error("Incomplete group suggestion");
+        return;
+      }
+
+      try {
+        const { data: existing } = await supabase
+          .from("contact_group_memberships")
+          .select("id")
+          .eq("group_id", group_id)
+          .eq("person_id", contact_id)
+          .is("archived_at", null)
+          .maybeSingle();
+
+        let membershipId = existing?.id || item.target_entity_id;
+        if (!membershipId) {
+          const { data, error } = await supabase
+            .from("contact_group_memberships")
+            .insert({
+              user_id: user!.id,
+              group_id,
+              person_id: contact_id,
+              status: item.payload?.default_status || null,
+              reason: item.description || null,
+            })
+            .select("id")
+            .single();
+          if (error || !data) {
+            showToast.error("Failed to add to group: " + (error?.message || "Unknown error"));
+            return;
+          }
+          membershipId = data.id;
+        }
+
+        queryClient.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+        queryClient.invalidateQueries({ queryKey: ["contact_groups"] });
+        updateStatus.mutate({ id: item.id, status: "kept", extra: { target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: item.applied_at || new Date().toISOString() } });
+        showToast.success("Group member kept");
+      } catch (err: any) {
+        showToast.error("Error: " + (err.message || "Unknown error"));
+      }
+      return;
+    }
+
     if (type === "add_alias") {
       const { contact_id, alias } = item.payload as any;
       if (!contact_id || !alias) {
@@ -442,33 +496,6 @@ export default function ReviewQueue() {
 
     updateStatus.mutate({ id: item.id, status: "kept" });
     showToast.success("Change kept");
-  };
-
-  const handleAddGroupSuggestion = async (item: ReviewItem) => {
-    const { group_id, contact_id } = item.payload as any;
-    if (!group_id || !contact_id) {
-      showToast.error("Incomplete group suggestion");
-      return;
-    }
-    await addMembership.mutateAsync({ groupId: group_id, personId: contact_id });
-    await supabase.from("review_queue" as any).delete().eq("id", item.id);
-    refreshReviewQueues();
-    showToast.success("Added to group");
-  };
-
-  const handleRejectGroupSuggestion = async (item: ReviewItem) => {
-    const { error } = await supabase.from("review_queue" as any).delete().eq("id", item.id);
-    if (error) return showToast.error(error.message);
-    refreshReviewQueues();
-    showToast.info("Suggestion rejected");
-  };
-
-  const handleSnoozeGroupSuggestion = async (item: ReviewItem) => {
-    const snoozedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { error } = await supabase.from("review_queue" as any).update({ snoozed_until: snoozedUntil }).eq("id", item.id);
-    if (error) return showToast.error(error.message);
-    refreshReviewQueues();
-    showToast.info("Snoozed for 7 days");
   };
 
   const handleKeep = (item: ReviewItem) => {
@@ -665,37 +692,6 @@ export default function ReviewQueue() {
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
             const payload = item.payload as any;
-
-            if (item.suggestion_type === "group_member_suggestion") {
-              const contactName = suggestionContacts.find((contact) => contact.id === payload.contact_id)?.name || payload.contact_name || "person";
-              const group = groups.find((candidate) => candidate.id === payload.group_id);
-              return (
-                <Card key={item.id} className="transition-all hover:shadow-lg">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start gap-3">
-                      <Users2 className="mt-0.5 h-5 w-5 text-primary" />
-                      <div className="min-w-0 flex-1">
-                        <CardTitle className="text-base">Add {contactName} to {group?.name || "group"}?</CardTitle>
-                        {(payload.reasoning || item.description) && <CardDescription className="mt-1">{payload.reasoning || item.description}</CardDescription>}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-end gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => handleSnoozeGroupSuggestion(item)} disabled={updateStatus.isPending}>
-                        <Clock className="mr-1 h-4 w-4" /> Snooze
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleRejectGroupSuggestion(item)} disabled={updateStatus.isPending}>
-                        <X className="mr-1 h-4 w-4" /> Reject
-                      </Button>
-                      <Button size="sm" onClick={() => handleAddGroupSuggestion(item)} disabled={addMembership.isPending}>
-                        {addMembership.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Check className="mr-1 h-4 w-4" />} Add
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            }
 
             return (
               <Card key={item.id} className="transition-all hover:shadow-lg">
