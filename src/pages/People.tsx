@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,9 @@ import { DuplicateHints } from "@/components/people/DuplicateHints";
 import { ConversationTab } from "@/components/people/ConversationTab";
 import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
+import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
+import { useGroups } from "@/hooks/useGroups";
+import { useGroupMemberships } from "@/hooks/useGroupMemberships";
 
 interface Person {
   id: string;
