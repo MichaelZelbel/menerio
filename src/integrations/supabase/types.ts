@@ -316,11 +316,147 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_group_memberships: {
+        Row: {
+          archived_at: string | null
+          attributes: Json
+          created_at: string
+          group_id: string
+          id: string
+          joined_at: string
+          last_movement_at: string
+          notes: string | null
+          person_id: string
+          position: number
+          priority: string
+          reason: string | null
+          source_note_ids: string[]
+          status: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          attributes?: Json
+          created_at?: string
+          group_id: string
+          id?: string
+          joined_at?: string
+          last_movement_at?: string
+          notes?: string | null
+          person_id: string
+          position?: number
+          priority?: string
+          reason?: string | null
+          source_note_ids?: string[]
+          status?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          attributes?: Json
+          created_at?: string
+          group_id?: string
+          id?: string
+          joined_at?: string
+          last_movement_at?: string
+          notes?: string | null
+          person_id?: string
+          position?: number
+          priority?: string
+          reason?: string | null
+          source_note_ids?: string[]
+          status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_group_memberships_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "contact_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_group_memberships_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_groups: {
+        Row: {
+          archived_at: string | null
+          attributes_schema: Json
+          color: string | null
+          created_at: string
+          description: string | null
+          icon: string | null
+          id: string
+          is_trashed: boolean
+          name: string
+          purpose: string | null
+          sensitivity: string
+          slug: string
+          stages: Json
+          success_criteria: Json
+          template: string | null
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          attributes_schema?: Json
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_trashed?: boolean
+          name: string
+          purpose?: string | null
+          sensitivity?: string
+          slug: string
+          stages?: Json
+          success_criteria?: Json
+          template?: string | null
+          type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          attributes_schema?: Json
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_trashed?: boolean
+          name?: string
+          purpose?: string | null
+          sensitivity?: string
+          slug?: string
+          stages?: Json
+          success_criteria?: Json
+          template?: string | null
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       contact_interactions: {
         Row: {
           action_items: string[] | null
           contact_id: string
           created_at: string | null
+          group_id: string | null
           id: string
           interaction_date: string
           note_id: string | null
@@ -332,6 +468,7 @@ export type Database = {
           action_items?: string[] | null
           contact_id: string
           created_at?: string | null
+          group_id?: string | null
           id?: string
           interaction_date?: string
           note_id?: string | null
@@ -343,6 +480,7 @@ export type Database = {
           action_items?: string[] | null
           contact_id?: string
           created_at?: string | null
+          group_id?: string | null
           id?: string
           interaction_date?: string
           note_id?: string | null
@@ -356,6 +494,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_interactions_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "contact_groups"
             referencedColumns: ["id"]
           },
           {
