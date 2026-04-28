@@ -36,6 +36,14 @@ type TiptapNode = {
   content?: TiptapNode[];
 };
 
+function encodeBase64Utf8(value: string): string {
+  return btoa(unescape(encodeURIComponent(value)));
+}
+
+function decodeBase64Utf8(value: string): string {
+  return decodeURIComponent(escape(atob(value)));
+}
+
 // ─── HTML ↔ Markdown primitives ───────────────────────────────────────
 
 /**
@@ -615,7 +623,7 @@ export function noteToMarkdown(
 
   // Preserve full Menerio metadata as base64 JSON for lossless round-trip
   if (Object.keys(meta).length > 0) {
-    frontmatter.menerio_metadata = btoa(JSON.stringify(meta));
+    frontmatter.menerio_metadata = encodeBase64Utf8(JSON.stringify(meta));
   }
 
   if (note.is_favorite) frontmatter.favorite = true;
@@ -646,7 +654,7 @@ export function markdownToNote(
 
   if (fm.menerio_metadata && typeof fm.menerio_metadata === "string") {
     try {
-      metadata = JSON.parse(atob(fm.menerio_metadata));
+      metadata = JSON.parse(decodeBase64Utf8(fm.menerio_metadata));
     } catch {
       // corrupted base64 — fall back to frontmatter fields
     }
