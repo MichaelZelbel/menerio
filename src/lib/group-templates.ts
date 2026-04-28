@@ -37,7 +37,7 @@ export interface GroupTemplate {
   successCriteriaDefaults: {
     label: string;
     target: number;
-    kind: "manual" | "interaction_count";
+    kind: "manual" | "interaction_count" | "action_item_count";
   }[];
 }
 
@@ -51,7 +51,7 @@ type ContactGroupInsertFromTemplate = {
     label: string;
     target: number;
     current: number;
-    kind: "manual" | "interaction_count";
+    kind: "manual" | "interaction_count" | "action_item_count";
   }[];
   stages: GroupTemplateStage[];
   attributes_schema: Record<string, GroupTemplateAttribute>;
