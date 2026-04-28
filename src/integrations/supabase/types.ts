@@ -1838,6 +1838,7 @@ export type Database = {
           is_sensitive: boolean
           payload: Json
           reviewed_at: string | null
+          snoozed_until: string | null
           source_note_id: string | null
           source_title: string | null
           status: string
@@ -1859,6 +1860,7 @@ export type Database = {
           is_sensitive?: boolean
           payload?: Json
           reviewed_at?: string | null
+          snoozed_until?: string | null
           source_note_id?: string | null
           source_title?: string | null
           status?: string
@@ -1880,6 +1882,7 @@ export type Database = {
           is_sensitive?: boolean
           payload?: Json
           reviewed_at?: string | null
+          snoozed_until?: string | null
           source_note_id?: string | null
           source_title?: string | null
           status?: string

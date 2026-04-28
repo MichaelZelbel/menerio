@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +44,7 @@ import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
 import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
 import { useGroups } from "@/hooks/useGroups";
-import { useGroupMemberships } from "@/hooks/useGroupMemberships";
+import { useAddMembership, useGroupMemberships } from "@/hooks/useGroupMemberships";
 
 interface Person {
   id: string;
@@ -74,6 +75,10 @@ export default function People() {
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
+  const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  const [bulkGroupId, setBulkGroupId] = useState("");
+  const addMembership = useAddMembership();
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -179,6 +184,25 @@ export default function People() {
       (p.aliases || []).some((a) => a.toLowerCase().includes(q))
     );
   });
+
+  const selectedSet = useMemo(() => new Set(selectedPeople), [selectedPeople]);
+  const toggleSelected = (personId: string) => {
+    setSelectedPeople((current) => current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]);
+  };
+  const clearSelection = () => setSelectedPeople([]);
+  const bulkAddToGroup = async () => {
+    if (!bulkGroupId || selectedPeople.length === 0) return;
+    try {
+      await Promise.all(selectedPeople.map((personId) => addMembership.mutateAsync({ groupId: bulkGroupId, personId })));
+      showToast.success(`Added ${selectedPeople.length} people to group`);
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
+      clearSelection();
+      setBulkAddOpen(false);
+      setBulkGroupId("");
+    } catch (error: any) {
+      showToast.error(error.message || "Failed to add people");
+    }
+  };
 
   // ── Helpers ──
   const startEditing = (person: Person) => {
@@ -472,6 +496,16 @@ export default function People() {
         </Select>
       </div>
 
+      {selectedPeople.length > 0 && (
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
+          <span className="text-sm font-medium">{selectedPeople.length} selected</span>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => setBulkAddOpen(true)}>Add to Group</Button>
+            <Button size="sm" variant="ghost" onClick={clearSelection}>Clear selection</Button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -489,30 +523,58 @@ export default function People() {
       ) : (
         <div className="space-y-2">
           {filtered.map((person) => (
-            <button
+            <div
               key={person.id}
-              type="button"
-              onClick={() => setSelectedPersonId(person.id)}
               className="flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
             >
               <div className="flex min-w-0 items-center gap-3">
+                <Checkbox
+                  checked={selectedSet.has(person.id)}
+                  onCheckedChange={() => toggleSelected(person.id)}
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`Select ${person.name}`}
+                />
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <User className="h-5 w-5 text-primary" />
                 </div>
-                <div className="min-w-0">
+                <button type="button" onClick={() => setSelectedPersonId(person.id)} className="min-w-0 text-left">
                   <p className="truncate font-medium text-foreground">{person.name}</p>
                   {(person.aliases || []).length > 0 && (
                     <p className="truncate text-xs text-muted-foreground">{person.aliases.join(", ")}</p>
                   )}
-                </div>
+                </button>
               </div>
               {(person.tags || []).length > 0 && (
                 <Badge variant="secondary" className="ml-3 shrink-0">{person.tags[0]}</Badge>
               )}
-            </button>
+            </div>
           ))}
         </div>
       )}
+
+      <Dialog open={bulkAddOpen} onOpenChange={setBulkAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add selected people to group</DialogTitle>
+            <DialogDescription>Choose a group for the selected people.</DialogDescription>
+          </DialogHeader>
+          <Select value={bulkGroupId} onValueChange={setBulkGroupId}>
+            <SelectTrigger><SelectValue placeholder="Select group" /></SelectTrigger>
+            <SelectContent>
+              {groups.filter((group) => !group.archived_at).map((group) => (
+                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAddOpen(false)}>Cancel</Button>
+            <Button onClick={bulkAddToGroup} disabled={!bulkGroupId || addMembership.isPending}>
+              {addMembership.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

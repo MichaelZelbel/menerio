@@ -93,7 +93,10 @@ import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const AUTO_PROCESS_DELAY = 10_000;
 const MIN_WORDS_FOR_PROCESSING = 15;
@@ -218,6 +221,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [moderationBlock, setModerationBlock] = useState<ModerationResult | null>(null);
   const [duplicateTarget, setDuplicateTarget] = useState<Note | null>(null);
   const [pendingDuplicateTitle, setPendingDuplicateTitle] = useState("");
+  const [interactionGroupId, setInteractionGroupId] = useState<string | null>(null);
+  const [interactionType, setInteractionType] = useState("meeting");
+  const [interactionSummary, setInteractionSummary] = useState(note.title);
   // Wikilink autocomplete state
   const [wikilinkOpen, setWikilinkOpen] = useState(false);
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
@@ -542,10 +548,60 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     updateNote.mutate({ id: note.id, tags: (note.tags || []).filter((t) => t !== tag) });
   };
 
+  const logGroupInteraction = async () => {
+    if (!user || !selectedInteractionGroup) return;
+    const { error } = await supabase.from("contact_interactions").insert({
+      user_id: user.id,
+      contact_id: selectedInteractionGroup.personId,
+      group_id: selectedInteractionGroup.groupId,
+      note_id: note.id,
+      type: interactionType,
+      summary: interactionSummary.trim() || title,
+    });
+    if (error) {
+      showToast.error(error.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["contact-interactions"] });
+    setInteractionGroupId(null);
+    showToast.success("Interaction logged");
+  };
+
   const plainText = editor?.getText() || "";
   const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
   const charCount = plainText.length;
   const metadata = note.metadata as Record<string, unknown> | null;
+  const mentionedPeople = Array.isArray(metadata?.people) ? (metadata.people as string[]) : [];
+  const { data: mentionedGroupMatches = [] } = useQuery({
+    queryKey: ["note-mentioned-groups", note.id, mentionedPeople],
+    enabled: !!user && mentionedPeople.length > 0,
+    queryFn: async () => {
+      const { data: contacts, error: contactsError } = await supabase
+        .from("contacts")
+        .select("id, name")
+        .eq("user_id", user!.id)
+        .in("name", mentionedPeople);
+      if (contactsError) throw contactsError;
+      const personIds = (contacts || []).map((contact) => contact.id);
+      if (personIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("contact_group_memberships")
+        .select("person_id, contact_groups:group_id(id, name)")
+        .eq("user_id", user!.id)
+        .in("person_id", personIds)
+        .is("archived_at", null);
+      if (error) throw error;
+      const contactNameById = new Map((contacts || []).map((contact) => [contact.id, contact.name]));
+      return (data || []).map((membership: any) => ({
+        personId: membership.person_id as string,
+        personName: contactNameById.get(membership.person_id) || "",
+        groupId: membership.contact_groups?.id as string,
+        groupName: membership.contact_groups?.name as string,
+      })).filter((match) => match.groupId && match.groupName);
+    },
+  });
+  const mentionedGroups = [...new Map(mentionedGroupMatches.map((match) => [match.groupId, match])).values()];
+  const selectedInteractionGroup = mentionedGroups.find((group) => group.groupId === interactionGroupId) || null;
   const syncStatus = syncLog?.sync_status;
   const isSyncing = ghSync.isPending;
 
@@ -735,6 +791,22 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           {Array.isArray(metadata?.action_items) && (metadata.action_items as string[]).length > 0 && (
             <p>Action items: {(metadata.action_items as string[]).join("; ")}</p>
           )}
+        </div>
+      )}
+
+      {mentionedGroups.length > 0 && !note.is_trashed && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          <span>This note mentions members of</span>
+          {mentionedGroups.map((group) => (
+            <button
+              key={group.groupId}
+              type="button"
+              className="font-medium text-foreground hover:text-primary"
+              onClick={() => { setInteractionGroupId(group.groupId); setInteractionSummary(title); }}
+            >
+              {group.groupName}
+            </button>
+          ))}
         </div>
       )}
 
@@ -1012,6 +1084,38 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       targetNoteId={note.id}
       targetNoteTitle={title}
     />
+    <Dialog open={!!interactionGroupId} onOpenChange={(open) => { if (!open) setInteractionGroupId(null); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Log this note as an interaction in {selectedInteractionGroup?.groupName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select value={interactionType} onValueChange={setInteractionType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="chat">Chat</SelectItem>
+                <SelectItem value="meeting">Meeting</SelectItem>
+                <SelectItem value="email">Email</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Summary</Label>
+            <input
+              value={interactionSummary}
+              onChange={(event) => setInteractionSummary(event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setInteractionGroupId(null)}>Cancel</Button>
+          <Button onClick={logGroupInteraction}>Log Interaction</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     {showChat && (
       <NoteChatPanel
         note={note}
