@@ -70,11 +70,27 @@ Groups connect to Menerio’s AI features in several ways:
 
 - Suggest next step: generate a concrete follow-up for a member based on recent notes and interactions.
 - Suggest members from notes: scan recent notes and propose people who may belong in the Group.
+- Import members from structured notes: detect Markdown tables or numbered lists, preserve order, match or create people, and store extracted fields such as link, relevance, and first step on the membership.
 - Generate briefing: create a concise Group report.
 - Lexicon page: every Group gets an automatically maintained wiki page with purpose, members, and synthesized insights.
 - Review Queue: AI member suggestions appear in the Review Queue so you can add, reject, or snooze them.
 
 AI features use the same credit system as the rest of Menerio.
+
+## Structured Note Imports
+
+Some groups start as a note, such as a “Dream 100” table with rank, name, link, relevance, and first step. For these cases, Menerio uses deterministic import logic instead of relying only on fuzzy AI suggestions.
+
+The importer can:
+
+- Find the most relevant source note by comparing the group name and note content.
+- Parse Markdown tables and numbered lists.
+- Preserve list order in the membership `position` field.
+- Match existing people or create missing contacts.
+- Store note-derived fields such as external links, relevance, and first steps in membership attributes.
+- Update existing memberships instead of creating duplicates.
+
+The same import logic is exposed internally and through the MCP server so external agents can preview or apply group imports consistently.
 
 ## Templates Overview
 
@@ -98,3 +114,7 @@ If your existing People records already use tags, Menerio can suggest converting
 ## Group Pulse
 
 The dashboard includes Group Pulse, a quick overview of active Groups. It highlights recent activity, member counts, stale members, and action items due this week so you can see where attention is needed.
+
+## MCP and External Agents
+
+External AI tools connected through Menerio’s MCP server can work with groups using the same server-side logic as the app. This includes previewing and importing group members from notes, listing group context, and using review workflows rather than inventing IDs or bypassing user review.
