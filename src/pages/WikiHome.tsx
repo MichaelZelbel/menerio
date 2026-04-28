@@ -115,10 +115,10 @@ export default function WikiHome() {
     <div className="space-y-6">
       <SEOHead title="Wiki — Menerio" noIndex />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-display font-bold">Wiki</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-3xl font-display font-bold">Wiki</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             Your knowledge base, built automatically from your notes.
           </p>
         </div>
@@ -154,32 +154,30 @@ export default function WikiHome() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="space-y-6 lg:col-span-2">
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="min-w-0 space-y-8">
             {groupEntries.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+              <div className="border-y border-border py-12 text-center text-sm text-muted-foreground">
                   No wiki pages match your search.
-                </CardContent>
-              </Card>
+              </div>
             ) : (
               groupEntries.map(([pageType, groupPages]) => (
-                <Card key={pageType}>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                    <CardTitle className="text-base">{labelize(pageType)}</CardTitle>
+                <section key={pageType} className="border-t border-border pt-5 first:border-t-0 first:pt-0">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="text-base font-semibold">{labelize(pageType)}</h2>
                     <Badge variant="secondary">{groupPages.length}</Badge>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
+                  </div>
+                  <div className="divide-y divide-border">
                     {groupPages.map((page) => (
                       <Link
                         key={page.id}
                         to={`/wiki/${page.slug}`}
-                        className="block rounded-md border border-border p-4 transition-colors hover:bg-accent"
+                        className="block py-4 transition-colors hover:bg-accent/40 sm:px-3"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <h2 className="truncate text-sm font-semibold text-foreground">{page.title}</h2>
-                            <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
+                            <h3 className="truncate text-sm font-semibold text-foreground">{page.title}</h3>
+                            <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
                               {page.summary || "No summary yet."}
                             </p>
                           </div>
@@ -188,17 +186,16 @@ export default function WikiHome() {
                         <p className="mt-3 text-xs text-muted-foreground">Updated {relativeTime(page.updated_at)}</p>
                       </Link>
                     ))}
-                  </CardContent>
-                </Card>
+                  </div>
+                </section>
               ))
             )}
           </div>
 
-          <Card className="h-fit">
-            <CardHeader>
-              <CardTitle className="text-base">Recent activity</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <aside className="h-fit xl:sticky xl:top-20">
+            <div className="border-l border-border pl-5">
+              <h2 className="text-base font-semibold">Recent activity</h2>
+              <div className="mt-4 space-y-4">
               {revisions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No wiki activity yet.</p>
               ) : (
@@ -217,8 +214,9 @@ export default function WikiHome() {
                   </div>
                 ))
               )}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </aside>
         </div>
       )}
     </div>
