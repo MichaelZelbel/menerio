@@ -85,13 +85,14 @@ import {
   ChevronDown,
   ChevronRight,
   Tags,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
-import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
+import { markdownToHtml, noteToFilePath, noteToMarkdown, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -538,6 +539,25 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
   const togglePin = () => updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
 
+  const downloadMarkdown = () => {
+    try {
+      const currentMarkdown = sourceMode ? sourceText : editor ? editorToMarkdown(editor) : note.content || "";
+      const markdown = noteToMarkdown({ ...note, title: title.trim() || "Untitled", content: currentMarkdown });
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = noteToFilePath({ ...note, title: title.trim() || "Untitled", content: currentMarkdown }).split("/").pop() || "note.md";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      showToast.success("Markdown downloaded");
+    } catch {
+      showToast.error("Could not download note");
+    }
+  };
+
   const moveToTrash = () => {
     updateNote.mutate({ id: note.id, is_trashed: true, trashed_at: new Date().toISOString() });
     if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
@@ -729,6 +749,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               title="Copy to clipboard"
             >
               <Copy className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={downloadMarkdown}
+              title="Download Markdown"
+            >
+              <Download className="h-4 w-4" />
             </Button>
             <Button
               variant="ghost"
