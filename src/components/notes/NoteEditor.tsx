@@ -229,12 +229,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const [wikilinkPos, setWikilinkPos] = useState<{ top: number; left: number } | null>(null);
   const wikilinkInsertPos = useRef<number | null>(null);
 
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
   const pendingSaveContentRef = useRef<string | null>(null);
+  const lastLocalTitleRef = useRef(note.title ?? "");
+  const pendingSaveTitleRef = useRef<string | null>(null);
   const activeNoteIdRef = useRef(note.id);
 
   const triggerGitHubSync = useCallback((noteId: string) => {
@@ -365,8 +369,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }
       lastLocalContentRef.current = md;
       pendingSaveContentRef.current = md;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
+      if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      contentSaveTimer.current = setTimeout(() => {
         updateNote.mutate(
           { id: note.id, content: md },
           {
@@ -407,8 +411,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (noteChanged) {
       activeNoteIdRef.current = note.id;
       pendingSaveContentRef.current = null;
+      pendingSaveTitleRef.current = null;
     }
-    setTitle(note.title);
+    const incomingMatchesPendingTitle = pendingSaveTitleRef.current === note.title;
+    const incomingMatchesLastLocalTitle = lastLocalTitleRef.current === note.title;
+    const titleInputFocused = document.activeElement === titleInputRef.current;
+    if (noteChanged || incomingMatchesPendingTitle || incomingMatchesLastLocalTitle || (!pendingSaveTitleRef.current && !titleInputFocused)) {
+      setTitle(note.title);
+      lastLocalTitleRef.current = note.title ?? "";
+      if (incomingMatchesPendingTitle || noteChanged) pendingSaveTitleRef.current = null;
+    }
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
@@ -427,7 +439,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }
       lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
-    } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
+    } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
@@ -484,15 +496,23 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const handleTitleChange = (val: string) => {
     setTitle(val);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
+    lastLocalTitleRef.current = val;
+    pendingSaveTitleRef.current = val;
+    if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+    titleSaveTimer.current = setTimeout(async () => {
       const duplicate = await checkDuplicateTitle(val);
       if (duplicate) {
         setDuplicateTarget(duplicate);
         setPendingDuplicateTitle(val);
         return;
       }
-      updateNote.mutate({ id: note.id, title: val });
+      updateNote.mutate(
+        { id: note.id, title: val },
+        {
+          onSuccess: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
+          onError: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
+        }
+      );
       triggerGitHubSync(note.id);
     }, 800);
   };
@@ -618,8 +638,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
+      if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      contentSaveTimer.current = setTimeout(() => {
         const md = editorToMarkdown(editor);
         pendingSaveContentRef.current = md;
         updateNote.mutate(
@@ -886,6 +906,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         )}
         <div className="flex items-center gap-2 mb-4">
           <input
+            ref={titleInputRef}
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="Untitled"
@@ -908,10 +929,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             value={sourceText}
             onChange={(e) => {
               setSourceText(e.target.value);
-              if (saveTimer.current) clearTimeout(saveTimer.current);
+              if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
               pendingSaveContentRef.current = e.target.value;
               lastLocalContentRef.current = e.target.value;
-              saveTimer.current = setTimeout(() => {
+              contentSaveTimer.current = setTimeout(() => {
                 const nextContent = e.target.value;
                 updateNote.mutate(
                   { id: note.id, content: nextContent },
@@ -1026,7 +1047,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:justify-between gap-2">
-            <AlertDialogCancel onClick={() => { setTitle(note.title); setDuplicateTarget(null); }}>
+            <AlertDialogCancel onClick={() => { setTitle(note.title); lastLocalTitleRef.current = note.title ?? ""; pendingSaveTitleRef.current = null; setDuplicateTarget(null); }}>
               Rename
             </AlertDialogCancel>
             <Button variant="outline" onClick={mergeDuplicate}>Merge</Button>
