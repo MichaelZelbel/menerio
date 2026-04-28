@@ -439,7 +439,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }
       lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
-    } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !editor.isFocused) {
+    } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
       editor.commands.setContent(editorContent, { emitUpdate: false });
       lastLocalContentRef.current = note.content ?? "";
     }
