@@ -69,11 +69,11 @@ const TOOLS = [
   { name: "search_images", desc: "Search across all analyzed images and PDFs by description or extracted text" },
   { name: "get_note_media", desc: "Get all media analysis results for a specific note" },
   { name: "get_user_profile", desc: "Retrieve identity, preferences, values, goals, and agent instructions" },
-  { name: "wiki_search", desc: "Search Lexicon pages by title, slug, or content" },
-  { name: "wiki_get_page", desc: "Read a full Lexicon page with sources and backlinks" },
-  { name: "wiki_create_page", desc: "Create a reviewed Lexicon page on your behalf" },
-  { name: "wiki_update_page", desc: "Update a reviewed Lexicon page on your behalf" },
-  { name: "wiki_run_lint", desc: "Run the Lexicon health check for broken links, orphans, drift, and contradictions" },
+  { name: "lexicon_search", desc: "Search Lexicon pages by title, slug, or content" },
+  { name: "lexicon_get_page", desc: "Read a full Lexicon page with sources and backlinks" },
+  { name: "lexicon_create_page", desc: "Create a reviewed Lexicon page on your behalf" },
+  { name: "lexicon_update_page", desc: "Update a reviewed Lexicon page on your behalf" },
+  { name: "lexicon_run_lint", desc: "Run the Lexicon health check for broken links, orphans, drift, and contradictions" },
 ];
 
 type McpApiToken = {
@@ -289,16 +289,16 @@ Menerio stores the user's thoughts, notes, contacts (People), action items, medi
 - \`search_images(query)\` — search analyzed images and PDFs by description or extracted text.
 - \`get_note_media(note_id)\` — media analysis attached to a note.
 - \`get_user_profile(include_instructions?, include_notes?, scope?)\` — identity, preferences, values, goals, agent instructions. Call this once at the start of a session so you know who the user is.
-- \`wiki_search(query, limit?, page_type?)\` — search Lexicon pages by title, slug, or content.
-- \`wiki_get_page(slug)\` — read a full Lexicon page with source notes and backlinks.
-- \`wiki_create_page(slug, title, page_type, content, summary?)\` — create a reviewed Lexicon page on the user's behalf.
-- \`wiki_update_page(slug, content?, title?, summary?, page_type?)\` — update a reviewed Lexicon page on the user's behalf.
-- \`wiki_run_lint()\` — run the Lexicon health check.
+- \`lexicon_search(query, limit?, page_type?)\` — search Lexicon pages by title, slug, or content.
+- \`lexicon_get_page(slug)\` — read a full Lexicon page with source notes and backlinks.
+- \`lexicon_create_page(slug, title, page_type, content, summary?)\` — create a reviewed Lexicon page on the user's behalf.
+- \`lexicon_update_page(slug, content?, title?, summary?, page_type?)\` — update a reviewed Lexicon page on the user's behalf.
+- \`lexicon_run_lint()\` — run the Lexicon health check.
 
 # How to behave
 - On first use in a conversation, call \`get_user_profile\` so your answers are personalised. Honour any \`agent_instructions\` returned.
 - When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_thoughts\` before answering from memory.
-- When the user asks about durable synthesized knowledge, concepts, projects, people, or a Lexicon page, use \`wiki_search\` or \`wiki_get_page\`.
+- When the user asks about durable synthesized knowledge, concepts, projects, people, or a Lexicon page, use \`lexicon_search\` or \`lexicon_get_page\`.
 - When the user shares a new fact, decision, idea, observation, or meeting note worth keeping, call \`capture_thought\` — don't ask for permission for short factual captures, do confirm for long-form content.
 - Output style: concise. For lists of notes, show one bullet per item with title + date. Only show full content when explicitly asked.
 - After any \`capture_thought\`, end with a one-line confirmation including the detected type and topics.

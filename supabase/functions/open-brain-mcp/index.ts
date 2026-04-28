@@ -1475,14 +1475,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "wiki_search",
+  "lexicon_search",
   {
-    title: "Search Wiki",
-    description: "Search wiki pages by title, slug, or content. Returns matching pages with summaries.",
+    title: "Search Lexicon",
+    description: "Search Lexicon pages by title, slug, or content. Returns matching pages with summaries.",
     inputSchema: {
       query: z.string().describe("Case-insensitive substring to search for"),
       limit: z.number().optional().default(10),
-      page_type: z.enum(WIKI_PAGE_TYPES).optional().describe("Optional wiki page type filter"),
+      page_type: z.enum(WIKI_PAGE_TYPES).optional().describe("Optional Lexicon page type filter"),
     },
   },
   async ({ query, limit, page_type }) => {
@@ -1508,11 +1508,11 @@ server.registerTool(
 );
 
 server.registerTool(
-  "wiki_get_page",
+  "lexicon_get_page",
   {
-    title: "Get Wiki Page",
-    description: "Get a wiki page by slug, including full content, source notes, and backlinks.",
-    inputSchema: { slug: z.string().describe("Wiki page slug") },
+    title: "Get Lexicon Page",
+    description: "Get a Lexicon page by slug, including full content, source notes, and backlinks.",
+    inputSchema: { slug: z.string().describe("Lexicon page slug") },
   },
   async ({ slug }) => {
     try {
@@ -1523,7 +1523,7 @@ server.registerTool(
         .eq("slug", slug)
         .maybeSingle();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!page) return { content: [{ type: "text" as const, text: `No wiki page found for slug '${slug}'.` }] };
+      if (!page) return { content: [{ type: "text" as const, text: `No Lexicon page found for slug '${slug}'.` }] };
 
       const { data: sourceRows } = await supabase
         .from("wiki_page_sources")
@@ -1553,14 +1553,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "wiki_create_page",
+  "lexicon_create_page",
   {
-    title: "Create Wiki Page",
-    description: "Create a wiki page on the user's behalf and record a reviewed manual revision.",
+    title: "Create Lexicon Page",
+    description: "Create a Lexicon page on the user's behalf and record a reviewed manual revision.",
     inputSchema: {
       slug: z.string().regex(/^[a-z0-9-]+$/).describe("Stable lowercase kebab-case slug"),
       title: z.string().describe("Page title"),
-      page_type: z.enum(WIKI_PAGE_TYPES).describe("Wiki page type"),
+      page_type: z.enum(WIKI_PAGE_TYPES).describe("Lexicon page type"),
       content: z.string().describe("Full markdown content"),
       summary: z.string().optional().describe("Short summary"),
     },
@@ -1597,12 +1597,12 @@ server.registerTool(
 );
 
 server.registerTool(
-  "wiki_update_page",
+  "lexicon_update_page",
   {
-    title: "Update Wiki Page",
-    description: "Update a wiki page on the user's behalf and record a reviewed manual revision.",
+    title: "Update Lexicon Page",
+    description: "Update a Lexicon page on the user's behalf and record a reviewed manual revision.",
     inputSchema: {
-      slug: z.string().describe("Existing wiki page slug"),
+      slug: z.string().describe("Existing Lexicon page slug"),
       content: z.string().optional().describe("Replacement markdown content"),
       title: z.string().optional().describe("New title"),
       summary: z.string().optional().describe("New summary"),
@@ -1618,7 +1618,7 @@ server.registerTool(
         .eq("slug", slug)
         .maybeSingle();
       if (fetchError) return { content: [{ type: "text" as const, text: `Error: ${fetchError.message}` }], isError: true };
-      if (!existing) return { content: [{ type: "text" as const, text: `No wiki page found for slug '${slug}'.` }] };
+      if (!existing) return { content: [{ type: "text" as const, text: `No Lexicon page found for slug '${slug}'.` }] };
 
       const updates: Record<string, unknown> = {};
       if (content !== undefined) updates.content = content;
@@ -1659,10 +1659,10 @@ server.registerTool(
 );
 
 server.registerTool(
-  "wiki_run_lint",
+  "lexicon_run_lint",
   {
-    title: "Run Wiki Lint",
-    description: "Run the wiki health check and return deterministic plus AI audit findings.",
+    title: "Run Lexicon Health Check",
+    description: "Run the Lexicon health check and return deterministic plus AI audit findings.",
     inputSchema: {},
   },
   async () => {
@@ -1677,7 +1677,7 @@ server.registerTool(
         body: JSON.stringify({}),
       });
       const text = await response.text();
-      if (!response.ok) return { content: [{ type: "text" as const, text: `Wiki lint failed: ${response.status} ${text}` }], isError: true };
+      if (!response.ok) return { content: [{ type: "text" as const, text: `Lexicon health check failed: ${response.status} ${text}` }], isError: true };
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
