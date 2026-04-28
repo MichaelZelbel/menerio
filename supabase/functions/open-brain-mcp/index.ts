@@ -176,6 +176,69 @@ function jsonTool(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
+}
+
+async function resolveGroup(idOrSlug: string) {
+  const query = supabase.from("contact_groups").select("*").eq("user_id", currentUserId).eq("is_trashed", false);
+  const { data, error } = isUuid(idOrSlug) ? await query.eq("id", idOrSlug).maybeSingle() : await query.eq("slug", idOrSlug).maybeSingle();
+  if (error) throw new Error(`Could not load group: ${error.message}`);
+  if (!data) throw new Error("Group not found");
+  return data as any;
+}
+
+async function resolveContact(params: { contact_id?: string; contact_name?: string }) {
+  if (params.contact_id) {
+    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", currentUserId).eq("id", params.contact_id).is("merged_into", null).maybeSingle();
+    if (error) throw new Error(`Could not load person: ${error.message}`);
+    if (data) return data as any;
+  }
+  if (params.contact_name) {
+    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", currentUserId).ilike("name", `%${params.contact_name}%`).is("merged_into", null).limit(1);
+    if (error) throw new Error(`Could not load person: ${error.message}`);
+    if (data?.[0]) return data[0] as any;
+  }
+  throw new Error("Person not found");
+}
+
+function buildGroupMemberSuppressionKey(groupId: string, contactId: string) {
+  return ["group_member_suggestion", "contact_group", groupId, String(contactId).trim().toLowerCase()].join(":");
+}
+
+async function getSuggestionPreferences() {
+  const { data } = await supabase.from("ai_suggestion_preferences").select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive").eq("user_id", currentUserId).maybeSingle();
+  return { mode: data?.suggestion_mode || "auto", sensitivity: data?.suggestion_sensitivity || "balanced", autoAddSensitive: data?.auto_add_sensitive === true };
+}
+
+async function filterSuppressedGroupMemberRows(rows: any[]) {
+  const keys = rows.map((row) => row.suppression_key).filter(Boolean);
+  if (!keys.length) return rows;
+  const { data } = await supabase.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", currentUserId).in("suppression_key", keys);
+  const blocked = new Set((data || []).map((row: any) => row.suppression_key));
+  return rows.filter((row) => !blocked.has(row.suppression_key));
+}
+
+async function prepareGroupMemberSuggestion(row: any, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
+  const thresholds: Record<string, number> = { low: 0.5, balanced: 0.7, strict: 0.85 };
+  const sensitiveTerms = ["health", "medical", "diagnosis", "therapy", "politics", "religion", "financial", "salary", "private", "confidential"];
+  const threshold = thresholds[preferences.sensitivity] || thresholds.balanced;
+  const canAutoApply = preferences.mode === "auto" && Number(row.confidence_score || 0) >= threshold && (!row.is_sensitive || preferences.autoAddSensitive);
+  if (!canAutoApply) return { ...row, status: "pending_review" };
+
+  const { group_id, contact_id } = row.payload || {};
+  if (!group_id || !contact_id) return { ...row, status: "pending_review" };
+  const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", group_id).eq("person_id", contact_id).is("archived_at", null).maybeSingle();
+  if (existing?.id) return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: existing.id, applied_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id, person_id: contact_id, status: row.payload?.default_status || null, reason: row.description || null }).select("id").single();
+  if (error || !data) return { ...row, status: "pending_review" };
+  return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: data.id, applied_at: new Date().toISOString(), is_sensitive: row.is_sensitive ?? sensitiveTerms.some((term) => String(row.description || "").toLowerCase().includes(term)) };
+}
+
 const WIKI_PAGE_TYPES = ["entity", "concept", "source", "overview", "synthesis", "person"] as const;
 
 function extractWikiSlugs(content: string) {
