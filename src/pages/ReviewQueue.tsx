@@ -663,6 +663,38 @@ export default function ReviewQueue() {
             const { item } = entry;
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
+            const payload = item.payload as any;
+
+            if (item.suggestion_type === "group_member_suggestion") {
+              const contactName = suggestionContacts.find((contact) => contact.id === payload.contact_id)?.name || payload.contact_name || "person";
+              const group = groups.find((candidate) => candidate.id === payload.group_id);
+              return (
+                <Card key={item.id} className="transition-all hover:shadow-lg">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start gap-3">
+                      <Users2 className="mt-0.5 h-5 w-5 text-primary" />
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-base">Add {contactName} to {group?.name || "group"}?</CardTitle>
+                        {(payload.reasoning || item.description) && <CardDescription className="mt-1">{payload.reasoning || item.description}</CardDescription>}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => handleSnoozeGroupSuggestion(item)} disabled={updateStatus.isPending}>
+                        <Clock className="mr-1 h-4 w-4" /> Snooze
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleRejectGroupSuggestion(item)} disabled={updateStatus.isPending}>
+                        <X className="mr-1 h-4 w-4" /> Reject
+                      </Button>
+                      <Button size="sm" onClick={() => handleAddGroupSuggestion(item)} disabled={addMembership.isPending}>
+                        {addMembership.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Check className="mr-1 h-4 w-4" />} Add
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            }
 
             return (
               <Card key={item.id} className="transition-all hover:shadow-lg">
