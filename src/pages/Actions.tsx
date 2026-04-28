@@ -169,13 +169,27 @@ export default function Actions() {
 
   const updateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const item = items.find((candidate) => candidate.id === id);
       const update: any = { status };
       if (status === "done") update.completed_at = new Date().toISOString();
       else update.completed_at = null;
       const { error } = await supabase.from("action_items" as any).update(update).eq("id", id);
       if (error) throw error;
+      if (status === "done" && item?.metadata?.group_id && item.status !== "done") {
+        const { data: group, error: groupError } = await supabase.from("contact_groups").select("id, success_criteria").eq("id", item.metadata.group_id).maybeSingle();
+        if (groupError) throw groupError;
+        const criteria = Array.isArray(group?.success_criteria) ? group.success_criteria as any[] : [];
+        const nextCriteria = criteria.map((criterion) => criterion?.kind === "action_item_count" ? { ...criterion, current: Number(criterion.current || 0) + 1 } : criterion);
+        if (nextCriteria.some((criterion, index) => criterion.current !== criteria[index]?.current)) {
+          const { error: updateGroupError } = await supabase.from("contact_groups").update({ success_criteria: nextCriteria }).eq("id", item.metadata.group_id);
+          if (updateGroupError) throw updateGroupError;
+        }
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["action_items"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action_items"] });
+      qc.invalidateQueries({ queryKey: ["contact_groups"] });
+    },
   });
 
   const createItem = useMutation({
