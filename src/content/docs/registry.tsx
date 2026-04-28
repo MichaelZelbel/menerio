@@ -53,7 +53,7 @@ const noteTaking: DocPage = {
     { id: "creating-a-note", title: "Creating a Note" },
     { id: "rich-text-editor", title: "Rich Text Editor" },
     { id: "file-attachments", title: "File Attachments" },
-    { id: "wikilinks", title: "Wikilinks" },
+    { id: "internal-links", title: "Internal links" },
     { id: "quick-capture", title: "Quick Capture" },
   ],
   searchText: "notes create edit rich text editor toolbar bold italic heading image upload attachment wikilink quick capture",
@@ -74,9 +74,9 @@ const noteTaking: DocPage = {
       <h2 id="file-attachments">File Attachments</h2>
       <p>Drag and drop images, PDFs, audio, or video files directly into the editor. They're uploaded to secure cloud storage and embedded inline. Menerio's AI automatically analyses media — it extracts text from PDFs, describes images, and transcribes audio.</p>
 
-      <h2 id="wikilinks">Wikilinks</h2>
-      <p>Type <code>[[</code> to create a link to another note. An autocomplete menu appears so you can find and link notes instantly. Wikilinks create visible connections in your Note Graph and show up in the Backlinks panel.</p>
-      <Callout type="info">Wikilinks are bidirectional — if Note A links to Note B, Note B automatically shows Note A in its backlinks.</Callout>
+      <h2 id="internal-links">Internal links</h2>
+      <p>Type <code>[[</code> to create a link to another note. An autocomplete menu appears so you can find and link notes instantly. Internal links create visible connections in your Note Graph and show up in the Backlinks panel.</p>
+      <Callout type="info">Internal links are bidirectional — if Note A links to Note B, Note B automatically shows Note A in its backlinks.</Callout>
 
       <h2 id="quick-capture">Quick Capture</h2>
       <p>Press <code>⌘⇧K</code> from anywhere in the app to open a floating capture card. Type your thought, press <code>⌘↵</code>, and it's saved as a new note with full AI processing. Perfect for fleeting ideas you don't want to lose.</p>
@@ -440,7 +440,7 @@ const githubSync: DocPage = {
       <Callout type="info">This is perfect for keeping a Markdown backup or for interoperability with tools like Obsidian.</Callout>
 
       <h2 id="import-vault">Import an Existing Vault</h2>
-      <p>Have an existing Obsidian vault or Markdown collection on GitHub? Use <strong>"Import Vault"</strong> to pull all files into Menerio as notes. Wikilinks and frontmatter are preserved.</p>
+      <p>Have an existing Obsidian vault or Markdown collection on GitHub? Use <strong>"Import Vault"</strong> to pull all files into Menerio as notes. Internal links and frontmatter are preserved.</p>
 
       <h2 id="conflict-resolution">Conflict Resolution</h2>
       <p>If a note has been changed in both Menerio and GitHub, the Sync Conflicts panel shows you both versions so you can choose which to keep.</p>
