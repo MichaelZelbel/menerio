@@ -54,6 +54,7 @@ export function useReviewQueue() {
         .from("review_queue" as any)
         .select("*, source_note:notes!review_queue_source_note_id_fkey(title)")
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
+        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as ReviewItem[];
@@ -68,7 +69,8 @@ export function useReviewQueue() {
       const { count, error } = await supabase
         .from("review_queue" as any)
         .select("id", { count: "exact", head: true })
-        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
+        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
       if (error) throw error;
       return count || 0;
     },
