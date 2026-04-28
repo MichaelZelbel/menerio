@@ -539,6 +539,113 @@
   height: 0;
 }
 
+.wiki-article-editor {
+  overflow: visible;
+}
+
+.wiki-article-editor > div {
+  padding: 0;
+}
+
+.wiki-article-editor .tiptap {
+  min-height: 0;
+  max-width: 72ch;
+  font-size: 0.98rem;
+  line-height: 1.85;
+  color: hsl(var(--foreground));
+}
+
+.wiki-article-editor .tiptap p {
+  margin: 0 0 1.15rem;
+  color: hsl(var(--foreground) / 0.88);
+}
+
+.wiki-article-editor .tiptap h1,
+.wiki-article-editor .tiptap h2,
+.wiki-article-editor .tiptap h3 {
+  scroll-margin-top: 6rem;
+  letter-spacing: 0;
+}
+
+.wiki-article-editor .tiptap h1 {
+  margin: 2.25rem 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 1.75rem;
+}
+
+.wiki-article-editor .tiptap h2 {
+  margin: 2rem 0 0.85rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.7);
+  font-size: 1.35rem;
+}
+
+.wiki-article-editor .tiptap h3 {
+  margin: 1.6rem 0 0.65rem;
+  font-size: 1.08rem;
+}
+
+.wiki-article-editor .tiptap a,
+.wiki-article-editor .tiptap .wiki-link {
+  color: hsl(var(--primary));
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.wiki-article-editor .tiptap a:hover,
+.wiki-article-editor .tiptap .wiki-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.wiki-article-editor .tiptap ul,
+.wiki-article-editor .tiptap ol {
+  margin: 0 0 1.2rem;
+  padding-left: 1.35rem;
+}
+
+.wiki-article-editor .tiptap li {
+  margin: 0.35rem 0;
+  color: hsl(var(--foreground) / 0.88);
+}
+
+.wiki-article-editor .tiptap blockquote {
+  margin: 1.5rem 0;
+  border-left: 3px solid hsl(var(--primary));
+  background: hsl(var(--accent) / 0.45);
+  padding: 0.85rem 1rem;
+  color: hsl(var(--foreground) / 0.82);
+  font-style: normal;
+}
+
+.wiki-article-editor .tiptap table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.wiki-article-editor .tiptap table th {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+.wiki-article-editor .tiptap table td,
+.wiki-article-editor .tiptap table th {
+  padding: 0.7rem 0.85rem;
+  border-color: hsl(var(--border));
+}
+
+.wiki-article-editor .tiptap img {
+  margin: 1.5rem 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
 .dark .tiptap-editor .tiptap mark {
   background-color: hsl(45, 80%, 35%);
   color: hsl(var(--foreground));
