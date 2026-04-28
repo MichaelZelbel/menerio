@@ -1867,10 +1867,37 @@ server.registerTool("create_group_next_step", { title: "Create Group Next Step",
 
 server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step", description: "Use AI to suggest one concrete next step for a Group membership without saving it.", inputSchema: { membership_id: z.string() } }, async ({ membership_id }) => {
   try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/suggest-group-next-step`, { method: "POST", headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", "x-menerio-user-id": currentUserId }, body: JSON.stringify({ membership_id }) });
-    const text = await response.text();
-    if (!response.ok) return { content: [{ type: "text" as const, text: `Suggest next step failed: ${response.status} ${text}` }], isError: true };
-    return { content: [{ type: "text" as const, text }] };
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("*, contact_groups:group_id(*), contacts:person_id(*)").eq("id", membership_id).eq("user_id", currentUserId).maybeSingle();
+    if (membershipError) throw new Error(membershipError.message);
+    if (!membership) throw new Error("Membership not found");
+    const [{ data: interactions }, { data: notes }] = await Promise.all([
+      supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", currentUserId).eq("contact_id", (membership as any).person_id).order("interaction_date", { ascending: false }).limit(5),
+      supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", currentUserId).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
+    ]);
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_next_step", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
+    const parsed = JSON.parse(result?.choices?.[0]?.message?.content || "{}");
+    return jsonTool({ title: String(parsed.title || "Follow up"), due_date_offset_days: Number(parsed.due_date_offset_days || 3), priority: ["low", "normal", "high", "urgent"].includes(parsed.priority) ? parsed.priority : "normal", reasoning: String(parsed.reasoning || ""), credits });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("generate_group_briefing", { title: "Generate Group Briefing", description: "Generate and save a concise Markdown briefing for a Group.", inputSchema: { group_id_or_slug: z.string(), period_days: z.number().optional().default(7) } }, async ({ group_id_or_slug, period_days }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const days = Math.min(90, Math.max(1, Number(period_days) || 7));
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const [{ data: memberships }, { data: interactions }, { data: actions }] = await Promise.all([
+      supabase.from("contact_group_memberships").select("*, contacts:person_id(name, company, role)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null).order("last_movement_at", { ascending: true }),
+      supabase.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", currentUserId).eq("group_id", group.id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
+      supabase.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("metadata->>group_id", group.id).order("created_at", { ascending: false }),
+    ]);
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_briefing", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.25, messages: [{ role: "system", content: "Generate a concise weekly group briefing in Markdown with these exact sections: ## Movement, ## Stale Members, ## Top Priorities for Next Week, ## Goals Progress. Ground every claim in provided data." }, { role: "user", content: JSON.stringify({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], action_items: actions || [] }) }] });
+    const briefing = String(result?.choices?.[0]?.message?.content || "").trim();
+    const generatedAt = new Date().toISOString();
+    const { error } = await supabase.from("group_briefings").insert({ user_id: currentUserId, group_id: group.id, period_days: days, briefing_markdown: briefing, generated_at: generatedAt });
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    return jsonTool({ briefing_markdown: briefing, generated_at: generatedAt, credits });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
