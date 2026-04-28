@@ -300,12 +300,13 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
         </Dialog>
           </div>
       </div>
-      {isLoading ? (
-        <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-      ) : nextSteps.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No next steps yet.</p>
-      ) : (
-        <div className="space-y-2">
+      <div className="min-h-6">
+        {isLoading ? (
+          <div className="flex h-6 items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading next steps...</div>
+        ) : nextSteps.length === 0 ? (
+          <p className="text-sm leading-6 text-muted-foreground">No next steps yet.</p>
+        ) : (
+          <div className="space-y-2">
           {nextSteps.map((item) => (
             <button key={item.id} type="button" onClick={() => navigate("/dashboard/actions")} className="block w-full rounded-md border p-3 text-left text-sm hover:bg-accent">
               <span className="font-medium">{item.content.split("\n")[0]}</span>
@@ -316,8 +317,9 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
               </span>
             </button>
           ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
