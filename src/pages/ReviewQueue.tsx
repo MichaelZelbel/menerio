@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem, type WikiRevisionReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,8 +33,6 @@ import {
   RotateCcw,
   Users2,
 } from "lucide-react";
-import { useAddMembership } from "@/hooks/useGroupMemberships";
-import { useGroups } from "@/hooks/useGroups";
 
 const DEFAULT_PROFILE_CATEGORIES = [
   { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
@@ -84,21 +82,8 @@ export default function ReviewQueue() {
   const { user } = useAuth();
   const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
-  const addMembership = useAddMembership();
-  const { data: groups = [] } = useGroups();
   const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
   const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
-  const groupSuggestionContactIds = [...new Set(items.filter((item) => item.suggestion_type === "group_member_suggestion").map((item) => String((item.payload as any)?.contact_id || "")).filter(Boolean))];
-  const { data: suggestionContacts = [] } = useQuery({
-    queryKey: ["review-queue-group-suggestion-contacts", groupSuggestionContactIds],
-    enabled: groupSuggestionContactIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("contacts").select("id, name").in("id", groupSuggestionContactIds);
-      if (error) throw error;
-      return (data || []) as { id: string; name: string }[];
-    },
-  });
-
   const refreshReviewQueues = () => {
     queryClient.invalidateQueries({ queryKey: ["review-queue"] });
     queryClient.invalidateQueries({ queryKey: ["review-queue-count"] });
