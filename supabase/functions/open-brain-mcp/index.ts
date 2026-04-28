@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
+import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -1909,8 +1910,10 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
       supabase.from("contact_group_memberships").select("person_id, contacts:person_id(name)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null),
       supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", currentUserId).is("merged_into", null).order("name"),
-      supabase.from("notes").select("title, content, metadata, created_at").eq("user_id", currentUserId).order("created_at", { ascending: false }).limit(50),
+      supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
     ]);
+    const structuredImport = await importGroupMembersFromNotes(supabase, currentUserId, group, notes || []);
+    if (structuredImport) return jsonTool({ ok: true, mode: "structured_import", ...structuredImport });
     const existingIds = new Set((memberships || []).map((m: any) => m.person_id));
     const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
     const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
@@ -1931,6 +1934,30 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     }
     return jsonTool({ ok: true, suggestions_added: rows.length, auto_applied: rows.filter((row) => row.status === "auto_applied_unreviewed").length, pending_review: rows.filter((row) => row.status === "pending_review").length, credits });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("preview_group_members_from_note", { title: "Preview Group Members From Note", description: "Deterministically preview people that can be imported into a Group from a matching Markdown table or numbered list note. Does not write data.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    if (error) throw new Error(error.message);
+    const preview = previewGroupMembersFromNotes(group, notes || []);
+    return jsonTool(preview ? { ok: true, source_note: { id: preview.note.id, title: preview.note.title || "Untitled" }, parsed_rows: preview.rows.length, rows: preview.rows.slice(0, 120) } : { ok: true, source_note: null, parsed_rows: 0, rows: [] });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("import_group_members_from_note", { title: "Import Group Members From Note", description: "Deterministically import people into a Group from a matching Markdown table or numbered list note. Creates missing contacts, preserves rank/order, saves link/relevance/first-step metadata.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    if (error) throw new Error(error.message);
+    const result = await importGroupMembersFromNotes(supabase, currentUserId, group, notes || []);
+    return jsonTool(result ? { ok: true, ...result } : { ok: false, error: "No matching structured note found" });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
