@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
-import { ArrowLeft, Archive, CalendarDays, Check, GripVertical, Loader2, Plus, Search, Trash2, User, Users } from "lucide-react";
+import { ArrowLeft, Archive, CalendarDays, Check, Clapperboard, Compass, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import { showToast } from "@/lib/toast";
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
 const SENSITIVITIES = ["normal", "sensitive", "private"];
+const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound, Users };
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type Contact = Pick<Database["public"]["Tables"]["contacts"]["Row"], "id" | "name" | "company" | "role">;
@@ -56,6 +57,11 @@ function relativeDate(value: string) {
 
 function pretty(value?: string | null) {
   return (value || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function GroupIcon({ icon }: { icon?: string | null }) {
+  const Icon = icon && icon in iconMap ? iconMap[icon as keyof typeof iconMap] : Users;
+  return <Icon className="h-5 w-5" />;
 }
 
 function MemberCard({ membership, onOpen }: { membership: GroupMembershipWithPerson; onOpen: () => void }) {
@@ -213,6 +219,7 @@ export default function GroupDetail() {
   const moveMembership = useMoveMembershipStage();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [aboutForm, setAboutForm] = useState<AboutForm | null>(null);
+  const [activeTab, setActiveTab] = useState("pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<Stage>(group?.stages ?? []);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
@@ -245,18 +252,18 @@ export default function GroupDetail() {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")} className="mb-3"><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button>
-          <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary"><Users className="h-5 w-5" /></div><h1 className="truncate text-2xl font-display font-bold">{group.name}</h1></div>
+          <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary"><GroupIcon icon={group.icon} /></div><h1 className="truncate text-2xl font-display font-bold">{group.name}</h1></div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <AddMemberDialog group={group} existingPersonIds={existingPersonIds} />
-          <Button variant="outline" size="sm" onClick={() => updateGroup.mutate({ id: group.id, name: group.name })}>Edit</Button>
+          <Button variant="outline" size="sm" onClick={() => setActiveTab("about")}>Edit</Button>
           <Button variant="outline" size="icon" onClick={() => archiveGroup.mutate(group.id, { onSuccess: () => showToast.success("Group archived") })}><Archive className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" className="text-destructive" onClick={() => trashGroup.mutate(group.id, { onSuccess: () => { showToast.success("Group moved to trash"); navigate("/dashboard/groups"); } })}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
-      <Tabs defaultValue="pipeline" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
         <TabsContent value="pipeline" className="mt-0">
           <DndContext onDragEnd={onDragEnd}>
