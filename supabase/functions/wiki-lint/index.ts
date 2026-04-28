@@ -12,7 +12,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
-const DRIFT_AND_CONTRADICTION_AUDITOR_PROMPT = `You are the auditor for a personal LLM-maintained knowledge base in the style of Andrej Karpathy's LLM Wiki pattern. Your job is to find specific failure modes: contradictions, drift (confident prose not supported by sources), gaps (missing important connections), and stale syntheses (pages that newer pages have superseded).
+const DRIFT_AND_CONTRADICTION_AUDITOR_PROMPT = `You are the auditor for a personal AI-maintained Lexicon. Your job is to find specific failure modes: contradictions, drift (confident prose not supported by sources), gaps (missing important connections), and stale syntheses (pages that newer pages have superseded).
 
 The pages to audit follow this system prompt as the user-role message. Each shows slug, title, page_type, and full markdown content.
 
@@ -389,6 +389,6 @@ serve(async (req) => {
         details: { error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - startedAt },
       }).catch((logError: unknown) => console.error("failed to log wiki lint failure", logError));
     }
-    return jsonResponse({ error: "Wiki lint failed" }, 500);
+    return jsonResponse({ error: "Lexicon health check failed" }, 500);
   }
 });
