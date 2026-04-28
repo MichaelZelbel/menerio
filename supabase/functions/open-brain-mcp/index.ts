@@ -1876,6 +1876,68 @@ server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step
   }
 });
 
+server.registerTool("add_members_from_notes", { title: "Add Members From Notes", description: "Use AI to add or propose Group members from notes. Respects the user's AI suggestion settings: auto mode adds eligible members and queues them for review; manual mode sends suggestions to Review Queue.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
+      supabase.from("contact_group_memberships").select("person_id, contacts:person_id(name)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null),
+      supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", currentUserId).is("merged_into", null).order("name"),
+      supabase.from("notes").select("title, content, metadata, created_at").eq("user_id", currentUserId).order("created_at", { ascending: false }).limit(50),
+    ]);
+    const existingIds = new Set((memberships || []).map((m: any) => m.person_id));
+    const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
+    const suggestions = Array.isArray(result?.choices?.[0]?.message?.content) ? [] : JSON.parse(result?.choices?.[0]?.message?.content || "{}").suggestions || [];
+    const candidateIds = new Set(candidates.map((contact: any) => contact.id));
+    const defaultStatus = Array.isArray(group.stages) ? group.stages[0]?.id : null;
+    const rawRows = suggestions.filter((suggestion: any) => candidateIds.has(suggestion.contact_id) && Number(suggestion.confidence) > 0.6).map((suggestion: any) => {
+      const reasoning = suggestion.reasoning || "";
+      const contactId = String(suggestion.contact_id);
+      const sensitive = ["health", "medical", "diagnosis", "therapy", "politics", "religion", "financial", "salary", "private", "confidential"].some((term) => `${group.name} ${group.description || ""} ${reasoning}`.toLowerCase().includes(term));
+      return { user_id: currentUserId, suggestion_type: "group_member_suggestion", title: `Add ${suggestion.contact_name || "contact"} to ${group.name}`, description: reasoning || null, confidence_score: Number(suggestion.confidence), is_sensitive: sensitive, target_entity_type: "contact_group", target_entity_id: group.id, payload: { group_id: group.id, contact_id: contactId, contact_name: suggestion.contact_name || null, group_name: group.name, reasoning, default_status: defaultStatus }, suppression_key: buildGroupMemberSuppressionKey(group.id, contactId) };
+    });
+    const filteredRows = await filterSuppressedGroupMemberRows(rawRows);
+    const preferences = await getSuggestionPreferences();
+    const rows = await Promise.all(filteredRows.map((row) => prepareGroupMemberSuggestion(row, preferences)));
+    if (rows.length) {
+      const { error } = await supabase.from("review_queue").insert(rows);
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    }
+    return jsonTool({ ok: true, suggestions_added: rows.length, auto_applied: rows.filter((row) => row.status === "auto_applied_unreviewed").length, pending_review: rows.filter((row) => row.status === "pending_review").length, credits });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("review_group_member_suggestion", { title: "Review Group Member Suggestion", description: "Apply Review Queue actions for Group member suggestions using the same Keep, Roll Back, and Never Again behavior as the app.", inputSchema: { review_queue_id: z.string(), action: z.enum(["keep", "roll_back", "never_again"]) } }, async ({ review_queue_id, action }) => {
+  try {
+    const { data: item, error: fetchError } = await supabase.from("review_queue").select("*").eq("user_id", currentUserId).eq("id", review_queue_id).eq("suggestion_type", "group_member_suggestion").maybeSingle();
+    if (fetchError) throw new Error(fetchError.message);
+    if (!item) throw new Error("Group member suggestion not found");
+    const payload = (item as any).payload || {};
+    let membershipId = (item as any).target_entity_id;
+    if (action === "keep") {
+      if (!membershipId) {
+        const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", payload.group_id).eq("person_id", payload.contact_id).is("archived_at", null).maybeSingle();
+        membershipId = existing?.id;
+      }
+      if (!membershipId) {
+        const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: payload.group_id, person_id: payload.contact_id, status: payload.default_status || null, reason: (item as any).description || null }).select("id").single();
+        if (error || !data) throw new Error(error?.message || "Could not create membership");
+        membershipId = data.id;
+      }
+      await supabase.from("review_queue").update({ status: "kept", target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: (item as any).applied_at || new Date().toISOString(), reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", currentUserId);
+      return jsonTool({ ok: true, status: "kept", membership_id: membershipId });
+    }
+    if (membershipId) await supabase.from("contact_group_memberships").delete().eq("user_id", currentUserId).eq("id", membershipId);
+    if (action === "never_again") await supabase.from("ai_suggestion_suppressions").upsert({ user_id: currentUserId, suggestion_type: "group_member_suggestion", target_entity_type: (item as any).target_entity_type, target_entity_id: (item as any).target_entity_id, normalized_value: String(payload.contact_id || "").toLowerCase(), source_category: null, suppression_key: (item as any).suppression_key || buildGroupMemberSuppressionKey(payload.group_id, payload.contact_id) }, { onConflict: "user_id,suppression_key" });
+    await supabase.from("review_queue").update({ status: action === "never_again" ? "blocked" : "removed", blocked_at: action === "never_again" ? new Date().toISOString() : null, reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", currentUserId);
+    return jsonTool({ ok: true, status: action === "never_again" ? "blocked" : "removed" });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
 const app = new Hono();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
