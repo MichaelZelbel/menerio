@@ -354,11 +354,25 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
       .limit(50);
     if (interactionsError) throw interactionsError;
 
+    const { data: recentNotes, error: recentNotesError } = await db
+      .from("notes")
+      .select("id, title, content, metadata, created_at")
+      .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (recentNotesError) throw recentNotesError;
+    const noteExcerpts = (recentNotes || [])
+      .filter((candidate: any) => extractPeopleFromMetadata(candidate.metadata).some((person) => people.includes(person)))
+      .slice(0, 12)
+      .map((candidate: any) => `- ${candidate.title || "Untitled"}: ${noteContentToText(candidate.content).slice(0, 500)}`)
+      .join("\n") || "None";
+
     const context = [
       `Group: ${group.name}`,
       `Mentioned people: ${people.join(", ")}`,
       `Current note excerpt:\n${contentText.slice(0, 2500)}`,
       `Recent interactions:\n${(interactions || []).map((item: any) => `- ${item.interaction_date} ${item.type}: ${item.summary || ""}`).join("\n") || "None"}`,
+      `Related note excerpts from the last 30 days:\n${noteExcerpts}`,
       `Existing page content:\n${page.content}`,
     ].join("\n\n");
 
