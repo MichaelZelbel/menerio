@@ -1751,6 +1751,74 @@ server.registerTool(
   }
 );
 
+server.registerTool("list_groups", { title: "List Groups", description: "List the user's active Groups with membership counts and goals.", inputSchema: { limit: z.number().optional().default(50) } }, async ({ limit }) => {
+  try {
+    const safeLimit = clampNumber(limit, 1, 100, 50);
+    const { data: groups, error } = await supabase.from("contact_groups").select("id, name, slug, type, purpose, template, color, icon, stages, success_criteria, updated_at").eq("user_id", currentUserId).eq("is_trashed", false).order("updated_at", { ascending: false }).limit(safeLimit);
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    const ids = (groups || []).map((group: any) => group.id);
+    const { data: memberships } = ids.length ? await supabase.from("contact_group_memberships").select("group_id").eq("user_id", currentUserId).in("group_id", ids).is("archived_at", null) : { data: [] };
+    const counts = new Map<string, number>();
+    for (const membership of memberships || []) counts.set((membership as any).group_id, (counts.get((membership as any).group_id) || 0) + 1);
+    return jsonTool({ groups: (groups || []).map((group: any) => ({ ...group, member_count: counts.get(group.id) || 0 })) });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("get_group", { title: "Get Group", description: "Get a Group with members, recent interactions, open next steps, goals, and latest briefing.", inputSchema: { id_or_slug: z.string(), include_notes: z.boolean().optional().default(false) } }, async ({ id_or_slug, include_notes }) => {
+  try {
+    const group = await resolveGroup(id_or_slug);
+    const [{ data: memberships }, { data: interactions }, { data: actions }, { data: briefings }] = await Promise.all([
+      supabase.from("contact_group_memberships").select("*, contacts:person_id(id, name, company, role, email, tags)").eq("user_id", currentUserId).eq("group_id", group.id).is("archived_at", null).order("position"),
+      supabase.from("contact_interactions").select("id, interaction_date, type, summary, note_id, contact_id, action_items").eq("user_id", currentUserId).eq("group_id", group.id).order("interaction_date", { ascending: false }).limit(10),
+      supabase.from("action_items").select("id, content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("status", "open").eq("metadata->>group_id", group.id).order("created_at", { ascending: false }).limit(20),
+      supabase.from("group_briefings").select("briefing_markdown, generated_at, period_days").eq("user_id", currentUserId).eq("group_id", group.id).order("generated_at", { ascending: false }).limit(1),
+    ]);
+    let notes: any[] = [];
+    if (include_notes) {
+      const names = (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean).slice(0, 20);
+      const { data } = names.length ? await supabase.from("notes").select("id, title, content, created_at, metadata").eq("user_id", currentUserId).eq("is_trashed", false).contains("metadata", { people: names }).order("created_at", { ascending: false }).limit(10) : { data: [] };
+      notes = data || [];
+    }
+    return jsonTool({ group, members: memberships || [], recent_interactions: interactions || [], open_next_steps: actions || [], latest_briefing: briefings?.[0] || null, related_notes: notes });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("create_group", { title: "Create Group", description: "Create a new Group. Provide name plus optional purpose, type, stages, and success criteria.", inputSchema: { name: z.string(), purpose: z.string().optional(), description: z.string().optional(), type: z.string().optional().default("other"), template: z.string().optional(), stages: z.array(z.any()).optional(), success_criteria: z.array(z.any()).optional(), color: z.string().optional(), icon: z.string().optional() } }, async ({ name, purpose, description, type, template, stages, success_criteria, color, icon }) => {
+  try {
+    const baseSlug = slugify(name);
+    let slug = baseSlug;
+    for (let i = 2; i < 20; i++) {
+      const { data } = await supabase.from("contact_groups").select("id").eq("user_id", currentUserId).eq("slug", slug).maybeSingle();
+      if (!data) break;
+      slug = `${baseSlug}-${i}`;
+    }
+    const { data: group, error } = await supabase.from("contact_groups").insert({ user_id: currentUserId, name: name.trim(), slug, purpose: purpose || null, description: description || null, type: type || "other", template: template || null, stages: stages || [], success_criteria: success_criteria || [], color: color || null, icon: icon || null }).select("*").single();
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    await supabase.from("wiki_pages").insert({ user_id: currentUserId, slug: `group-${group.slug}`, page_type: "group", title: group.name, summary: group.purpose, metadata: { group_id: group.id }, content: `# ${group.name}\n\n## Purpose\n${group.purpose || ""}\n\n## Members\n_Synced automatically from contact_group_memberships._\n\n## Insights\n_Synthesized from notes mentioning members._\n` });
+    return jsonTool({ ok: true, group });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
+server.registerTool("add_group_member", { title: "Add Group Member", description: "Add a person to a Group, or restore the active membership if it already exists.", inputSchema: { group_id_or_slug: z.string(), contact_id: z.string().optional(), contact_name: z.string().optional(), status: z.string().optional(), priority: z.string().optional().default("normal"), reason: z.string().optional(), notes: z.string().optional() } }, async ({ group_id_or_slug, contact_id, contact_name, status, priority, reason, notes }) => {
+  try {
+    const group = await resolveGroup(group_id_or_slug);
+    const contact = await resolveContact({ contact_id, contact_name });
+    const { data: existing } = await supabase.from("contact_group_memberships").select("*").eq("user_id", currentUserId).eq("group_id", group.id).eq("person_id", contact.id).is("archived_at", null).maybeSingle();
+    if (existing) return jsonTool({ ok: true, changed: false, membership: existing });
+    const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: group.id, person_id: contact.id, status: status || null, priority: priority || "normal", reason: reason || null, notes: notes || null }).select("*").single();
+    if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    return jsonTool({ ok: true, changed: true, membership: data, group: { id: group.id, name: group.name }, person: { id: contact.id, name: contact.name } });
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+});
+
 const app = new Hono();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
