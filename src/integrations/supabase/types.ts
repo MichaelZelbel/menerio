@@ -2168,6 +2168,8 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          last_synthesized_at: string | null
+          metadata: Json
           page_type: string
           slug: string
           source_count: number
@@ -2180,6 +2182,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          last_synthesized_at?: string | null
+          metadata?: Json
           page_type?: string
           slug: string
           source_count?: number
@@ -2192,6 +2196,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          last_synthesized_at?: string | null
+          metadata?: Json
           page_type?: string
           slug?: string
           source_count?: number
