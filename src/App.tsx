@@ -38,6 +38,8 @@ const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
 const People = lazy(() => import("./pages/People"));
+const Groups = lazy(() => import("./pages/Groups"));
+const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const TimelinePage = lazy(() => import("./pages/TimelinePage"));
 
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
@@ -114,6 +116,8 @@ const App = () => (
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="timeline" element={<TimelinePage />} />
                     <Route path="people" element={<People />} />
+                    <Route path="groups" element={<Groups />} />
+                    <Route path="groups/:slug" element={<GroupDetail />} />
                     
                     <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />

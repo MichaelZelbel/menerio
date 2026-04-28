@@ -13,6 +13,8 @@ type CreateGroupInput =
   | (Omit<ContactGroupInsert, "user_id" | "slug"> & { slug?: string })
   | { templateId: string; name?: string };
 
+type CreateGroupBase = Omit<ContactGroupInsert, "user_id" | "slug"> & { slug?: string };
+
 const slugify = (value: string) =>
   value
     .toLowerCase()
@@ -74,13 +76,13 @@ export function useCreateGroup() {
       if (!user) throw new Error("Not authenticated");
 
       const templateInput = isTemplateCreateInput(input) ? input : null;
-      const base = templateInput
+      const base: CreateGroupBase = templateInput
         ? (() => {
             const template = getTemplateById(templateInput.templateId);
             if (!template) throw new Error("Unknown group template");
             return instantiateTemplate(template, templateInput.name);
           })()
-        : input;
+        : input as CreateGroupBase;
 
       const name = base.name.trim();
       const row: ContactGroupInsert = {
