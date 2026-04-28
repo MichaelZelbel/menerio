@@ -36,8 +36,11 @@ import {
   FileText,
   User,
   Filter,
+  Users,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
+// Group-linked action_items store metadata as: { group_membership_id: "uuid", group_id: "uuid", person_id: "uuid" }.
 interface ActionItem {
   id: string;
   user_id: string;
@@ -51,6 +54,7 @@ interface ActionItem {
   tags: string[];
   created_at: string;
   updated_at: string;
+  metadata?: Record<string, string> | null;
 }
 
 const STATUS_COLS = [
