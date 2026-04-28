@@ -86,6 +86,7 @@ export default function WikiPage() {
   const [titleDraft, setTitleDraft] = useState("");
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [selectedRevision, setSelectedRevision] = useState<RevisionWithSource | null>(null);
+  const [activeHeading, setActiveHeading] = useState("");
 
   const { data: page, isLoading: pageLoading } = useQuery<WikiPageRow | null>({
     queryKey: ["wiki-page", slug],
@@ -151,6 +152,19 @@ export default function WikiPage() {
     },
   });
 
+  const { data: wikiPages = [] } = useQuery<Pick<WikiPageRow, "id" | "slug" | "title" | "page_type">[]>({
+    queryKey: ["wiki-pages", "sidebar"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wiki_pages")
+        .select("id, slug, title, page_type")
+        .order("page_type", { ascending: true })
+        .order("title", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   const refreshWikiLinkStubs = useCallback(async () => {
     const root = editorWrapRef.current;
     if (!root) return;
@@ -212,6 +226,38 @@ export default function WikiPage() {
 
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
   const displayContent = useMemo(() => page ? normalizeWikiContent(page.content) : "", [page]);
+  const headings = useMemo(() => extractHeadings(displayContent), [displayContent]);
+  const groupedWikiPages = useMemo(() => wikiPages.reduce<Record<string, typeof wikiPages>>((groups, wikiPage) => {
+    const key = wikiPage.page_type || "other";
+    groups[key] = [...(groups[key] || []), wikiPage];
+    return groups;
+  }, {}), [wikiPages]);
+
+  useEffect(() => {
+    if (headings.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.find((entry) => entry.isIntersecting);
+        if (visible) setActiveHeading(visible.target.id);
+      },
+      { rootMargin: "-96px 0px -65% 0px", threshold: 0.1 }
+    );
+    headings.forEach((heading) => {
+      const element = document.getElementById(heading.id);
+      if (element) observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, [headings, displayContent]);
+
+  useEffect(() => {
+    if (!editorWrapRef.current || editMode || headings.length === 0) return;
+    const headingElements = Array.from(editorWrapRef.current.querySelectorAll("h1, h2, h3"));
+    headingElements.forEach((element, index) => {
+      const heading = headings[index];
+      if (heading) element.id = heading.id;
+    });
+    setActiveHeading((current) => current || headings[0]?.id || "");
+  }, [displayContent, editMode, headings]);
 
   if (pageLoading) return <WikiPageSkeleton />;
 
