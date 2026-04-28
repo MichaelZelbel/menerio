@@ -37,6 +37,7 @@ const Wizard = lazy(() => import("./pages/Wizard"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
+const Actions = lazy(() => import("./pages/Actions"));
 const People = lazy(() => import("./pages/People"));
 const Groups = lazy(() => import("./pages/Groups"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
@@ -113,6 +114,7 @@ const App = () => (
                     <Route path="settings" element={<Settings />} />
                     
                     <Route path="activity" element={<ActivityPage />} />
+                    <Route path="actions" element={<Actions />} />
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="timeline" element={<TimelinePage />} />
                     <Route path="people" element={<People />} />
