@@ -322,12 +322,18 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
   );
 }
 
+type SuggestMembersResult = {
+  suggestions_added: number;
+  auto_applied?: number;
+  structured_import?: { source_note?: { title?: string | null }; parsed_rows?: number; created_contacts?: number; imported_members?: number; updated_members?: number };
+};
+
 function SuggestMembersButton({ groupId }: { groupId: string }) {
   const qc = useQueryClient();
   const { credits } = useAICredits();
   const suggestMembers = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke<{ suggestions_added: number; auto_applied?: number }>("suggest-group-members", { body: { group_id: groupId } });
+      const { data, error } = await supabase.functions.invoke<SuggestMembersResult>("suggest-group-members", { body: { group_id: groupId } });
       if (error) throw error;
       return data || { suggestions_added: 0, auto_applied: 0 };
     },
@@ -337,6 +343,12 @@ function SuggestMembersButton({ groupId }: { groupId: string }) {
       qc.invalidateQueries({ queryKey: ["contact_group_memberships", groupId] });
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       triggerCreditsRefresh();
+      if (result.structured_import) {
+        const imported = result.structured_import.imported_members || 0;
+        const updated = result.structured_import.updated_members || 0;
+        showToast.success(`${imported} member${imported === 1 ? "" : "s"} imported${updated > 0 ? ` · ${updated} updated` : ""}`);
+        return;
+      }
       const added = result.suggestions_added - (result.auto_applied || 0);
       if (result.auto_applied) {
         showToast.success(`${result.auto_applied} member${result.auto_applied === 1 ? "" : "s"} added${added > 0 ? ` · ${added} in Review Queue` : ""}`);
