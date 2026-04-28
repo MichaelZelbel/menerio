@@ -48,12 +48,6 @@ import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -67,7 +61,6 @@ import {
   Star,
   Pin,
   Trash2,
-  MoreHorizontal,
   Copy,
   RotateCcw,
   Tag,
