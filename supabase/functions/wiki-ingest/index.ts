@@ -403,7 +403,10 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
       .update({ content: nextContent, last_synthesized_at: new Date().toISOString() })
       .eq("id", page.id);
     if (updateError) throw updateError;
-    await db.from("wiki_page_sources").insert({ user_id: userId, wiki_page_id: page.id, note_id: noteId }).select().maybeSingle();
+    const { error: sourceError } = await db
+      .from("wiki_page_sources")
+      .upsert({ user_id: userId, wiki_page_id: page.id, note_id: noteId }, { onConflict: "wiki_page_id,note_id" });
+    if (sourceError) throw sourceError;
     updated += 1;
   }
 
