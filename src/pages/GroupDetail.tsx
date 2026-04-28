@@ -223,10 +223,32 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
     onError: (error: Error) => showToast.error(error.message),
   });
 
+  const suggestNextStep = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<NextStepSuggestion>("suggest-group-next-step", { body: { membership_id: membership.id } });
+      if (error) throw error;
+      return data!;
+    },
+    onSuccess: (suggestion) => {
+      const due = new Date();
+      due.setDate(due.getDate() + Number(suggestion.due_date_offset_days || 3));
+      setForm({ title: suggestion.title, priority: suggestion.priority || "normal", notes: suggestion.reasoning || "" });
+      setDueDate(due);
+      setOpen(true);
+      triggerCreditsRefresh();
+      showToast.success("Next step suggested");
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not suggest next step"),
+  });
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-medium">Next Steps</h3>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestNextStep.mutate()} disabled={suggestNextStep.isPending}>
+              {suggestNextStep.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Suggest Next Step
+            </Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> Add Next Step</Button>
@@ -274,6 +296,7 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
             </DialogFooter>
           </DialogContent>
         </Dialog>
+          </div>
       </div>
       {isLoading ? (
         <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
