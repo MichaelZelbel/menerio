@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
 import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, ExternalLink, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +24,10 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
 import { useArchiveGroup, useGroup, useTrashGroup, useUpdateGroup } from "@/hooks/useGroups";
 import { GroupMembershipWithPerson, useAddMembership, useArchiveMembership, useGroupMemberships, useMoveMembershipStage, useRemoveMembership, useUpdateMembership } from "@/hooks/useGroupMemberships";
+import { useAICredits } from "@/hooks/useAICredits";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { triggerCreditsRefresh } from "@/lib/credits-events";
 
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
@@ -35,8 +38,10 @@ type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type Contact = Pick<Database["public"]["Tables"]["contacts"]["Row"], "id" | "name" | "company" | "role">;
 type NoteSummary = Pick<Database["public"]["Tables"]["notes"]["Row"], "id" | "title">;
 type ActionItem = Database["public"]["Tables"]["action_items"]["Row"] & { metadata?: Record<string, string> | null };
+type GroupBriefing = Database["public"]["Tables"]["group_briefings"]["Row"];
 type Stage = { id: string; label: string; color?: string };
 type AttributeSchema = Record<string, { type: "number" | "text" | "select"; label: string; options?: string[]; min?: number; max?: number }>;
+type NextStepSuggestion = { title: string; due_date_offset_days: number; priority: string; reasoning: string };
 
 type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
 
@@ -218,10 +223,32 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
     onError: (error: Error) => showToast.error(error.message),
   });
 
+  const suggestNextStep = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<NextStepSuggestion>("suggest-group-next-step", { body: { membership_id: membership.id } });
+      if (error) throw error;
+      return data!;
+    },
+    onSuccess: (suggestion) => {
+      const due = new Date();
+      due.setDate(due.getDate() + Number(suggestion.due_date_offset_days || 3));
+      setForm({ title: suggestion.title, priority: suggestion.priority || "normal", notes: suggestion.reasoning || "" });
+      setDueDate(due);
+      setOpen(true);
+      triggerCreditsRefresh();
+      showToast.success("Next step suggested");
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not suggest next step"),
+  });
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-medium">Next Steps</h3>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestNextStep.mutate()} disabled={suggestNextStep.isPending}>
+              {suggestNextStep.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Suggest Next Step
+            </Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> Add Next Step</Button>
@@ -269,6 +296,7 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
             </DialogFooter>
           </DialogContent>
         </Dialog>
+          </div>
       </div>
       {isLoading ? (
         <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
@@ -289,6 +317,77 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
         </div>
       )}
     </div>
+  );
+}
+
+function SuggestMembersButton({ groupId }: { groupId: string }) {
+  const qc = useQueryClient();
+  const { credits } = useAICredits();
+  const suggestMembers = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<{ suggestions_added: number }>("suggest-group-members", { body: { group_id: groupId } });
+      if (error) throw error;
+      return data || { suggestions_added: 0 };
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["review_queue"] });
+      triggerCreditsRefresh();
+      showToast.success(`${result.suggestions_added} suggestions added to Review Queue`);
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not suggest members"),
+  });
+
+  return (
+    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestMembers.mutate()} disabled={suggestMembers.isPending || (credits?.remainingCredits ?? 0) < 20}>
+      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Suggest Members from Notes
+    </Button>
+  );
+}
+
+function BriefingTab({ groupId }: { groupId: string }) {
+  const qc = useQueryClient();
+  const { data: briefings = [], isLoading } = useQuery<GroupBriefing[]>({
+    queryKey: ["group_briefings", groupId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("group_briefings").select("*").eq("group_id", groupId).order("generated_at", { ascending: false }).limit(5);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+  const latest = briefings[0];
+  const generatedToday = latest ? new Date(latest.generated_at).toDateString() === new Date().toDateString() : false;
+  const generateBriefing = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<{ briefing_markdown: string; generated_at: string }>("generate-group-briefing", { body: { group_id: groupId, period_days: 7 } });
+      if (error) throw error;
+      return data!;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["group_briefings", groupId] });
+      triggerCreditsRefresh();
+      showToast.success("Briefing generated");
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not generate briefing"),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base">Briefing</CardTitle>
+          <Button onClick={() => generateBriefing.mutate()} disabled={generateBriefing.isPending || generatedToday}>
+            {generateBriefing.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Generate New Briefing
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : latest ? (
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <ReactMarkdown>{latest.briefing_markdown}</ReactMarkdown>
+          </div>
+        ) : <p className="text-sm text-muted-foreground">No briefing generated yet.</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -401,13 +500,17 @@ export default function GroupDetail() {
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
         <TabsContent value="pipeline" className="mt-0">
+          <div className="mb-4 flex justify-end"><SuggestMembersButton groupId={group.id} /></div>
           <DndContext onDragEnd={onDragEnd}>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {stages.map((stage) => <PipelineColumn key={stage.id} stage={stage} memberships={byStage(stage.id)} onOpen={(membership) => setSelectedMembershipId(membership.id)} />)}
             </div>
           </DndContext>
+        </TabsContent>
+        <TabsContent value="briefing" className="mt-0">
+          <BriefingTab groupId={group.id} />
         </TabsContent>
         <TabsContent value="list" className="mt-0">
           <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{membership.contacts?.name || "Unknown"}</TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>

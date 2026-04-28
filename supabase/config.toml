@@ -107,3 +107,12 @@ verify_jwt = false
 
 [functions.wiki-lint]
 verify_jwt = false
+
+[functions.suggest-group-next-step]
+verify_jwt = false
+
+[functions.suggest-group-members]
+verify_jwt = false
+
+[functions.generate-group-briefing]
+verify_jwt = false
