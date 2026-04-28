@@ -130,6 +130,27 @@ export default function Actions() {
     },
   });
 
+
+  const { data: groupContexts = [] } = useQuery({
+    queryKey: ["action_group_contexts", user?.id, items.map((item) => item.metadata?.group_id).filter(Boolean).join(",")],
+    enabled: !!user && items.some((item) => item.metadata?.group_id),
+    queryFn: async () => {
+      const groupIds = Array.from(new Set(items.map((item) => item.metadata?.group_id).filter(Boolean))) as string[];
+      if (groupIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("contact_groups")
+        .select("id, name, slug, icon")
+        .in("id", groupIds);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const groupContextById = useCallback(
+    (id?: string) => groupContexts.find((group: any) => group.id === id),
+    [groupContexts],
+  );
+
   const contactName = useCallback(
     (id: string | null) => {
       if (!id) return null;
@@ -393,6 +414,13 @@ export default function Actions() {
                               {nTitle && (
                                 <Badge variant="secondary" className="text-[10px] gap-0.5 max-w-[120px] truncate">
                                   <FileText className="h-2.5 w-2.5 shrink-0" /> {nTitle}
+                                </Badge>
+                              )}
+                              {item.metadata?.group_id && groupContextById(item.metadata.group_id) && (
+                                <Badge variant="secondary" className="text-[10px] gap-0.5 max-w-[140px] truncate" asChild>
+                                  <Link to={`/dashboard/groups/${groupContextById(item.metadata!.group_id)?.slug}`} onClick={(event) => event.stopPropagation()}>
+                                    <Users className="h-2.5 w-2.5 shrink-0" /> {groupContextById(item.metadata.group_id)?.name}
+                                  </Link>
                                 </Badge>
                               )}
                             </div>
