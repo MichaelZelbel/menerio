@@ -865,6 +865,44 @@ export type Database = {
           },
         ]
       }
+      group_briefings: {
+        Row: {
+          briefing_markdown: string
+          created_at: string
+          generated_at: string
+          group_id: string
+          id: string
+          period_days: number
+          user_id: string
+        }
+        Insert: {
+          briefing_markdown: string
+          created_at?: string
+          generated_at?: string
+          group_id: string
+          id?: string
+          period_days?: number
+          user_id?: string
+        }
+        Update: {
+          briefing_markdown?: string
+          created_at?: string
+          generated_at?: string
+          group_id?: string
+          id?: string
+          period_days?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_briefings_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "contact_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hub_api_keys: {
         Row: {
           created_at: string | null
