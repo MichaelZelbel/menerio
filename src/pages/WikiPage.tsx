@@ -42,7 +42,7 @@ function extractHeadings(markdown: string): WikiHeading[] {
   return markdown.split("\n").flatMap((line) => {
     const match = line.match(/^(#{1,3})\s+(.+)$/);
     if (!match) return [];
-    const title = match[2].replace(/[*_`\[\]()]/g, "").trim();
+    const title = match[2].replace(/[*_`[\]()]/g, "").trim();
     const baseId = slugifyHeading(title);
     const count = seen.get(baseId) || 0;
     seen.set(baseId, count + 1);
