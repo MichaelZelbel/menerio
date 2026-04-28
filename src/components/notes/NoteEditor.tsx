@@ -794,6 +794,22 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </div>
       )}
 
+      {mentionedGroups.length > 0 && !note.is_trashed && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          <span>This note mentions members of</span>
+          {mentionedGroups.map((group) => (
+            <button
+              key={group.groupId}
+              type="button"
+              className="font-medium text-foreground hover:text-primary"
+              onClick={() => { setInteractionGroupId(group.groupId); setInteractionSummary(title); }}
+            >
+              {group.groupName}
+            </button>
+          ))}
+        </div>
+      )}
+
 
       {/* Rich text formatting toolbar — hidden for external read-only notes */}
       {!note.is_trashed && !sourceMode && !note.is_external && <EditorToolbar editor={editor} />}
@@ -1068,6 +1084,38 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       targetNoteId={note.id}
       targetNoteTitle={title}
     />
+    <Dialog open={!!interactionGroupId} onOpenChange={(open) => { if (!open) setInteractionGroupId(null); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Log this note as an interaction in {selectedInteractionGroup?.groupName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select value={interactionType} onValueChange={setInteractionType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="chat">Chat</SelectItem>
+                <SelectItem value="meeting">Meeting</SelectItem>
+                <SelectItem value="email">Email</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Summary</Label>
+            <input
+              value={interactionSummary}
+              onChange={(event) => setInteractionSummary(event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setInteractionGroupId(null)}>Cancel</Button>
+          <Button onClick={logGroupInteraction}>Log Interaction</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     {showChat && (
       <NoteChatPanel
         note={note}
