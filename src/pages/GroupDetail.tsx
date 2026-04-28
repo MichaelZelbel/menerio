@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
-import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, ExternalLink, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, ExternalLink, GripVertical, Handshake, Landmark, Loader2, Minus, Pencil, Plus, Podcast, Search, Sparkles, Target, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ type GroupBriefing = Database["public"]["Tables"]["group_briefings"]["Row"];
 type Stage = { id: string; label: string; color?: string };
 type AttributeSchema = Record<string, { type: "number" | "text" | "select"; label: string; options?: string[]; min?: number; max?: number }>;
 type NextStepSuggestion = { title: string; due_date_offset_days: number; priority: string; reasoning: string };
+type SuccessCriterion = { label: string; target: number; current?: number; kind: "manual" | "interaction_count" | "action_item_count"; period_days?: number };
 
 type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
 
@@ -391,6 +393,94 @@ function BriefingTab({ groupId }: { groupId: string }) {
   );
 }
 
+function GoalsTab({ group }: { group: ContactGroup }) {
+  const updateGroup = useUpdateGroup();
+  const [editingIndex, setEditingIndex] = useState<number | "new" | null>(null);
+  const [form, setForm] = useState<SuccessCriterion>({ label: "", target: 1, current: 0, kind: "manual" });
+  const criteria = parseArray<SuccessCriterion>(group.success_criteria);
+  const { data: interactionCounts = {} } = useQuery<Record<number, number>>({
+    queryKey: ["group_goal_interaction_counts", group.id, group.success_criteria],
+    queryFn: async () => {
+      const entries = await Promise.all(criteria.map(async (criterion, index) => {
+        if (criterion.kind !== "interaction_count") return [index, Number(criterion.current || 0)] as const;
+        const since = new Date();
+        since.setDate(since.getDate() - Number(criterion.period_days || 30));
+        const { count, error } = await supabase
+          .from("contact_interactions")
+          .select("id", { count: "exact", head: true })
+          .eq("group_id", group.id)
+          .gte("interaction_date", since.toISOString().slice(0, 10));
+        if (error) throw error;
+        return [index, count || 0] as const;
+      }));
+      return Object.fromEntries(entries);
+    },
+  });
+  const saveCriteria = (next: SuccessCriterion[], message: string) => updateGroup.mutate({ id: group.id, success_criteria: next as unknown as Json }, { onSuccess: () => showToast.success(message) });
+  const setManualValue = (index: number, value: number) => saveCriteria(criteria.map((criterion, i) => i === index ? { ...criterion, current: Math.max(0, value) } : criterion), "Goal updated");
+  const openEdit = (index: number | "new") => {
+    setEditingIndex(index);
+    setForm(index === "new" ? { label: "", target: 1, current: 0, kind: "manual" } : { ...criteria[index], current: criteria[index].current || 0 });
+  };
+  const submit = () => {
+    if (!form.label.trim()) return;
+    const normalized = { ...form, label: form.label.trim(), target: Math.max(1, Number(form.target || 1)), current: Number(form.current || 0) };
+    saveCriteria(editingIndex === "new" ? [...criteria, normalized] : criteria.map((criterion, index) => index === editingIndex ? normalized : criterion), editingIndex === "new" ? "Goal added" : "Goal updated");
+    setEditingIndex(null);
+  };
+  const deleteGoal = () => {
+    if (typeof editingIndex !== "number") return;
+    saveCriteria(criteria.filter((_, index) => index !== editingIndex), "Goal deleted");
+    setEditingIndex(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end"><Button size="sm" className="gap-1.5" onClick={() => openEdit("new")}><Plus className="h-4 w-4" /> Add Goal</Button></div>
+      {criteria.length === 0 ? (
+        <Card><CardContent className="flex flex-col items-center justify-center py-12 text-center"><Target className="mb-3 h-8 w-8 text-muted-foreground" /><p className="font-medium">No goals yet.</p><p className="mt-1 text-sm text-muted-foreground">Add a goal to track this group’s mission.</p></CardContent></Card>
+      ) : criteria.map((criterion, index) => {
+        const current = criterion.kind === "interaction_count" ? interactionCounts[index] ?? 0 : Number(criterion.current || 0);
+        const target = Math.max(1, Number(criterion.target || 1));
+        return (
+          <Card key={`${criterion.label}-${index}`}>
+            <CardContent className="space-y-4 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0"><p className="truncate font-medium">{criterion.label}</p><p className="text-sm text-muted-foreground">{current}/{target} · {pretty(criterion.kind)}{criterion.kind === "interaction_count" ? ` · last ${criterion.period_days || 30} days` : ""}</p></div>
+                <Button variant="ghost" size="icon" onClick={() => openEdit(index)}><Pencil className="h-4 w-4" /></Button>
+              </div>
+              <Progress value={Math.min(100, Math.round((current / target) * 100))} />
+              {criterion.kind === "manual" && (
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setManualValue(index, current + 1)}><Plus className="mr-1 h-4 w-4" />1</Button>
+                  <Button size="sm" variant="outline" onClick={() => setManualValue(index, current - 1)}><Minus className="mr-1 h-4 w-4" />1</Button>
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(index)}>Set value</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
+
+      <Dialog open={editingIndex !== null} onOpenChange={(open) => !open && setEditingIndex(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{editingIndex === "new" ? "Add Goal" : "Edit Goal"}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label>Label</Label><Input value={form.label} onChange={(e) => setForm((current) => ({ ...current, label: e.target.value }))} /></div>
+            <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Target</Label><Input type="number" min={1} value={form.target} onChange={(e) => setForm((current) => ({ ...current, target: Number(e.target.value || 1) }))} /></div><div className="space-y-2"><Label>Current</Label><Input type="number" min={0} value={form.current || 0} onChange={(e) => setForm((current) => ({ ...current, current: Number(e.target.value || 0) }))} disabled={form.kind === "interaction_count"} /></div></div>
+            <div className="space-y-2"><Label>Kind</Label><Select value={form.kind} onValueChange={(kind) => setForm((current) => ({ ...current, kind: kind as SuccessCriterion["kind"] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manual</SelectItem><SelectItem value="interaction_count">Interaction Count</SelectItem><SelectItem value="action_item_count">Action Item Count</SelectItem></SelectContent></Select></div>
+            {form.kind === "interaction_count" && <div className="space-y-2"><Label>Period days</Label><Input type="number" min={1} value={form.period_days || 30} onChange={(e) => setForm((current) => ({ ...current, period_days: Number(e.target.value || 30) }))} /></div>}
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {editingIndex !== "new" && <Button variant="destructive" onClick={deleteGoal}><Trash2 className="mr-2 h-4 w-4" />Delete</Button>}
+            <Button onClick={submit} disabled={!form.label.trim() || updateGroup.isPending}>{updateGroup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function MembershipSheet({ group, membership, notes, open, onOpenChange }: { group: ContactGroup; membership: GroupMembershipWithPerson | null; notes: NoteSummary[]; open: boolean; onOpenChange: (open: boolean) => void }) {
   const updateMembership = useUpdateMembership();
   const removeMembership = useRemoveMembership();
@@ -455,7 +545,7 @@ export default function GroupDetail() {
   const moveMembership = useMoveMembershipStage();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [aboutForm, setAboutForm] = useState<AboutForm | null>(null);
-  const [activeTab, setActiveTab] = useState("pipeline");
+  const [activeTab, setActiveTab] = useState(() => window.matchMedia("(max-width: 767px)").matches ? "list" : "pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<Stage>(group?.stages ?? []);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
@@ -500,7 +590,7 @@ export default function GroupDetail() {
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        <TabsList className="flex h-auto flex-wrap"><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="goals">Goals</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
         <TabsContent value="pipeline" className="mt-0">
           <div className="mb-4 flex justify-end"><SuggestMembersButton groupId={group.id} /></div>
           <DndContext onDragEnd={onDragEnd}>
@@ -514,6 +604,9 @@ export default function GroupDetail() {
         </TabsContent>
         <TabsContent value="list" className="mt-0">
           <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{membership.contacts?.name || "Unknown"}</TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>
+        </TabsContent>
+        <TabsContent value="goals" className="mt-0">
+          <GoalsTab group={group} />
         </TabsContent>
         <TabsContent value="about" className="mt-0">
           <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle className="text-base">About</CardTitle><Button asChild variant="outline" size="sm"><Link to={`/lexicon/group-${group.slug}`}><ExternalLink className="mr-2 h-4 w-4" />Open Wiki Page</Link></Button></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setAboutForm({ ...form, name: e.target.value })} /></div><div className="space-y-2"><Label>Type</Label><Select value={form.type} onValueChange={(value) => setAboutForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{GROUP_TYPES.map((type) => <SelectItem key={type} value={type}>{pretty(type)}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ""} onChange={(e) => setAboutForm({ ...form, description: e.target.value || null })} /></div><div className="space-y-2"><Label>Purpose</Label><Textarea value={form.purpose || ""} onChange={(e) => setAboutForm({ ...form, purpose: e.target.value || null })} /></div><div className="grid gap-4 sm:grid-cols-3"><div className="space-y-2"><Label>Sensitivity</Label><Select value={form.sensitivity} onValueChange={(value) => setAboutForm({ ...form, sensitivity: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SENSITIVITIES.map((value) => <SelectItem key={value} value={value}>{pretty(value)}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Icon</Label><Input value={form.icon || ""} onChange={(e) => setAboutForm({ ...form, icon: e.target.value || null })} /></div><div className="space-y-2"><Label>Color</Label><Input value={form.color || ""} onChange={(e) => setAboutForm({ ...form, color: e.target.value || null })} /></div></div><Button onClick={saveAbout} disabled={updateGroup.isPending}>{updateGroup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></CardContent></Card>
