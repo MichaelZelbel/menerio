@@ -73,6 +73,7 @@ export default function People() {
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -95,6 +96,8 @@ export default function People() {
   });
 
   const selectedPerson = people.find((p) => p.id === selectedPersonId);
+  const { data: groups = [] } = useGroups();
+  const { data: groupFilterMemberships = [] } = useGroupMemberships(groupFilter === "all" ? null : groupFilter);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({
@@ -168,6 +171,7 @@ export default function People() {
 
   // ── Filtered list ──
   const filtered = people.filter((p) => {
+    if (groupFilter !== "all" && !groupFilterMemberships.some((membership) => membership.person_id === p.id)) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
