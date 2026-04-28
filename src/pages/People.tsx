@@ -195,7 +195,7 @@ export default function People() {
     try {
       await Promise.all(selectedPeople.map((personId) => addMembership.mutateAsync({ groupId: bulkGroupId, personId })));
       showToast.success(`Added ${selectedPeople.length} people to group`);
-      queryClient.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
       clearSelection();
       setBulkAddOpen(false);
       setBulkGroupId("");
