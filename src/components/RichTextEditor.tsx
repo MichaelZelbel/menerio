@@ -126,6 +126,7 @@ export function RichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
+    if (editor.isFocused) return;
     const current = editorToMarkdown(editor);
     if (current.trimEnd() !== value.trimEnd()) {
       editor.commands.setContent(toEditorHtml(value), { emitUpdate: false });
