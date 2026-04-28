@@ -638,8 +638,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
+      if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      contentSaveTimer.current = setTimeout(() => {
         const md = editorToMarkdown(editor);
         pendingSaveContentRef.current = md;
         updateNote.mutate(
@@ -928,10 +928,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             value={sourceText}
             onChange={(e) => {
               setSourceText(e.target.value);
-              if (saveTimer.current) clearTimeout(saveTimer.current);
+              if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
               pendingSaveContentRef.current = e.target.value;
               lastLocalContentRef.current = e.target.value;
-              saveTimer.current = setTimeout(() => {
+              contentSaveTimer.current = setTimeout(() => {
                 const nextContent = e.target.value;
                 updateNote.mutate(
                   { id: note.id, content: nextContent },
