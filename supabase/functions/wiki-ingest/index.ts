@@ -425,7 +425,7 @@ serve(async (req) => {
 
     const { data: note, error: noteError } = await db
       .from("notes")
-      .select("id, title, content")
+      .select("id, title, content, metadata")
       .eq("id", noteId)
       .maybeSingle();
 
@@ -477,6 +477,10 @@ serve(async (req) => {
     });
     if (applyError) throw applyError;
 
+    const groupInsightsResult = changeType === "UPDATE"
+      ? await synthesizeGroupInsights(db, userId, note, noteId, contentText)
+      : { updated: 0, skipped: "not_update" };
+
     const durationMs = Date.now() - startedAt;
     await logWiki(db, userId, "ingest", {
       note_id: noteId,
@@ -485,9 +489,10 @@ serve(async (req) => {
       log_summary: parsed.log_summary,
       duration_ms: durationMs,
       apply_result: applyResult,
+      group_insights: groupInsightsResult,
     });
 
-    return jsonResponse({ ok: true, summary: parsed.log_summary, action_count: parsed.actions.length, duration_ms: durationMs });
+    return jsonResponse({ ok: true, summary: parsed.log_summary, action_count: parsed.actions.length, group_insights: groupInsightsResult, duration_ms: durationMs });
   } catch (error) {
     console.error("wiki-ingest failed", error);
     if (db && userId) {
