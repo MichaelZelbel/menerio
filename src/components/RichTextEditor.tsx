@@ -69,7 +69,7 @@ export function RichTextEditor({
         const display = match.match(/data-display-text="([^"]*)"/i)?.[1] || "";
         const slug = toWikiSlug(target);
         const label = (display || target).replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim() || slug;
-        return `<a class="wiki-link" data-slug="${slug}" href="/wiki/${slug}">${label}</a>`;
+        return `<a class="wiki-link" data-slug="${slug}" href="/lexicon/${slug}">${label}</a>`;
       },
     );
 

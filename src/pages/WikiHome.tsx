@@ -113,16 +113,16 @@ export default function WikiHome() {
 
   return (
     <div className="space-y-6">
-      <SEOHead title="Wiki — Menerio" noIndex />
+      <SEOHead title="Lexicon — Menerio" noIndex />
 
       <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-display font-bold">Wiki</h1>
+          <h1 className="text-3xl font-display font-bold">Lexicon</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Your knowledge base, built automatically from your notes.
+            Your AI-generated knowledge lexicon, built automatically from your notes.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate("/wiki/lint")}>Run lint</Button>
+        <Button variant="secondary" onClick={() => navigate("/lexicon/lint")}>Run lint</Button>
       </div>
 
       <div className="relative max-w-xl">
@@ -143,9 +143,9 @@ export default function WikiHome() {
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10">
               <BookOpen className="h-7 w-7 text-primary" />
             </div>
-            <CardTitle className="mb-2 text-lg">Your wiki is empty.</CardTitle>
+            <CardTitle className="mb-2 text-lg">Your Lexicon is empty.</CardTitle>
             <CardDescription className="max-w-md">
-              The wiki grows automatically as you write notes. Write or open a note, and the wiki will start building itself in the background.
+              The Lexicon grows automatically as you write notes. Write or open a note, and it will start building itself in the background.
             </CardDescription>
             <Button className="mt-6" onClick={() => navigate("/dashboard/notes?action=create")}>
               <FileText className="h-4 w-4" />
@@ -158,7 +158,7 @@ export default function WikiHome() {
           <div className="min-w-0 space-y-8">
             {groupEntries.length === 0 ? (
               <div className="border-y border-border py-12 text-center text-sm text-muted-foreground">
-                  No wiki pages match your search.
+                  No Lexicon pages match your search.
               </div>
             ) : (
               groupEntries.map(([pageType, groupPages]) => (
@@ -171,7 +171,7 @@ export default function WikiHome() {
                     {groupPages.map((page) => (
                       <Link
                         key={page.id}
-                        to={`/wiki/${page.slug}`}
+                        to={`/lexicon/${page.slug}`}
                         className="block py-4 transition-colors hover:bg-accent/40 sm:px-3"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -197,14 +197,14 @@ export default function WikiHome() {
               <h2 className="text-base font-semibold">Recent activity</h2>
               <div className="mt-4 space-y-4">
               {revisions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No wiki activity yet.</p>
+                <p className="text-sm text-muted-foreground">No Lexicon activity yet.</p>
               ) : (
                 revisions.map((revision) => (
                   <div key={revision.id} className="space-y-1.5 border-b border-border pb-4 last:border-0 last:pb-0">
                     <Badge variant={revisionBadgeVariant[revision.change_type] || "secondary"}>
                       {labelize(revision.change_type)}
                     </Badge>
-                    <Link to={`/wiki/${revision.page_slug}`} className="block text-sm font-medium text-foreground hover:underline">
+                    <Link to={`/lexicon/${revision.page_slug}`} className="block text-sm font-medium text-foreground hover:underline">
                       {revision.page_title}
                     </Link>
                     <p className="text-sm text-muted-foreground">

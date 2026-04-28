@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -56,6 +56,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const LegacyWikiRedirect = () => {
+  const { slug } = useParams<{ slug?: string }>();
+  return <Navigate to={slug ? `/lexicon/${slug}` : "/lexicon"} replace />;
+};
 
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange={false}>
@@ -118,7 +123,7 @@ const App = () => (
                   </Route>
 
                   <Route
-                    path="/wiki"
+                    path="/lexicon"
                     element={
                       <ProtectedRoute>
                         <DashboardLayout />
@@ -129,6 +134,10 @@ const App = () => (
                     <Route path="lint" element={<WikiLintPlaceholder />} />
                     <Route path=":slug" element={<WikiPage />} />
                   </Route>
+
+                  <Route path="/wiki" element={<LegacyWikiRedirect />} />
+                  <Route path="/wiki/lint" element={<Navigate to="/lexicon/lint" replace />} />
+                  <Route path="/wiki/:slug" element={<LegacyWikiRedirect />} />
 
                   <Route path="*" element={<NotFound />} />
                 </Routes>
