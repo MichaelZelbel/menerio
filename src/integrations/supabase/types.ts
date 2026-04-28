@@ -24,6 +24,123 @@ export type Database = {
   public: {
     Tables: {
       [key: string]: GenericTable;
+      wiki_log: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          operation: string;
+          details: Json;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          operation: string;
+          details?: Json;
+          created_at?: string;
+        },
+        {
+          id?: string;
+          user_id?: string;
+          operation?: string;
+          details?: Json;
+          created_at?: string;
+        },
+        []
+      >;
+      wiki_pages: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          slug: string;
+          title: string;
+          page_type: string;
+          summary: string | null;
+          content: string;
+          source_count: number;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          slug: string;
+          title: string;
+          page_type?: string;
+          summary?: string | null;
+          content?: string;
+          source_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        },
+        {
+          id?: string;
+          user_id?: string;
+          slug?: string;
+          title?: string;
+          page_type?: string;
+          summary?: string | null;
+          content?: string;
+          source_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        },
+        []
+      >;
+      wiki_revisions: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          wiki_page_id: string | null;
+          page_slug: string;
+          page_title: string;
+          change_type: string;
+          previous_content: string | null;
+          new_content: string;
+          source_note_id: string | null;
+          source_revision_id: string | null;
+          change_summary: string | null;
+          status: string;
+          reviewed_at: string | null;
+          rolled_back_at: string | null;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          wiki_page_id?: string | null;
+          page_slug: string;
+          page_title: string;
+          change_type: string;
+          previous_content?: string | null;
+          new_content: string;
+          source_note_id?: string | null;
+          source_revision_id?: string | null;
+          change_summary?: string | null;
+          status?: string;
+          reviewed_at?: string | null;
+          rolled_back_at?: string | null;
+          created_at?: string;
+        },
+        {
+          id?: string;
+          user_id?: string;
+          wiki_page_id?: string | null;
+          page_slug?: string;
+          page_title?: string;
+          change_type?: string;
+          previous_content?: string | null;
+          new_content?: string;
+          source_note_id?: string | null;
+          source_revision_id?: string | null;
+          change_summary?: string | null;
+          status?: string;
+          reviewed_at?: string | null;
+          rolled_back_at?: string | null;
+          created_at?: string;
+        },
+        []
+      >;
       contact_groups: TableDefinition<
         {
           id: string;
