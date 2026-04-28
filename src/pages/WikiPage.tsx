@@ -279,14 +279,14 @@ export default function WikiPage() {
   return (
     <div className="space-y-6">
       <SEOHead title={`${page.title} — Wiki — Menerio`} noIndex />
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 space-y-2">
+      <div className="flex flex-col gap-3 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <Link to="/wiki" className="hover:text-foreground">Wiki</Link><span>/</span><span>{labelize(page.page_type)}</span><span>/</span><span className="text-foreground">{page.title}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-display font-bold">{page.title}</h1>
-            <Badge variant="secondary">{labelize(page.page_type)}</Badge>
+          <div>
+            <h1 className="max-w-4xl text-3xl font-display font-bold leading-tight sm:text-4xl">{page.title}</h1>
+            {page.summary && <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">{page.summary}</p>}
           </div>
           <p className="text-sm text-muted-foreground">{pageMeta}</p>
         </div>
@@ -305,49 +305,98 @@ export default function WikiPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Content</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {editMode && <Input value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} />}
+      <div className="grid gap-8 xl:grid-cols-[240px_minmax(0,1fr)_220px]">
+        <aside className="hidden xl:block">
+          <nav className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto border-r border-border pr-4">
+            <Link to="/wiki" className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground hover:text-primary">
+              <FileText className="h-4 w-4" /> Wiki index
+            </Link>
+            <div className="space-y-5">
+              {Object.entries(groupedWikiPages).map(([pageType, items]) => (
+                <div key={pageType}>
+                  <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">{labelize(pageType)}</p>
+                  <div className="space-y-1">
+                    {items.map((item) => (
+                      <Link
+                        key={item.id}
+                        to={`/wiki/${item.slug}`}
+                        className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${item.slug === page.slug ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"}`}
+                      >
+                        {item.title}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </nav>
+        </aside>
+
+        <main className="min-w-0">
+          {editMode && <Input className="mb-4" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} />}
           <div ref={editorWrapRef}>
             <RichTextEditor
               value={editMode ? latestMarkdownRef.current || page.content : displayContent}
               editable={editMode}
               showToolbar={editMode}
+              className={editMode ? undefined : "wiki-article-editor border-0 bg-transparent"}
               onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
               onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/wiki/${encodeURIComponent(targetSlug)}`); }}
             />
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Backlinks</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {backlinksLoading ? <Skeleton className="h-16" /> : backlinks.length === 0 ? <p className="text-sm text-muted-foreground">No pages link here yet.</p> : backlinks.map((backlink) => backlink.source && (
-              <Link key={backlink.id} to={`/wiki/${backlink.source.slug}`} className="block rounded-md border border-border p-3 hover:bg-accent">
-                <p className="text-sm font-medium">{backlink.source.title}</p>
-                {backlink.source.summary && <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{backlink.source.summary}</p>}
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="text-base">Sources</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {sourcesLoading ? <Skeleton className="h-20" /> : sources.length === 0 ? <p className="text-sm text-muted-foreground">No sources cited yet.</p> : sources.map((source) => source.notes && (
-              <div key={source.id} className="rounded-md border border-border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0"><p className="truncate text-sm font-medium">{source.notes.title || "Untitled"}</p><p className="mt-1 text-xs text-muted-foreground">{format(new Date(source.notes.created_at), "MMM d, yyyy")}</p></div>
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/notes/${source.notes!.id}`)}><ExternalLink className="h-3.5 w-3.5" /> Open note</Button>
+          <div className="mt-12 border-t border-border pt-8">
+            <div className="grid gap-8 lg:grid-cols-2">
+              <section>
+                <h2 className="text-base font-semibold">Backlinks</h2>
+                <div className="mt-3 space-y-2">
+                  {backlinksLoading ? <Skeleton className="h-16" /> : backlinks.length === 0 ? <p className="text-sm text-muted-foreground">No pages link here yet.</p> : backlinks.map((backlink) => backlink.source && (
+                    <Link key={backlink.id} to={`/wiki/${backlink.source.slug}`} className="block rounded-md border border-border p-3 transition-colors hover:bg-accent">
+                      <p className="text-sm font-medium">{backlink.source.title}</p>
+                      {backlink.source.summary && <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{backlink.source.summary}</p>}
+                    </Link>
+                  ))}
                 </div>
-                <p className="mt-3 text-sm text-muted-foreground">{truncate(source.notes.content || "")}</p>
+              </section>
+
+              <section>
+                <h2 className="text-base font-semibold">Sources</h2>
+                <div className="mt-3 space-y-2">
+                  {sourcesLoading ? <Skeleton className="h-20" /> : sources.length === 0 ? <p className="text-sm text-muted-foreground">No sources cited yet.</p> : sources.map((source) => source.notes && (
+                    <div key={source.id} className="rounded-md border border-border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0"><p className="truncate text-sm font-medium">{source.notes.title || "Untitled"}</p><p className="mt-1 text-xs text-muted-foreground">{format(new Date(source.notes.created_at), "MMM d, yyyy")}</p></div>
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/notes/${source.notes!.id}`)}><ExternalLink className="h-3.5 w-3.5" /> Open note</Button>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{truncate(source.notes.content || "")}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </main>
+
+        <aside className="hidden xl:block">
+          <nav className="sticky top-20 border-l border-border pl-5">
+            <p className="mb-3 text-sm font-semibold text-foreground">On this page</p>
+            {headings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No sections yet.</p>
+            ) : (
+              <div className="space-y-1">
+                {headings.map((heading) => (
+                  <a
+                    key={heading.id}
+                    href={`#${heading.id}`}
+                    className={`block rounded px-2 py-1 text-sm transition-colors ${activeHeading === heading.id ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground"} ${heading.level === 3 ? "ml-3" : heading.level === 2 ? "ml-1" : ""}`}
+                  >
+                    {heading.title}
+                  </a>
+                ))}
               </div>
-            ))}
-          </CardContent>
-        </Card>
+            )}
+          </nav>
+        </aside>
       </div>
 
       <Sheet open={revisionsOpen} onOpenChange={setRevisionsOpen}>
