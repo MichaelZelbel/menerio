@@ -42,7 +42,7 @@ serve(async (req) => {
       }));
 
     if (rows.length > 0) {
-      const { error: insertError } = await admin.from("review_queue").upsert(rows, { onConflict: "user_id,suggestion_type,title", ignoreDuplicates: true });
+      const { error: insertError } = await admin.from("review_queue").insert(rows);
       if (insertError) throw insertError;
     }
     await deductFixedCredits(admin, userId, "group_member_suggestions", cost.tokens);
