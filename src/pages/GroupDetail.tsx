@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
-import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, ExternalLink, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, ExternalLink, GripVertical, Handshake, Landmark, Loader2, Minus, Pencil, Plus, Podcast, Search, Sparkles, Target, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ type GroupBriefing = Database["public"]["Tables"]["group_briefings"]["Row"];
 type Stage = { id: string; label: string; color?: string };
 type AttributeSchema = Record<string, { type: "number" | "text" | "select"; label: string; options?: string[]; min?: number; max?: number }>;
 type NextStepSuggestion = { title: string; due_date_offset_days: number; priority: string; reasoning: string };
+type SuccessCriterion = { label: string; target: number; current?: number; kind: "manual" | "interaction_count" | "action_item_count"; period_days?: number };
 
 type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
 
