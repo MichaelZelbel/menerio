@@ -221,7 +221,7 @@ export default function WikiPage() {
       toast.success("Saved");
       setEditMode(false);
     },
-    onError: () => toast.error("Could not save wiki page"),
+    onError: () => toast.error("Could not save Lexicon page"),
   });
 
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
@@ -264,12 +264,12 @@ export default function WikiPage() {
   if (!page) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <SEOHead title="Wiki page not found — Menerio" noIndex />
+        <SEOHead title="Lexicon page not found — Menerio" noIndex />
         <Card className="max-w-lg border-dashed text-center">
           <CardContent className="py-12">
             <CardTitle className="mb-2">This page doesn't exist yet.</CardTitle>
-            <CardDescription>The wiki creates pages automatically as you write notes — keep writing, and pages will appear here.</CardDescription>
-            <Button className="mt-6" onClick={() => navigate("/wiki")}><ArrowLeft className="h-4 w-4" /> Back to Wiki</Button>
+            <CardDescription>The Lexicon creates pages automatically as you write notes — keep writing, and pages will appear here.</CardDescription>
+            <Button className="mt-6" onClick={() => navigate("/lexicon")}><ArrowLeft className="h-4 w-4" /> Back to Lexicon</Button>
           </CardContent>
         </Card>
       </div>
@@ -278,11 +278,11 @@ export default function WikiPage() {
 
   return (
     <div className="space-y-6">
-      <SEOHead title={`${page.title} — Wiki — Menerio`} noIndex />
+      <SEOHead title={`${page.title} — Lexicon — Menerio`} noIndex />
       <div className="flex flex-col gap-3 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/wiki" className="hover:text-foreground">Wiki</Link><span>/</span><span>{labelize(page.page_type)}</span><span>/</span><span className="text-foreground">{page.title}</span>
+            <Link to="/lexicon" className="hover:text-foreground">Lexicon</Link><span>/</span><span>{labelize(page.page_type)}</span><span>/</span><span className="text-foreground">{page.title}</span>
           </div>
           <div>
             <h1 className="max-w-4xl text-3xl font-display font-bold leading-tight sm:text-4xl">{page.title}</h1>
@@ -308,8 +308,8 @@ export default function WikiPage() {
       <div className="grid gap-8 xl:grid-cols-[240px_minmax(0,1fr)_220px]">
         <aside className="hidden xl:block">
           <nav className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto border-r border-border pr-4">
-            <Link to="/wiki" className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground hover:text-primary">
-              <FileText className="h-4 w-4" /> Wiki index
+            <Link to="/lexicon" className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground hover:text-primary">
+              <FileText className="h-4 w-4" /> Lexicon index
             </Link>
             <div className="space-y-5">
               {Object.entries(groupedWikiPages).map(([pageType, items]) => (
@@ -319,7 +319,7 @@ export default function WikiPage() {
                     {items.map((item) => (
                       <Link
                         key={item.id}
-                        to={`/wiki/${item.slug}`}
+                        to={`/lexicon/${item.slug}`}
                         className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${item.slug === page.slug ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"}`}
                       >
                         {item.title}
@@ -341,7 +341,7 @@ export default function WikiPage() {
               showToolbar={editMode}
               className={editMode ? undefined : "wiki-article-editor border-0 bg-transparent"}
               onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
-              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/wiki/${encodeURIComponent(targetSlug)}`); }}
+              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/lexicon/${encodeURIComponent(targetSlug)}`); }}
             />
           </div>
 
@@ -351,7 +351,7 @@ export default function WikiPage() {
                 <h2 className="text-base font-semibold">Backlinks</h2>
                 <div className="mt-3 space-y-2">
                   {backlinksLoading ? <Skeleton className="h-16" /> : backlinks.length === 0 ? <p className="text-sm text-muted-foreground">No pages link here yet.</p> : backlinks.map((backlink) => backlink.source && (
-                    <Link key={backlink.id} to={`/wiki/${backlink.source.slug}`} className="block rounded-md border border-border p-3 transition-colors hover:bg-accent">
+                    <Link key={backlink.id} to={`/lexicon/${backlink.source.slug}`} className="block rounded-md border border-border p-3 transition-colors hover:bg-accent">
                       <p className="text-sm font-medium">{backlink.source.title}</p>
                       {backlink.source.summary && <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{backlink.source.summary}</p>}
                     </Link>

@@ -67,7 +67,7 @@ export function DashboardSidebar() {
   const mainItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Notes", url: "/dashboard/notes", icon: FileText },
-    { title: "Wiki", url: "/wiki", icon: BookOpen },
+    { title: "Lexicon", url: "/lexicon", icon: BookOpen },
     { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     

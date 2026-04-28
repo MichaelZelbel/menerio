@@ -98,11 +98,11 @@ export default function ReviewQueue() {
       .update({ status: "reviewed", reviewed_at: new Date().toISOString() })
       .eq("id", revision.id);
     if (error) {
-      showToast.error("Could not review wiki update: " + error.message);
+      showToast.error("Could not review Lexicon update: " + error.message);
       return;
     }
     refreshReviewQueues();
-    showToast.success("Wiki update reviewed");
+    showToast.success("Lexicon update reviewed");
   };
 
   const rollbackWikiRevisionById = async (revisionId: string) => {
@@ -115,7 +115,7 @@ export default function ReviewQueue() {
     try {
       await rollbackWikiRevisionById(rollbackWikiRevision.id);
     } catch (error: any) {
-      showToast.error("Could not roll back wiki update: " + (error.message || "Unknown error"));
+      showToast.error("Could not roll back Lexicon update: " + (error.message || "Unknown error"));
       return;
     }
     setRollbackWikiRevision(null);
@@ -558,7 +558,7 @@ export default function ReviewQueue() {
                           {revision.change_type}
                         </Badge>
                         <CardTitle className="text-base">
-                          <Link to={`/wiki/${revision.page_slug}`} className="hover:text-primary">
+                          <Link to={`/lexicon/${revision.page_slug}`} className="hover:text-primary">
                             {revision.page_title}
                           </Link>
                         </CardTitle>
@@ -690,7 +690,7 @@ export default function ReviewQueue() {
       <Dialog open={!!selectedWikiRevision} onOpenChange={(open) => !open && setSelectedWikiRevision(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>Wiki revision diff</DialogTitle>
+            <DialogTitle>Lexicon revision diff</DialogTitle>
           </DialogHeader>
           {selectedWikiRevision && (
             <div className="grid gap-4 md:grid-cols-2 max-h-[70vh] overflow-y-auto">
@@ -712,7 +712,7 @@ export default function ReviewQueue() {
           <AlertDialogHeader>
             <AlertDialogTitle>Roll back this change?</AlertDialogTitle>
             <AlertDialogDescription>
-              The wiki page will be restored to its previous content.
+              The Lexicon page will be restored to its previous content.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

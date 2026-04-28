@@ -67,7 +67,7 @@ const coreFeatures = [
     title: "Rich Note-Taking",
     description:
       "Capture thoughts, meeting notes, ideas, and references with a powerful editor. Support for markdown, tags, pins, favorites, and rich media.",
-    highlights: ["Markdown editor", "Media attachments", "Wikilinks"],
+    highlights: ["Markdown editor", "Media attachments", "Internal links"],
   },
   {
     icon: Network,

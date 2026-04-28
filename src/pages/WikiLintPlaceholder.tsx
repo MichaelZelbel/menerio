@@ -49,7 +49,7 @@ const emptyFindings: LintFindings = {
 };
 
 const relativeTime = (date: string) => formatDistanceToNow(new Date(date), { addSuffix: true });
-const pagePath = (slug: string) => `/wiki/${slug}`;
+const pagePath = (slug: string) => `/lexicon/${slug}`;
 
 function severityVariant(severity: Severity): "destructive" | "default" | "secondary" | "outline" {
   if (severity === "high") return "destructive";
@@ -139,7 +139,7 @@ export default function WikiLintPlaceholder() {
       setResult(data as LintResponse);
       await lastRunQuery.refetch();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Wiki lint failed");
+      setError(err instanceof Error ? err.message : "Lexicon health check failed");
     } finally {
       setIsRunning(false);
     }
@@ -149,12 +149,12 @@ export default function WikiLintPlaceholder() {
 
   return (
     <div className="space-y-6">
-      <SEOHead title="Wiki health check — Menerio" noIndex />
+      <SEOHead title="Lexicon health check — Menerio" noIndex />
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-display font-bold">Wiki health check</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Find orphans, broken links, drift, contradictions, gaps, and stale syntheses. Run when the wiki feels off.</p>
+          <h1 className="text-2xl font-display font-bold">Lexicon health check</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Find orphans, broken links, drift, contradictions, gaps, and stale syntheses. Run when the Lexicon feels off.</p>
           <p className="mt-2 text-xs text-muted-foreground">
             Last lint: {lastRunQuery.isLoading ? "Loading…" : lastRunQuery.data ? relativeTime(lastRunQuery.data.created_at) : "Never run."}
           </p>
@@ -172,7 +172,7 @@ export default function WikiLintPlaceholder() {
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <BookOpen className="mb-4 h-12 w-12 text-muted-foreground/50" />
             <CardTitle className="mb-2 text-lg">No pages to lint yet.</CardTitle>
-            <CardDescription>The wiki health check will be available once wiki pages exist.</CardDescription>
+            <CardDescription>The Lexicon health check will be available once Lexicon pages exist.</CardDescription>
           </CardContent>
         </Card>
       ) : (
@@ -188,7 +188,7 @@ export default function WikiLintPlaceholder() {
           {error && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Wiki lint failed</AlertTitle>
+              <AlertTitle>Lexicon health check failed</AlertTitle>
               <AlertDescription className="space-y-3">
                 <p>{error}</p>
                 <Button variant="outline" size="sm" onClick={runLint} disabled={isRunning}><RotateCcw className="h-4 w-4" /> Retry</Button>
@@ -213,7 +213,7 @@ export default function WikiLintPlaceholder() {
             </CardHeader>
           </Card>
 
-          <LintSection title="Unresolved wikilinks" count={findings.unresolved_wikilinks.length}>
+          <LintSection title="Unresolved Lexicon links" count={findings.unresolved_wikilinks.length}>
             {findings.unresolved_wikilinks.map((item, index) => (
               <div key={`${item.source_page_slug}-${item.target_slug}-${index}`} className="flex flex-col gap-3 rounded-md border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm"><PageLink slug={item.source_page_slug} title={item.source_page_title} /> <span className="text-muted-foreground">links to missing</span> <code className="rounded bg-muted px-1.5 py-0.5 text-xs">[[{item.target_slug}]]</code></div>
