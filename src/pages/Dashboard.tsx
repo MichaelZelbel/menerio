@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { SEOHead } from "@/components/SEOHead";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth, type AppRole } from "@/contexts/AuthContext";
 import { useAICredits } from "@/hooks/useAICredits";
 import { useNotes } from "@/hooks/useNotes";
@@ -27,7 +29,10 @@ import {
   Crown,
   ArrowRight,
   User,
+  Users2,
 } from "lucide-react";
+
+type GroupPulseItem = { id: string; name: string; slug: string; memberCount: number; staleCount: number; dueThisWeek: number; lastActivity: number };
 
 const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "success" | "info" | "warning" }> = {
   free: { label: "Free", color: "secondary" },
@@ -65,6 +70,31 @@ const Dashboard = () => {
     { label: "Explore features", done: false, action: () => navigate("/features") },
   ];
   const completedCount = checklistItems.filter((i) => i.done).length;
+  const { data: groupPulse = [] } = useQuery<GroupPulseItem[]>({
+    queryKey: ["group-pulse", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data: groups, error: groupError } = await supabase.from("contact_groups").select("id, name, slug, updated_at").eq("user_id", user!.id).eq("is_trashed", false).is("archived_at", null);
+      if (groupError) throw groupError;
+      const groupIds = (groups || []).map((group) => group.id);
+      if (groupIds.length === 0) return [];
+      const weekEnd = new Date();
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const [{ data: memberships, error: membershipError }, { data: actions, error: actionError }] = await Promise.all([
+        supabase.from("contact_group_memberships").select("group_id, last_movement_at").in("group_id", groupIds).is("archived_at", null),
+        supabase.from("action_items" as any).select("due_date, status, metadata").eq("user_id", user!.id).neq("status", "done").lte("due_date", weekEnd.toISOString().slice(0, 10)),
+      ]);
+      if (membershipError) throw membershipError;
+      if (actionError) throw actionError;
+      const staleCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      return (groups || []).map((group) => {
+        const groupMemberships = (memberships || []).filter((membership) => membership.group_id === group.id);
+        const groupActions = ((actions || []) as any[]).filter((action) => action.metadata?.group_id === group.id);
+        const lastMovement = Math.max(new Date(group.updated_at).getTime(), ...groupMemberships.map((membership) => new Date(membership.last_movement_at).getTime()));
+        return { id: group.id, name: group.name, slug: group.slug, memberCount: groupMemberships.length, staleCount: groupMemberships.filter((membership) => new Date(membership.last_movement_at).getTime() < staleCutoff).length, dueThisWeek: groupActions.length, lastActivity: lastMovement };
+      }).sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 3);
+    },
+  });
 
   return (
     <div className="space-y-6">
@@ -241,6 +271,22 @@ const Dashboard = () => {
           </Card>
 
           <TodaysConnections />
+          {groupPulse.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base">Group Pulse</CardTitle>
+                <Users2 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {groupPulse.map((group) => (
+                  <button key={group.id} onClick={() => navigate(`/dashboard/groups/${group.slug}`)} className="w-full rounded-md px-2 py-2 text-left transition-colors hover:bg-accent">
+                    <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{group.name}</span><ArrowRight className="h-3 w-3 text-muted-foreground" /></div>
+                    <p className="mt-1 text-xs text-muted-foreground">{group.memberCount} members · {group.staleCount} stale members · {group.dueThisWeek} due this week</p>
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
           <DiscoveryFeed />
           <OrphanNotesDetector compact />
           <BridgeNotesHighlighter compact />
