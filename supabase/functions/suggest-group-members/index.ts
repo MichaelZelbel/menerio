@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { callJson, corsHeaders, deductFixedCredits, ensureCredits, getAuthedAdmin, isUuid, jsonResponse, noteText } from "../_shared/group-ai.ts";
+import { importGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 
 const SENSITIVITY_THRESHOLDS: Record<string, number> = { low: 0.5, balanced: 0.7, strict: 0.85 };
 const SENSITIVE_TERMS = ["health", "medical", "diagnosis", "therapy", "politics", "religion", "financial", "salary", "private", "confidential"];
@@ -104,8 +105,15 @@ serve(async (req) => {
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
       admin.from("contact_group_memberships").select("person_id, contacts:person_id(name)").eq("group_id", group_id).eq("user_id", userId).is("archived_at", null),
       admin.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", userId).is("merged_into", null).order("name"),
-      admin.from("notes").select("title, content, metadata, created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(50),
+      admin.from("notes").select("id, title, content, metadata, created_at").eq("user_id", userId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
     ]);
+
+    const structuredImport = await importGroupMembersFromNotes(admin, userId, group, notes || []);
+    if (structuredImport && structuredImport.imported_members + structuredImport.updated_members > 0) {
+      await deductFixedCredits(admin, userId, "group_member_suggestions", cost.tokens);
+      return jsonResponse({ suggestions_added: 0, auto_applied: structuredImport.imported_members, structured_import: structuredImport });
+    }
+
     const existingIds = new Set((memberships || []).map((m: any) => m.person_id));
     const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
 
