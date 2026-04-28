@@ -160,6 +160,138 @@ function AddMemberDialog({ group, existingPersonIds }: { group: ContactGroup; ex
   );
 }
 
+
+function formatDateInput(date: Date | undefined) {
+  if (!date) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function NextStepsSection({ group, membership }: { group: ContactGroup; membership: GroupMembershipWithPerson }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ title: "", priority: membership.priority || "normal", notes: "" });
+  const [dueDate, setDueDate] = useState<Date | undefined>();
+
+  const { data: nextSteps = [], isLoading } = useQuery<ActionItem[]>({
+    queryKey: ["action_items", "group_membership", membership.id],
+    enabled: !!user && !!membership.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("action_items" as any)
+        .select("*")
+        .eq("user_id", user!.id)
+        .eq("metadata->>group_membership_id", membership.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return ((data || []) as unknown) as ActionItem[];
+    },
+  });
+
+  const createNextStep = useMutation({
+    mutationFn: async () => {
+      const body = [form.title.trim(), form.notes.trim()].filter(Boolean).join("\n\n");
+      const { error } = await supabase.from("action_items" as any).insert({
+        user_id: user!.id,
+        contact_id: membership.person_id,
+        content: body,
+        priority: form.priority,
+        due_date: formatDateInput(dueDate) || null,
+        status: "open",
+        metadata: {
+          group_membership_id: membership.id,
+          group_id: group.id,
+          person_id: membership.person_id,
+        },
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action_items"] });
+      qc.invalidateQueries({ queryKey: ["action_items", "group_membership", membership.id] });
+      showToast.success("Next step added");
+      setForm({ title: "", priority: membership.priority || "normal", notes: "" });
+      setDueDate(undefined);
+      setOpen(false);
+    },
+    onError: (error: Error) => showToast.error(error.message),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium">Next Steps</h3>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> Add Next Step</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Next Step</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Title</Label>
+                <Input value={form.title} onChange={(e) => setForm((current) => ({ ...current, title: e.target.value }))} placeholder="Follow up about the proposal" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Due date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !dueDate && "text-muted-foreground")}>
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {dueDate ? dueDate.toLocaleDateString() : "Pick a date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar mode="single" selected={dueDate} onSelect={setDueDate} initialFocus />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select value={form.priority} onValueChange={(priority) => setForm((current) => ({ ...current, priority }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{PRIORITIES.map((priority) => <SelectItem key={priority} value={priority} className="capitalize">{priority}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea value={form.notes} onChange={(e) => setForm((current) => ({ ...current, notes: e.target.value }))} className="min-h-24" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => createNextStep.mutate()} disabled={!form.title.trim() || createNextStep.isPending}>
+                {createNextStep.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+      ) : nextSteps.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No next steps yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {nextSteps.map((item) => (
+            <button key={item.id} type="button" onClick={() => navigate("/dashboard/actions")} className="block w-full rounded-md border p-3 text-left text-sm hover:bg-accent">
+              <span className="font-medium">{item.content.split("\n")[0]}</span>
+              <span className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="secondary" className="text-[10px] capitalize">{item.status}</Badge>
+                <Badge variant="outline" className="text-[10px] capitalize">{item.priority}</Badge>
+                {item.due_date && <Badge variant="outline" className="text-[10px]">{new Date(item.due_date).toLocaleDateString()}</Badge>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MembershipSheet({ group, membership, notes, open, onOpenChange }: { group: ContactGroup; membership: GroupMembershipWithPerson | null; notes: NoteSummary[]; open: boolean; onOpenChange: (open: boolean) => void }) {
   const updateMembership = useUpdateMembership();
   const removeMembership = useRemoveMembership();
@@ -198,6 +330,7 @@ function MembershipSheet({ group, membership, notes, open, onOpenChange }: { gro
               </div>
             ))}
           </div>
+          <NextStepsSection group={group} membership={membership} />
           <div className="space-y-3">
             <h3 className="text-sm font-medium">Source Notes</h3>
             {notes.length === 0 ? <p className="text-sm text-muted-foreground">No source notes.</p> : notes.map((note) => <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 text-sm hover:bg-accent">{note.title || "Untitled"}</Link>)}
