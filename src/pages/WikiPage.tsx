@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ExternalLink, FileText, History, Save } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, History, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { RichTextEditor } from "@/components/RichTextEditor";
@@ -232,6 +232,7 @@ export default function WikiPage() {
     groups[key] = [...(groups[key] || []), wikiPage];
     return groups;
   }, {}), [wikiPages]);
+  const groupSlug = page?.page_type === "group" && page.slug.startsWith("group-") ? page.slug.replace(/^group-/, "") : null;
 
   useEffect(() => {
     if (headings.length === 0) return;
@@ -298,6 +299,7 @@ export default function WikiPage() {
             </>
           ) : (
             <>
+              {groupSlug && <Button asChild variant="outline"><Link to={`/dashboard/groups/${groupSlug}`}><Users className="h-4 w-4" /> View as Group</Link></Button>}
               <Button variant="outline" onClick={() => setEditMode(true)}>Edit</Button>
               <Button variant="secondary" onClick={() => setRevisionsOpen(true)}><History className="h-4 w-4" /> View revisions</Button>
             </>
