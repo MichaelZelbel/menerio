@@ -545,7 +545,7 @@ export default function GroupDetail() {
   const moveMembership = useMoveMembershipStage();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [aboutForm, setAboutForm] = useState<AboutForm | null>(null);
-  const [activeTab, setActiveTab] = useState("pipeline");
+  const [activeTab, setActiveTab] = useState(() => window.matchMedia("(max-width: 767px)").matches ? "list" : "pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<Stage>(group?.stages ?? []);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
@@ -590,7 +590,7 @@ export default function GroupDetail() {
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        <TabsList className="flex h-auto flex-wrap"><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="goals">Goals</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
         <TabsContent value="pipeline" className="mt-0">
           <div className="mb-4 flex justify-end"><SuggestMembersButton groupId={group.id} /></div>
           <DndContext onDragEnd={onDragEnd}>
@@ -604,6 +604,9 @@ export default function GroupDetail() {
         </TabsContent>
         <TabsContent value="list" className="mt-0">
           <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{membership.contacts?.name || "Unknown"}</TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>
+        </TabsContent>
+        <TabsContent value="goals" className="mt-0">
+          <GoalsTab group={group} />
         </TabsContent>
         <TabsContent value="about" className="mt-0">
           <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle className="text-base">About</CardTitle><Button asChild variant="outline" size="sm"><Link to={`/lexicon/group-${group.slug}`}><ExternalLink className="mr-2 h-4 w-4" />Open Wiki Page</Link></Button></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setAboutForm({ ...form, name: e.target.value })} /></div><div className="space-y-2"><Label>Type</Label><Select value={form.type} onValueChange={(value) => setAboutForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{GROUP_TYPES.map((type) => <SelectItem key={type} value={type}>{pretty(type)}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ""} onChange={(e) => setAboutForm({ ...form, description: e.target.value || null })} /></div><div className="space-y-2"><Label>Purpose</Label><Textarea value={form.purpose || ""} onChange={(e) => setAboutForm({ ...form, purpose: e.target.value || null })} /></div><div className="grid gap-4 sm:grid-cols-3"><div className="space-y-2"><Label>Sensitivity</Label><Select value={form.sensitivity} onValueChange={(value) => setAboutForm({ ...form, sensitivity: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SENSITIVITIES.map((value) => <SelectItem key={value} value={value}>{pretty(value)}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Icon</Label><Input value={form.icon || ""} onChange={(e) => setAboutForm({ ...form, icon: e.target.value || null })} /></div><div className="space-y-2"><Label>Color</Label><Input value={form.color || ""} onChange={(e) => setAboutForm({ ...form, color: e.target.value || null })} /></div></div><Button onClick={saveAbout} disabled={updateGroup.isPending}>{updateGroup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></CardContent></Card>
