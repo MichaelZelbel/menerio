@@ -15,6 +15,7 @@ import { useCreateGroup, useGroups } from "@/hooks/useGroups";
 import { useGroupMemberships } from "@/hooks/useGroupMemberships";
 import { GROUP_TEMPLATES, getTemplateById, instantiateTemplate, type GroupTemplate } from "@/lib/group-templates";
 import { showToast } from "@/lib/toast";
+import { InitialMigrationCard } from "@/components/groups/InitialMigrationCard";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound };
@@ -220,13 +221,16 @@ export default function Groups() {
       {isLoading ? (
         <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : filtered.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-            <Users className="mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="font-medium">No groups yet.</p>
-            <p className="mt-1 text-sm text-muted-foreground">Start with a template to organize your people.</p>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+              <Users className="mb-3 h-8 w-8 text-muted-foreground" />
+              <p className="font-medium">No groups yet.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Start with a template to organize your people.</p>
+            </CardContent>
+          </Card>
+          {groups.length === 0 && <InitialMigrationCard />}
+        </>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {filtered.map((group) => <GroupCard key={group.id} group={group} />)}
