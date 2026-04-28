@@ -250,7 +250,7 @@ function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResu
       page_slugs: [...new Set(link.page_slugs.map((slug) => String(slug).toLowerCase().trim()).filter(Boolean))],
     }));
 
-  return { actions, source_links, log_summary: result.log_summary || "Wiki ingest completed." };
+  return { actions, source_links, log_summary: result.log_summary || "Lexicon ingest completed." };
 }
 
 async function logWiki(db: any, userId: string, operation: string, details: Record<string, unknown>) {
@@ -387,7 +387,7 @@ serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       }).catch((logError: unknown) => console.error("failed to log wiki ingest failure", logError));
     }
-    return jsonResponse({ error: "Wiki ingest failed" }, 500);
+    return jsonResponse({ error: "Lexicon ingest failed" }, 500);
   }
 });
 
