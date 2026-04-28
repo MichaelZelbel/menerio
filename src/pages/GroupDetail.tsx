@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
-import { ArrowLeft, Archive, CalendarDays, Check, Clapperboard, Compass, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import { ArrowLeft, Archive, CalendarDays, CalendarIcon, Check, Clapperboard, Compass, GripVertical, Handshake, Landmark, Loader2, Plus, Podcast, Search, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +16,11 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { cn } from "@/lib/utils";
 import { useArchiveGroup, useGroup, useTrashGroup, useUpdateGroup } from "@/hooks/useGroups";
 import { GroupMembershipWithPerson, useAddMembership, useArchiveMembership, useGroupMemberships, useMoveMembershipStage, useRemoveMembership, useUpdateMembership } from "@/hooks/useGroupMemberships";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +34,7 @@ const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSear
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type Contact = Pick<Database["public"]["Tables"]["contacts"]["Row"], "id" | "name" | "company" | "role">;
 type NoteSummary = Pick<Database["public"]["Tables"]["notes"]["Row"], "id" | "title">;
+type ActionItem = Database["public"]["Tables"]["action_items"]["Row"] & { metadata?: Record<string, string> | null };
 type Stage = { id: string; label: string; color?: string };
 type AttributeSchema = Record<string, { type: "number" | "text" | "select"; label: string; options?: string[]; min?: number; max?: number }>;
 
