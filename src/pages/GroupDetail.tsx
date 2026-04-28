@@ -500,13 +500,17 @@ export default function GroupDetail() {
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
         <TabsContent value="pipeline" className="mt-0">
+          <div className="mb-4 flex justify-end"><SuggestMembersButton groupId={group.id} /></div>
           <DndContext onDragEnd={onDragEnd}>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {stages.map((stage) => <PipelineColumn key={stage.id} stage={stage} memberships={byStage(stage.id)} onOpen={(membership) => setSelectedMembershipId(membership.id)} />)}
             </div>
           </DndContext>
+        </TabsContent>
+        <TabsContent value="briefing" className="mt-0">
+          <BriefingTab groupId={group.id} />
         </TabsContent>
         <TabsContent value="list" className="mt-0">
           <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{membership.contacts?.name || "Unknown"}</TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>
