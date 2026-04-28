@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem, type WikiRevisionReviewItem } from "@/hooks/useReviewQueue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,11 @@ import {
   BookOpen,
   Eye,
   RotateCcw,
+  Clock,
+  Users2,
 } from "lucide-react";
+import { useAddMembership } from "@/hooks/useGroupMemberships";
+import { useGroups } from "@/hooks/useGroups";
 
 const DEFAULT_PROFILE_CATEGORIES = [
   { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
@@ -80,8 +84,20 @@ export default function ReviewQueue() {
   const { user } = useAuth();
   const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
   const queryClient = useQueryClient();
+  const addMembership = useAddMembership();
+  const { data: groups = [] } = useGroups();
   const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
   const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
+  const groupSuggestionContactIds = [...new Set(items.filter((item) => item.suggestion_type === "group_member_suggestion").map((item) => String((item.payload as any)?.contact_id || "")).filter(Boolean))];
+  const { data: suggestionContacts = [] } = useQuery({
+    queryKey: ["review-queue-group-suggestion-contacts", groupSuggestionContactIds],
+    enabled: groupSuggestionContactIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("contacts").select("id, name").in("id", groupSuggestionContactIds);
+      if (error) throw error;
+      return (data || []) as { id: string; name: string }[];
+    },
+  });
 
   const refreshReviewQueues = () => {
     queryClient.invalidateQueries({ queryKey: ["review-queue"] });
@@ -425,6 +441,33 @@ export default function ReviewQueue() {
 
     updateStatus.mutate({ id: item.id, status: "kept" });
     showToast.success("Change kept");
+  };
+
+  const handleAddGroupSuggestion = async (item: ReviewItem) => {
+    const { group_id, contact_id } = item.payload as any;
+    if (!group_id || !contact_id) {
+      showToast.error("Incomplete group suggestion");
+      return;
+    }
+    await addMembership.mutateAsync({ groupId: group_id, personId: contact_id });
+    await supabase.from("review_queue" as any).delete().eq("id", item.id);
+    refreshReviewQueues();
+    showToast.success("Added to group");
+  };
+
+  const handleRejectGroupSuggestion = async (item: ReviewItem) => {
+    const { error } = await supabase.from("review_queue" as any).delete().eq("id", item.id);
+    if (error) return showToast.error(error.message);
+    refreshReviewQueues();
+    showToast.info("Suggestion rejected");
+  };
+
+  const handleSnoozeGroupSuggestion = async (item: ReviewItem) => {
+    const snoozedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await supabase.from("review_queue" as any).update({ snoozed_until: snoozedUntil }).eq("id", item.id);
+    if (error) return showToast.error(error.message);
+    refreshReviewQueues();
+    showToast.info("Snoozed for 7 days");
   };
 
   const handleKeep = (item: ReviewItem) => {
