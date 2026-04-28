@@ -320,6 +320,77 @@ function NextStepsSection({ group, membership }: { group: ContactGroup; membersh
   );
 }
 
+function SuggestMembersButton({ groupId }: { groupId: string }) {
+  const qc = useQueryClient();
+  const { credits } = useAICredits();
+  const suggestMembers = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<{ suggestions_added: number }>("suggest-group-members", { body: { group_id: groupId } });
+      if (error) throw error;
+      return data || { suggestions_added: 0 };
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["review_queue"] });
+      triggerCreditsRefresh();
+      showToast.success(`${result.suggestions_added} suggestions added to Review Queue`);
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not suggest members"),
+  });
+
+  return (
+    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestMembers.mutate()} disabled={suggestMembers.isPending || (credits?.remainingCredits ?? 0) < 20}>
+      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Suggest Members from Notes
+    </Button>
+  );
+}
+
+function BriefingTab({ groupId }: { groupId: string }) {
+  const qc = useQueryClient();
+  const { data: briefings = [], isLoading } = useQuery<GroupBriefing[]>({
+    queryKey: ["group_briefings", groupId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("group_briefings").select("*").eq("group_id", groupId).order("generated_at", { ascending: false }).limit(5);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+  const latest = briefings[0];
+  const generatedToday = latest ? new Date(latest.generated_at).toDateString() === new Date().toDateString() : false;
+  const generateBriefing = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke<{ briefing_markdown: string; generated_at: string }>("generate-group-briefing", { body: { group_id: groupId, period_days: 7 } });
+      if (error) throw error;
+      return data!;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["group_briefings", groupId] });
+      triggerCreditsRefresh();
+      showToast.success("Briefing generated");
+    },
+    onError: (error: Error) => showToast.error(error.message || "Could not generate briefing"),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base">Briefing</CardTitle>
+          <Button onClick={() => generateBriefing.mutate()} disabled={generateBriefing.isPending || generatedToday}>
+            {generateBriefing.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Generate New Briefing
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : latest ? (
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <ReactMarkdown>{latest.briefing_markdown}</ReactMarkdown>
+          </div>
+        ) : <p className="text-sm text-muted-foreground">No briefing generated yet.</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 function MembershipSheet({ group, membership, notes, open, onOpenChange }: { group: ContactGroup; membership: GroupMembershipWithPerson | null; notes: NoteSummary[]; open: boolean; onOpenChange: (open: boolean) => void }) {
   const updateMembership = useUpdateMembership();
   const removeMembership = useRemoveMembership();
