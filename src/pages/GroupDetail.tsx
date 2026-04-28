@@ -327,21 +327,29 @@ function SuggestMembersButton({ groupId }: { groupId: string }) {
   const { credits } = useAICredits();
   const suggestMembers = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke<{ suggestions_added: number }>("suggest-group-members", { body: { group_id: groupId } });
+      const { data, error } = await supabase.functions.invoke<{ suggestions_added: number; auto_applied?: number }>("suggest-group-members", { body: { group_id: groupId } });
       if (error) throw error;
-      return data || { suggestions_added: 0 };
+      return data || { suggestions_added: 0, auto_applied: 0 };
     },
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ["review_queue"] });
+      qc.invalidateQueries({ queryKey: ["review-queue"] });
+      qc.invalidateQueries({ queryKey: ["review-queue-count"] });
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships", groupId] });
+      qc.invalidateQueries({ queryKey: ["contact_groups"] });
       triggerCreditsRefresh();
-      showToast.success(`${result.suggestions_added} suggestions added to Review Queue`);
+      const added = result.suggestions_added - (result.auto_applied || 0);
+      if (result.auto_applied) {
+        showToast.success(`${result.auto_applied} member${result.auto_applied === 1 ? "" : "s"} added${added > 0 ? ` · ${added} in Review Queue` : ""}`);
+      } else {
+        showToast.success(`${result.suggestions_added} suggestion${result.suggestions_added === 1 ? "" : "s"} added to Review Queue`);
+      }
     },
     onError: (error: Error) => showToast.error(error.message || "Could not suggest members"),
   });
 
   return (
     <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestMembers.mutate()} disabled={suggestMembers.isPending || (credits?.remainingCredits ?? 0) < 20}>
-      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Suggest Members from Notes
+      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Add Members from Notes
     </Button>
   );
 }
