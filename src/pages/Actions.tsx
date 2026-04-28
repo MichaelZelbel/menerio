@@ -36,8 +36,11 @@ import {
   FileText,
   User,
   Filter,
+  Users,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
+// Group-linked action_items store metadata as: { group_membership_id: "uuid", group_id: "uuid", person_id: "uuid" }.
 interface ActionItem {
   id: string;
   user_id: string;
@@ -51,6 +54,7 @@ interface ActionItem {
   tags: string[];
   created_at: string;
   updated_at: string;
+  metadata?: Record<string, string> | null;
 }
 
 const STATUS_COLS = [
@@ -125,6 +129,27 @@ export default function Actions() {
       return data || [];
     },
   });
+
+
+  const { data: groupContexts = [] } = useQuery({
+    queryKey: ["action_group_contexts", user?.id, items.map((item) => item.metadata?.group_id).filter(Boolean).join(",")],
+    enabled: !!user && items.some((item) => item.metadata?.group_id),
+    queryFn: async () => {
+      const groupIds = Array.from(new Set(items.map((item) => item.metadata?.group_id).filter(Boolean))) as string[];
+      if (groupIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("contact_groups")
+        .select("id, name, slug, icon")
+        .in("id", groupIds);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const groupContextById = useCallback(
+    (id?: string) => groupContexts.find((group: any) => group.id === id),
+    [groupContexts],
+  );
 
   const contactName = useCallback(
     (id: string | null) => {
@@ -390,6 +415,15 @@ export default function Actions() {
                                 <Badge variant="secondary" className="text-[10px] gap-0.5 max-w-[120px] truncate">
                                   <FileText className="h-2.5 w-2.5 shrink-0" /> {nTitle}
                                 </Badge>
+                              )}
+                              {item.metadata?.group_id && groupContextById(item.metadata.group_id) && (
+                                <Link
+                                  to={`/dashboard/groups/${groupContextById(item.metadata.group_id)?.slug}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="inline-flex max-w-[140px] items-center gap-0.5 truncate rounded-full border border-transparent bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-secondary-foreground transition-colors hover:bg-secondary/80"
+                                >
+                                  <Users className="h-2.5 w-2.5 shrink-0" /> {groupContextById(item.metadata.group_id)?.name}
+                                </Link>
                               )}
                             </div>
                           </div>
