@@ -2233,6 +2233,7 @@ app.all("*", async (c) => {
   }
 
   currentUserId = auth.userId!;
+  addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
 
   const transport = new StreamableHTTPTransport();
   await server.connect(transport);
