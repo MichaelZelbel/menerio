@@ -116,6 +116,9 @@ type SchemaField = {
   options?: string[];
 };
 type ItemData = Record<string, unknown>;
+type FormValue = string | number | boolean | string[] | null;
+type FormValues = Record<string, FormValue>;
+type FormErrors = Record<string, string>;
 type Cursor = { updated_at: string; id: string };
 type SortKey = "updated" | "created" | "alpha";
 
