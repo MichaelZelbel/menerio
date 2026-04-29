@@ -352,6 +352,35 @@ const reviewQueue: DocPage = {
   ),
 };
 
+const groups: DocPage = {
+  slug: "groups",
+  title: "Groups",
+  description: "Organise people around shared missions, pipelines, circles, and relationship workflows.",
+  category: "People & Actions",
+  headings: [
+    { id: "what-are-groups", title: "What Groups Are" },
+    { id: "memberships", title: "Memberships & Stages" },
+    { id: "ai-match-members", title: "AI Match Members" },
+    { id: "briefings", title: "Briefings & Next Steps" },
+  ],
+  searchText: "groups contact groups people members stages pipeline relationship circle AI match members notes briefing next steps",
+  content: () => (
+    <>
+      <h2 id="what-are-groups">What Groups Are</h2>
+      <p>Groups let you organise people around a shared context: a community, project, pipeline, research list, relationship circle, or any other set of people you want to move forward intentionally.</p>
+
+      <h2 id="memberships">Memberships & Stages</h2>
+      <p>The same person can belong to multiple Groups with different statuses, priorities, notes, and reasons. Use stages to track where each member sits in that specific Group workflow.</p>
+
+      <h2 id="ai-match-members">AI Match Members</h2>
+      <p>Use <strong>AI Match Members</strong> to let Menerio analyse your notes and suggest or add relevant people to a Group. Depending on your Review Queue settings, high-confidence matches can be added automatically while still staying reviewable.</p>
+
+      <h2 id="briefings">Briefings & Next Steps</h2>
+      <p>Groups can generate AI briefings from recent interactions, members, goals, and open actions. You can also ask AI for a concrete next step for a specific Group member.</p>
+    </>
+  ),
+};
+
 // ── Integrations ──
 
 const appIntegrations: DocPage = {
@@ -444,6 +473,35 @@ const githubSync: DocPage = {
 
       <h2 id="conflict-resolution">Conflict Resolution</h2>
       <p>If a note has been changed in both Menerio and GitHub, the Sync Conflicts panel shows you both versions so you can choose which to keep.</p>
+    </>
+  ),
+};
+
+const lexicon: DocPage = {
+  slug: "lexicon",
+  title: "Lexicon",
+  description: "Build durable, reviewed knowledge pages from your notes and links.",
+  category: "Knowledge",
+  headings: [
+    { id: "what-it-is", title: "What It Is" },
+    { id: "pages-and-sources", title: "Pages & Sources" },
+    { id: "wikilinks", title: "Wikilinks & Backlinks" },
+    { id: "health-check", title: "Health Check" },
+  ],
+  searchText: "lexicon wiki pages knowledge synthesis sources backlinks wikilinks lint health check concepts entities",
+  content: () => (
+    <>
+      <h2 id="what-it-is">What It Is</h2>
+      <p>The Lexicon is where Menerio turns scattered notes into durable knowledge pages for concepts, people, projects, sources, and synthesis pages.</p>
+
+      <h2 id="pages-and-sources">Pages & Sources</h2>
+      <p>Lexicon pages can cite the notes they were built from, so you can move from a clean summary back to the original evidence whenever needed.</p>
+
+      <h2 id="wikilinks">Wikilinks & Backlinks</h2>
+      <p>Use Obsidian-style <code>[[wikilinks]]</code> to connect Lexicon pages. Backlinks show which pages reference the current topic and help you navigate related knowledge.</p>
+
+      <h2 id="health-check">Health Check</h2>
+      <p>The Lexicon health check can surface broken links, orphan pages, stale pages, and possible contradictions so your knowledge base stays coherent over time.</p>
     </>
   ),
 };
@@ -668,9 +726,11 @@ export const allDocs: DocPage[] = [
   contacts,
   actionItems,
   reviewQueue,
+  groups,
   appIntegrations,
   messagingIntegrations,
   githubSync,
+  lexicon,
   profilePage,
   dailyWorkflow,
   weeklyReview,
@@ -704,6 +764,14 @@ export const docCategories: DocCategory[] = [
       { slug: "contacts-crm", title: "People & Contacts" },
       { slug: "action-items", title: "Action Items" },
       { slug: "review-queue", title: "Review Queue" },
+      { slug: "groups", title: "Groups" },
+    ],
+  },
+  {
+    name: "Knowledge",
+    slug: "knowledge",
+    pages: [
+      { slug: "lexicon", title: "Lexicon" },
     ],
   },
   {
@@ -731,16 +799,16 @@ export const docCategories: DocCategory[] = [
     ],
   },
   {
-    name: "Settings",
+    name: "Account",
     slug: "settings",
     pages: [
       { slug: "settings", title: "Settings & Account" },
     ],
   },
   {
-    name: "FAQ",
+    name: "Help",
     slug: "faq",
-    pages: [{ slug: "faq", title: "FAQ" }],
+    pages: [{ slug: "faq", title: "Frequently Asked Questions" }],
   },
 ];
 
