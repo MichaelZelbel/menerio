@@ -81,7 +81,7 @@ function EmptyCollectionsState({ onNewBlank, onCreateWithAI, onBrowseTemplates }
         </p>
         <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button variant="secondary" onClick={onBrowseTemplates}>Browse Templates</Button>
-          <Button size="lg" className="animate-pulse bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={onCreateWithAI}>
+          <Button size="lg" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={onCreateWithAI}>
             ✨ Create with AI
           </Button>
         </div>
