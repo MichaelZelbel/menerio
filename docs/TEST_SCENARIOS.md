@@ -1368,7 +1368,7 @@
   1. Navigate to `/privacy`
   2. Navigate to `/terms`
   3. Navigate to `/cookies`
-  4. - **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
+- **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
 
 ### TS-PUBLIC-005: 404 Page
 
