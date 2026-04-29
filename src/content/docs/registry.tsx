@@ -581,7 +581,7 @@ const dailyWorkflow: DocPage = {
       <p>Don't worry about organising — the AI tags and connects everything for you.</p>
 
       <h2 id="evening">Evening: Reflect</h2>
-      <p>Browse your Note Graph to see how today's notes connect to older ones. Use the <strong>Weekly Review</strong> (available every Sunday) for a deeper retrospective on patterns, themes, and progress.</p>
+      <p>Browse your Note Graph to see how today's notes connect to older ones. Use the <strong>Weekly Review</strong> for a deeper retrospective on patterns, themes, and progress — it can run automatically on the weekly rhythm or be created manually at any time.</p>
     </>
   ),
 };
@@ -600,7 +600,7 @@ const weeklyReview: DocPage = {
   content: () => (
     <>
       <h2 id="what-it-includes">What It Includes</h2>
-      <p>Every week, Menerio generates a review of your activity:</p>
+      <p>Every week, Menerio can generate a review of your activity. You can also create one manually whenever you want a fresh retrospective:</p>
       <ul>
         <li><strong>Notes created</strong> — a count and summary of what you wrote</li>
         <li><strong>Themes & patterns</strong> — recurring topics the AI noticed</li>
@@ -609,7 +609,7 @@ const weeklyReview: DocPage = {
       </ul>
 
       <h2 id="how-to-access">How to Access</h2>
-      <p>Navigate to the <strong>Weekly Review</strong> page from the sidebar. Past reviews are stored so you can look back over weeks or months.</p>
+      <p>Navigate to the <strong>Weekly Review</strong> page from the sidebar. Use <strong>Create Review</strong> to generate it immediately for the selected period. Past reviews are stored so you can look back over weeks or months.</p>
 
       <h2 id="making-the-most">Making the Most of It</h2>
       <p>Use the weekly review as a reflection tool. Ask yourself: What surprised me? What patterns am I noticing? Are there action items I keep postponing? This practice turns Menerio from a note-taking app into a genuine thinking partner.</p>
