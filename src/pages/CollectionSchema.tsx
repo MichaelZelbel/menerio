@@ -140,3 +140,110 @@ function OptionEditor({ field, onChange, addOption }: { field: SchemaField; opti
   const [value, setValue] = useState("");
   return <div className="space-y-3"><Label>Options</Label><div className="flex flex-wrap gap-2">{(field.options ?? []).map((option, index) => <span key={`${option}-${index}`} className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-sm">{option}<button type="button" onClick={() => onChange({ ...field, options: (field.options ?? []).filter((_, i) => i !== index) })}><X className="h-3 w-3" /></button></span>)}</div><form className="flex max-w-sm gap-2" onSubmit={(event) => { event.preventDefault(); addOption(value); setValue(""); }}><Input value={value} onChange={(event) => setValue(event.target.value)} placeholder="+ add option" /><Button type="submit" variant="secondary">Add</Button></form></div>;
 }
+
+export default function CollectionSchema() {
+  const { slug } = useParams<{ slug: string }>();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [collection, setCollection] = useState<Collection | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [fields, setFields] = useState<SchemaField[]>([defaultField()]);
+  const [initialSchema, setInitialSchema] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const serialized = useMemo(() => JSON.stringify(toJsonSchema(fields)), [fields]);
+  const isDirty = serialized !== initialSchema;
+
+  useEffect(() => {
+    if (!user || !slug) return;
+    let cancelled = false;
+    const load = async () => {
+      setIsLoading(true);
+      const [{ data: current, error }, { data: allCollections }] = await Promise.all([
+        supabase.from("collections").select("*").eq("user_id", user.id).eq("slug", slug).maybeSingle(),
+        supabase.from("collections").select("*").eq("user_id", user.id).order("name"),
+      ]);
+      if (cancelled) return;
+      if (error || !current) {
+        toast.error("Could not load collection", { description: error?.message ?? "Collection not found." });
+        setIsLoading(false);
+        return;
+      }
+      const parsed = parseSchema(current.field_schema);
+      setCollection(current);
+      setCollections(allCollections ?? []);
+      setFields(parsed);
+      setInitialSchema(JSON.stringify(toJsonSchema(parsed)));
+      setIsLoading(false);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [slug, user]);
+
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  const updateField = (id: string, next: SchemaField) => setFields((current) => current.map((field) => field.id === id ? next : field));
+  const addField = () => setFields((current) => [...current, { id: crypto.randomUUID(), key: "new_field", label: "New field", type: "text" }]);
+  const cancel = () => {
+    if (isDirty && !window.confirm("Discard unsaved schema changes?")) return;
+    navigate(`/collections/${slug}`);
+  };
+  const save = async () => {
+    if (!collection) return;
+    const nextErrors = validateFields(fields);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+    setIsSaving(true);
+    const schema = toJsonSchema(fields);
+    const { error } = await supabase.from("collections").update({ field_schema: schema }).eq("id", collection.id).eq("user_id", collection.user_id);
+    setIsSaving(false);
+    if (error) {
+      toast.error("Could not save schema", { description: error.message });
+      return;
+    }
+    setInitialSchema(JSON.stringify(schema));
+    toast.success("Schema saved");
+    navigate(`/collections/${collection.slug}`);
+  };
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setFields((current) => arrayMove(current, current.findIndex((field) => field.id === active.id), current.findIndex((field) => field.id === over.id)));
+  };
+
+  if (isLoading) return <div className="w-full max-w-5xl space-y-4"><Skeleton className="h-8 w-80" /><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>;
+
+  return (
+    <div className="w-full max-w-5xl space-y-6">
+      <SEOHead title={`${collection?.name ?? "Collection"} Schema — Menerio`} noIndex />
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">Collections / {collection?.name} / Schema</p>
+          <h1 className="mt-2 text-2xl font-bold font-display">{collection?.icon} {collection?.name} — Schema</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Define the fields this collection tracks. You can add, remove, or reorder fields anytime.</p>
+          {isDirty && <p className="mt-2 text-xs text-primary">Unsaved changes</p>}
+          {errors.__form?.map((error) => <p key={error} className="mt-2 text-xs text-destructive">{error}</p>)}
+        </div>
+        <div className="flex gap-2"><Button variant="ghost" onClick={cancel}>Cancel</Button><Button onClick={save} disabled={isSaving}>Save</Button></div>
+      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={fields.map((field) => field.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-3">
+            {fields.map((field) => <SortableFieldRow key={field.id} field={field} collections={collections.filter((item) => item.id !== collection?.id)} errors={errors[field.id]} onChange={(next) => updateField(field.id, next)} onPrimary={() => setFields((current) => current.map((item) => ({ ...item, primary: item.id === field.id })))} onToggleIndexable={() => updateField(field.id, { ...field, indexable: !field.indexable })} onDuplicate={() => setFields((current) => [...current, { ...field, id: crypto.randomUUID(), label: `${field.label} copy`, key: fieldKey(`${field.label} copy`), primary: false }])} onDelete={() => setFields((current) => current.filter((item) => item.id !== field.id))} />)}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <button type="button" onClick={addField} className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border py-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><Plus className="h-4 w-4" /> Add field</button>
+    </div>
+  );
+}
