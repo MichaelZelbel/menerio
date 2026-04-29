@@ -654,7 +654,101 @@
 
 ---
 
-## Section 8: Knowledge Graph
+## Section 8: Groups
+
+### TS-GROUPS-001: Create a Group from Template
+
+- **Objective:** Validate group creation and template defaults
+- **Preconditions:** User is signed in
+- **Steps:**
+  1. Navigate to `/dashboard/groups`
+  2. Create a new Group using the Dream 100 template
+  3. Enter name, purpose, and description
+- **Expected Outcome:** Group is created with slug, stages, template fields, and default goals. User lands on `/dashboard/groups/<slug>`.
+
+### TS-GROUPS-002: Add and Move Group Members
+
+- **Objective:** Validate membership lifecycle
+- **Preconditions:** A group and at least one contact exist
+- **Steps:**
+  1. Open the group detail page
+  2. Add an existing person as a member
+  3. Move the member between pipeline stages
+  4. Open the member sheet
+- **Expected Outcome:** Membership appears in Pipeline and List views. Stage, position, priority, reason, notes, and next-step area persist.
+
+### TS-GROUPS-003: Import Members from Structured Note
+
+- **Objective:** Validate deterministic table/list import
+- **Preconditions:** A note exists with a Markdown table or numbered list containing names, links, relevance, and first steps
+- **Steps:**
+  1. Open a matching group
+  2. Run the AI/member suggestion import from notes
+  3. Confirm/import suggested rows
+- **Expected Outcome:** Members are created or matched without duplicates. Order is preserved in `position`; extracted links, relevance, and first steps are saved on membership attributes.
+
+### TS-GROUPS-004: Generate Group Briefing
+
+- **Objective:** Validate AI briefing generation
+- **Preconditions:** Group has members, notes, and interactions
+- **Steps:**
+  1. Open the Briefing tab
+  2. Generate a briefing
+- **Expected Outcome:** Briefing appears with recent movement, stale members, priorities, and suggested next actions. AI credits are deducted.
+
+### TS-GROUPS-005: Group Lexicon Link
+
+- **Objective:** Validate operational group ↔ synthesized Lexicon page navigation
+- **Preconditions:** A group exists with a Lexicon page
+- **Steps:**
+  1. Open the Group About tab
+  2. Click the Lexicon link
+  3. From the Lexicon group page, click “View as Group”
+- **Expected Outcome:** Navigation works in both directions without losing slug state.
+
+---
+
+## Section 9: Lexicon
+
+### TS-LEXICON-001: Open Lexicon Index
+
+- **Objective:** Validate Lexicon index rendering
+- **Preconditions:** User has at least one Lexicon page
+- **Steps:**
+  1. Navigate to `/lexicon`
+- **Expected Outcome:** Pages are grouped by type and can be opened by slug.
+
+### TS-LEXICON-002: View Lexicon Page Sources and Backlinks
+
+- **Objective:** Validate source traceability and backlinks
+- **Preconditions:** A Lexicon page has at least one source note and one incoming link
+- **Steps:**
+  1. Open `/lexicon/<slug>`
+  2. Inspect Sources and Backlinks sections
+  3. Open a source note
+- **Expected Outcome:** Sources show note title/date/content preview and navigate to the source note. Backlinks navigate to linking pages.
+
+### TS-LEXICON-003: Edit Lexicon Page and View Revision
+
+- **Objective:** Validate manual edits and revision audit trail
+- **Preconditions:** A Lexicon page exists
+- **Steps:**
+  1. Click Edit
+  2. Change content and save
+  3. Open revisions
+- **Expected Outcome:** Content saves, a `manual_edit` revision appears, and diff view shows previous/new content.
+
+### TS-LEXICON-004: Legacy Wiki Redirects
+
+- **Objective:** Validate backwards compatibility
+- **Steps:**
+  1. Navigate to `/wiki`
+  2. Navigate to `/wiki/example-slug`
+- **Expected Outcome:** Routes redirect to `/lexicon` and `/lexicon/example-slug`.
+
+---
+
+## Section 10: Knowledge Graph
 
 ### TS-GRAPH-001: View Knowledge Graph
 
@@ -703,7 +797,7 @@
 
 ---
 
-## Section 9: Media Library
+## Section 11: Media Library
 
 ### TS-MEDIA-001: View Media Library
 
@@ -754,7 +848,7 @@
 
 ---
 
-## Section 10: Weekly Review
+## Section 12: Weekly Review
 
 ### TS-REVIEW-001: Generate Weekly Review
 
