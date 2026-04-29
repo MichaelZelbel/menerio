@@ -1,0 +1,142 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { DndContext, DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, MoreHorizontal, Plus, X } from "lucide-react";
+import { toast } from "sonner";
+import { SEOHead } from "@/components/SEOHead";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import type { Database, Json } from "@/integrations/supabase/types";
+
+type Collection = Database["public"]["Tables"]["collections"]["Row"];
+type FieldType = "text" | "longtext" | "number" | "date" | "datetime" | "boolean" | "select" | "multiselect" | "currency" | "url" | "email" | "phone" | "note" | "person" | "collection";
+type SchemaField = { id: string; key: string; label: string; type: FieldType; primary?: boolean; indexable?: boolean; options?: string[]; collection_id?: string | null };
+type FieldErrors = Record<string, string[]>;
+
+const defaultField = (): SchemaField => ({ id: crypto.randomUUID(), key: "name", label: "Name", type: "text", primary: true });
+const indexableTypes = new Set<FieldType>(["date", "number", "select"]);
+const optionTypes = new Set<FieldType>(["select", "multiselect"]);
+
+function fieldKey(label: string) {
+  return label.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "field";
+}
+
+function parseSchema(value: Json): SchemaField[] {
+  if (!Array.isArray(value) || value.length === 0) return [defaultField()];
+  return value.map((raw, index) => {
+    const item = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, Json | undefined> : {};
+    const label = typeof item.label === "string" ? item.label : `Field ${index + 1}`;
+    const type = typeof item.type === "string" ? item.type as FieldType : "text";
+    return {
+      id: typeof item.id === "string" ? item.id : crypto.randomUUID(),
+      key: typeof item.key === "string" ? item.key : fieldKey(label),
+      label,
+      type,
+      primary: item.primary === true,
+      indexable: item.indexable === true,
+      options: Array.isArray(item.options) ? item.options.filter((option): option is string => typeof option === "string") : undefined,
+      collection_id: typeof item.collection_id === "string" ? item.collection_id : null,
+    };
+  });
+}
+
+function toJsonSchema(fields: SchemaField[]): Json[] {
+  return fields.map(({ id: _id, ...field }) => {
+    const clean: Record<string, Json> = { key: field.key, label: field.label.trim(), type: field.type };
+    if (field.primary) clean.primary = true;
+    if (field.indexable) clean.indexable = true;
+    if (optionTypes.has(field.type)) clean.options = field.options ?? [];
+    if (field.type === "collection" && field.collection_id) clean.collection_id = field.collection_id;
+    return clean;
+  });
+}
+
+function validateFields(fields: SchemaField[]) {
+  const errors: FieldErrors = {};
+  const labels = new Map<string, number>();
+  fields.forEach((field) => labels.set(field.label.trim().toLowerCase(), (labels.get(field.label.trim().toLowerCase()) ?? 0) + 1));
+  fields.forEach((field) => {
+    const fieldErrors: string[] = [];
+    if (!field.label.trim()) fieldErrors.push("Label is required.");
+    if (field.label.trim() && (labels.get(field.label.trim().toLowerCase()) ?? 0) > 1) fieldErrors.push("Label must be unique.");
+    if (optionTypes.has(field.type) && (field.options ?? []).filter(Boolean).length === 0) fieldErrors.push("Add at least one option.");
+    if (field.type === "collection" && !field.collection_id) fieldErrors.push("Choose a collection to link.");
+    if (fieldErrors.length) errors[field.id] = fieldErrors;
+  });
+  if (fields.filter((field) => field.indexable).length > 4) errors.__form = ["Use at most 4 indexable fields."];
+  return errors;
+}
+
+function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, onDelete, onPrimary, onToggleIndexable }: { field: SchemaField; collections: Collection[]; errors?: string[]; onChange: (field: SchemaField) => void; onDuplicate: () => void; onDelete: () => void; onPrimary: () => void; onToggleIndexable: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const optionValue = "";
+
+  const updateType = (type: FieldType) => onChange({ ...field, type, indexable: indexableTypes.has(type) ? field.indexable : false, options: optionTypes.has(type) ? field.options ?? ["Option"] : undefined });
+  const addOption = (value: string) => {
+    const next = value.trim();
+    if (next) onChange({ ...field, options: [...(field.options ?? []), next] });
+  };
+
+  return (
+    <Card ref={setNodeRef} style={style} className={cn("transition-shadow", isDragging && "shadow-lg")}> 
+      <CardContent className="p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <button type="button" className="mt-2 text-muted-foreground hover:text-foreground" {...attributes} {...listeners} aria-label="Reorder field"><GripVertical className="h-5 w-5" /></button>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {field.primary && <Badge variant="secondary" className="text-[10px]">PRIMARY</Badge>}
+              {field.indexable && <Badge variant="outline" className="text-[10px]">INDEXABLE</Badge>}
+            </div>
+            <Input value={field.label} onChange={(event) => onChange({ ...field, label: event.target.value, key: fieldKey(event.target.value) })} placeholder="Field label" />
+            <p className="text-xs text-muted-foreground">key: {field.key}</p>
+            {errors?.map((error) => <p key={error} className="text-xs text-destructive">{error}</p>)}
+          </div>
+          <div className="w-full lg:w-64">
+            <Select value={field.type} onValueChange={(value) => updateType(value as FieldType)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectGroup><SelectLabel>Basic</SelectLabel>{[["text", "Text"], ["longtext", "Long text"], ["number", "Number"], ["date", "Date"], ["datetime", "Date and time"], ["boolean", "Yes/No"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectGroup>
+                <SelectSeparator />
+                <SelectGroup><SelectLabel>Choice</SelectLabel><SelectItem value="select">Single choice</SelectItem><SelectItem value="multiselect">Multiple choice</SelectItem></SelectGroup>
+                <SelectSeparator />
+                <SelectGroup><SelectLabel>Specialized</SelectLabel>{[["currency", "Currency"], ["url", "URL"], ["email", "Email"], ["phone", "Phone"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectGroup>
+                <SelectSeparator />
+                <SelectGroup><SelectLabel>Links</SelectLabel><SelectItem value="note">Link to Note</SelectItem><SelectItem value="person">Link to Person</SelectItem><SelectItem value="collection">Link to another Collection</SelectItem></SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onPrimary}>Mark as primary field</DropdownMenuItem>
+              <DropdownMenuItem disabled={!indexableTypes.has(field.type)} onClick={onToggleIndexable}>Mark as indexable</DropdownMenuItem>
+              <DropdownMenuItem onClick={onDuplicate}>Duplicate</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={onDelete}>Delete</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {optionTypes.has(field.type) && <div className="mt-4 border-t pt-4"><OptionEditor field={field} onChange={onChange} optionValue={optionValue} addOption={addOption} /></div>}
+        {field.type === "collection" && <div className="mt-4 max-w-sm border-t pt-4"><Label>Linked collection</Label><Select value={field.collection_id ?? ""} onValueChange={(collectionId) => onChange({ ...field, collection_id: collectionId })}><SelectTrigger className="mt-2"><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>)}</SelectContent></Select></div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OptionEditor({ field, onChange, addOption }: { field: SchemaField; optionValue: string; onChange: (field: SchemaField) => void; addOption: (value: string) => void }) {
+  const [value, setValue] = useState("");
+  return <div className="space-y-3"><Label>Options</Label><div className="flex flex-wrap gap-2">{(field.options ?? []).map((option, index) => <span key={`${option}-${index}`} className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-sm">{option}<button type="button" onClick={() => onChange({ ...field, options: (field.options ?? []).filter((_, i) => i !== index) })}><X className="h-3 w-3" /></button></span>)}</div><form className="flex max-w-sm gap-2" onSubmit={(event) => { event.preventDefault(); addOption(value); setValue(""); }}><Input value={value} onChange={(event) => setValue(event.target.value)} placeholder="+ add option" /><Button type="submit" variant="secondary">Add</Button></form></div>;
+}
