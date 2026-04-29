@@ -38,10 +38,6 @@ function extractBearerToken(authHeader: string | undefined) {
   return raw.trim().replace(/^["'`]+|["'`]+$/g, "").replace(/\s+/g, "");
 }
 
-async function lookupMcpTokenByPrefixFallback(token: string) {
-  return null;
-}
-
 async function authenticateMcpRequest(authHeader: string | undefined) {
   const token = extractBearerToken(authHeader);
   if (!token) {
@@ -65,11 +61,6 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
   const tokenRow = Array.isArray(data) ? data[0] : null;
 
   if (error || !tokenRow?.user_id) {
-    const fallbackRow = await lookupMcpTokenByPrefixFallback(token);
-    if (fallbackRow?.user_id) {
-      return { userId: fallbackRow.user_id as string, error: null };
-    }
-
     console.warn("MCP token rejected", {
       rpc_error: error?.message || null,
       token_prefix: token.slice(0, 16),
