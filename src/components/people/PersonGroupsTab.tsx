@@ -67,7 +67,7 @@ function MembershipRow({ membership }: { membership: PersonGroupMembership }) {
       {
         id: membership.id,
         groupId: membership.group_id,
-        personId: membership.person_id,
+        personId: membership.contact_id,
         status: form.status || null,
         priority: form.priority,
         reason: form.reason.trim() || null,
