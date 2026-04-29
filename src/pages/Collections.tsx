@@ -122,9 +122,130 @@ function CollectionCard({ collection }: { collection: CollectionWithCount }) {
   );
 }
 
+function NewCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [values, setValues] = useState<CollectionFormValues>({ name: "", icon: "📚", description: "", visibility: "private" });
+  const [errors, setErrors] = useState<CollectionFormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const slugPreview = slugify(values.name);
+
+  const updateValue = <K extends keyof CollectionFormValues>(key: K, value: CollectionFormValues[K]) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+  };
+
+  const validate = () => {
+    const parsed = collectionFormSchema.safeParse(values);
+    if (parsed.success) {
+      setErrors({});
+      return parsed.data;
+    }
+
+    const nextErrors: CollectionFormErrors = {};
+    parsed.error.issues.forEach((issue) => {
+      const key = issue.path[0] as keyof CollectionFormValues | undefined;
+      if (key) nextErrors[key] = issue.message;
+    });
+    setErrors(nextErrors);
+    return null;
+  };
+
+  const reset = () => {
+    setValues({ name: "", icon: "📚", description: "", visibility: "private" });
+    setErrors({});
+    setIsSubmitting(false);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!user) return;
+
+    const parsed = validate();
+    if (!parsed) return;
+
+    setIsSubmitting(true);
+    const { data, error } = await supabase
+      .from("collections")
+      .insert({
+        user_id: user.id,
+        name: parsed.name,
+        slug: slugPreview,
+        icon: parsed.icon || null,
+        description: parsed.description || null,
+        visibility: parsed.visibility,
+        field_schema: [],
+        agent_instructions: null,
+      })
+      .select("slug")
+      .single();
+
+    setIsSubmitting(false);
+    if (error || !data) {
+      toast.error("Could not create collection", { description: "Please try again." });
+      return;
+    }
+
+    toast.success("Collection created");
+    onOpenChange(false);
+    reset();
+    navigate(`/collections/${data.slug}/schema`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset(); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New Collection</DialogTitle></DialogHeader>
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="space-y-2">
+            <Label htmlFor="collection-name">Name</Label>
+            <Input id="collection-name" value={values.name} maxLength={60} onChange={(event) => updateValue("name", event.target.value)} onBlur={validate} placeholder="Reading List" />
+            <p className="text-xs text-muted-foreground">Slug: {slugPreview}</p>
+            {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Icon</Label>
+            <div className="flex flex-wrap gap-2">
+              {emojiOptions.map((emoji) => (
+                <button key={emoji} type="button" className={cn("flex h-9 w-9 items-center justify-center rounded-md border text-lg transition-colors hover:bg-accent", values.icon === emoji && "border-primary bg-primary/10")} onClick={() => updateValue("icon", emoji)}>
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <Input value={values.icon} maxLength={4} onChange={(event) => updateValue("icon", event.target.value)} onBlur={validate} className="w-24" aria-label="Custom emoji" />
+            {errors.icon && <p className="text-xs text-destructive">{errors.icon}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="collection-description">Description</Label>
+            <Textarea id="collection-description" value={values.description} maxLength={200} onChange={(event) => updateValue("description", event.target.value)} onBlur={validate} placeholder="What does this collection track?" />
+            {errors.description && <p className="text-xs text-destructive">{errors.description}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Visibility</Label>
+            <RadioGroup value={values.visibility} onValueChange={(value) => updateValue("visibility", value as "private" | "personal")}>
+              <Label className="flex items-center gap-2 rounded-md border p-3"><RadioGroupItem value="private" /> Private (only me)</Label>
+              <Label className="flex items-center gap-2 rounded-md border p-3"><RadioGroupItem value="personal" /> Personal (visible to my AI agents)</Label>
+            </RadioGroup>
+          </div>
+
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">URL: menerio.com/collections/{slugPreview}</p>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={!values.name.trim() || isSubmitting}>Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Collections() {
   const { user } = useAuth();
-  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [collections, setCollections] = useState<CollectionWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
