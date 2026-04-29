@@ -39,36 +39,7 @@ function extractBearerToken(authHeader: string | undefined) {
 }
 
 async function lookupMcpTokenByPrefixFallback(token: string) {
-  if (!MCP_TOKEN_PATTERN.test(token)) return null;
-
-  const candidatePrefixes = Array.from(new Set([
-    token.slice(0, 32),
-    token.slice(0, 24),
-    token.slice(0, 16),
-  ])).filter((prefix) => prefix.length >= 16);
-
-  const { data, error } = await supabase
-    .from("mcp_api_tokens")
-    .select("id, user_id, token_prefix, expires_at, revoked_at")
-    .in("token_prefix", candidatePrefixes)
-    .is("revoked_at", null)
-    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
-
-  if (error) {
-    console.warn("MCP token prefix fallback lookup failed", { message: error.message });
-    return null;
-  }
-
-  const matches = (data || []).filter((row) => token.startsWith(row.token_prefix));
-  if (matches.length !== 1) return null;
-
-  const row = matches[0];
-  await supabase.from("mcp_api_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", row.id);
-  console.warn("MCP token accepted via prefix compatibility fallback", {
-    token_id: row.id,
-    prefix_length: row.token_prefix.length,
-  });
-  return row;
+  return null;
 }
 
 async function authenticateMcpRequest(authHeader: string | undefined) {
@@ -78,6 +49,14 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
   }
 
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
+  }
+
+  if (!MCP_TOKEN_PATTERN.test(token)) {
+    console.warn("MCP token rejected due to invalid shape", {
+      token_prefix: token.slice(0, 16),
+      token_length: token.length,
+    });
     return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
 
