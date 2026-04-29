@@ -32,7 +32,7 @@ import {
   Users2,
 } from "lucide-react";
 
-type GroupPulseItem = { id: string; name: string; slug: string; memberCount: number; staleCount: number; dueThisWeek: number; lastActivity: number };
+type GroupPulseItem = { id: string; name: string; slug: string; icon: string | null; memberCount: number; staleCount: number; dueThisWeek: number; lastActivity: number };
 
 const ROLE_CONFIG: Record<AppRole, { label: string; color: "secondary" | "success" | "info" | "warning" }> = {
   free: { label: "Free", color: "secondary" },
@@ -74,7 +74,7 @@ const Dashboard = () => {
     queryKey: ["group-pulse", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data: groups, error: groupError } = await supabase.from("contact_groups").select("id, name, slug, updated_at").eq("user_id", user!.id).eq("is_trashed", false).is("archived_at", null);
+      const { data: groups, error: groupError } = await supabase.from("contact_groups").select("id, name, slug, icon, updated_at").eq("user_id", user!.id).eq("is_trashed", false).is("archived_at", null);
       if (groupError) throw groupError;
       const groupIds = (groups || []).map((group) => group.id);
       if (groupIds.length === 0) return [];
@@ -91,7 +91,7 @@ const Dashboard = () => {
         const groupMemberships = (memberships || []).filter((membership) => membership.group_id === group.id);
         const groupActions = ((actions || []) as any[]).filter((action) => action.metadata?.group_id === group.id);
         const lastMovement = Math.max(new Date(group.updated_at).getTime(), ...groupMemberships.map((membership) => new Date(membership.last_movement_at).getTime()));
-        return { id: group.id, name: group.name, slug: group.slug, memberCount: groupMemberships.length, staleCount: groupMemberships.filter((membership) => new Date(membership.last_movement_at).getTime() < staleCutoff).length, dueThisWeek: groupActions.length, lastActivity: lastMovement };
+        return { id: group.id, name: group.name, slug: group.slug, icon: group.icon, memberCount: groupMemberships.length, staleCount: groupMemberships.filter((membership) => new Date(membership.last_movement_at).getTime() < staleCutoff).length, dueThisWeek: groupActions.length, lastActivity: lastMovement };
       }).sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 3);
     },
   });
@@ -271,22 +271,28 @@ const Dashboard = () => {
           </Card>
 
           <TodaysConnections />
-          {groupPulse.length > 0 && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base">Group Pulse</CardTitle>
-                <Users2 className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {groupPulse.map((group) => (
-                  <button key={group.id} onClick={() => navigate(`/dashboard/groups/${group.slug}`)} className="w-full rounded-md px-2 py-2 text-left transition-colors hover:bg-accent">
-                    <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{group.name}</span><ArrowRight className="h-3 w-3 text-muted-foreground" /></div>
-                    <p className="mt-1 text-xs text-muted-foreground">{group.memberCount} members · {group.staleCount} stale members · {group.dueThisWeek} due this week</p>
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Group Pulse</CardTitle>
+              <Users2 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {groupPulse.length === 0 ? (
+                <button onClick={() => navigate("/dashboard/groups")} className="w-full rounded-md px-2 py-3 text-left text-sm text-muted-foreground transition-colors hover:bg-accent">
+                  No active groups yet — start one from the Groups page.
+                </button>
+              ) : groupPulse.map((group) => (
+                <button key={group.id} onClick={() => navigate(`/dashboard/groups/${group.slug}`)} className="w-full rounded-md px-2 py-2 text-left transition-colors hover:bg-accent">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs text-primary">{group.icon || <Users2 className="h-3.5 w-3.5" />}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.name}</span>
+                    <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  </div>
+                  <p className="mt-1 pl-9 text-xs text-muted-foreground">{group.memberCount} members · {group.staleCount} stale members · {group.dueThisWeek} action items due this week</p>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
           <DiscoveryFeed />
           <OrphanNotesDetector compact />
           <BridgeNotesHighlighter compact />

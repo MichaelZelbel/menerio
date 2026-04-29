@@ -86,6 +86,7 @@ import {
   ChevronRight,
   Tags,
   Download,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -611,6 +612,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       note_id: note.id,
       type: interactionType,
       summary: interactionSummary.trim() || title,
+      interaction_date: note.created_at,
     });
     if (error) {
       showToast.error(error.message);
@@ -618,7 +620,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }
     queryClient.invalidateQueries({ queryKey: ["contact-interactions"] });
     setInteractionGroupId(null);
-    showToast.success("Interaction logged");
+    showToast.success("Logged as interaction");
   };
 
   const plainText = editor?.getText() || "";
@@ -640,7 +642,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (personIds.length === 0) return [];
       const { data, error } = await supabase
         .from("contact_group_memberships")
-        .select("person_id, contact_groups:group_id(id, name)")
+        .select("person_id, contact_groups:group_id(id, name, slug, icon)")
         .eq("user_id", user!.id)
         .in("person_id", personIds)
         .is("archived_at", null);
@@ -651,6 +653,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         personName: contactNameById.get(membership.person_id) || "",
         groupId: membership.contact_groups?.id as string,
         groupName: membership.contact_groups?.name as string,
+        groupSlug: membership.contact_groups?.slug as string,
+        groupIcon: membership.contact_groups?.icon as string | null,
       })).filter((match) => match.groupId && match.groupName);
     },
   });
@@ -858,15 +862,16 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       )}
 
       {mentionedGroups.length > 0 && !note.is_trashed && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          <span>This note mentions members of</span>
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-warning/10 px-4 py-2 text-xs text-muted-foreground">
+          <span>This note mentions members of:</span>
           {mentionedGroups.map((group) => (
             <button
               key={group.groupId}
               type="button"
-              className="font-medium text-foreground hover:text-primary"
+              className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 font-medium text-foreground hover:text-primary"
               onClick={() => { setInteractionGroupId(group.groupId); setInteractionSummary(title); }}
             >
+              {group.groupIcon ? <span>{group.groupIcon}</span> : <Users className="h-3 w-3" />}
               {group.groupName}
             </button>
           ))}
