@@ -363,7 +363,7 @@ function SuggestMembersButton({ groupId }: { groupId: string }) {
 
   return (
     <Button variant="outline" size="sm" className="gap-1.5" onClick={() => suggestMembers.mutate()} disabled={suggestMembers.isPending || (credits?.remainingCredits ?? 0) < 20}>
-      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Add Members from Notes
+      {suggestMembers.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI Match Members
     </Button>
   );
 }
