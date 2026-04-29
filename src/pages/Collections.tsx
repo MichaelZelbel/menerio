@@ -1,0 +1,192 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { LayoutGrid, Plus, Sparkles, type LucideIcon } from "lucide-react";
+import { SEOHead } from "@/components/SEOHead";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { Database } from "@/integrations/supabase/types";
+
+type Collection = Database["public"]["Tables"]["collections"]["Row"];
+type CollectionWithCount = Collection & { itemCount: number };
+
+const iconMap: Record<string, LucideIcon> = { LayoutGrid, Sparkles };
+
+function CollectionIcon({ icon, className = "h-5 w-5" }: { icon?: string | null; className?: string }) {
+  if (icon && /^\p{Emoji}/u.test(icon)) return <span className={className}>{icon}</span>;
+  const Icon = icon && icon in iconMap ? iconMap[icon] : LayoutGrid;
+  return <Icon className={className} />;
+}
+
+function CollectionsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <Card key={index}>
+          <CardHeader className="pb-3">
+            <div className="flex items-start gap-3">
+              <Skeleton className="h-10 w-10 rounded-md" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-5 w-2/3" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-4/5" />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-4 w-20" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function EmptyCollectionsState() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center px-4 py-16 text-center">
+      <div className="max-w-2xl">
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <LayoutGrid className="h-8 w-8" />
+        </div>
+        <h1 className="text-2xl font-bold font-display">No collections yet</h1>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+          Collections are structured trackers for anything you want to remember — household items, reading lists, contacts, job applications. Create one from a template or describe what you want to track.
+        </p>
+        <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Button variant="secondary">Browse Templates</Button>
+          <Button className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">
+            ✨ Create with AI
+          </Button>
+        </div>
+        <button type="button" className="mt-4 text-sm text-primary underline-offset-4 hover:underline">
+          or create a blank collection
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CollectionCard({ collection }: { collection: CollectionWithCount }) {
+  const navigate = useNavigate();
+
+  return (
+    <Card
+      className="cursor-pointer transition-colors hover:bg-accent/50"
+      onClick={() => navigate(`/collections/${collection.slug}`)}
+    >
+      <CardHeader className="pb-3">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <CollectionIcon icon={collection.icon} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="truncate text-base">{collection.name}</CardTitle>
+            <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
+              {collection.description || "No description"}
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground">
+          {collection.itemCount} item{collection.itemCount === 1 ? "" : "s"}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function Collections() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [collections, setCollections] = useState<CollectionWithCount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    const fetchCollections = async () => {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from("collections")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
+
+      if (error) {
+        if (!cancelled) {
+          toast({ variant: "destructive", title: "Could not load collections", description: error.message });
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      const rows = data ?? [];
+      const counts = await Promise.all(
+        rows.map(async (collection) => {
+          const { count, error: countError } = await supabase
+            .from("collection_items")
+            .select("id", { count: "exact", head: true })
+            .eq("collection_id", collection.id)
+            .eq("user_id", user.id);
+
+          if (countError) throw countError;
+          return [collection.id, count ?? 0] as const;
+        }),
+      ).catch((countError: Error) => {
+        if (!cancelled) toast({ variant: "destructive", title: "Could not load item counts", description: countError.message });
+        return [] as readonly (readonly [string, number])[];
+      });
+
+      const countById = new Map(counts);
+      if (!cancelled) {
+        setCollections(rows.map((collection) => ({ ...collection, itemCount: countById.get(collection.id) ?? 0 })));
+        setIsLoading(false);
+      }
+    };
+
+    fetchCollections();
+    return () => { cancelled = true; };
+  }, [toast, user]);
+
+  const hasCollections = useMemo(() => collections.length > 0, [collections.length]);
+
+  return (
+    <div className="w-full max-w-6xl">
+      <SEOHead title="Collections — Menerio" noIndex />
+      {hasCollections && (
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-2xl font-bold font-display">Collections</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm">Templates</Button>
+            <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">✨ Create with AI</Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="New blank collection">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>New blank collection</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <CollectionsSkeleton />
+      ) : collections.length === 0 ? (
+        <EmptyCollectionsState />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {collections.map((collection) => <CollectionCard key={collection.id} collection={collection} />)}
+        </div>
+      )}
+    </div>
+  );
+}

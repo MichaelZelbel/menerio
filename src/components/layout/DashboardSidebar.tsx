@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Calendar,
   Layers,
+  LayoutGrid,
   LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
@@ -72,6 +73,7 @@ export function DashboardSidebar() {
     { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
     { title: "People", url: "/dashboard/people", icon: UserCircle },
     { title: "Groups", url: "/dashboard/groups", icon: Layers },
+    { title: "Collections", url: "/collections", icon: LayoutGrid },
     
     { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
     { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
