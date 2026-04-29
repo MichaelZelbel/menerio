@@ -2,7 +2,7 @@ type SupabaseAdmin = any;
 
 type ImportableNote = { id: string; title?: string | null; content?: string | null; metadata?: Record<string, unknown> | null; created_at?: string | null };
 type ImportableGroup = { id: string; name: string; description?: string | null; purpose?: string | null; stages?: unknown };
-type ExistingMembership = { id: string; person_id: string; source_note_ids?: string[] | null; attributes?: Record<string, unknown> | null; position?: number | null };
+type ExistingMembership = { id: string; contact_id: string; source_note_ids?: string[] | null; attributes?: Record<string, unknown> | null; position?: number | null };
 
 type ParsedMemberRow = {
   rank: number;
@@ -143,7 +143,7 @@ export async function importGroupMembersFromNotes(admin: SupabaseAdmin, userId: 
 
   const [{ data: contacts }, { data: memberships }] = await Promise.all([
     admin.from("contacts").select("id, name, aliases, metadata").eq("user_id", userId).is("merged_into", null),
-    admin.from("contact_group_memberships").select("id, person_id, source_note_ids, attributes, position").eq("user_id", userId).eq("group_id", group.id).is("archived_at", null),
+    admin.from("contact_group_memberships").select("id, contact_id, source_note_ids, attributes, position").eq("user_id", userId).eq("group_id", group.id).is("archived_at", null),
   ]);
 
   const contactsByName = new Map<string, any>();
@@ -151,7 +151,7 @@ export async function importGroupMembersFromNotes(admin: SupabaseAdmin, userId: 
     contactsByName.set(normalize(contact.name), contact);
     for (const alias of contact.aliases || []) contactsByName.set(normalize(alias), contact);
   }
-  const membershipsByPerson = new Map<string, ExistingMembership>(((memberships || []) as ExistingMembership[]).map((membership) => [membership.person_id, membership]));
+  const membershipsByPerson = new Map<string, ExistingMembership>(((memberships || []) as ExistingMembership[]).map((membership) => [membership.contact_id, membership]));
   const defaultStatus = Array.isArray(group.stages) ? (group.stages as any[])[0]?.id : null;
   const maxPosition = Math.max(0, ...(memberships || []).map((membership: any) => Number(membership.position || 0)));
   let createdContacts = 0;
@@ -194,7 +194,7 @@ export async function importGroupMembersFromNotes(admin: SupabaseAdmin, userId: 
       const { data, error } = await admin.from("contact_group_memberships").insert({
         user_id: userId,
         group_id: group.id,
-        person_id: contact.id,
+        contact_id: contact.id,
         status: defaultStatus || null,
         position: row.rank || maxPosition + index + 1,
         reason: row.relevance || null,
