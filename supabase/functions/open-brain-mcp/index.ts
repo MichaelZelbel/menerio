@@ -258,9 +258,9 @@ async function prepareGroupMemberSuggestion(row: any, preferences: { mode: strin
 
   const { group_id, contact_id } = row.payload || {};
   if (!group_id || !contact_id) return { ...row, status: "pending_review" };
-  const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", group_id).eq("person_id", contact_id).is("archived_at", null).maybeSingle();
+  const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", group_id).eq("contact_id", contact_id).is("archived_at", null).maybeSingle();
   if (existing?.id) return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: existing.id, applied_at: new Date().toISOString() };
-  const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id, person_id: contact_id, status: row.payload?.default_status || null, reason: row.description || null }).select("id").single();
+  const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id, contact_id, status: row.payload?.default_status || null, reason: row.description || null }).select("id").single();
   if (error || !data) return { ...row, status: "pending_review" };
   return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: data.id, applied_at: new Date().toISOString(), is_sensitive: row.is_sensitive ?? sensitiveTerms.some((term) => String(row.description || "").toLowerCase().includes(term)) };
 }
@@ -1796,7 +1796,7 @@ server.registerTool("get_group", { title: "Get Group", description: "Get a Group
   try {
     const group = await resolveGroup(id_or_slug);
     const [{ data: memberships }, { data: interactions }, { data: actions }, { data: briefings }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("*, contacts:person_id(id, name, company, role, email, tags)").eq("user_id", currentUserId).eq("group_id", group.id).is("archived_at", null).order("position"),
+      supabase.from("contact_group_memberships").select("*, contacts:contact_id(id, name, company, role, email, tags)").eq("user_id", currentUserId).eq("group_id", group.id).is("archived_at", null).order("position"),
       supabase.from("contact_interactions").select("id, interaction_date, type, summary, note_id, contact_id, action_items").eq("user_id", currentUserId).eq("group_id", group.id).order("interaction_date", { ascending: false }).limit(10),
       supabase.from("action_items").select("id, content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("status", "open").eq("metadata->>group_id", group.id).order("created_at", { ascending: false }).limit(20),
       supabase.from("group_briefings").select("briefing_markdown, generated_at, period_days").eq("user_id", currentUserId).eq("group_id", group.id).order("generated_at", { ascending: false }).limit(1),
@@ -1835,9 +1835,9 @@ server.registerTool("add_group_member", { title: "Add Group Member", description
   try {
     const group = await resolveGroup(group_id_or_slug);
     const contact = await resolveContact({ contact_id, contact_name });
-    const { data: existing } = await supabase.from("contact_group_memberships").select("*").eq("user_id", currentUserId).eq("group_id", group.id).eq("person_id", contact.id).is("archived_at", null).maybeSingle();
+    const { data: existing } = await supabase.from("contact_group_memberships").select("*").eq("user_id", currentUserId).eq("group_id", group.id).eq("contact_id", contact.id).is("archived_at", null).maybeSingle();
     if (existing) return jsonTool({ ok: true, changed: false, membership: existing });
-    const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: group.id, person_id: contact.id, status: status || null, priority: priority || "normal", reason: reason || null, notes: notes || null }).select("*").single();
+    const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: group.id, contact_id: contact.id, status: status || null, priority: priority || "normal", reason: reason || null, notes: notes || null }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, changed: true, membership: data, group: { id: group.id, name: group.name }, person: { id: contact.id, name: contact.name } });
   } catch (err: unknown) {
@@ -1880,10 +1880,10 @@ server.registerTool("log_group_interaction", { title: "Log Group Interaction", d
 
 server.registerTool("create_group_next_step", { title: "Create Group Next Step", description: "Create an open next-step action for a Group membership.", inputSchema: { membership_id: z.string(), content: z.string(), priority: z.string().optional().default("normal"), due_date: z.string().optional() } }, async ({ membership_id, content, priority, due_date }) => {
   try {
-    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, person_id").eq("user_id", currentUserId).eq("id", membership_id).maybeSingle();
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, contact_id").eq("user_id", currentUserId).eq("id", membership_id).maybeSingle();
     if (membershipError) throw new Error(membershipError.message);
     if (!membership) throw new Error("Membership not found");
-    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).person_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, person_id: (membership as any).person_id } }).select("*").single();
+    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).contact_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, person_id: (membership as any).contact_id } }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, action_item: data });
   } catch (err: unknown) {
@@ -1893,11 +1893,11 @@ server.registerTool("create_group_next_step", { title: "Create Group Next Step",
 
 server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step", description: "Use AI to suggest one concrete next step for a Group membership without saving it.", inputSchema: { membership_id: z.string() } }, async ({ membership_id }) => {
   try {
-    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("*, contact_groups:group_id(*), contacts:person_id(*)").eq("id", membership_id).eq("user_id", currentUserId).maybeSingle();
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("*, contact_groups:group_id(*), contacts:contact_id(*)").eq("id", membership_id).eq("user_id", currentUserId).maybeSingle();
     if (membershipError) throw new Error(membershipError.message);
     if (!membership) throw new Error("Membership not found");
     const [{ data: interactions }, { data: notes }] = await Promise.all([
-      supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", currentUserId).eq("contact_id", (membership as any).person_id).order("interaction_date", { ascending: false }).limit(5),
+      supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", currentUserId).eq("contact_id", (membership as any).contact_id).order("interaction_date", { ascending: false }).limit(5),
       supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", currentUserId).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
     const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_next_step", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
@@ -1914,7 +1914,7 @@ server.registerTool("generate_group_briefing", { title: "Generate Group Briefing
     const days = Math.min(90, Math.max(1, Number(period_days) || 7));
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     const [{ data: memberships }, { data: interactions }, { data: actions }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("*, contacts:person_id(name, company, role)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null).order("last_movement_at", { ascending: true }),
+      supabase.from("contact_group_memberships").select("*, contacts:contact_id(name, company, role)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null).order("last_movement_at", { ascending: true }),
       supabase.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", currentUserId).eq("group_id", group.id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
       supabase.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("metadata->>group_id", group.id).order("created_at", { ascending: false }),
     ]);
@@ -1933,13 +1933,13 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
   try {
     const group = await resolveGroup(group_id_or_slug);
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("person_id, contacts:person_id(name)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null),
+      supabase.from("contact_group_memberships").select("contact_id, contacts:contact_id(name)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null),
       supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", currentUserId).is("merged_into", null).order("name"),
       supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
     ]);
     const structuredImport = await importGroupMembersFromNotes(supabase, currentUserId, group, notes || []);
     if (structuredImport) return jsonTool({ ok: true, mode: "structured_import", ...structuredImport });
-    const existingIds = new Set((memberships || []).map((m: any) => m.person_id));
+    const existingIds = new Set((memberships || []).map((m: any) => m.contact_id));
     const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
     const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
     const suggestions = Array.isArray(result?.choices?.[0]?.message?.content) ? [] : JSON.parse(result?.choices?.[0]?.message?.content || "{}").suggestions || [];
@@ -1997,11 +1997,11 @@ server.registerTool("review_group_member_suggestion", { title: "Review Group Mem
     let membershipId = (item as any).target_entity_id;
     if (action === "keep") {
       if (!membershipId) {
-        const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", payload.group_id).eq("person_id", payload.contact_id).is("archived_at", null).maybeSingle();
+        const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", payload.group_id).eq("contact_id", payload.contact_id).is("archived_at", null).maybeSingle();
         membershipId = existing?.id;
       }
       if (!membershipId) {
-        const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: payload.group_id, person_id: payload.contact_id, status: payload.default_status || null, reason: (item as any).description || null }).select("id").single();
+        const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: payload.group_id, contact_id: payload.contact_id, status: payload.default_status || null, reason: (item as any).description || null }).select("id").single();
         if (error || !data) throw new Error(error?.message || "Could not create membership");
         membershipId = data.id;
       }
