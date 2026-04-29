@@ -27,8 +27,8 @@ There is **no custom backend server**. All server-side logic runs as Supabase Ed
 
 | Directory | Purpose |
 |-----------|---------|
-| `pages/` | Route-level components (one per page) |
-| `components/` | Reusable UI, grouped by domain (`notes/`, `settings/`, `admin/`, `layout/`, `ui/`, etc.) |
+| `pages/` | Route-level components (one per page), including Notes, People, Groups, Lexicon, Review Queue, Media, and Settings |
+| `components/` | Reusable UI, grouped by domain (`notes/`, `people/`, `groups/`, `settings/`, `admin/`, `layout/`, `ui/`, etc.) |
 | `hooks/` | Custom React hooks (data fetching, subscriptions, utilities) |
 | `contexts/` | React context providers (`AuthContext`) |
 | `integrations/supabase/` | Auto-generated Supabase client and TypeScript types |
@@ -41,9 +41,20 @@ There is **no custom backend server**. All server-side logic runs as Supabase Ed
 React Router v6 with two layout wrappers:
 
 - **`PageLayout`** — public pages (landing, docs, legal)
-- **`DashboardLayout`** — authenticated pages (notes, settings, graph, etc.)
+- **`DashboardLayout`** — authenticated pages (dashboard, notes, people, groups, lexicon, graph, media, settings, etc.)
 
 Routes are lazy-loaded for code splitting.
+
+Key authenticated routes:
+
+| Route | Purpose |
+|-------|---------|
+| `/dashboard/notes` and `/dashboard/notes/:noteId` | Markdown-native note workspace with rich editor, wikilinks, source mode, sharing, media, and AI chat |
+| `/dashboard/people` | Contact/person profiles, relationships, timeline, documents, and duplicate merging |
+| `/dashboard/groups` and `/dashboard/groups/:slug` | Group workspaces for people pipelines, goals, member stages, briefings, and note-based imports |
+| `/lexicon` and `/lexicon/:slug` | Synthesized knowledge pages with sources, backlinks, revisions, and manual editing |
+| `/dashboard/review-queue` | Review workflow for AI suggestions, dedupe, relationships, profile enrichment, and group-member proposals |
+| `/dashboard/media` | Searchable library of analyzed note attachments |
 
 ## Supabase (`supabase/`)
 
@@ -53,17 +64,20 @@ Routes are lazy-loaded for code splitting.
 
 | Group | Functions |
 |-------|-----------|
-| **AI / LLM** | `note-chat`, `process-note`, `ai-moderate-content`, `generate-profile-suggestions`, `search-notes-semantic` |
+| **AI / LLM** | `note-chat`, `conversation-chat`, `process-note`, `ai-moderate-content`, `generate-profile-suggestions`, `search-notes-semantic`, `suggest-group-next-step`, `generate-group-briefing` |
 | **Media** | `analyze-media`, `analyze-pdf`, `backfill-media-analysis` |
-| **Connections** | `compute-connections`, `find-connections`, `suggest-connections`, `recompute-all-connections` |
+| **Connections / Graph** | `compute-connections`, `find-connections`, `suggest-connections`, `recompute-all-connections`, `get-graph-data` |
+| **Groups** | `suggest-group-members`, `generate-group-briefing`, `suggest-group-next-step` |
+| **Lexicon** | `wiki-ingest`, `wiki-lint` |
 | **Hub API** | `hub-api-keys`, `hub-api-notes`, `hub-api-contacts`, `hub-api-actions`, `hub-api-stats` |
+| **MCP Server** | `open-brain-mcp` |
 | **Sync / Import** | `github-sync-export`, `github-sync-pull`, `github-import-vault`, `github-sync-scheduled` |
-| **Capture** | `quick-capture`, `ingest-thought`, `telegram-capture`, `discord-capture`, `slack-capture` |
+| **Capture** | `quick-capture`, `ingest-thought`, `telegram-capture`, `discord-capture`, `slack-capture`, `receive-note` |
 | **Moderation** | `moderate-content`, `ai-moderate-content` |
 | **Inter-app** | `send-patch`, `patch-response`, `receive-note`, `verify-connection` |
 | **Other** | `daily-digest`, `weekly-review`, `extract-event`, `delete-my-account`, `ensure-token-allowance`, `get-shared-note`, `link-note` |
 
-Shared helpers live in `supabase/functions/_shared/` (auth, rate limiting, LLM credit accounting).
+Shared helpers live in `supabase/functions/_shared/` (auth, rate limiting, LLM credit accounting, Hub helpers, group note import logic, hashing).
 
 ### Database
 
@@ -73,14 +87,15 @@ PostgreSQL with Row-Level Security. The schema is managed through migrations in 
 
 1. The React app calls Supabase directly (queries, auth) via the JS client.
 2. For AI or complex operations, the app invokes edge functions.
-3. Edge functions read/write the database using the service-role key (server-side only).
-4. External integrations (Telegram, Discord, Slack, GitHub) communicate through dedicated capture/sync functions.
+3. Edge functions read/write the database using server-side credentials and must scope operations to the authenticated user or validated API token.
+4. External integrations (Telegram, Discord, Slack, GitHub, Hub API clients, MCP clients) communicate through dedicated capture/sync/API functions.
+5. AI-heavy functions use the shared credit system and should use background execution patterns where needed to avoid timeouts.
 
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `.env` / `.env.example` | Environment variables (Supabase URL, anon key) |
+| `.env.example` | Public configuration template; runtime secrets are managed by Lovable/Supabase, not committed files |
 | `supabase/config.toml` | Edge function settings (JWT verification) |
 | `tailwind.config.ts` | Design tokens and theme |
 | `vite.config.ts` | Build configuration |

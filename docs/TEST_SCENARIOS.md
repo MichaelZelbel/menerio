@@ -1,6 +1,6 @@
 # Menerio — End-to-End Test Scenarios
 
-> **Last updated:** 2026-04-19
+> **Last updated:** 2026-04-28
 
 > **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
@@ -257,6 +257,27 @@
   2. Click the filter/entity-type dropdown
   3. Select "Task"
 - **Expected Outcome:** Only notes with `entity_type = "Task"` are shown. Clearing filter shows all notes.
+
+### TS-NOTES-013: Download Note as Markdown
+
+- **Objective:** Validate single-note Markdown export
+- **Preconditions:** A note exists with title, Markdown content, tags, and optional wikilinks
+- **Steps:**
+  1. Navigate to `/dashboard/notes`
+  2. Select the note
+  3. Click the download icon in the editor action bar
+- **Expected Outcome:** Browser downloads a `.md` file named after the note title. File contains YAML frontmatter and the current Markdown body.
+
+### TS-NOTES-014: Source Mode Round Trip
+
+- **Objective:** Validate Markdown source editing
+- **Preconditions:** A note is open and editable
+- **Steps:**
+  1. Click the Markdown source icon
+  2. Edit raw Markdown, including a checklist or wikilink
+  3. Switch back to rich text mode
+  4. Refresh the page
+- **Expected Outcome:** Markdown changes persist without HTML conversion artifacts. Checklists and wikilinks render correctly.
 
 ### TS-NOTES-013: Process Note with AI
 
@@ -633,7 +654,101 @@
 
 ---
 
-## Section 8: Knowledge Graph
+## Section 8: Groups
+
+### TS-GROUPS-001: Create a Group from Template
+
+- **Objective:** Validate group creation and template defaults
+- **Preconditions:** User is signed in
+- **Steps:**
+  1. Navigate to `/dashboard/groups`
+  2. Create a new Group using the Dream 100 template
+  3. Enter name, purpose, and description
+- **Expected Outcome:** Group is created with slug, stages, template fields, and default goals. User lands on `/dashboard/groups/<slug>`.
+
+### TS-GROUPS-002: Add and Move Group Members
+
+- **Objective:** Validate membership lifecycle
+- **Preconditions:** A group and at least one contact exist
+- **Steps:**
+  1. Open the group detail page
+  2. Add an existing person as a member
+  3. Move the member between pipeline stages
+  4. Open the member sheet
+- **Expected Outcome:** Membership appears in Pipeline and List views. Stage, position, priority, reason, notes, and next-step area persist.
+
+### TS-GROUPS-003: Import Members from Structured Note
+
+- **Objective:** Validate deterministic table/list import
+- **Preconditions:** A note exists with a Markdown table or numbered list containing names, links, relevance, and first steps
+- **Steps:**
+  1. Open a matching group
+  2. Run the AI/member suggestion import from notes
+  3. Confirm/import suggested rows
+- **Expected Outcome:** Members are created or matched without duplicates. Order is preserved in `position`; extracted links, relevance, and first steps are saved on membership attributes.
+
+### TS-GROUPS-004: Generate Group Briefing
+
+- **Objective:** Validate AI briefing generation
+- **Preconditions:** Group has members, notes, and interactions
+- **Steps:**
+  1. Open the Briefing tab
+  2. Generate a briefing
+- **Expected Outcome:** Briefing appears with recent movement, stale members, priorities, and suggested next actions. AI credits are deducted.
+
+### TS-GROUPS-005: Group Lexicon Link
+
+- **Objective:** Validate operational group ↔ synthesized Lexicon page navigation
+- **Preconditions:** A group exists with a Lexicon page
+- **Steps:**
+  1. Open the Group About tab
+  2. Click the Lexicon link
+  3. From the Lexicon group page, click “View as Group”
+- **Expected Outcome:** Navigation works in both directions without losing slug state.
+
+---
+
+## Section 9: Lexicon
+
+### TS-LEXICON-001: Open Lexicon Index
+
+- **Objective:** Validate Lexicon index rendering
+- **Preconditions:** User has at least one Lexicon page
+- **Steps:**
+  1. Navigate to `/lexicon`
+- **Expected Outcome:** Pages are grouped by type and can be opened by slug.
+
+### TS-LEXICON-002: View Lexicon Page Sources and Backlinks
+
+- **Objective:** Validate source traceability and backlinks
+- **Preconditions:** A Lexicon page has at least one source note and one incoming link
+- **Steps:**
+  1. Open `/lexicon/<slug>`
+  2. Inspect Sources and Backlinks sections
+  3. Open a source note
+- **Expected Outcome:** Sources show note title/date/content preview and navigate to the source note. Backlinks navigate to linking pages.
+
+### TS-LEXICON-003: Edit Lexicon Page and View Revision
+
+- **Objective:** Validate manual edits and revision audit trail
+- **Preconditions:** A Lexicon page exists
+- **Steps:**
+  1. Click Edit
+  2. Change content and save
+  3. Open revisions
+- **Expected Outcome:** Content saves, a `manual_edit` revision appears, and diff view shows previous/new content.
+
+### TS-LEXICON-004: Legacy Wiki Redirects
+
+- **Objective:** Validate backwards compatibility
+- **Steps:**
+  1. Navigate to `/wiki`
+  2. Navigate to `/wiki/example-slug`
+- **Expected Outcome:** Routes redirect to `/lexicon` and `/lexicon/example-slug`.
+
+---
+
+## Section 10: Knowledge Graph
 
 ### TS-GRAPH-001: View Knowledge Graph
 
@@ -682,7 +797,7 @@
 
 ---
 
-## Section 9: Media Library
+## Section 11: Media Library
 
 ### TS-MEDIA-001: View Media Library
 
@@ -733,7 +848,7 @@
 
 ---
 
-## Section 10: Weekly Review
+## Section 12: Weekly Review
 
 ### TS-REVIEW-001: Generate Weekly Review
 
@@ -757,7 +872,7 @@
 
 ---
 
-## Section 11: User Profile System
+## Section 13: User Profile System
 
 ### TS-PROFILE-001: Seed Default Categories
 
@@ -890,7 +1005,7 @@
 
 ---
 
-## Section 12: Dashboard
+## Section 14: Dashboard
 
 ### TS-DASH-001: Dashboard Overview Cards
 
@@ -939,7 +1054,7 @@
 
 ---
 
-## Section 13: AI Features & Credit Tracking
+## Section 15: AI Features & Credit Tracking
 
 ### TS-AI-001: View AI Credits
 
@@ -988,7 +1103,7 @@
 
 ---
 
-## Section 14: Premium Feature Gating
+## Section 16: Premium Feature Gating
 
 ### TS-PREMIUM-001: Premium Gate — Free User Blocked
 
@@ -1008,7 +1123,7 @@
 
 ---
 
-## Section 15: Settings & Integrations
+## Section 17: Settings & Integrations
 
 ### TS-SETTINGS-001: Update Profile Info
 
@@ -1088,7 +1203,7 @@
 
 ---
 
-## Section 16: Admin Dashboard
+## Section 18: Admin Dashboard
 
 ### TS-ADMIN-001: Access Admin Panel
 
@@ -1150,7 +1265,7 @@
 
 ---
 
-## Section 17: Activity & Notifications
+## Section 19: Activity & Notifications
 
 ### TS-ACTIVITY-001: View Activity Page
 
@@ -1189,7 +1304,7 @@
 
 ---
 
-## Section 18: Content Moderation
+## Section 20: Content Moderation
 
 ### TS-MOD-001: Stopword Filter on Note Save
 
@@ -1222,7 +1337,7 @@
 
 ---
 
-## Section 19: Public Pages & Navigation
+## Section 21: Public Pages & Navigation
 
 ### TS-PUBLIC-001: Landing Page
 
@@ -1253,7 +1368,6 @@
   1. Navigate to `/privacy`
   2. Navigate to `/terms`
   3. Navigate to `/cookies`
-  4. Navigate to `/impressum`
 - **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
 
 ### TS-PUBLIC-005: 404 Page
@@ -1283,14 +1397,14 @@
 
 ---
 
-## Section 20: Sidebar Navigation
+## Section 22: Sidebar Navigation
 
 ### TS-NAV-001: Sidebar Navigation Links
 
 - **Objective:** Validate all sidebar navigation items
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Click each sidebar item in order: Dashboard, Notes, People, Actions, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
+  1. Click each sidebar item in order: Dashboard, Notes, People, Groups, Review Queue, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
 - **Expected Outcome:** Each click navigates to the correct page. Active item is highlighted.
 
 ### TS-NAV-002: Profile Completeness Dot in Sidebar
@@ -1306,7 +1420,7 @@
 
 ---
 
-## Section 21: Cleanup — Delete Test Data
+## Section 23: Cleanup — Delete Test Data
 
 ### TS-CLEANUP-001: Delete All Test Notes
 
