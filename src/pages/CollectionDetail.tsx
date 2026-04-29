@@ -1336,6 +1336,28 @@ export default function CollectionDetail() {
     };
   }, [user, slug, query, sort, cursorStack]);
 
+  useEffect(() => {
+    if (!user || items.length === 0) {
+      setLinkValidity(emptyLinkValidity());
+      return;
+    }
+    const links = items.flatMap((item) => Object.values(asData(item.data))).filter(isLinkValue);
+    const noteIds = links.filter((link) => link.type === "note").map((link) => link.id);
+    const personIds = links.filter((link) => link.type === "person").map((link) => link.id);
+    const itemIds = links.filter((link) => link.type === "collection_item").map((link) => link.id);
+    let cancelled = false;
+    const load = async () => {
+      const [notes, people, linkedItems] = await Promise.all([
+        noteIds.length ? supabase.from("notes").select("id").eq("user_id", user.id).in("id", noteIds).eq("is_trashed", false) : Promise.resolve({ data: [] }),
+        personIds.length ? supabase.from("contacts").select("id").eq("user_id", user.id).in("id", personIds).is("merged_into", null) : Promise.resolve({ data: [] }),
+        itemIds.length ? supabase.from("collection_items").select("id").eq("user_id", user.id).in("id", itemIds) : Promise.resolve({ data: [] }),
+      ]);
+      if (!cancelled) setLinkValidity({ notes: new Set((notes.data ?? []).map((row) => row.id)), people: new Set((people.data ?? []).map((row) => row.id)), items: new Set((linkedItems.data ?? []).map((row) => row.id)) });
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [items, user]);
+
   const duplicateItem = async (item: CollectionItem) => {
     if (!user || !collection) return;
     const { error } = await supabase.from("collection_items").insert({
