@@ -176,7 +176,7 @@ export default function People() {
 
   // ── Filtered list ──
   const filtered = people.filter((p) => {
-    if (groupFilter !== "all" && !groupFilterMemberships.some((membership) => membership.person_id === p.id)) return false;
+    if (groupFilter !== "all" && !groupFilterMemberships.some((membership) => membership.contact_id === p.id)) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
