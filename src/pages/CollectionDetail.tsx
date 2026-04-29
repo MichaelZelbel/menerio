@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format, formatDistanceToNow, isValid, parseISO } from "date-fns";
 import {
@@ -760,12 +760,12 @@ function ItemSheet({
     setErrors({});
   }, [fields, isCreate, item, open]);
 
-  const close = () => {
+  const close = useCallback(() => {
     if (isDirty && !window.confirm("Discard unsaved item changes?")) return;
     onOpenChange(false);
-  };
+  }, [isDirty, onOpenChange]);
 
-  const save = async () => {
+  const save = useCallback(async () => {
     if (!collection || !user) return;
     const validated = validateItemValues(fields, values);
     setErrors(validated.errors);
@@ -798,7 +798,7 @@ function ItemSheet({
     toast.success(isCreate ? "Item created" : "Item saved");
     onSaved(data);
     onOpenChange(false);
-  };
+  }, [collection, fields, isCreate, item?.id, onOpenChange, onSaved, user, values]);
 
   const deleteItem = async () => {
     if (!item || isCreate) return;
