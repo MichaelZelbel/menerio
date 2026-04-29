@@ -2209,6 +2209,7 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          last_members_synced_at: string | null
           last_synthesized_at: string | null
           metadata: Json
           page_type: string
@@ -2223,6 +2224,7 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          last_members_synced_at?: string | null
           last_synthesized_at?: string | null
           metadata?: Json
           page_type?: string
@@ -2237,6 +2239,7 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          last_members_synced_at?: string | null
           last_synthesized_at?: string | null
           metadata?: Json
           page_type?: string
@@ -2451,6 +2454,14 @@ export type Database = {
           similarity: number
           title: string
         }[]
+      }
+      replace_group_members_section: {
+        Args: { p_content: string; p_members_section: string }
+        Returns: string
+      }
+      sync_group_wiki_members: {
+        Args: { p_force?: boolean; p_group_id: string }
+        Returns: Json
       }
       wiki_apply_ingest: {
         Args: { p_actions: Json; p_note_id: string; p_source_links: Json }
