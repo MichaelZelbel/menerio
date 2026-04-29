@@ -184,6 +184,10 @@ function formatNote(
   return parts.join("\n");
 }
 
+function noteText(note: { title?: string | null; content?: string | null; created_at?: string | null }) {
+  return `${note.title || "Untitled"}: ${String(note.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").slice(0, 1000)}${note.created_at ? ` (${note.created_at})` : ""}`;
+}
+
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -2229,7 +2233,7 @@ app.all("*", async (c) => {
   const auth = await authenticateMcpRequest(authHeader);
 
   if (auth.error) {
-    return c.json({ error: auth.error.message }, auth.error.status);
+    return c.json({ error: auth.error.message }, auth.error.status as 401);
   }
 
   currentUserId = auth.userId!;
