@@ -1412,6 +1412,26 @@ export default function CollectionDetail() {
     navigate("/collections");
   };
 
+  const openLinkedEntity = async (link: LinkValue) => {
+    if (link.label === "[deleted]") return;
+    if (link.type === "note") {
+      window.open(`/dashboard/notes/${link.id}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (link.type === "person") {
+      window.open(`/dashboard/people?contact=${link.id}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const existing = items.find((item) => item.id === link.id);
+    if (existing) {
+      setSelectedItem(existing);
+      return;
+    }
+    const { data, error } = await supabase.from("collection_items").select("*").eq("id", link.id).maybeSingle();
+    if (error || !data) return toast.error("Linked item not found");
+    setSelectedItem(data);
+  };
+
   if (isLoading && !collection)
     return (
       <div className="w-full max-w-6xl space-y-4">
@@ -1654,7 +1674,13 @@ export default function CollectionDetail() {
                                 "text-right",
                             )}
                           >
-                            <FieldValue field={field} value={data[field.key]} />
+                            <FieldValue
+                              field={field}
+                              value={data[field.key]}
+                              collections={allCollections}
+                              linkValidity={linkValidity}
+                              onOpenLink={openLinkedEntity}
+                            />
                           </TableCell>
                         ))}
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
@@ -1741,6 +1767,7 @@ export default function CollectionDetail() {
         onDeleted={(id) =>
           setItems((current) => current.filter((row) => row.id !== id))
         }
+        collections={allCollections}
       />
       <EditCollectionDialog
         collection={collection}
