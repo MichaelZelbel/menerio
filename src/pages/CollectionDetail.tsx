@@ -187,6 +187,12 @@ function parseSchema(value: Json): SchemaField[] {
               (option): option is string => typeof option === "string",
             )
           : undefined,
+        target_collection_slug:
+          typeof item.target_collection_slug === "string"
+            ? item.target_collection_slug
+            : typeof item.collection_id === "string"
+              ? item.collection_id
+              : null,
       },
     ];
   });
@@ -212,6 +218,17 @@ function isEmptyValue(value: FormValue) {
     value == null ||
     value === "" ||
     (Array.isArray(value) && value.length === 0)
+  );
+}
+
+function isLinkValue(value: unknown): value is LinkValue {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof (value as LinkValue).type === "string" &&
+      typeof (value as LinkValue).id === "string" &&
+      typeof (value as LinkValue).label === "string",
   );
 }
 
