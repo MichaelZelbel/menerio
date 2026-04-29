@@ -74,6 +74,7 @@ export function DashboardSidebar() {
     { title: "Groups", url: "/dashboard/groups", icon: Layers },
     
     { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
+    { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
     { title: "Note Graph", url: "/dashboard/graph", icon: Network },
     { title: "Media Library", url: "/dashboard/media", icon: Image },
   ];

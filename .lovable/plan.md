@@ -1,51 +1,52 @@
-Plan zur Stabilisierung der rechten Personen-Schublade in Gruppen
+Ich würde das so umsetzen:
 
-Ich würde das Layout in `src/pages/GroupDetail.tsx` gezielt so ändern, dass die unteren Buttons nicht mehr hoch- oder runterrutschen, wenn die Next-Steps-Abfrage fertig wird.
+1. Weekly Review wieder ins Sidebar-Menü aufnehmen
+- In der Hauptnavigation kommt ein Eintrag „Weekly Review“ zurück.
+- Ziel bleibt die bereits existierende Route `/dashboard/review`.
+- Icon passend zur bestehenden UI, z. B. `CalendarDays` oder `BarChart3`.
+- Damit ist der Punkt nicht nur in den Docs beschrieben, sondern wieder direkt erreichbar.
 
-Umsetzung:
+2. Weekly-Review-Seite verständlicher und nutzbarer machen
+- Den vorhandenen Button klarer benennen, z. B. „Create Weekly Review“ oder „Generate Now“.
+- Den Zeitraum-Selector beibehalten, aber so gestalten, dass der User bewusst wählt: „Last 7 days“, „Last 14 days“, „Last 30 days“.
+- Den Empty State verbessern: Wenn noch keine Review existiert, wird direkt erklärt, dass man sie jederzeit manuell starten kann.
+- Während der Generierung eine klare Ladeanzeige zeigen.
+- Fehler wie „No notes found in this period“ freundlicher anzeigen, damit es nicht wirkt, als sei die Funktion kaputt.
 
-1. Next-Steps-Ladezustand kompakter machen
-   - Der aktuelle Loader nutzt `py-6` und reserviert dadurch deutlich mehr Höhe als der spätere Text `No next steps yet.`
-   - Ich ersetze ihn durch eine einzeilige Loading-Zeile, z. B. `Loading next steps...` mit kleinem Spinner.
-   - Diese Zeile bekommt ungefähr dieselbe Höhe wie der spätere Empty-State-Text.
+3. Backend so anpassen, dass „sie wirklich passiert“
+- Die Edge Function `weekly-review` existiert bereits und kann manuell Reviews erzeugen.
+- Ich würde sie so erweitern, dass sie zwei Modi unterstützt:
+  - manueller Modus: aktueller User triggert jederzeit eine Review für 7/14/30 Tage
+  - geplanter Modus: ein Cron/Scheduled Trigger kann regelmäßig für alle User prüfen, ob eine neue Weekly Review fällig ist
+- Für den geplanten Modus soll die Function nicht blind doppelte Reviews erzeugen, sondern prüfen, ob für den jeweiligen Wochenzeitraum bereits eine Review existiert.
+- Wenn in einem Zeitraum keine Notizen vorhanden sind, soll das sauber als „skipped/no content“ behandelt werden statt als kaputte leere Ansicht.
 
-2. Stabile Mindesthöhe für den Next-Steps-Inhaltsbereich
-   - Der Bereich unter der Überschrift „Next Steps“ bekommt eine kleine feste Mindesthöhe, die für Loader, Empty-State und kurze Inhalte gleich bleibt.
-   - Ergebnis: Wenn von Loader zu „No next steps yet.“ gewechselt wird, verändert sich die Gesamthöhe praktisch nicht mehr.
+4. Wöchentlichen Rhythmus etablieren
+- In der bestehenden `daily-digest` Function gibt es bisher nur eine Freitags-Notification „Time for your weekly review“; sie erzeugt aber keine Review.
+- Ich würde stattdessen/zusätzlich die Weekly Review automatisch erzeugen lassen, z. B. einmal wöchentlich.
+- Technisch sinnvoll wäre ein geplanter Supabase-Cron-Aufruf auf die `weekly-review` Edge Function.
+- Die Function erstellt dann Reviews für User mit aktivierter `notify_weekly_review`-Einstellung und schreibt danach optional eine Notification mit Link zur Review.
 
-3. Optional kleine Textkorrektur/Polish
-   - Falls im UI wirklich `NoNextStepsYet` ohne Leerzeichen auftaucht, korrigiere ich das zu `No next steps yet.`
-   - Die Buttons `Archive` und `Remove` bleiben an derselben Stelle, solange keine echte Next-Step-Liste nachgeladen wird.
+5. Notifications korrigieren
+- Wenn eine automatische Weekly Review erzeugt wurde, bekommt der User eine Notification wie „Your weekly review is ready“ mit Link `/dashboard/review`.
+- Die bestehende Reminder-Notification aus `daily-digest` sollte nicht weiterhin nur „mach mal Review“ sagen, wenn wir die Review tatsächlich automatisch erstellen. Entweder wird sie entfernt oder auf „Review ist bereit“ umgestellt.
 
-Technische Details:
+6. Docs an die neue Realität anpassen
+- Der Docs-Text „available every Sunday“ sollte angepasst werden auf: automatisch im Wochenrhythmus plus jederzeit manuell per Button.
+- Die Weekly-Review-Dokumentation wird mit dem Button/Manual Trigger ergänzt.
 
-- Änderung nur in `NextStepsSection` innerhalb von `src/pages/GroupDetail.tsx`.
-- Kein Backend-Change nötig.
-- Kein Datenmodell-Change nötig.
-- Die Query darf weiterhin beim Öffnen der Schublade laden; der Fix ist rein layoutseitig und risikoarm.
+Technische Details
+- Dateien, die voraussichtlich geändert werden:
+  - `src/components/layout/DashboardSidebar.tsx`: Sidebar-Eintrag hinzufügen
+  - `src/pages/WeeklyReview.tsx`: UI/Empty State/Button/Fehlerhandling verbessern
+  - `supabase/functions/weekly-review/index.ts`: Batch-/Scheduled-Modus, Duplikat-Prüfung, robustere Responses, Notification nach Erstellung
+  - `supabase/functions/daily-digest/index.ts`: alte Reminder-Logik anpassen oder entfernen, damit keine irreführenden Notifications entstehen
+  - `src/content/docs/registry.tsx`: Docs-Text aktualisieren
+- Falls ein echter Wochenrhythmus direkt in Supabase eingerichtet werden soll, braucht es zusätzlich eine Cron-Konfiguration via `pg_cron`/`pg_net` mit dem Projekt-Function-URL und Anon Key. Das würde ich nicht als portable Migration ablegen, sondern projektspezifisch einrichten, weil dort konkrete Projekt-URLs/Keys enthalten sind.
 
-Geplantes Zielbild:
-
-```text
-Next Steps                       [Suggest] [Add]
-[small spinner] Loading next steps...
-
-Source Notes
-No source notes.
-
-[Archive] [Remove]
-```
-
-wird nach dem Laden zu:
-
-```text
-Next Steps                       [Suggest] [Add]
-No next steps yet.
-
-Source Notes
-No source notes.
-
-[Archive] [Remove]
-```
-
-ohne sichtbares Springen der unteren Buttons.
+Ergebnis
+- „Weekly Review“ ist wieder im Sidebar-Menü sichtbar.
+- User können jederzeit manuell eine Review starten.
+- Es gibt eine klare leere Startansicht statt „da steht nichts“.
+- Automatische Weekly Reviews werden im Wochenrhythmus erzeugt, ohne unnötige Duplikate.
+- Die Dokumentation beschreibt danach exakt dieses Verhalten.

@@ -74,6 +74,7 @@ export default function WeeklyReview() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
+  const [reviewDays, setReviewDays] = useState("7");
 
   const { data: reviews = [], isLoading } = useQuery<WeeklyReview[]>({
     queryKey: ["weekly_reviews", user?.id],
@@ -103,13 +104,26 @@ export default function WeeklyReview() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["weekly_reviews"] });
-      if (data?.id) setSelectedReviewId(data.id);
-      showToast.success("Weekly review generated!");
+      if (data?.id) {
+        setSelectedReviewId(data.id);
+        showToast.success(data.existing ? "Weekly review already exists." : "Weekly review generated.");
+      } else if (data?.skipped === "no_notes") {
+        showToast.info("No notes found for this period yet.");
+      } else {
+        showToast.success("Weekly review request completed.");
+      }
     },
-    onError: (err: any) => {
-      showToast.error(err.message || "Failed to generate review");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Failed to generate review";
+      showToast.error(
+        message.includes("No notes found")
+          ? "No notes found for this period yet. Capture a few notes first, then try again."
+          : message,
+      );
     },
   });
+
+  const handleGenerate = () => generateReview.mutate(Number(reviewDays));
 
   const currentReview = selectedReviewId
     ? reviews.find((r) => r.id === selectedReviewId)
@@ -147,8 +161,8 @@ export default function WeeklyReview() {
         </div>
         <div className="flex items-center gap-2">
           <Select
-            defaultValue="7"
-            onValueChange={(v) => generateReview.mutate(Number(v))}
+            value={reviewDays}
+            onValueChange={setReviewDays}
             disabled={generateReview.isPending}
           >
             <SelectTrigger className="w-[180px]">
@@ -161,7 +175,7 @@ export default function WeeklyReview() {
             </SelectContent>
           </Select>
           <Button
-            onClick={() => generateReview.mutate(7)}
+            onClick={handleGenerate}
             disabled={generateReview.isPending}
           >
             {generateReview.isPending ? (
@@ -169,7 +183,7 @@ export default function WeeklyReview() {
             ) : (
               <Sparkles className="mr-2 h-4 w-4" />
             )}
-            Generate
+            Create Review
           </Button>
         </div>
       </div>
@@ -184,15 +198,15 @@ export default function WeeklyReview() {
             <CalendarDays className="h-12 w-12 text-muted-foreground/40 mb-4" />
             <h3 className="text-lg font-medium mb-1">No reviews yet</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Generate your first weekly review to see AI-powered insights about your captured thoughts.
+              Create one now from your recent notes. Future weekly reviews can be generated again on your normal weekly rhythm.
             </p>
-            <Button onClick={() => generateReview.mutate(7)} disabled={generateReview.isPending}>
+            <Button onClick={handleGenerate} disabled={generateReview.isPending}>
               {generateReview.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Sparkles className="mr-2 h-4 w-4" />
               )}
-              Generate First Review
+              Create First Review
             </Button>
           </CardContent>
         </Card>
