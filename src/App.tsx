@@ -42,6 +42,7 @@ const People = lazy(() => import("./pages/People"));
 const Groups = lazy(() => import("./pages/Groups"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const Collections = lazy(() => import("./pages/Collections"));
+const CollectionSchema = lazy(() => import("./pages/CollectionSchema"));
 const TimelinePage = lazy(() => import("./pages/TimelinePage"));
 
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
@@ -138,6 +139,7 @@ const App = () => (
                     }
                   >
                     <Route index element={<Collections />} />
+                    <Route path=":slug/schema" element={<CollectionSchema />} />
                   </Route>
 
                   <Route
