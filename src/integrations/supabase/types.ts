@@ -376,17 +376,17 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "contact_group_memberships_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "contact_group_memberships_group_id_fkey"
             columns: ["group_id"]
             isOneToOne: false
             referencedRelation: "contact_groups"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "contact_group_memberships_person_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
           {
