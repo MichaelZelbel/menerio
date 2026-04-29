@@ -197,11 +197,29 @@ function truncate(value: unknown, length = 60) {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
+function toInputString(value: unknown) {
+  return value == null ? "" : String(value);
+}
+
+function isEmptyValue(value: FormValue) {
+  return value == null || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
 function parseDate(value: unknown) {
   if (!value) return null;
   const date =
     typeof value === "string" ? parseISO(value) : new Date(String(value));
   return isValid(date) ? date : null;
+}
+
+function toDateInput(value: unknown) {
+  const date = parseDate(value);
+  return date ? format(date, "yyyy-MM-dd") : "";
+}
+
+function toTimeInput(value: unknown) {
+  const date = parseDate(value);
+  return date ? format(date, "HH:mm") : "";
 }
 
 function renderDate(value: unknown) {
