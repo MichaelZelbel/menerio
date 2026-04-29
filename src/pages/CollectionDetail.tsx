@@ -798,7 +798,16 @@ function ItemSheet({
     toast.success(isCreate ? "Item created" : "Item saved");
     onSaved(data);
     onOpenChange(false);
-  }, [collection, fields, isCreate, item?.id, onOpenChange, onSaved, user, values]);
+  }, [
+    collection,
+    fields,
+    isCreate,
+    item?.id,
+    onOpenChange,
+    onSaved,
+    user,
+    values,
+  ]);
 
   const deleteItem = async () => {
     if (!item || isCreate) return;
