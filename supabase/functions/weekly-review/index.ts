@@ -127,7 +127,7 @@ async function createWeeklyReviewForUser(
     return parts.join(" | ");
   });
 
-  const prompt = `Analyze these ${notes.length} notes captured over the past ${days} days by a single person. Return JSON with:
+  const prompt = `Analyze these ${noteRows.length} notes captured over the past ${days} days by a single person. Return JSON with:
 
 - "week_summary": 2-3 sentence overview of the week's themes and activity
 - "themes": array of {name, note_count, synthesis} — the 3-5 dominant topics with a synthesis paragraph each
