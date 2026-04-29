@@ -17,6 +17,18 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
+declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
+
+type NoteRow = {
+  id: string;
+  title: string;
+  content: string | null;
+  metadata: Record<string, unknown> | null;
+  tags: string[] | null;
+  created_at: string;
+  entity_type: string | null;
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -78,7 +90,7 @@ async function createWeeklyReviewForUser(
 
   const balance = await checkBalance(supabaseAdmin, userId);
   if (!balance.allowed) {
-    return { skipped: "insufficient_credits", error: balance.error };
+    return { skipped: "insufficient_credits" };
   }
 
   const { data: notes, error: notesError } = await supabaseAdmin
@@ -95,7 +107,9 @@ async function createWeeklyReviewForUser(
     return { skipped: "no_notes", week_start: weekStart, week_end: weekEnd };
   }
 
-  const noteSummaries = notes.map((n, i) => {
+  const noteRows = notes as NoteRow[];
+
+  const noteSummaries = noteRows.map((n, i) => {
     const m = (n.metadata || {}) as Record<string, unknown>;
     const parts = [
       `[${i + 1}] id=${n.id}`,
