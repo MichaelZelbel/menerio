@@ -872,7 +872,7 @@
 
 ---
 
-## Section 11: User Profile System
+## Section 13: User Profile System
 
 ### TS-PROFILE-001: Seed Default Categories
 
@@ -1005,7 +1005,7 @@
 
 ---
 
-## Section 12: Dashboard
+## Section 14: Dashboard
 
 ### TS-DASH-001: Dashboard Overview Cards
 
@@ -1054,7 +1054,7 @@
 
 ---
 
-## Section 13: AI Features & Credit Tracking
+## Section 15: AI Features & Credit Tracking
 
 ### TS-AI-001: View AI Credits
 
@@ -1103,7 +1103,7 @@
 
 ---
 
-## Section 14: Premium Feature Gating
+## Section 16: Premium Feature Gating
 
 ### TS-PREMIUM-001: Premium Gate — Free User Blocked
 
@@ -1123,7 +1123,7 @@
 
 ---
 
-## Section 15: Settings & Integrations
+## Section 17: Settings & Integrations
 
 ### TS-SETTINGS-001: Update Profile Info
 
@@ -1203,7 +1203,7 @@
 
 ---
 
-## Section 16: Admin Dashboard
+## Section 18: Admin Dashboard
 
 ### TS-ADMIN-001: Access Admin Panel
 
@@ -1265,7 +1265,7 @@
 
 ---
 
-## Section 17: Activity & Notifications
+## Section 19: Activity & Notifications
 
 ### TS-ACTIVITY-001: View Activity Page
 
@@ -1304,7 +1304,7 @@
 
 ---
 
-## Section 18: Content Moderation
+## Section 20: Content Moderation
 
 ### TS-MOD-001: Stopword Filter on Note Save
 
@@ -1337,7 +1337,7 @@
 
 ---
 
-## Section 19: Public Pages & Navigation
+## Section 21: Public Pages & Navigation
 
 ### TS-PUBLIC-001: Landing Page
 
@@ -1368,8 +1368,7 @@
   1. Navigate to `/privacy`
   2. Navigate to `/terms`
   3. Navigate to `/cookies`
-  4. Navigate to `/impressum`
-- **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
+  4. - **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
 
 ### TS-PUBLIC-005: 404 Page
 
@@ -1398,14 +1397,14 @@
 
 ---
 
-## Section 20: Sidebar Navigation
+## Section 22: Sidebar Navigation
 
 ### TS-NAV-001: Sidebar Navigation Links
 
 - **Objective:** Validate all sidebar navigation items
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Click each sidebar item in order: Dashboard, Notes, People, Actions, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
+  1. Click each sidebar item in order: Dashboard, Notes, People, Groups, Review Queue, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
 - **Expected Outcome:** Each click navigates to the correct page. Active item is highlighted.
 
 ### TS-NAV-002: Profile Completeness Dot in Sidebar
@@ -1421,7 +1420,7 @@
 
 ---
 
-## Section 21: Cleanup — Delete Test Data
+## Section 23: Cleanup — Delete Test Data
 
 ### TS-CLEANUP-001: Delete All Test Notes
 
