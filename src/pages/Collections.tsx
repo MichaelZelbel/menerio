@@ -68,7 +68,7 @@ function CollectionsSkeleton() {
   );
 }
 
-function EmptyCollectionsState({ onNewBlank, onCreateWithAI }: { onNewBlank: () => void; onCreateWithAI: () => void }) {
+function EmptyCollectionsState({ onNewBlank, onCreateWithAI, onBrowseTemplates }: { onNewBlank: () => void; onCreateWithAI: () => void; onBrowseTemplates: () => void }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-16 text-center">
       <div className="max-w-2xl">
@@ -80,7 +80,7 @@ function EmptyCollectionsState({ onNewBlank, onCreateWithAI }: { onNewBlank: () 
           Collections are structured trackers for anything you want to remember — household items, reading lists, contacts, job applications. Create one from a template or describe what you want to track.
         </p>
         <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Button variant="secondary">Browse Templates</Button>
+          <Button variant="secondary" onClick={onBrowseTemplates}>Browse Templates</Button>
           <Button size="lg" className="animate-pulse bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={onCreateWithAI}>
             ✨ Create with AI
           </Button>
@@ -246,6 +246,7 @@ function NewCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 
 export default function Collections() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [collections, setCollections] = useState<CollectionWithCount[]>([]);
@@ -309,7 +310,7 @@ export default function Collections() {
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-bold font-display">Collections</h1>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" size="sm">Templates</Button>
+            <Button variant="secondary" size="sm" onClick={() => navigate("/collections/templates")}>Templates</Button>
             <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={() => setAiDialogOpen(true)}>✨ Create with AI</Button>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -326,7 +327,7 @@ export default function Collections() {
       {isLoading ? (
         <CollectionsSkeleton />
       ) : collections.length === 0 ? (
-        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} onCreateWithAI={() => setAiDialogOpen(true)} />
+        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} onCreateWithAI={() => setAiDialogOpen(true)} onBrowseTemplates={() => navigate("/collections/templates")} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {collections.map((collection) => <CollectionCard key={collection.id} collection={collection} />)}
