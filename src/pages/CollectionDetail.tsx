@@ -292,12 +292,21 @@ function LinkChip({ value, collectionLabel, onOpen }: { value: unknown; collecti
   );
 }
 
-function FieldValue({ field, value, collections, onOpenLink }: { field: SchemaField; value: unknown; collections: Collection[]; onOpenLink: (link: LinkValue) => void }) {
+function linkValueWithValidity(value: unknown, validity?: LinkValidity): LinkValue | null {
+  if (!isLinkValue(value)) return null;
+  if (value.type === "note" && validity && !validity.notes.has(value.id)) return { ...value, label: "[deleted]" };
+  if (value.type === "person" && validity && !validity.people.has(value.id)) return { ...value, label: "[deleted]" };
+  if (value.type === "collection_item" && validity && !validity.items.has(value.id)) return { ...value, label: "[deleted]" };
+  return value;
+}
+
+function FieldValue({ field, value, collections, onOpenLink, linkValidity }: { field: SchemaField; value: unknown; collections: Collection[]; onOpenLink: (link: LinkValue) => void; linkValidity?: LinkValidity }) {
   if (value == null || value === "")
     return <span className="text-muted-foreground">—</span>;
   if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
-    const collectionLabel = isLinkValue(value) && value.collection_id ? collections.find((collection) => collection.id === value.collection_id)?.name : collections.find((collection) => collection.slug === field.target_collection_slug)?.name;
-    return <LinkChip value={value} collectionLabel={collectionLabel} onOpen={onOpenLink} />;
+    const checked = linkValueWithValidity(value, linkValidity);
+    const collectionLabel = checked?.collection_id ? collections.find((collection) => collection.id === checked.collection_id)?.name : collections.find((collection) => collection.slug === field.target_collection_slug)?.name;
+    return <LinkChip value={checked} collectionLabel={collectionLabel} onOpen={onOpenLink} />;
   }
   if (field.type === "number")
     return (
