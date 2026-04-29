@@ -4,7 +4,6 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { getTemplateById, instantiateTemplate } from "@/lib/group-templates";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
-import { syncGroupWikiMembers } from "@/lib/group-wiki-sync";
 
 type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type ContactGroupInsert = Database["public"]["Tables"]["contact_groups"]["Insert"];
@@ -131,7 +130,6 @@ export function useCreateGroup() {
       });
 
       if (wikiError) throw wikiError;
-      await syncGroupWikiMembers(group.id);
       return group;
     },
     onSuccess: (group) => {

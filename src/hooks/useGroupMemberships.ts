@@ -3,7 +3,6 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
-import { syncGroupWikiMembers } from "@/lib/group-wiki-sync";
 
 type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type MembershipRow = Database["public"]["Tables"]["contact_group_memberships"]["Row"];
@@ -118,9 +117,6 @@ export function useAddMembership() {
     },
     onSuccess: (membership) => {
       invalidateMembershipQueries(qc, membership.group_id, membership.person_id);
-      void syncGroupWikiMembers(membership.group_id).then(() => {
-        qc.invalidateQueries({ queryKey: ["wiki-page", `group-${membership.group_id}`] });
-      }).catch((error) => console.error("Failed to sync group wiki members", error));
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -168,7 +164,6 @@ export function useRemoveMembership() {
     },
     onSuccess: ({ groupId, personId }) => {
       invalidateMembershipQueries(qc, groupId, personId);
-      void syncGroupWikiMembers(groupId).catch((error) => console.error("Failed to sync group wiki members", error));
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -245,7 +240,6 @@ export function useMoveMembershipStage() {
     },
     onSuccess: (membership) => {
       invalidateMembershipQueries(qc, membership.group_id, membership.person_id);
-      void syncGroupWikiMembers(membership.group_id).catch((error) => console.error("Failed to sync group wiki members", error));
     },
     onError: (error: Error) => showToast.error(error.message),
   });

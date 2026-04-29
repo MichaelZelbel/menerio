@@ -27,14 +27,19 @@ serve(async (req) => {
     ]);
 
     const generatedAt = new Date().toISOString();
-    const { error: insertError } = await admin.from("group_briefings").insert({
-      user_id: userId,
-      group_id,
-      period_days: days,
-      briefing_markdown: briefing,
-      generated_at: generatedAt,
-    });
-    if (insertError) throw insertError;
+    try {
+      const { error: insertError } = await admin.from("group_briefings").insert({
+        user_id: userId,
+        group_id,
+        period_days: days,
+        briefing_markdown: briefing,
+        generated_at: generatedAt,
+      });
+      if (insertError) throw insertError;
+    } catch (insertError) {
+      console.error("generate-group-briefing insert failed", insertError);
+      return jsonResponse({ error: "Failed to save briefing" }, 500);
+    }
     await deductFixedCredits(admin, userId, "group_briefing", cost.tokens);
     return jsonResponse({ briefing_markdown: briefing, generated_at: generatedAt });
   } catch (error) {
