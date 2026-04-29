@@ -497,11 +497,15 @@ function FieldInput({
   value,
   error,
   onChange,
+  collections,
+  currentCollection,
 }: {
   field: SchemaField;
   value: FormValue;
   error?: string;
   onChange: (value: FormValue) => void;
+  collections: Collection[];
+  currentCollection: Collection | null;
 }) {
   const selectedDate = parseDate(value);
   const label = (
@@ -537,26 +541,17 @@ function FieldInput({
     );
   }
 
-  if (
-    [
-      "note",
-      "person",
-      "collection",
-      "link_note",
-      "link_person",
-      "link_collection_item",
-    ].includes(field.type)
-  ) {
+  if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
     return (
       <div>
         {label}
-        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          Link picker coming soon
-        </div>
+        <LinkPicker field={field} value={isLinkValue(value) ? value : null} onChange={onChange} collections={collections} currentCollection={currentCollection} />
         {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       </div>
     );
   }
+
+  if (["note", "person", "collection"].includes(field.type)) return <div>{label}<div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Link picker coming soon</div>{error && <p className="mt-2 text-xs text-destructive">{error}</p>}</div>;
 
   return (
     <div>
