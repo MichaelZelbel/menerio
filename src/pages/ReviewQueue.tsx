@@ -395,7 +395,7 @@ export default function ReviewQueue() {
           .from("contact_group_memberships")
           .select("id")
           .eq("group_id", group_id)
-          .eq("person_id", contact_id)
+          .eq("contact_id", contact_id)
           .is("archived_at", null)
           .maybeSingle();
 
@@ -406,7 +406,7 @@ export default function ReviewQueue() {
             .insert({
               user_id: user!.id,
               group_id,
-              person_id: contact_id,
+              contact_id,
               status: item.payload?.default_status || null,
               reason: item.description || null,
             })
