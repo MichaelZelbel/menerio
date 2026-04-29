@@ -118,7 +118,7 @@ function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, o
                 <SelectSeparator />
                 <SelectGroup><SelectLabel>Specialized</SelectLabel>{[["currency", "Currency"], ["url", "URL"], ["email", "Email"], ["phone", "Phone"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectGroup>
                 <SelectSeparator />
-                <SelectGroup><SelectLabel>Links</SelectLabel><SelectItem value="note">Link to Note</SelectItem><SelectItem value="person">Link to Person</SelectItem><SelectItem value="collection">Link to another Collection</SelectItem></SelectGroup>
+                <SelectGroup><SelectLabel>Links</SelectLabel><SelectItem value="link_note">Link to Note</SelectItem><SelectItem value="link_person">Link to Person</SelectItem><SelectItem value="link_collection_item">Link to another Collection</SelectItem></SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -135,7 +135,7 @@ function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, o
         </div>
 
         {optionTypes.has(field.type) && <div className="mt-4 border-t pt-4"><OptionEditor field={field} onChange={onChange} addOption={addOption} /></div>}
-        {field.type === "collection" && <div className="mt-4 max-w-sm border-t pt-4"><Label>Linked collection</Label><Select value={field.collection_id ?? ""} onValueChange={(collectionId) => onChange({ ...field, collection_id: collectionId })}><SelectTrigger className="mt-2"><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>)}</SelectContent></Select></div>}
+        {field.type === "link_collection_item" && <div className="mt-4 max-w-sm border-t pt-4"><Label>Target collection</Label><Select value={field.target_collection_slug ?? ""} onValueChange={(targetSlug) => onChange({ ...field, target_collection_slug: targetSlug })}><SelectTrigger className="mt-2"><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.slug}>{collection.name}</SelectItem>)}</SelectContent></Select></div>}
       </CardContent>
     </Card>
   );
