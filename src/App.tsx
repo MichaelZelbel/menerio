@@ -41,6 +41,7 @@ const Actions = lazy(() => import("./pages/Actions"));
 const People = lazy(() => import("./pages/People"));
 const Groups = lazy(() => import("./pages/Groups"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
+const Collections = lazy(() => import("./pages/Collections"));
 const TimelinePage = lazy(() => import("./pages/TimelinePage"));
 
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
@@ -126,6 +127,17 @@ const App = () => (
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
                     <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                  </Route>
+
+                  <Route
+                    path="/collections"
+                    element={
+                      <ProtectedRoute>
+                        <DashboardLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Collections />} />
                   </Route>
 
                   <Route
