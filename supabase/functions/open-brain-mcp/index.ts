@@ -210,6 +210,114 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
 }
 
+function collectionItemUrl(collectionSlug: string, itemId: string) {
+  return `https://menerio.com/collections/${collectionSlug}?item=${itemId}`;
+}
+
+function summarizeOutput(output: unknown) {
+  const text = typeof output === "string" ? output : JSON.stringify(output);
+  return text.length > 500 ? `${text.slice(0, 497)}...` : text;
+}
+
+async function logMcpToolCall(toolName: string, input: Record<string, unknown>, output: unknown, success: boolean) {
+  await supabase.from("mcp_call_logs").insert({
+    user_id: currentUserId,
+    tool_name: toolName,
+    input,
+    output_summary: summarizeOutput(output),
+    success,
+  });
+}
+
+async function enforceMcpToolLimit(toolName: string, input: Record<string, unknown>) {
+  const since = new Date(Date.now() - 60_000).toISOString();
+  const { count, error } = await supabase
+    .from("mcp_call_logs")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", currentUserId)
+    .eq("tool_name", toolName)
+    .gte("created_at", since);
+  if (error) throw new Error(`Could not check MCP usage: ${error.message}`);
+  if ((count || 0) >= 60) {
+    const message = "Rate limit exceeded for this tool. Please wait a minute and try again.";
+    await logMcpToolCall(toolName, input, message, false);
+    throw new Error(message);
+  }
+}
+
+async function withLoggedCollectionTool(toolName: string, input: Record<string, unknown>, handler: () => Promise<unknown>) {
+  try {
+    await enforceMcpToolLimit(toolName, input);
+    const output = await handler();
+    await logMcpToolCall(toolName, input, output, true);
+    return jsonTool(output);
+  } catch (err: unknown) {
+    const message = (err as Error).message;
+    await logMcpToolCall(toolName, input, message, false).catch(() => null);
+    return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
+  }
+}
+
+async function collectionItemCounts(collectionIds: string[]) {
+  const pairs = await Promise.all(collectionIds.map(async (id) => {
+    const { count } = await supabase.from("collection_items").select("id", { count: "exact", head: true }).eq("user_id", currentUserId).eq("collection_id", id);
+    return [id, count || 0] as const;
+  }));
+  return new Map(pairs);
+}
+
+async function getCollectionBySlug(slug: string) {
+  const { data, error } = await supabase.from("collections").select("*").eq("user_id", currentUserId).eq("slug", slug).maybeSingle();
+  if (error) throw new Error(`Could not load collection: ${error.message}`);
+  if (!data) throw new Error(`Collection not found: ${slug}`);
+  return data as any;
+}
+
+function schemaKeys(collection: any) {
+  const fields = Array.isArray(collection.field_schema) ? collection.field_schema : [];
+  return new Set(fields.map((field: any) => field?.key).filter((key: unknown): key is string => typeof key === "string" && key.length > 0));
+}
+
+function validateCollectionData(collection: any, data: Record<string, unknown>) {
+  const allowed = schemaKeys(collection);
+  const unknownKeys = Object.keys(data || {}).filter((key) => !allowed.has(key));
+  if (unknownKeys.length) throw new Error(`Unknown field key(s): ${unknownKeys.join(", ")}. Call get_collection_schema first and use only keys from field_schema.`);
+}
+
+async function recentlyUsedCollectionsForDescription(limit = 8) {
+  const { data: collections, error } = await supabase.from("collections").select("id, slug, name, icon, agent_instructions, updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false });
+  if (error || !collections?.length) return [];
+  if (collections.length <= limit) return collections as any[];
+
+  const { data: items } = await supabase.from("collection_items").select("collection_id, updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false }).limit(200);
+  const collectionById = new Map((collections as any[]).map((collection) => [collection.id, collection]));
+  const ordered: any[] = [];
+  const seen = new Set<string>();
+  for (const item of items || []) {
+    if (!seen.has((item as any).collection_id) && collectionById.has((item as any).collection_id)) {
+      seen.add((item as any).collection_id);
+      ordered.push(collectionById.get((item as any).collection_id));
+    }
+    if (ordered.length >= limit) break;
+  }
+  for (const collection of collections as any[]) {
+    if (ordered.length >= limit) break;
+    if (!seen.has(collection.id)) ordered.push(collection);
+  }
+  return ordered;
+}
+
+async function buildAddCollectionItemDescription() {
+  const collections = await recentlyUsedCollectionsForDescription(8);
+  if (!collections.length) {
+    return "Add a new item to a collection. The user has defined custom collections — call list_collections first to see what's available, then get_collection_schema to know the fields. For sensitive collections (visibility=private), confirm with the user before saving.";
+  }
+  const guidance = collections
+    .map((collection: any) => `- ${collection.icon || "📁"} ${collection.name} (slug: ${collection.slug}): ${collection.agent_instructions || "No capture instructions provided."}`)
+    .join("\n");
+  return `Add a new item to a collection. The user has defined the following collections — pay attention to each one's capture instructions:\n\n${guidance}\n\nCall get_collection_schema before adding to know the exact fields. For sensitive collections (visibility=private), confirm with the user before saving.`;
+}
+
 async function resolveGroup(idOrSlug: string) {
   const query = supabase.from("contact_groups").select("*").eq("user_id", currentUserId).eq("is_trashed", false);
   const { data, error } = isUuid(idOrSlug) ? await query.eq("id", idOrSlug).maybeSingle() : await query.eq("slug", idOrSlug).maybeSingle();
