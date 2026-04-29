@@ -1,6 +1,6 @@
 # Menerio — End-to-End Test Scenarios
 
-> **Last updated:** 2026-04-19
+> **Last updated:** 2026-04-28
 
 > **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
@@ -257,6 +257,27 @@
   2. Click the filter/entity-type dropdown
   3. Select "Task"
 - **Expected Outcome:** Only notes with `entity_type = "Task"` are shown. Clearing filter shows all notes.
+
+### TS-NOTES-013: Download Note as Markdown
+
+- **Objective:** Validate single-note Markdown export
+- **Preconditions:** A note exists with title, Markdown content, tags, and optional wikilinks
+- **Steps:**
+  1. Navigate to `/dashboard/notes`
+  2. Select the note
+  3. Click the download icon in the editor action bar
+- **Expected Outcome:** Browser downloads a `.md` file named after the note title. File contains YAML frontmatter and the current Markdown body.
+
+### TS-NOTES-014: Source Mode Round Trip
+
+- **Objective:** Validate Markdown source editing
+- **Preconditions:** A note is open and editable
+- **Steps:**
+  1. Click the Markdown source icon
+  2. Edit raw Markdown, including a checklist or wikilink
+  3. Switch back to rich text mode
+  4. Refresh the page
+- **Expected Outcome:** Markdown changes persist without HTML conversion artifacts. Checklists and wikilinks render correctly.
 
 ### TS-NOTES-013: Process Note with AI
 
