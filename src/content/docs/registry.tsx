@@ -477,6 +477,35 @@ const githubSync: DocPage = {
   ),
 };
 
+const lexicon: DocPage = {
+  slug: "lexicon",
+  title: "Lexicon",
+  description: "Build durable, reviewed knowledge pages from your notes and links.",
+  category: "Knowledge",
+  headings: [
+    { id: "what-it-is", title: "What It Is" },
+    { id: "pages-and-sources", title: "Pages & Sources" },
+    { id: "wikilinks", title: "Wikilinks & Backlinks" },
+    { id: "health-check", title: "Health Check" },
+  ],
+  searchText: "lexicon wiki pages knowledge synthesis sources backlinks wikilinks lint health check concepts entities",
+  content: () => (
+    <>
+      <h2 id="what-it-is">What It Is</h2>
+      <p>The Lexicon is where Menerio turns scattered notes into durable knowledge pages for concepts, people, projects, sources, and synthesis pages.</p>
+
+      <h2 id="pages-and-sources">Pages & Sources</h2>
+      <p>Lexicon pages can cite the notes they were built from, so you can move from a clean summary back to the original evidence whenever needed.</p>
+
+      <h2 id="wikilinks">Wikilinks & Backlinks</h2>
+      <p>Use Obsidian-style <code>[[wikilinks]]</code> to connect Lexicon pages. Backlinks show which pages reference the current topic and help you navigate related knowledge.</p>
+
+      <h2 id="health-check">Health Check</h2>
+      <p>The Lexicon health check can surface broken links, orphan pages, stale pages, and possible contradictions so your knowledge base stays coherent over time.</p>
+    </>
+  ),
+};
+
 // ── Your Profile ──
 
 const profilePage: DocPage = {
