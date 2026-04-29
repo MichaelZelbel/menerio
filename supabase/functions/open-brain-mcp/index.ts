@@ -2125,6 +2125,93 @@ server.registerTool("review_group_member_suggestion", { title: "Review Group Mem
   }
 });
 
+server.registerTool("list_collections", { title: "List Collections", description: "List all collections the user has created. Returns each collection's name, slug, description, icon, and the agent_instructions that explain how to capture into it. Call this once at the start of a session, or whenever the user mentions a topic that might fit an existing collection, to know what's available.", inputSchema: {} }, async () => {
+  return withLoggedCollectionTool("list_collections", {}, async () => {
+    const { data, error } = await supabase.from("collections").select("id, slug, name, icon, description, agent_instructions, field_schema").eq("user_id", currentUserId).order("updated_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    const counts = await collectionItemCounts((data || []).map((collection: any) => collection.id));
+    return (data || []).map((collection: any) => ({
+      slug: collection.slug,
+      name: collection.name,
+      icon: collection.icon,
+      description: collection.description,
+      agent_instructions: collection.agent_instructions,
+      item_count: counts.get(collection.id) || 0,
+      field_count: Array.isArray(collection.field_schema) ? collection.field_schema.length : 0,
+    }));
+  });
+});
+
+server.registerTool("get_collection_schema", { title: "Get Collection Schema", description: "Get the full field schema for a specific collection, including each field's key, label, type, and options. Call this before adding or updating items so you know the exact fields and their constraints.", inputSchema: { slug: z.string() } }, async ({ slug }) => {
+  return withLoggedCollectionTool("get_collection_schema", { slug }, async () => {
+    const collection = await getCollectionBySlug(slug);
+    const counts = await collectionItemCounts([collection.id]);
+    return {
+      slug: collection.slug,
+      name: collection.name,
+      field_schema: Array.isArray(collection.field_schema) ? collection.field_schema : [],
+      agent_instructions: collection.agent_instructions,
+      item_count: counts.get(collection.id) || 0,
+    };
+  });
+});
+
+const addCollectionItemTool = server.registerTool("add_collection_item", { title: "Add Collection Item", description: "Add a new item to a collection. The user has defined custom collections — call list_collections first to see what's available, then get_collection_schema to know the fields. Pay close attention to each collection's agent_instructions, which describe when and how to capture entries. For sensitive collections (visibility=private), confirm with the user before saving.", inputSchema: { collection_slug: z.string(), data: z.record(z.string(), z.any()) } }, async ({ collection_slug, data }) => {
+  return withLoggedCollectionTool("add_collection_item", { collection_slug, data }, async () => {
+    const collection = await getCollectionBySlug(collection_slug);
+    validateCollectionData(collection, data || {});
+    const { data: item, error } = await supabase.from("collection_items").insert({ user_id: currentUserId, collection_id: collection.id, data }).select("id, title").single();
+    if (error || !item) throw new Error(error?.message || "Could not add collection item");
+    return { id: item.id, title: item.title, collection_slug: collection.slug, item_url: collectionItemUrl(collection.slug, item.id) };
+  });
+});
+
+server.registerTool("update_collection_item", { title: "Update Collection Item", description: "Update an existing item in a collection. Useful for status changes, follow-up updates, adding notes to an existing entry.", inputSchema: { item_id: z.string(), data: z.record(z.string(), z.any()) } }, async ({ item_id, data }) => {
+  return withLoggedCollectionTool("update_collection_item", { item_id, data }, async () => {
+    const { data: existing, error: existingError } = await supabase.from("collection_items").select("id, collection_id, data, collections:collection_id(*)").eq("user_id", currentUserId).eq("id", item_id).maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (!existing) throw new Error("Collection item not found");
+    const collection = (existing as any).collections;
+    validateCollectionData(collection, data || {});
+    const merged = { ...((existing as any).data || {}), ...(data || {}) };
+    const { data: updated, error } = await supabase.from("collection_items").update({ data: merged }).eq("user_id", currentUserId).eq("id", item_id).select("id, title, updated_at").single();
+    if (error || !updated) throw new Error(error?.message || "Could not update collection item");
+    return { id: updated.id, title: updated.title, updated_at: updated.updated_at };
+  });
+});
+
+server.registerTool("list_collection_items", { title: "List Collection Items", description: "Search and list items within a specific collection. Supports text search and filtering by indexable date/number/text columns. Use this to retrieve context — 'what was the last thing I logged about X', 'what's coming up', 'who hasn't been followed up with'.", inputSchema: { collection_slug: z.string(), search: z.string().optional(), limit: z.number().optional().default(20), date_from: z.string().optional(), date_to: z.string().optional(), status: z.string().optional(), sort: z.enum(["recent", "oldest", "updated"]).optional().default("recent") } }, async ({ collection_slug, search, limit, date_from, date_to, status, sort }) => {
+  return withLoggedCollectionTool("list_collection_items", { collection_slug, search, limit, date_from, date_to, status, sort }, async () => {
+    const collection = await getCollectionBySlug(collection_slug);
+    const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    let q = supabase.from("collection_items").select("id, title, data, updated_at, created_at").eq("user_id", currentUserId).eq("collection_id", collection.id).limit(cappedLimit);
+    if (search) q = q.textSearch("search_vector", search, { type: "websearch", config: "simple" });
+    if (date_from) q = q.gte("indexable_date_1", date_from);
+    if (date_to) q = q.lte("indexable_date_1", date_to);
+    if (status) q = q.eq("indexable_text_1", status);
+    if (sort === "oldest") q = q.order("created_at", { ascending: true });
+    else if (sort === "updated") q = q.order("updated_at", { ascending: false });
+    else q = q.order("created_at", { ascending: false });
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return (data || []).map((item: any) => ({ id: item.id, title: item.title, data: item.data, updated_at: item.updated_at }));
+  });
+});
+
+server.registerTool("search_all_collections", { title: "Search All Collections", description: "Search across all of the user's collections at once. Useful when the user references something but you don't know which collection it might be in.", inputSchema: { query: z.string(), limit: z.number().optional().default(20) } }, async ({ query, limit }) => {
+  return withLoggedCollectionTool("search_all_collections", { query, limit }, async () => {
+    const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    const { data, error } = await supabase.from("collection_items").select("id, title, data, collections:collection_id(slug, name)").eq("user_id", currentUserId).textSearch("search_vector", query, { type: "websearch", config: "simple" }).order("updated_at", { ascending: false }).limit(cappedLimit);
+    if (error) throw new Error(error.message);
+    return (data || []).map((item: any) => {
+      const flat = Object.values(item.data || {}).map((value) => typeof value === "object" ? JSON.stringify(value) : String(value)).join(" ");
+      const idx = flat.toLowerCase().indexOf(query.toLowerCase());
+      const snippet = idx >= 0 ? flat.slice(Math.max(0, idx - 60), idx + query.length + 120) : flat.slice(0, 180);
+      return { collection_slug: item.collections?.slug, collection_name: item.collections?.name, item_id: item.id, item_title: item.title, snippet };
+    });
+  });
+});
+
 const app = new Hono();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
