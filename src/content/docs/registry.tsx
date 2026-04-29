@@ -352,6 +352,35 @@ const reviewQueue: DocPage = {
   ),
 };
 
+const groups: DocPage = {
+  slug: "groups",
+  title: "Groups",
+  description: "Organise people around shared missions, pipelines, circles, and relationship workflows.",
+  category: "People & Actions",
+  headings: [
+    { id: "what-are-groups", title: "What Groups Are" },
+    { id: "memberships", title: "Memberships & Stages" },
+    { id: "ai-match-members", title: "AI Match Members" },
+    { id: "briefings", title: "Briefings & Next Steps" },
+  ],
+  searchText: "groups contact groups people members stages pipeline relationship circle AI match members notes briefing next steps",
+  content: () => (
+    <>
+      <h2 id="what-are-groups">What Groups Are</h2>
+      <p>Groups let you organise people around a shared context: a community, project, pipeline, research list, relationship circle, or any other set of people you want to move forward intentionally.</p>
+
+      <h2 id="memberships">Memberships & Stages</h2>
+      <p>The same person can belong to multiple Groups with different statuses, priorities, notes, and reasons. Use stages to track where each member sits in that specific Group workflow.</p>
+
+      <h2 id="ai-match-members">AI Match Members</h2>
+      <p>Use <strong>AI Match Members</strong> to let Menerio analyse your notes and suggest or add relevant people to a Group. Depending on your Review Queue settings, high-confidence matches can be added automatically while still staying reviewable.</p>
+
+      <h2 id="briefings">Briefings & Next Steps</h2>
+      <p>Groups can generate AI briefings from recent interactions, members, goals, and open actions. You can also ask AI for a concrete next step for a specific Group member.</p>
+    </>
+  ),
+};
+
 // ── Integrations ──
 
 const appIntegrations: DocPage = {
