@@ -1883,7 +1883,7 @@ server.registerTool("create_group_next_step", { title: "Create Group Next Step",
     const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, contact_id").eq("user_id", currentUserId).eq("id", membership_id).maybeSingle();
     if (membershipError) throw new Error(membershipError.message);
     if (!membership) throw new Error("Membership not found");
-    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).contact_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, person_id: (membership as any).contact_id } }).select("*").single();
+    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).contact_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, contact_id: (membership as any).contact_id } }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, action_item: data });
   } catch (err: unknown) {
