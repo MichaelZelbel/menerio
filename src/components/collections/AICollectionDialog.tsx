@@ -240,7 +240,8 @@ export function AICollectionDialog({ open, onOpenChange, onCreated }: { open: bo
 
   const requestSchema = async (prompt: string, refining = false) => {
     if (!user) return;
-    refining ? setIsRefining(true) : setIsGenerating(true);
+    if (refining) setIsRefining(true);
+    else setIsGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke<EdgeResponse>("generate_collection_schema", {
         body: { description: prompt },
