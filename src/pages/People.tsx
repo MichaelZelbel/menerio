@@ -192,16 +192,16 @@ export default function People() {
   const clearSelection = () => setSelectedPeople([]);
   const bulkAddToGroup = async () => {
     if (!bulkGroupId || selectedPeople.length === 0) return;
-    try {
-      await Promise.all(selectedPeople.map((personId) => addMembership.mutateAsync({ groupId: bulkGroupId, personId })));
-      showToast.success(`Added ${selectedPeople.length} people to group`);
-      qc.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
-      clearSelection();
-      setBulkAddOpen(false);
-      setBulkGroupId("");
-    } catch (error: any) {
-      showToast.error(error.message || "Failed to add people");
-    }
+    const results = await Promise.allSettled(selectedPeople.map((personId) => addMembership.mutateAsync({ groupId: bulkGroupId, personId })));
+    const added = results.filter((result) => result.status === "fulfilled").length;
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    const alreadyMembers = rejected.filter((result) => String(result.reason?.message || "").toLowerCase().includes("duplicate")).length;
+    const errors = rejected.length - alreadyMembers;
+    showToast.success(`${added} added, ${alreadyMembers} already members, ${errors} errors`);
+    qc.invalidateQueries({ queryKey: ["contact_group_memberships", bulkGroupId] });
+    clearSelection();
+    setBulkAddOpen(false);
+    setBulkGroupId("");
   };
 
   // ── Helpers ──
@@ -474,6 +474,17 @@ export default function People() {
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row">
+        <Select value={groupFilter} onValueChange={setGroupFilter}>
+          <SelectTrigger className="w-full sm:w-48">
+            <SelectValue placeholder="Filter by Group" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Groups</SelectItem>
+            {groups.filter((group) => !group.archived_at).map((group) => (
+              <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -483,17 +494,6 @@ export default function People() {
             className="pl-9"
           />
         </div>
-        <Select value={groupFilter} onValueChange={setGroupFilter}>
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Filter by Group" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            {groups.filter((group) => !group.archived_at).map((group) => (
-              <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {selectedPeople.length > 0 && (
@@ -525,6 +525,7 @@ export default function People() {
           {filtered.map((person) => (
             <div
               key={person.id}
+              onClick={() => setSelectedPersonId(person.id)}
               className="flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -537,7 +538,7 @@ export default function People() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <User className="h-5 w-5 text-primary" />
                 </div>
-                <button type="button" onClick={() => setSelectedPersonId(person.id)} className="min-w-0 text-left">
+                <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedPersonId(person.id); }} className="min-w-0 text-left">
                   <p className="truncate font-medium text-foreground">{person.name}</p>
                   {(person.aliases || []).length > 0 && (
                     <p className="truncate text-xs text-muted-foreground">{person.aliases.join(", ")}</p>
