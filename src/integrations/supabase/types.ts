@@ -2601,6 +2601,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_collection_template_usage: {
+        Args: { p_slug: string }
+        Returns: undefined
+      }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_premium_user: { Args: { _user_id: string }; Returns: boolean }
       lookup_mcp_token: {
