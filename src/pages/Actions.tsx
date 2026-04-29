@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { SEOHead } from "@/components/SEOHead";
@@ -41,22 +42,10 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-// Group-linked action_items store metadata as: { group_membership_id: "uuid", group_id: "uuid", person_id: "uuid" }.
-interface ActionItem {
-  id: string;
-  user_id: string;
-  content: string;
-  source_note_id: string | null;
-  contact_id: string | null;
-  status: string;
-  priority: string;
-  due_date: string | null;
-  completed_at: string | null;
-  tags: string[];
-  created_at: string;
-  updated_at: string;
+// Group-linked action_items store metadata as: { group_membership_id: "uuid", group_id: "uuid", contact_id: "uuid" }.
+type ActionItem = Omit<Database["public"]["Tables"]["action_items"]["Row"], "metadata"> & {
   metadata?: Record<string, string> | null;
-}
+};
 
 const STATUS_COLS = [
   { key: "open", label: "Open", icon: Circle, color: "text-blue-500" },
@@ -94,13 +83,13 @@ export default function Actions() {
     enabled: !!user,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("action_items" as any)
+        .from("action_items")
         .select("*")
         .eq("user_id", user!.id)
         .neq("status", "dismissed")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data as unknown as ActionItem[]) || [];
+      return ((data || []) as unknown) as ActionItem[];
     },
   });
 
@@ -175,7 +164,7 @@ export default function Actions() {
       const update: any = { status };
       if (status === "done") update.completed_at = new Date().toISOString();
       else update.completed_at = null;
-      const { error } = await supabase.from("action_items" as any).update(update).eq("id", id);
+      const { error } = await supabase.from("action_items").update(update).eq("id", id);
       if (error) throw error;
       if (status === "done" && item?.metadata?.group_id && item.status !== "done") {
         const { data: group, error: groupError } = await supabase.from("contact_groups").select("id, success_criteria").eq("id", item.metadata.group_id).maybeSingle();
@@ -196,7 +185,7 @@ export default function Actions() {
 
   const createItem = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("action_items" as any).insert({
+      const { error } = await supabase.from("action_items").insert({
         user_id: user!.id,
         content: form.content.trim(),
         priority: form.priority,
@@ -216,7 +205,7 @@ export default function Actions() {
 
   const dismissItem = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("action_items" as any).update({ status: "dismissed" }).eq("id", id);
+      const { error } = await supabase.from("action_items").update({ status: "dismissed" }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {

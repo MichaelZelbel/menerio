@@ -33,8 +33,8 @@ export function MembershipSheet({ group, membership, notes, open, onOpenChange }
   if (!membership) return <Sheet open={open} onOpenChange={onOpenChange} />;
 
   const update = (updates: Parameters<typeof updateMembership.mutate>[0]) => updateMembership.mutate(updates, { onSuccess: () => showToast.success("Membership updated") });
-  const updateField = (field: "status" | "priority" | "reason" | "notes", value: string | null) => update({ id: membership.id, groupId: group.id, personId: membership.person_id, [field]: value });
-  const updateAttribute = (key: string, value: string | number) => update({ id: membership.id, groupId: group.id, personId: membership.person_id, attributes: { ...values, [key]: value } as Json });
+  const updateField = (field: "status" | "priority" | "reason" | "notes", value: string | null) => update({ id: membership.id, groupId: group.id, personId: membership.contact_id, [field]: value });
+  const updateAttribute = (key: string, value: string | number) => update({ id: membership.id, groupId: group.id, personId: membership.contact_id, attributes: { ...values, [key]: value } as Json });
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -42,7 +42,7 @@ export function MembershipSheet({ group, membership, notes, open, onOpenChange }
         <SheetHeader>
           <SheetTitle className="flex items-center gap-3 pr-6">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm text-primary">{initials(membership.contacts?.name)}</span>
-            <span className="min-w-0"><span className="block truncate">{membership.contacts?.name || "Unknown person"}</span><Link to={`/dashboard/people/${membership.person_id}`} className="text-sm font-normal text-muted-foreground hover:text-foreground">Open profile</Link></span>
+            <span className="min-w-0"><span className="block truncate">{membership.contacts?.name || "Unknown person"}</span><Link to={`/dashboard/people/${membership.contact_id}`} className="text-sm font-normal text-muted-foreground hover:text-foreground">Open profile</Link></span>
           </SheetTitle>
         </SheetHeader>
         <div className="mt-6 space-y-5">
@@ -67,8 +67,8 @@ export function MembershipSheet({ group, membership, notes, open, onOpenChange }
             {notes.length === 0 ? <p className="text-sm text-muted-foreground">No source notes.</p> : notes.map((note) => <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 text-sm hover:bg-accent">{note.title || "Untitled"}</Link>)}
           </div>
           <div className="flex gap-2 pt-2">
-            <Button variant="outline" className="flex-1" onClick={() => archiveMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.person_id }, { onSuccess: () => { showToast.success("Membership archived"); onOpenChange(false); } })}><Archive className="mr-2 h-4 w-4" /> Archive</Button>
-            <Button variant="destructive" className="flex-1" onClick={() => removeMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.person_id }, { onSuccess: () => { showToast.success("Removed from group"); onOpenChange(false); } })}><Trash2 className="mr-2 h-4 w-4" /> Remove</Button>
+            <Button variant="outline" className="flex-1" onClick={() => archiveMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.contact_id }, { onSuccess: () => { showToast.success("Membership archived"); onOpenChange(false); } })}><Archive className="mr-2 h-4 w-4" /> Archive</Button>
+            <Button variant="destructive" className="flex-1" onClick={() => removeMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.contact_id }, { onSuccess: () => { showToast.success("Removed from group"); onOpenChange(false); } })}><Trash2 className="mr-2 h-4 w-4" /> Remove</Button>
           </div>
         </div>
       </SheetContent>

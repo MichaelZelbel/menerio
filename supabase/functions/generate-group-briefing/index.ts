@@ -16,7 +16,7 @@ serve(async (req) => {
 
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     const [{ data: memberships }, { data: interactions }, { data: actions }] = await Promise.all([
-      admin.from("contact_group_memberships").select("*, contacts:person_id(name, company, role)").eq("group_id", group_id).eq("user_id", userId).is("archived_at", null).order("last_movement_at", { ascending: true }),
+      admin.from("contact_group_memberships").select("*, contacts:contact_id(name, company, role)").eq("group_id", group_id).eq("user_id", userId).is("archived_at", null).order("last_movement_at", { ascending: true }),
       admin.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", userId).eq("group_id", group_id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
       admin.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", userId).eq("metadata->>group_id", group_id).order("created_at", { ascending: false }),
     ]);

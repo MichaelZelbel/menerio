@@ -315,8 +315,8 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
 
   const { data: memberships, error: membershipsError } = await db
     .from("contact_group_memberships")
-    .select("group_id, person_id, contact_groups:group_id(id, slug, name)")
-    .in("person_id", personIds)
+    .select("group_id, contact_id, contact_groups:group_id(id, slug, name)")
+    .in("contact_id", personIds)
     .is("archived_at", null);
   if (membershipsError) throw membershipsError;
 
@@ -325,7 +325,7 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     const group = membership.contact_groups;
     if (!group?.id || !group?.slug) continue;
     const current = groups.get(group.id) || { id: group.id, slug: group.slug, name: group.name || group.slug, personIds: new Set<string>() };
-    current.personIds.add(membership.person_id);
+    current.personIds.add(membership.contact_id);
     groups.set(group.id, current);
   }
   if (groups.size === 0) return { updated: 0, skipped: "no_groups" };
