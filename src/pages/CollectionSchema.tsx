@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useBlocker, useNavigate, useParams } from "react-router-dom";
 import { DndContext, DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -60,6 +60,12 @@ function toJsonSchema(fields: SchemaField[]): Json[] {
     if (field.type === "collection" && field.collection_id) clean.collection_id = field.collection_id;
     return clean;
   });
+}
+
+function normalizePrimary(fields: SchemaField[]) {
+  if (fields.some((field) => field.primary)) return fields;
+  const fallback = fields.find((field) => field.type === "text") ?? fields[0];
+  return fields.map((field) => ({ ...field, primary: field.id === fallback?.id }));
 }
 
 function validateFields(fields: SchemaField[]) {
@@ -136,7 +142,7 @@ function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, o
   );
 }
 
-function OptionEditor({ field, onChange, addOption }: { field: SchemaField; optionValue: string; onChange: (field: SchemaField) => void; addOption: (value: string) => void }) {
+function OptionEditor({ field, onChange, addOption }: { field: SchemaField; onChange: (field: SchemaField) => void; addOption: (value: string) => void }) {
   const [value, setValue] = useState("");
   return <div className="space-y-3"><Label>Options</Label><div className="flex flex-wrap gap-2">{(field.options ?? []).map((option, index) => <span key={`${option}-${index}`} className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-sm">{option}<button type="button" onClick={() => onChange({ ...field, options: (field.options ?? []).filter((_, i) => i !== index) })}><X className="h-3 w-3" /></button></span>)}</div><form className="flex max-w-sm gap-2" onSubmit={(event) => { event.preventDefault(); addOption(value); setValue(""); }}><Input value={value} onChange={(event) => setValue(event.target.value)} placeholder="+ add option" /><Button type="submit" variant="secondary">Add</Button></form></div>;
 }
