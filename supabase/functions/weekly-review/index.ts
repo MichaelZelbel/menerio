@@ -68,7 +68,7 @@ async function getAuthenticatedUser(authHeader: string | null) {
 }
 
 async function createWeeklyReviewForUser(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: any,
   userId: string,
   days: number,
   options: { scheduled?: boolean } = {},
@@ -198,7 +198,7 @@ ${noteSummaries.join("\n\n")}`;
   };
 }
 
-async function runScheduledWeeklyReviews(supabaseAdmin: ReturnType<typeof createClient>) {
+async function runScheduledWeeklyReviews(supabaseAdmin: any) {
   const { data: profiles, error } = await supabaseAdmin
     .from("profiles")
     .select("id");
@@ -222,9 +222,10 @@ async function runScheduledWeeklyReviews(supabaseAdmin: ReturnType<typeof create
     }
 
     try {
-      const result = await createWeeklyReviewForUser(supabaseAdmin, profile.id, 7, { scheduled: true });
+      const profileId = String(profile.id);
+      const result = await createWeeklyReviewForUser(supabaseAdmin, profileId, 7, { scheduled: true });
       results.processed++;
-      if (result.saved) results.created++;
+      if ("saved" in result && result.saved) results.created++;
       if (result.skipped) results.skipped++;
     } catch (err) {
       results.errors++;
