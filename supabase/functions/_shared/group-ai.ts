@@ -92,9 +92,9 @@ const UNTRUSTED_TEXT_KEYS = new Set(["name", "title", "summary", "content", "des
 
 export function sanitizePromptText(value: unknown, maxLength = 500) {
   return String(value ?? "")
-    .replace(/```/g, "\u0060\u0060\u0060")
-    .replace(/`/g, "\u0060")
-    .replace(/"""/g, "\u0022\u0022\u0022")
+    .replace(/```/g, "'''")
+    .replace(/`/g, "'")
+    .replace(/"""/g, "'''")
     .slice(0, maxLength);
 }
 
