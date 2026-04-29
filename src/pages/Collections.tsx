@@ -1,20 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LayoutGrid, Plus, Sparkles, type LucideIcon } from "lucide-react";
+import { z } from "zod";
+import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { Database } from "@/integrations/supabase/types";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionWithCount = Collection & { itemCount: number };
 
 const iconMap: Record<string, LucideIcon> = { LayoutGrid, Sparkles };
+const emojiOptions = ["📚", "🏠", "💼", "🎯", "🍳", "✏️", "🎨", "💡", "🔧", "🌱"];
+const collectionFormSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(60, "Name must be 60 characters or fewer"),
+  icon: z.string().trim().refine((value) => !value || (/^\p{Emoji}/u.test(value) && Array.from(value.replace(/\uFE0F/g, "")).length === 1), "Use a single emoji"),
+  description: z.string().trim().max(200, "Description must be 200 characters or fewer").optional(),
+  visibility: z.enum(["private", "personal"]),
+});
+
+type CollectionFormValues = z.infer<typeof collectionFormSchema>;
+type CollectionFormErrors = Partial<Record<keyof CollectionFormValues, string>>;
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "collection";
+}
 
 function CollectionIcon({ icon, className = "h-5 w-5" }: { icon?: string | null; className?: string }) {
   if (icon && /^\p{Emoji}/u.test(icon)) return <span className={className}>{icon}</span>;
@@ -46,7 +67,7 @@ function CollectionsSkeleton() {
   );
 }
 
-function EmptyCollectionsState() {
+function EmptyCollectionsState({ onNewBlank }: { onNewBlank: () => void }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-16 text-center">
       <div className="max-w-2xl">
@@ -63,7 +84,7 @@ function EmptyCollectionsState() {
             ✨ Create with AI
           </Button>
         </div>
-        <button type="button" className="mt-4 text-sm text-primary underline-offset-4 hover:underline">
+        <button type="button" className="mt-4 text-sm text-primary underline-offset-4 hover:underline" onClick={onNewBlank}>
           or create a blank collection
         </button>
       </div>
@@ -101,9 +122,130 @@ function CollectionCard({ collection }: { collection: CollectionWithCount }) {
   );
 }
 
+function NewCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [values, setValues] = useState<CollectionFormValues>({ name: "", icon: "📚", description: "", visibility: "private" });
+  const [errors, setErrors] = useState<CollectionFormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const slugPreview = slugify(values.name);
+
+  const updateValue = <K extends keyof CollectionFormValues>(key: K, value: CollectionFormValues[K]) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+  };
+
+  const validate = () => {
+    const parsed = collectionFormSchema.safeParse(values);
+    if (parsed.success) {
+      setErrors({});
+      return parsed.data;
+    }
+
+    const nextErrors: CollectionFormErrors = {};
+    parsed.error.issues.forEach((issue) => {
+      const key = issue.path[0] as keyof CollectionFormValues | undefined;
+      if (key) nextErrors[key] = issue.message;
+    });
+    setErrors(nextErrors);
+    return null;
+  };
+
+  const reset = () => {
+    setValues({ name: "", icon: "📚", description: "", visibility: "private" });
+    setErrors({});
+    setIsSubmitting(false);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!user) return;
+
+    const parsed = validate();
+    if (!parsed) return;
+
+    setIsSubmitting(true);
+    const { data, error } = await supabase
+      .from("collections")
+      .insert({
+        user_id: user.id,
+        name: parsed.name,
+        slug: slugPreview,
+        icon: parsed.icon || null,
+        description: parsed.description || null,
+        visibility: parsed.visibility,
+        field_schema: [],
+        agent_instructions: null,
+      })
+      .select("slug")
+      .single();
+
+    setIsSubmitting(false);
+    if (error || !data) {
+      toast.error("Could not create collection", { description: "Please try again." });
+      return;
+    }
+
+    toast.success("Collection created");
+    onOpenChange(false);
+    reset();
+    navigate(`/collections/${data.slug}/schema`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset(); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New Collection</DialogTitle></DialogHeader>
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="space-y-2">
+            <Label htmlFor="collection-name">Name</Label>
+            <Input id="collection-name" value={values.name} maxLength={60} onChange={(event) => updateValue("name", event.target.value)} onBlur={validate} placeholder="Reading List" />
+            <p className="text-xs text-muted-foreground">Slug: {slugPreview}</p>
+            {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Icon</Label>
+            <div className="flex flex-wrap gap-2">
+              {emojiOptions.map((emoji) => (
+                <button key={emoji} type="button" className={cn("flex h-9 w-9 items-center justify-center rounded-md border text-lg transition-colors hover:bg-accent", values.icon === emoji && "border-primary bg-primary/10")} onClick={() => updateValue("icon", emoji)}>
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <Input value={values.icon} maxLength={4} onChange={(event) => updateValue("icon", event.target.value)} onBlur={validate} className="w-24" aria-label="Custom emoji" />
+            {errors.icon && <p className="text-xs text-destructive">{errors.icon}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="collection-description">Description</Label>
+            <Textarea id="collection-description" value={values.description} maxLength={200} onChange={(event) => updateValue("description", event.target.value)} onBlur={validate} placeholder="What does this collection track?" />
+            {errors.description && <p className="text-xs text-destructive">{errors.description}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Visibility</Label>
+            <RadioGroup value={values.visibility} onValueChange={(value) => updateValue("visibility", value as "private" | "personal")}>
+              <Label className="flex items-center gap-2 rounded-md border p-3"><RadioGroupItem value="private" /> Private (only me)</Label>
+              <Label className="flex items-center gap-2 rounded-md border p-3"><RadioGroupItem value="personal" /> Personal (visible to my AI agents)</Label>
+            </RadioGroup>
+          </div>
+
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">URL: menerio.com/collections/{slugPreview}</p>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={!values.name.trim() || isSubmitting}>Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Collections() {
   const { user } = useAuth();
-  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [collections, setCollections] = useState<CollectionWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -121,7 +263,7 @@ export default function Collections() {
 
       if (error) {
         if (!cancelled) {
-          toast({ variant: "destructive", title: "Could not load collections", description: error.message });
+          toast.error("Could not load collections", { description: error.message });
           setIsLoading(false);
         }
         return;
@@ -140,7 +282,7 @@ export default function Collections() {
           return [collection.id, count ?? 0] as const;
         }),
       ).catch((countError: Error) => {
-        if (!cancelled) toast({ variant: "destructive", title: "Could not load item counts", description: countError.message });
+        if (!cancelled) toast.error("Could not load item counts", { description: countError.message });
         return [] as readonly (readonly [string, number])[];
       });
 
@@ -153,7 +295,7 @@ export default function Collections() {
 
     fetchCollections();
     return () => { cancelled = true; };
-  }, [toast, user]);
+  }, [user]);
 
   const hasCollections = useMemo(() => collections.length > 0, [collections.length]);
 
@@ -168,7 +310,7 @@ export default function Collections() {
             <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">✨ Create with AI</Button>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="New blank collection">
+                <Button variant="outline" size="icon" aria-label="New blank collection" onClick={() => setDialogOpen(true)}>
                   <Plus className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -181,12 +323,13 @@ export default function Collections() {
       {isLoading ? (
         <CollectionsSkeleton />
       ) : collections.length === 0 ? (
-        <EmptyCollectionsState />
+        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {collections.map((collection) => <CollectionCard key={collection.id} collection={collection} />)}
         </div>
       )}
+      <NewCollectionDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
   );
 }
