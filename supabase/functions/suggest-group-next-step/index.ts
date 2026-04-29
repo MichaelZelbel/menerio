@@ -11,7 +11,7 @@ serve(async (req) => {
 
     const { data: membership, error: membershipError } = await admin
       .from("contact_group_memberships")
-      .select("*, contact_groups:group_id(*), contacts:person_id(*)")
+      .select("*, contact_groups:group_id(*), contacts:contact_id(*)")
       .eq("id", membership_id)
       .eq("user_id", userId)
       .maybeSingle();
@@ -19,7 +19,7 @@ serve(async (req) => {
     if (!membership) return jsonResponse({ error: "Membership not found" }, 404);
 
     const [{ data: interactions, error: interactionsError }, { data: notes, error: notesError }] = await Promise.all([
-      admin.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", userId).eq("contact_id", membership.person_id).order("interaction_date", { ascending: false }).limit(5),
+      admin.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", userId).eq("contact_id", membership.contact_id).order("interaction_date", { ascending: false }).limit(5),
       admin.from("notes").select("title, content, created_at, metadata").eq("user_id", userId).contains("metadata", { people: [membership.contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
     if (interactionsError) throw interactionsError;
