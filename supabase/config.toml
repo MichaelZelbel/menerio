@@ -116,3 +116,6 @@ verify_jwt = false
 
 [functions.generate-group-briefing]
 verify_jwt = false
+
+[functions.generate_collection_schema]
+verify_jwt = false
