@@ -20,8 +20,8 @@ import { cn } from "@/lib/utils";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
-type FieldType = "text" | "longtext" | "number" | "date" | "datetime" | "boolean" | "select" | "multiselect" | "currency" | "url" | "email" | "phone" | "note" | "person" | "collection";
-type SchemaField = { id: string; key: string; label: string; type: FieldType; primary?: boolean; indexable?: boolean; options?: string[]; collection_id?: string | null };
+type FieldType = "text" | "longtext" | "number" | "date" | "datetime" | "boolean" | "select" | "multiselect" | "currency" | "url" | "email" | "phone" | "link_note" | "link_person" | "link_collection_item";
+type SchemaField = { id: string; key: string; label: string; type: FieldType; primary?: boolean; indexable?: boolean; options?: string[]; target_collection_slug?: string | null };
 type FieldErrors = Record<string, string[]>;
 
 const defaultField = (): SchemaField => ({ id: crypto.randomUUID(), key: "name", label: "Name", type: "text", primary: true });
@@ -46,7 +46,7 @@ function parseSchema(value: Json): SchemaField[] {
       primary: item.primary === true,
       indexable: item.indexable === true,
       options: Array.isArray(item.options) ? item.options.filter((option): option is string => typeof option === "string") : undefined,
-      collection_id: typeof item.collection_id === "string" ? item.collection_id : null,
+      target_collection_slug: typeof item.target_collection_slug === "string" ? item.target_collection_slug : typeof item.collection_id === "string" ? item.collection_id : null,
     };
   });
 }
@@ -57,7 +57,7 @@ function toJsonSchema(fields: SchemaField[]): Json[] {
     if (field.primary) clean.primary = true;
     if (field.indexable) clean.indexable = true;
     if (optionTypes.has(field.type)) clean.options = field.options ?? [];
-    if (field.type === "collection" && field.collection_id) clean.collection_id = field.collection_id;
+    if (field.type === "link_collection_item" && field.target_collection_slug) clean.target_collection_slug = field.target_collection_slug;
     return clean;
   });
 }
@@ -77,7 +77,7 @@ function validateFields(fields: SchemaField[]) {
     if (!field.label.trim()) fieldErrors.push("Label is required.");
     if (field.label.trim() && (labels.get(field.label.trim().toLowerCase()) ?? 0) > 1) fieldErrors.push("Label must be unique.");
     if (optionTypes.has(field.type) && (field.options ?? []).filter(Boolean).length === 0) fieldErrors.push("Add at least one option.");
-    if (field.type === "collection" && !field.collection_id) fieldErrors.push("Choose a collection to link.");
+    if (field.type === "link_collection_item" && !field.target_collection_slug) fieldErrors.push("Choose a target collection.");
     if (fieldErrors.length) errors[field.id] = fieldErrors;
   });
   if (fields.filter((field) => field.indexable).length > 4) errors.__form = ["Use at most 4 indexable fields."];
