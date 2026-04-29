@@ -1846,7 +1846,7 @@ server.registerTool("add_group_member", { title: "Add Group Member", description
   }
 });
 
-server.registerTool("update_group_membership", { title: "Update Group Membership", description: "Update a Group membership's stage/status, priority, notes, attributes, or archive state.", inputSchema: { membership_id: z.string(), status: z.string().optional(), priority: z.string().optional(), notes: z.string().optional(), reason: z.string().optional(), attributes: z.record(z.any()).optional(), archived: z.boolean().optional() } }, async ({ membership_id, status, priority, notes, reason, attributes, archived }) => {
+server.registerTool("update_group_membership", { title: "Update Group Membership", description: "Update a Group membership's stage/status, priority, notes, attributes, or archive state.", inputSchema: { membership_id: z.string(), status: z.string().optional(), priority: z.string().optional(), notes: z.string().optional(), reason: z.string().optional(), attributes: z.record(z.string(), z.any()).optional(), archived: z.boolean().optional() } }, async ({ membership_id, status, priority, notes, reason, attributes, archived }) => {
   try {
     if (!isUuid(membership_id)) throw new Error("Invalid membership_id");
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
