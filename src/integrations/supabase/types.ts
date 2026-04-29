@@ -22,6 +22,7 @@ export type Database = {
           created_at: string | null
           due_date: string | null
           id: string
+          metadata: Json | null
           priority: string
           source_note_id: string | null
           status: string
@@ -36,6 +37,7 @@ export type Database = {
           created_at?: string | null
           due_date?: string | null
           id?: string
+          metadata?: Json | null
           priority?: string
           source_note_id?: string | null
           status?: string
@@ -50,6 +52,7 @@ export type Database = {
           created_at?: string | null
           due_date?: string | null
           id?: string
+          metadata?: Json | null
           priority?: string
           source_note_id?: string | null
           status?: string
@@ -320,13 +323,13 @@ export type Database = {
         Row: {
           archived_at: string | null
           attributes: Json
+          contact_id: string
           created_at: string
           group_id: string
           id: string
           joined_at: string
           last_movement_at: string
           notes: string | null
-          person_id: string
           position: number
           priority: string
           reason: string | null
@@ -338,13 +341,13 @@ export type Database = {
         Insert: {
           archived_at?: string | null
           attributes?: Json
+          contact_id: string
           created_at?: string
           group_id: string
           id?: string
           joined_at?: string
           last_movement_at?: string
           notes?: string | null
-          person_id: string
           position?: number
           priority?: string
           reason?: string | null
@@ -356,13 +359,13 @@ export type Database = {
         Update: {
           archived_at?: string | null
           attributes?: Json
+          contact_id?: string
           created_at?: string
           group_id?: string
           id?: string
           joined_at?: string
           last_movement_at?: string
           notes?: string | null
-          person_id?: string
           position?: number
           priority?: string
           reason?: string | null
@@ -381,7 +384,7 @@ export type Database = {
           },
           {
             foreignKeyName: "contact_group_memberships_person_id_fkey"
-            columns: ["person_id"]
+            columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
