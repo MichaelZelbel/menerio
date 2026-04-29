@@ -638,19 +638,19 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         .eq("user_id", user!.id)
         .in("name", mentionedPeople);
       if (contactsError) throw contactsError;
-      const personIds = (contacts || []).map((contact) => contact.id);
+      const personIds = ((contacts || []) as Array<{ id: string; name: string }>).map((contact) => contact.id);
       if (personIds.length === 0) return [];
       const { data, error } = await supabase
         .from("contact_group_memberships")
-        .select("person_id, contact_groups:group_id(id, name, slug, icon)")
+        .select("contact_id, contact_groups:group_id(id, name, slug, icon)")
         .eq("user_id", user!.id)
-        .in("person_id", personIds)
+        .in("contact_id", personIds)
         .is("archived_at", null);
       if (error) throw error;
-      const contactNameById = new Map((contacts || []).map((contact) => [contact.id, contact.name]));
-      return (data || []).map((membership: any) => ({
-        personId: membership.person_id as string,
-        personName: contactNameById.get(membership.person_id) || "",
+      const contactNameById = new Map(((contacts || []) as Array<{ id: string; name: string }>).map((contact) => [contact.id, contact.name]));
+      return ((data || []) as Array<{ contact_id: string; contact_groups: { id: string; name: string; slug: string; icon: string | null } | null }>).map((membership) => ({
+        personId: membership.contact_id,
+        personName: contactNameById.get(membership.contact_id) || "",
         groupId: membership.contact_groups?.id as string,
         groupName: membership.contact_groups?.name as string,
         groupSlug: membership.contact_groups?.slug as string,
