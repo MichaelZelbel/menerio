@@ -1,15 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format, formatDistanceToNow, isValid, parseISO } from "date-fns";
 import {
+  CalendarIcon,
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
+  DollarSign,
   ExternalLink,
   LayoutGrid,
+  Link as LinkIcon,
+  Mail,
   MoreHorizontal,
+  Phone,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -28,6 +35,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -66,6 +74,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -107,6 +116,9 @@ type SchemaField = {
   options?: string[];
 };
 type ItemData = Record<string, unknown>;
+type FormValue = string | number | boolean | string[] | null;
+type FormValues = Record<string, FormValue>;
+type FormErrors = Record<string, string>;
 type Cursor = { updated_at: string; id: string };
 type SortKey = "updated" | "created" | "alpha";
 
@@ -185,11 +197,33 @@ function truncate(value: unknown, length = 60) {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
+function toInputString(value: unknown) {
+  return value == null ? "" : String(value);
+}
+
+function isEmptyValue(value: FormValue) {
+  return (
+    value == null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
 function parseDate(value: unknown) {
   if (!value) return null;
   const date =
     typeof value === "string" ? parseISO(value) : new Date(String(value));
   return isValid(date) ? date : null;
+}
+
+function toDateInput(value: unknown) {
+  const date = parseDate(value);
+  return date ? format(date, "yyyy-MM-dd") : "";
+}
+
+function toTimeInput(value: unknown) {
+  const date = parseDate(value);
+  return date ? format(date, "HH:mm") : "";
 }
 
 function renderDate(value: unknown) {
@@ -319,6 +353,584 @@ function CollectionIcon({
   if (icon && /^\p{Emoji}/u.test(icon))
     return <span className={className}>{icon}</span>;
   return <LayoutGrid className={className} />;
+}
+
+function initialFormValues(
+  fields: SchemaField[],
+  item: CollectionItem | null,
+): FormValues {
+  const data = asData(item?.data ?? {});
+  return fields.reduce<FormValues>((values, field) => {
+    const value = data[field.key];
+    if (field.type === "boolean") values[field.key] = Boolean(value);
+    else if (field.type === "multiselect")
+      values[field.key] = Array.isArray(value) ? value.map(String) : [];
+    else values[field.key] = value == null ? "" : String(value);
+    return values;
+  }, {});
+}
+
+function validateItemValues(fields: SchemaField[], values: FormValues) {
+  const errors: FormErrors = {};
+  const data: Record<string, Json> = {};
+
+  fields.forEach((field) => {
+    const value = values[field.key];
+    if (field.primary && isEmptyValue(value))
+      errors[field.key] = "Primary field cannot be empty.";
+    if (isEmptyValue(value)) return;
+
+    if (field.type === "number" || field.type === "currency") {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        errors[field.key] = "Enter a valid number.";
+        return;
+      }
+      data[field.key] = numeric;
+      return;
+    }
+
+    if (field.type === "url") {
+      const parsed = z
+        .string()
+        .trim()
+        .url("Enter a valid URL.")
+        .safeParse(value);
+      if (!parsed.success) {
+        errors[field.key] =
+          parsed.error.issues[0]?.message ?? "Enter a valid URL.";
+        return;
+      }
+      data[field.key] = parsed.data;
+      return;
+    }
+
+    if (field.type === "email") {
+      const parsed = z
+        .string()
+        .trim()
+        .email("Enter a valid email address.")
+        .max(255)
+        .safeParse(value);
+      if (!parsed.success) {
+        errors[field.key] =
+          parsed.error.issues[0]?.message ?? "Enter a valid email address.";
+        return;
+      }
+      data[field.key] = parsed.data;
+      return;
+    }
+
+    if (field.type === "boolean") data[field.key] = Boolean(value);
+    else if (field.type === "multiselect")
+      data[field.key] = Array.isArray(value) ? value : [];
+    else data[field.key] = String(value).trim();
+  });
+
+  return { errors, data };
+}
+
+function FieldInput({
+  field,
+  value,
+  error,
+  onChange,
+}: {
+  field: SchemaField;
+  value: FormValue;
+  error?: string;
+  onChange: (value: FormValue) => void;
+}) {
+  const selectedDate = parseDate(value);
+  const label = (
+    <div className="mb-2 flex items-center gap-2">
+      <Label>{field.label}</Label>
+      {field.primary && (
+        <Badge variant="secondary" className="text-[10px]">
+          primary
+        </Badge>
+      )}
+    </div>
+  );
+  const inputClass = error
+    ? "border-destructive focus-visible:ring-destructive"
+    : undefined;
+
+  if (field.type === "boolean") {
+    return (
+      <div className="rounded-md border p-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Label>{field.label}</Label>
+            {field.primary && (
+              <Badge variant="secondary" className="text-[10px]">
+                primary
+              </Badge>
+            )}
+          </div>
+          <Switch checked={Boolean(value)} onCheckedChange={onChange} />
+        </div>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
+  if (
+    [
+      "note",
+      "person",
+      "collection",
+      "link_note",
+      "link_person",
+      "link_collection_item",
+    ].includes(field.type)
+  ) {
+    return (
+      <div>
+        {label}
+        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          Link picker coming soon
+        </div>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {label}
+      {field.type === "longtext" ? (
+        <Textarea
+          value={toInputString(value)}
+          rows={3}
+          className={cn("max-h-72 min-h-24 resize-none", inputClass)}
+          onChange={(event) => {
+            onChange(event.target.value);
+            event.currentTarget.style.height = "auto";
+            event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 288)}px`;
+          }}
+        />
+      ) : field.type === "number" ? (
+        <Input
+          type="number"
+          value={toInputString(value)}
+          className={inputClass}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : field.type === "currency" ? (
+        <div className="relative">
+          <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="number"
+            step="0.01"
+            value={toInputString(value)}
+            className={cn("pl-9", inputClass)}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </div>
+      ) : field.type === "date" ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(
+                "w-full justify-start",
+                !value && "text-muted-foreground",
+                inputClass,
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {selectedDate
+                ? format(selectedDate, "MMM d, yyyy")
+                : "Select date"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={selectedDate ?? undefined}
+              onSelect={(date) =>
+                onChange(date ? format(date, "yyyy-MM-dd") : "")
+              }
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+      ) : field.type === "datetime" ? (
+        <div className="grid grid-cols-[1fr_120px] gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(
+                  "justify-start",
+                  !value && "text-muted-foreground",
+                  inputClass,
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {selectedDate
+                  ? format(selectedDate, "MMM d, yyyy")
+                  : "Select date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-0">
+              <Calendar
+                mode="single"
+                selected={selectedDate ?? undefined}
+                onSelect={(date) => {
+                  const currentTime = toTimeInput(value) || "09:00";
+                  onChange(
+                    date ? `${format(date, "yyyy-MM-dd")}T${currentTime}` : "",
+                  );
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          <div className="relative">
+            <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="time"
+              value={toTimeInput(value)}
+              className="pl-9"
+              onChange={(event) => {
+                const datePart =
+                  toDateInput(value) || format(new Date(), "yyyy-MM-dd");
+                onChange(`${datePart}T${event.target.value}`);
+              }}
+            />
+          </div>
+        </div>
+      ) : field.type === "select" ? (
+        <Select value={toInputString(value)} onValueChange={onChange}>
+          <SelectTrigger className={inputClass}>
+            <SelectValue placeholder="Select option" />
+          </SelectTrigger>
+          <SelectContent>
+            {(field.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : field.type === "multiselect" ? (
+        <div className="space-y-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+              >
+                Choose options
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72">
+              <div className="space-y-3">
+                {(field.options ?? []).map((option) => {
+                  const selected =
+                    Array.isArray(value) && value.includes(option);
+                  return (
+                    <Label
+                      key={option}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={(checked) =>
+                          onChange(
+                            checked
+                              ? [...(Array.isArray(value) ? value : []), option]
+                              : (Array.isArray(value) ? value : []).filter(
+                                  (item) => item !== option,
+                                ),
+                          )
+                        }
+                      />
+                      {option}
+                    </Label>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+          {Array.isArray(value) && value.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {value.map((item) => (
+                <Badge key={item} variant="secondary">
+                  {item}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : field.type === "url" ? (
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="url"
+              value={toInputString(value)}
+              className={cn("pl-9", inputClass)}
+              onChange={(event) => onChange(event.target.value)}
+            />
+          </div>
+          {value && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const parsed = z.string().url().safeParse(value);
+                if (parsed.success)
+                  window.open(parsed.data, "_blank", "noopener,noreferrer");
+                else toast.error("Enter a valid URL first");
+              }}
+            >
+              Test link
+            </Button>
+          )}
+        </div>
+      ) : field.type === "email" ? (
+        <div className="relative">
+          <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="email"
+            value={toInputString(value)}
+            className={cn("pl-9", inputClass)}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </div>
+      ) : field.type === "phone" ? (
+        <div className="relative">
+          <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="tel"
+            value={toInputString(value)}
+            className="pl-9"
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </div>
+      ) : (
+        <Input
+          value={toInputString(value)}
+          className={inputClass}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function ItemSheet({
+  collection,
+  fields,
+  item,
+  open,
+  onOpenChange,
+  onSaved,
+  onDeleted,
+}: {
+  collection: Collection | null;
+  fields: SchemaField[];
+  item: CollectionItem | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (item: CollectionItem) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const { user } = useAuth();
+  const [values, setValues] = useState<FormValues>({});
+  const [initialValues, setInitialValues] = useState("");
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const isCreate = item?.id === "new";
+  const isDirty = JSON.stringify(values) !== initialValues;
+
+  useEffect(() => {
+    if (!open) return;
+    const next = initialFormValues(fields, isCreate ? null : item);
+    setValues(next);
+    setInitialValues(JSON.stringify(next));
+    setErrors({});
+  }, [fields, isCreate, item, open]);
+
+  const close = useCallback(() => {
+    if (isDirty && !window.confirm("Discard unsaved item changes?")) return;
+    onOpenChange(false);
+  }, [isDirty, onOpenChange]);
+
+  const save = useCallback(async () => {
+    if (!collection || !user) return;
+    const validated = validateItemValues(fields, values);
+    setErrors(validated.errors);
+    if (Object.keys(validated.errors).length > 0) return;
+    setIsSaving(true);
+    const query = isCreate
+      ? supabase
+          .from("collection_items")
+          .insert({
+            user_id: user.id,
+            collection_id: collection.id,
+            data: validated.data,
+          })
+          .select("*")
+          .single()
+      : supabase
+          .from("collection_items")
+          .update({ data: validated.data })
+          .eq("id", item?.id ?? "")
+          .eq("user_id", user.id)
+          .select("*")
+          .single();
+    const { data, error } = await query;
+    setIsSaving(false);
+    if (error || !data)
+      return toast.error(
+        isCreate ? "Could not create item" : "Could not save item",
+        { description: error?.message ?? "Please try again." },
+      );
+    toast.success(isCreate ? "Item created" : "Item saved");
+    onSaved(data);
+    onOpenChange(false);
+  }, [
+    collection,
+    fields,
+    isCreate,
+    item?.id,
+    onOpenChange,
+    onSaved,
+    user,
+    values,
+  ]);
+
+  const deleteItem = async () => {
+    if (!item || isCreate) return;
+    const { error } = await supabase
+      .from("collection_items")
+      .delete()
+      .eq("id", item.id)
+      .eq("user_id", item.user_id);
+    if (error)
+      return toast.error("Could not delete item", {
+        description: error.message,
+      });
+    toast.success("Item deleted");
+    onDeleted(item.id);
+    setDeleteOpen(false);
+    onOpenChange(false);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        save();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [close, open, save]);
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+    >
+      <SheetContent className="flex flex-col sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>
+            {isCreate
+              ? `New item in ${collection?.name ?? "Collection"}`
+              : item?.title || "Edit item"}
+          </SheetTitle>
+          <SheetDescription>
+            {isDirty ? "Unsaved changes" : "Save changes when you are done."}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="-mx-6 flex-1 overflow-y-auto px-6 py-4">
+          <form
+            className="space-y-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              save();
+            }}
+          >
+            {fields.map((field) => (
+              <FieldInput
+                key={field.key}
+                field={field}
+                value={
+                  values[field.key] ??
+                  (field.type === "multiselect"
+                    ? []
+                    : field.type === "boolean"
+                      ? false
+                      : "")
+                }
+                error={errors[field.key]}
+                onChange={(value) => {
+                  setValues((current) => ({ ...current, [field.key]: value }));
+                  setErrors((current) => ({ ...current, [field.key]: "" }));
+                }}
+              />
+            ))}
+          </form>
+        </div>
+        <div className="flex items-center justify-between gap-2 border-t pt-4">
+          <div>
+            {!isCreate && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={save} disabled={isSaving}>
+              {isSaving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete item?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently deletes this collection item. This action
+                cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={deleteItem}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </SheetContent>
+    </Sheet>
+  );
 }
 
 function EditCollectionDialog({
@@ -980,23 +1592,26 @@ export default function CollectionDetail() {
           </div>
         </div>
       )}
-      <Sheet
+      <ItemSheet
+        collection={collection}
+        fields={fields}
+        item={selectedItem}
         open={!!selectedItem}
         onOpenChange={(open) => !open && setSelectedItem(null)}
-      >
-        <SheetContent className="sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>
-              {selectedItem?.id === "new"
-                ? "New Item"
-                : selectedItem?.title || "Edit Item"}
-            </SheetTitle>
-            <SheetDescription>
-              The item form will be added in the next step.
-            </SheetDescription>
-          </SheetHeader>
-        </SheetContent>
-      </Sheet>
+        onSaved={(savedItem) => {
+          setItems((current) => {
+            const exists = current.some((row) => row.id === savedItem.id);
+            return exists
+              ? current.map((row) =>
+                  row.id === savedItem.id ? savedItem : row,
+                )
+              : [savedItem, ...current].slice(0, PAGE_SIZE);
+          });
+        }}
+        onDeleted={(id) =>
+          setItems((current) => current.filter((row) => row.id !== id))
+        }
+      />
       <EditCollectionDialog
         collection={collection}
         open={editOpen}
