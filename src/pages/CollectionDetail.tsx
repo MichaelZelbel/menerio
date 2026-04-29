@@ -2,14 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format, formatDistanceToNow, isValid, parseISO } from "date-fns";
 import {
+  CalendarIcon,
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
+  DollarSign,
   ExternalLink,
   LayoutGrid,
+  Link as LinkIcon,
+  Mail,
   MoreHorizontal,
+  Phone,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -28,6 +35,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -66,6 +74,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
