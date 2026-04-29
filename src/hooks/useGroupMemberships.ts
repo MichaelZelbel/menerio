@@ -51,7 +51,7 @@ export function useGroupMemberships(groupId: string | null | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contact_group_memberships")
-        .select("*, contacts:person_id(id, name, aliases)")
+        .select("*, contacts:contact_id(id, name, aliases)")
         .eq("group_id", groupId!)
         .is("archived_at", null)
         .order("position", { ascending: true });
@@ -70,7 +70,7 @@ export function usePersonGroupMemberships(personId: string | null | undefined) {
       const { data, error } = await supabase
         .from("contact_group_memberships")
         .select("*, contact_groups:group_id(*)")
-        .eq("person_id", personId!)
+        .eq("contact_id", personId!)
         .is("archived_at", null)
         .order("updated_at", { ascending: false });
 
@@ -104,7 +104,7 @@ export function useAddMembership() {
         .from("contact_group_memberships")
         .insert({
           group_id: groupId,
-          person_id: personId,
+          contact_id: personId,
           user_id: user.id,
           status: status ?? firstStage,
           priority,
@@ -116,7 +116,7 @@ export function useAddMembership() {
       return data as MembershipRow;
     },
     onSuccess: (membership) => {
-      invalidateMembershipQueries(qc, membership.group_id, membership.person_id);
+      invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
     },
     onError: (error: Error) => showToast.error(error.message),
   });
