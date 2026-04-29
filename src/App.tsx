@@ -4,7 +4,13 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useParams,
+} from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -42,6 +48,7 @@ const People = lazy(() => import("./pages/People"));
 const Groups = lazy(() => import("./pages/Groups"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const Collections = lazy(() => import("./pages/Collections"));
+const CollectionDetail = lazy(() => import("./pages/CollectionDetail"));
 const CollectionSchema = lazy(() => import("./pages/CollectionSchema"));
 const TimelinePage = lazy(() => import("./pages/TimelinePage"));
 
@@ -68,7 +75,12 @@ const LegacyWikiRedirect = () => {
 };
 
 const App = () => (
-  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange={false}>
+  <ThemeProvider
+    attribute="class"
+    defaultTheme="dark"
+    enableSystem
+    disableTransitionOnChange={false}
+  >
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
@@ -85,8 +97,11 @@ const App = () => (
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/cookies" element={<Cookies />} />
-                    
-                    <Route path="/community-guidelines" element={<CommunityGuidelines />} />
+
+                    <Route
+                      path="/community-guidelines"
+                      element={<CommunityGuidelines />}
+                    />
                   </Route>
 
                   <Route path="/shared/:token" element={<SharedNote />} />
@@ -114,7 +129,7 @@ const App = () => (
                     <Route path="notes" element={<Notes />} />
                     <Route path="notes/:noteId" element={<Notes />} />
                     <Route path="settings" element={<Settings />} />
-                    
+
                     <Route path="activity" element={<ActivityPage />} />
                     <Route path="actions" element={<Actions />} />
                     <Route path="review" element={<WeeklyReview />} />
@@ -122,12 +137,19 @@ const App = () => (
                     <Route path="people" element={<People />} />
                     <Route path="groups" element={<Groups />} />
                     <Route path="groups/:slug" element={<GroupDetail />} />
-                    
+
                     <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
-                    <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                    <Route
+                      path="admin"
+                      element={
+                        <AdminRoute>
+                          <Admin />
+                        </AdminRoute>
+                      }
+                    />
                   </Route>
 
                   <Route
@@ -139,6 +161,7 @@ const App = () => (
                     }
                   >
                     <Route index element={<Collections />} />
+                    <Route path=":slug" element={<CollectionDetail />} />
                     <Route path=":slug/schema" element={<CollectionSchema />} />
                   </Route>
 
@@ -156,7 +179,10 @@ const App = () => (
                   </Route>
 
                   <Route path="/wiki" element={<LegacyWikiRedirect />} />
-                  <Route path="/wiki/lint" element={<Navigate to="/lexicon/lint" replace />} />
+                  <Route
+                    path="/wiki/lint"
+                    element={<Navigate to="/lexicon/lint" replace />}
+                  />
                   <Route path="/wiki/:slug" element={<LegacyWikiRedirect />} />
 
                   <Route path="*" element={<NotFound />} />
