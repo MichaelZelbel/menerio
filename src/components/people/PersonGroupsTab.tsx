@@ -24,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Json } from "@/integrations/supabase/types";
 import { useAddMembership, usePersonGroupMemberships, useUpdateMembership, type PersonGroupMembership } from "@/hooks/useGroupMemberships";
 import { useGroups } from "@/hooks/useGroups";
 import { showToast } from "@/lib/toast";
