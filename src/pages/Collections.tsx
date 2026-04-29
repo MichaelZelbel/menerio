@@ -295,7 +295,7 @@ export default function Collections() {
 
     fetchCollections();
     return () => { cancelled = true; };
-  }, [toast, user]);
+  }, [user]);
 
   const hasCollections = useMemo(() => collections.length > 0, [collections.length]);
 
