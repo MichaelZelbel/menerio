@@ -149,8 +149,13 @@ serve(async (req) => {
     const rows = await Promise.all(filteredRows.map((row) => prepareSuggestionForInsert(admin, row, preferences)));
 
     if (rows.length > 0) {
-      const { error: insertError } = await admin.from("review_queue").insert(rows);
-      if (insertError) throw insertError;
+      try {
+        const { error: insertError } = await admin.from("review_queue").insert(rows);
+        if (insertError) throw insertError;
+      } catch (insertError) {
+        console.error("suggest-group-members review_queue insert failed", insertError);
+        return jsonResponse({ error: "Failed to save member suggestions" }, 500);
+      }
     }
     await deductFixedCredits(admin, userId, "group_member_suggestions", cost.tokens);
     return jsonResponse({ suggestions_added: rows.length, auto_applied: rows.filter((row) => row.status === "auto_applied_unreviewed").length });
