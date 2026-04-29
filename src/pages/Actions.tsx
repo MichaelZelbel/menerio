@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -139,7 +140,8 @@ export default function Actions() {
       if (groupIds.length === 0) return [];
       const { data, error } = await supabase
         .from("contact_groups")
-        .select("id, name, slug, icon")
+        .select("id, name, slug, icon, contact_group_memberships!inner(id, status)")
+        .eq("user_id", user!.id)
         .in("id", groupIds);
       if (error) throw error;
       return data || [];
@@ -430,15 +432,24 @@ export default function Actions() {
                                   <FileText className="h-2.5 w-2.5 shrink-0" /> {nTitle}
                                 </Badge>
                               )}
-                              {item.metadata?.group_id && groupContextById(item.metadata.group_id) && (
-                                <Link
-                                  to={`/dashboard/groups/${groupContextById(item.metadata.group_id)?.slug}`}
-                                  onClick={(event) => event.stopPropagation()}
-                                  className="inline-flex max-w-[140px] items-center gap-0.5 truncate rounded-full border border-transparent bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-secondary-foreground transition-colors hover:bg-secondary/80"
-                                >
-                                  <Users className="h-2.5 w-2.5 shrink-0" /> {groupContextById(item.metadata.group_id)?.name}
-                                </Link>
-                              )}
+                              {item.metadata?.group_membership_id && item.metadata?.group_id && groupContextById(item.metadata.group_id) && (() => {
+                                const group = groupContextById(item.metadata!.group_id);
+                                const stage = (group as any)?.contact_group_memberships?.find((membership: any) => membership.id === item.metadata?.group_membership_id)?.status;
+                                return (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Link
+                                        to={`/dashboard/groups/${group?.slug}`}
+                                        onClick={(event) => event.stopPropagation()}
+                                        className="inline-flex max-w-[140px] items-center gap-0.5 truncate rounded-full border border-transparent bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-secondary-foreground transition-colors hover:bg-secondary/80"
+                                      >
+                                        <Users className="h-2.5 w-2.5 shrink-0" /> {group?.icon || null}{group?.name}
+                                      </Link>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{stage || "No stage"}</TooltipContent>
+                                  </Tooltip>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
