@@ -1,20 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LayoutGrid, Plus, Sparkles, type LucideIcon } from "lucide-react";
+import { z } from "zod";
+import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { Database } from "@/integrations/supabase/types";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionWithCount = Collection & { itemCount: number };
 
 const iconMap: Record<string, LucideIcon> = { LayoutGrid, Sparkles };
+const emojiOptions = ["📚", "🏠", "💼", "🎯", "🍳", "✏️", "🎨", "💡", "🔧", "🌱"];
+const collectionFormSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(60, "Name must be 60 characters or fewer"),
+  icon: z.string().trim().refine((value) => !value || (/^\p{Emoji}/u.test(value) && Array.from(value.replace(/\uFE0F/g, "")).length === 1), "Use a single emoji"),
+  description: z.string().trim().max(200, "Description must be 200 characters or fewer").optional(),
+  visibility: z.enum(["private", "personal"]),
+});
+
+type CollectionFormValues = z.infer<typeof collectionFormSchema>;
+type CollectionFormErrors = Partial<Record<keyof CollectionFormValues, string>>;
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "collection";
+}
 
 function CollectionIcon({ icon, className = "h-5 w-5" }: { icon?: string | null; className?: string }) {
   if (icon && /^\p{Emoji}/u.test(icon)) return <span className={className}>{icon}</span>;
@@ -46,7 +67,7 @@ function CollectionsSkeleton() {
   );
 }
 
-function EmptyCollectionsState() {
+function EmptyCollectionsState({ onNewBlank }: { onNewBlank: () => void }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-16 text-center">
       <div className="max-w-2xl">
@@ -63,7 +84,7 @@ function EmptyCollectionsState() {
             ✨ Create with AI
           </Button>
         </div>
-        <button type="button" className="mt-4 text-sm text-primary underline-offset-4 hover:underline">
+        <button type="button" className="mt-4 text-sm text-primary underline-offset-4 hover:underline" onClick={onNewBlank}>
           or create a blank collection
         </button>
       </div>
