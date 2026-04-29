@@ -492,6 +492,49 @@ function validateItemValues(fields: SchemaField[], values: FormValues) {
   return { errors, data };
 }
 
+function LinkPicker({ field, value, onChange, collections, currentCollection }: { field: SchemaField; value: LinkValue | null; onChange: (value: FormValue) => void; collections: Collection[]; currentCollection: Collection | null }) {
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; label: string; collection_id?: string }>>([]);
+  const [targetCollectionId, setTargetCollectionId] = useState("");
+  const [newPersonName, setNewPersonName] = useState("");
+  const targetCollection = collections.find((collection) => collection.slug === field.target_collection_slug) ?? collections.find((collection) => collection.id === targetCollectionId) ?? currentCollection;
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const load = async () => {
+      const term = search.trim();
+      if (field.type === "link_note") {
+        const request = supabase.from("notes").select("id, title").eq("user_id", user.id).eq("is_trashed", false).order("updated_at", { ascending: false }).limit(10);
+        const { data } = term ? await request.or(`title.ilike.%${term}%,content.ilike.%${term}%`) : await request;
+        if (!cancelled) setResults((data ?? []).map((note) => ({ id: note.id, label: note.title || "Untitled" })));
+      } else if (field.type === "link_person") {
+        const request = supabase.from("contacts").select("id, name").eq("user_id", user.id).is("merged_into", null).order("name").limit(10);
+        const { data } = term ? await request.ilike("name", `%${term}%`) : await request;
+        if (!cancelled) setResults((data ?? []).map((person) => ({ id: person.id, label: person.name })));
+      } else if (field.type === "link_collection_item" && targetCollection?.id) {
+        const request = supabase.from("collection_items").select("id, title, collection_id").eq("user_id", user.id).eq("collection_id", targetCollection.id).order("updated_at", { ascending: false }).limit(10);
+        const { data } = term ? await request.or(`title.ilike.%${term}%,indexable_text_1.ilike.%${term}%`) : await request;
+        if (!cancelled) setResults((data ?? []).map((item) => ({ id: item.id, label: item.title || "Untitled", collection_id: item.collection_id })));
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentCollection, field.target_collection_slug, field.type, search, targetCollection?.id, user]);
+
+  const createPerson = async () => {
+    if (!user || !newPersonName.trim()) return;
+    const { data, error } = await supabase.from("contacts").insert({ user_id: user.id, name: newPersonName.trim(), aliases: [], app_mappings: {} }).select("id, name").single();
+    if (error || !data) return toast.error("Could not create person", { description: error?.message ?? "Please try again." });
+    onChange({ type: "person", id: data.id, label: data.name });
+    setNewPersonName("");
+  };
+
+  const buttonLabel = value?.label || (field.type === "link_note" ? "+ Link a note" : field.type === "link_person" ? "+ Link a person" : `+ Link to ${targetCollection?.name ?? "collection item"}`);
+  return <div className="flex items-center gap-2"><Popover><PopoverTrigger asChild><Button type="button" variant="outline" className={cn("min-w-0 flex-1 justify-start", !value && "text-muted-foreground")}>{field.type === "link_note" ? <FileText className="mr-2 h-4 w-4" /> : field.type === "link_person" ? <User className="mr-2 h-4 w-4" /> : <LayoutGrid className="mr-2 h-4 w-4" />}<span className="truncate">{buttonLabel}</span></Button></PopoverTrigger><PopoverContent align="start" className="w-80 space-y-3"><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" />{field.type === "link_collection_item" && !field.target_collection_slug && <Select value={targetCollectionId || currentCollection?.id || ""} onValueChange={setTargetCollectionId}><SelectTrigger><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>)}</SelectContent></Select>}<div className="max-h-64 overflow-y-auto space-y-1">{results.map((result) => <button key={result.id} type="button" className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => onChange(field.type === "link_note" ? { type: "note", id: result.id, label: result.label } : field.type === "link_person" ? { type: "person", id: result.id, label: result.label } : { type: "collection_item", id: result.id, label: result.label, collection_id: result.collection_id ?? targetCollection?.id })}><span className="truncate">{result.label}</span></button>)}{results.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No results</p>}</div>{field.type === "link_person" && <div className="border-t pt-3"><div className="flex gap-2"><Input value={newPersonName} onChange={(event) => setNewPersonName(event.target.value)} placeholder="New person name" /><Button type="button" variant="secondary" onClick={createPerson}>Create</Button></div></div>}</PopoverContent></Popover>{value && <Button type="button" variant="ghost" size="icon" onClick={() => onChange(null)} aria-label="Clear link"><X className="h-4 w-4" /></Button>}</div>;
+}
+
 function FieldInput({
   field,
   value,
