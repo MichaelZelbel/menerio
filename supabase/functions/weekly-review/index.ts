@@ -210,7 +210,10 @@ async function runScheduledWeeklyReviews(supabaseAdmin: any) {
     .select("user_id, notify_weekly_review");
 
   const preferencesByUser = new Map(
-    (preferences || []).map((pref) => [pref.user_id, pref.notify_weekly_review]),
+    (preferences || []).map((pref: { user_id: string; notify_weekly_review: boolean }) => [
+      pref.user_id,
+      pref.notify_weekly_review,
+    ]),
   );
 
   const results = { processed: 0, created: 0, skipped: 0, errors: 0 };
