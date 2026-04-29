@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent } from "@dnd-kit/core";
 import { ArrowLeft, Archive, CalendarDays, Check, Clapperboard, Compass, ExternalLink, Handshake, Landmark, Loader2, Podcast, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,7 @@ import { AddMemberDialog } from "@/components/groups/AddMemberDialog";
 import { BriefingTab } from "@/components/groups/BriefingTab";
 import { GoalsTab } from "@/components/groups/GoalsTab";
 import { MembershipSheet } from "@/components/groups/MembershipSheet";
-import { PipelineColumn } from "@/components/groups/PipelineColumn";
+import { PipelineColumn, type GroupStage } from "@/components/groups/PipelineColumn";
 import { SuggestMembersButton } from "@/components/groups/SuggestMembersButton";
 
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
@@ -32,7 +33,6 @@ const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSear
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type NoteSummary = Pick<Database["public"]["Tables"]["notes"]["Row"], "id" | "title">;
-type Stage = { id: string; label: string; color?: string };
 type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
 
 function GroupIcon({ icon }: { icon?: string | null }) {
@@ -54,7 +54,7 @@ export default function GroupDetail() {
   const [aboutForm, setAboutForm] = useState<AboutForm | null>(null);
   const [activeTab, setActiveTab] = useState(() => window.matchMedia("(max-width: 767px)").matches ? "list" : "pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
-  const stages = parseArray<Stage>(group?.stages ?? []);
+  const stages = parseArray<GroupStage>(group?.stages ?? []);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
   const { data: sourceNotes = [] } = useQuery<NoteSummary[]>({
