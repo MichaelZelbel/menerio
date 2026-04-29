@@ -601,7 +601,7 @@ export default function CollectionDetail() {
       const page = filtered.slice(0, PAGE_SIZE);
       setItems(page);
       setNextCursor(
-        !needle && filtered.length > PAGE_SIZE
+        !needle && sort === "updated" && filtered.length > PAGE_SIZE
           ? {
               updated_at: page.at(-1)?.updated_at ?? "",
               id: page.at(-1)?.id ?? "",
@@ -650,11 +650,15 @@ export default function CollectionDetail() {
 
   const deleteCollection = async () => {
     if (!collection) return;
-    await supabase
+    const { error: itemsError } = await supabase
       .from("collection_items")
       .delete()
       .eq("collection_id", collection.id)
       .eq("user_id", collection.user_id);
+    if (itemsError)
+      return toast.error("Could not delete collection items", {
+        description: itemsError.message,
+      });
     const { error } = await supabase
       .from("collections")
       .delete()
