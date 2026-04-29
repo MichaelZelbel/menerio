@@ -618,14 +618,12 @@ export default function CollectionDetail() {
 
   const duplicateItem = async (item: CollectionItem) => {
     if (!user || !collection) return;
-    const { error } = await supabase
-      .from("collection_items")
-      .insert({
-        user_id: user.id,
-        collection_id: collection.id,
-        data: item.data,
-        title: item.title ? `${item.title} copy` : null,
-      });
+    const { error } = await supabase.from("collection_items").insert({
+      user_id: user.id,
+      collection_id: collection.id,
+      data: item.data,
+      title: item.title ? `${item.title} copy` : null,
+    });
     if (error)
       return toast.error("Could not duplicate item", {
         description: error.message,
