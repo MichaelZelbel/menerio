@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useBlocker, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { DndContext, DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -160,7 +160,6 @@ export default function CollectionSchema() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const serialized = useMemo(() => JSON.stringify(toJsonSchema(fields)), [fields]);
   const isDirty = serialized !== initialSchema;
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => isDirty && currentLocation.pathname !== nextLocation.pathname);
 
   useEffect(() => {
     if (!user || !slug) return;
@@ -199,10 +198,15 @@ export default function CollectionSchema() {
   }, [isDirty]);
 
   useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    if (window.confirm("Discard unsaved schema changes?")) blocker.proceed();
-    else blocker.reset();
-  }, [blocker]);
+    const handler = (event: MouseEvent) => {
+      if (!isDirty) return;
+      const link = (event.target as HTMLElement | null)?.closest("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.origin !== window.location.origin || link.pathname === window.location.pathname) return;
+      if (!window.confirm("Discard unsaved schema changes?")) event.preventDefault();
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [isDirty]);
 
   const updateField = (id: string, next: SchemaField) => setFields((current) => current.map((field) => field.id === id ? next : field));
   const addField = () => setFields((current) => [...current, { id: crypto.randomUUID(), key: "new_field", label: "New field", type: "text" }]);
