@@ -160,6 +160,7 @@ export default function CollectionSchema() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const serialized = useMemo(() => JSON.stringify(toJsonSchema(fields)), [fields]);
   const isDirty = serialized !== initialSchema;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => isDirty && currentLocation.pathname !== nextLocation.pathname);
 
   useEffect(() => {
     if (!user || !slug) return;
@@ -176,7 +177,7 @@ export default function CollectionSchema() {
         setIsLoading(false);
         return;
       }
-      const parsed = parseSchema(current.field_schema);
+      const parsed = normalizePrimary(parseSchema(current.field_schema));
       setCollection(current);
       setCollections(allCollections ?? []);
       setFields(parsed);
@@ -197,6 +198,12 @@ export default function CollectionSchema() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (window.confirm("Discard unsaved schema changes?")) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+
   const updateField = (id: string, next: SchemaField) => setFields((current) => current.map((field) => field.id === id ? next : field));
   const addField = () => setFields((current) => [...current, { id: crypto.randomUUID(), key: "new_field", label: "New field", type: "text" }]);
   const cancel = () => {
@@ -205,11 +212,13 @@ export default function CollectionSchema() {
   };
   const save = async () => {
     if (!collection) return;
-    const nextErrors = validateFields(fields);
+    const normalizedFields = normalizePrimary(fields);
+    setFields(normalizedFields);
+    const nextErrors = validateFields(normalizedFields);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     setIsSaving(true);
-    const schema = toJsonSchema(fields);
+    const schema = toJsonSchema(normalizedFields);
     const { error } = await supabase.from("collections").update({ field_schema: schema }).eq("id", collection.id).eq("user_id", collection.user_id);
     setIsSaving(false);
     if (error) {
