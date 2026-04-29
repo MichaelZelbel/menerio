@@ -1152,23 +1152,22 @@ export default function CollectionDetail() {
           </div>
         </div>
       )}
-      <Sheet
+      <ItemSheet
+        collection={collection}
+        fields={fields}
+        item={selectedItem}
         open={!!selectedItem}
         onOpenChange={(open) => !open && setSelectedItem(null)}
-      >
-        <SheetContent className="sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>
-              {selectedItem?.id === "new"
-                ? "New Item"
-                : selectedItem?.title || "Edit Item"}
-            </SheetTitle>
-            <SheetDescription>
-              The item form will be added in the next step.
-            </SheetDescription>
-          </SheetHeader>
-        </SheetContent>
-      </Sheet>
+        onSaved={(savedItem) => {
+          setItems((current) => {
+            const exists = current.some((row) => row.id === savedItem.id);
+            return exists
+              ? current.map((row) => (row.id === savedItem.id ? savedItem : row))
+              : [savedItem, ...current].slice(0, PAGE_SIZE);
+          });
+        }}
+        onDeleted={(id) => setItems((current) => current.filter((row) => row.id !== id))}
+      />
       <EditCollectionDialog
         collection={collection}
         open={editOpen}
