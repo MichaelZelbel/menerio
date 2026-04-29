@@ -187,18 +187,22 @@ ${noteSummaries.join("\n\n")}`;
 async function runScheduledWeeklyReviews(supabaseAdmin: ReturnType<typeof createClient>) {
   const { data: profiles, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, notification_preferences(notify_weekly_review)");
+    .select("id");
 
   if (error) throw new Error(error.message);
+
+  const { data: preferences } = await supabaseAdmin
+    .from("notification_preferences")
+    .select("user_id, notify_weekly_review");
+
+  const preferencesByUser = new Map(
+    (preferences || []).map((pref) => [pref.user_id, pref.notify_weekly_review]),
+  );
 
   const results = { processed: 0, created: 0, skipped: 0, errors: 0 };
 
   for (const profile of profiles || []) {
-    const prefs = Array.isArray(profile.notification_preferences)
-      ? profile.notification_preferences[0]
-      : profile.notification_preferences;
-
-    if (prefs?.notify_weekly_review === false) {
+    if (preferencesByUser.get(profile.id) === false) {
       results.skipped++;
       continue;
     }
