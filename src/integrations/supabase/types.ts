@@ -271,6 +271,146 @@ export type Database = {
         }
         Relationships: []
       }
+      collection_items: {
+        Row: {
+          collection_id: string
+          created_at: string
+          data: Json
+          id: string
+          indexable_date_1: string | null
+          indexable_date_2: string | null
+          indexable_number_1: number | null
+          indexable_number_2: number | null
+          indexable_text_1: string | null
+          search_vector: unknown
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          collection_id: string
+          created_at?: string
+          data?: Json
+          id?: string
+          indexable_date_1?: string | null
+          indexable_date_2?: string | null
+          indexable_number_1?: number | null
+          indexable_number_2?: number | null
+          indexable_text_1?: string | null
+          search_vector?: unknown
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          collection_id?: string
+          created_at?: string
+          data?: Json
+          id?: string
+          indexable_date_1?: string | null
+          indexable_date_2?: string | null
+          indexable_number_1?: number | null
+          indexable_number_2?: number | null
+          indexable_text_1?: string | null
+          search_vector?: unknown
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_items_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_templates: {
+        Row: {
+          agent_instructions: string | null
+          category: string | null
+          created_at: string
+          description: string | null
+          field_schema: Json
+          icon: string | null
+          id: string
+          name: string
+          official: boolean
+          slug: string
+          usage_count: number
+        }
+        Insert: {
+          agent_instructions?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          field_schema: Json
+          icon?: string | null
+          id?: string
+          name: string
+          official?: boolean
+          slug: string
+          usage_count?: number
+        }
+        Update: {
+          agent_instructions?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          field_schema?: Json
+          icon?: string | null
+          id?: string
+          name?: string
+          official?: boolean
+          slug?: string
+          usage_count?: number
+        }
+        Relationships: []
+      }
+      collections: {
+        Row: {
+          agent_instructions: string | null
+          created_at: string
+          description: string | null
+          field_schema: Json
+          icon: string | null
+          id: string
+          name: string
+          slug: string
+          updated_at: string
+          user_id: string
+          visibility: string
+        }
+        Insert: {
+          agent_instructions?: string | null
+          created_at?: string
+          description?: string | null
+          field_schema?: Json
+          icon?: string | null
+          id?: string
+          name: string
+          slug: string
+          updated_at?: string
+          user_id: string
+          visibility?: string
+        }
+        Update: {
+          agent_instructions?: string | null
+          created_at?: string
+          description?: string | null
+          field_schema?: Json
+          icon?: string | null
+          id?: string
+          name?: string
+          slug?: string
+          updated_at?: string
+          user_id?: string
+          visibility?: string
+        }
+        Relationships: []
+      }
       connected_apps: {
         Row: {
           api_key: string
@@ -2477,6 +2617,7 @@ export type Database = {
         Args: { p_content: string; p_members_section: string }
         Returns: string
       }
+      slugify_collection_name: { Args: { p_name: string }; Returns: string }
       sync_group_wiki_members: {
         Args: { p_force?: boolean; p_group_id: string }
         Returns: Json
