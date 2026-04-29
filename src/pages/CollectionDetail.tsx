@@ -9,6 +9,7 @@ import {
   Clock,
   DollarSign,
   ExternalLink,
+  FileText,
   LayoutGrid,
   Link as LinkIcon,
   Mail,
@@ -17,6 +18,8 @@ import {
   Plus,
   Search,
   Trash2,
+  User,
+  X,
 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -84,6 +87,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Database, Json } from "@/integrations/supabase/types";
 
@@ -114,9 +118,11 @@ type SchemaField = {
   type: FieldType;
   primary?: boolean;
   options?: string[];
+  target_collection_slug?: string | null;
 };
 type ItemData = Record<string, unknown>;
-type FormValue = string | number | boolean | string[] | null;
+type LinkValue = { type: "note" | "person" | "collection_item"; id: string; label: string; collection_id?: string };
+type FormValue = string | number | boolean | string[] | LinkValue | null;
 type FormValues = Record<string, FormValue>;
 type FormErrors = Record<string, string>;
 type Cursor = { updated_at: string; id: string };
