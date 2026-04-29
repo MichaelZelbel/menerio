@@ -24,10 +24,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Json } from "@/integrations/supabase/types";
 import { useAddMembership, usePersonGroupMemberships, useUpdateMembership, type PersonGroupMembership } from "@/hooks/useGroupMemberships";
 import { useGroups } from "@/hooks/useGroups";
 import { showToast } from "@/lib/toast";
+import { parseArray, pretty } from "@/lib/group-utils";
 
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound, Users };
@@ -41,14 +41,6 @@ type EditForm = {
   notes: string;
 };
 
-function parseStages(value: Json): Stage[] {
-  return Array.isArray(value) ? (value as Stage[]) : [];
-}
-
-function pretty(value?: string | null) {
-  return (value || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 function GroupIcon({ icon }: { icon?: string | null }) {
   const Icon = icon && icon in iconMap ? iconMap[icon as keyof typeof iconMap] : Users;
   return <Icon className="h-4 w-4" />;
@@ -57,7 +49,7 @@ function GroupIcon({ icon }: { icon?: string | null }) {
 function MembershipRow({ membership }: { membership: PersonGroupMembership }) {
   const updateMembership = useUpdateMembership();
   const group = membership.contact_groups;
-  const stages = parseStages(group?.stages ?? []);
+  const stages = parseArray<Stage>(group?.stages ?? []);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>({
     status: membership.status || stages[0]?.id || "",
