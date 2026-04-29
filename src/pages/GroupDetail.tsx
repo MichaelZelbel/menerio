@@ -559,6 +559,7 @@ function MembershipSheet({ group, membership, notes, open, onOpenChange }: { gro
 export default function GroupDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: group, isLoading } = useGroup(slug);
   const { data: memberships = [] } = useGroupMemberships(group?.id);
   const updateGroup = useUpdateGroup();
@@ -573,10 +574,15 @@ export default function GroupDetail() {
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
   const { data: sourceNotes = [] } = useQuery<NoteSummary[]>({
-    queryKey: ["membership_source_notes", selectedMembershipId, sourceNoteIds],
-    enabled: sourceNoteIds.length > 0,
+    queryKey: ["membership_source_notes", user?.id, selectedMembershipId, sourceNoteIds],
+    enabled: !!user && sourceNoteIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase.from("notes").select("id, title").in("id", sourceNoteIds);
+      const { data, error } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false)
+        .in("id", sourceNoteIds);
       if (error) throw error;
       return data || [];
     },
