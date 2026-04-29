@@ -143,7 +143,7 @@ export function useUpdateMembership() {
       return { membership: data as MembershipRow, groupId, personId };
     },
     onSuccess: ({ membership, groupId, personId }) => {
-      invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.person_id);
+      invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -185,7 +185,7 @@ export function useArchiveMembership() {
       return { membership: data as MembershipRow, groupId, personId };
     },
     onSuccess: ({ membership, groupId, personId }) => {
-      invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.person_id);
+      invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -202,7 +202,7 @@ export function useReorderMemberships() {
           .update({ position })
           .eq("id", id)
           .eq("group_id", groupId)
-          .select("id, person_id")
+          .select("id, contact_id")
           .single(),
       );
 
@@ -212,7 +212,7 @@ export function useReorderMemberships() {
 
       return {
         groupId,
-        personIds: results.map((result) => (result.data as Pick<MembershipRow, "person_id">).person_id),
+        personIds: results.map((result) => (result.data as Pick<MembershipRow, "contact_id">).contact_id),
       };
     },
     onSuccess: ({ groupId, personIds }) => {
@@ -239,7 +239,7 @@ export function useMoveMembershipStage() {
       return data as MembershipRow;
     },
     onSuccess: (membership) => {
-      invalidateMembershipQueries(qc, membership.group_id, membership.person_id);
+      invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
     },
     onError: (error: Error) => showToast.error(error.message),
   });
