@@ -928,6 +928,30 @@ export type Database = {
           },
         ]
       }
+      generation_logs: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          response: Json | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          response?: Json | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          response?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       github_connections: {
         Row: {
           branch: string | null
