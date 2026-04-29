@@ -413,6 +413,8 @@ function initialFormValues(
     if (field.type === "boolean") values[field.key] = Boolean(value);
     else if (field.type === "multiselect")
       values[field.key] = Array.isArray(value) ? value.map(String) : [];
+    else if (["link_note", "link_person", "link_collection_item"].includes(field.type))
+      values[field.key] = isLinkValue(value) ? value : null;
     else values[field.key] = value == null ? "" : String(value);
     return values;
   }, {});
@@ -469,7 +471,10 @@ function validateItemValues(fields: SchemaField[], values: FormValues) {
       return;
     }
 
-    if (field.type === "boolean") data[field.key] = Boolean(value);
+    if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
+      if (!isLinkValue(value)) return;
+      data[field.key] = value as unknown as Json;
+    } else if (field.type === "boolean") data[field.key] = Boolean(value);
     else if (field.type === "multiselect")
       data[field.key] = Array.isArray(value) ? value : [];
     else data[field.key] = String(value).trim();
