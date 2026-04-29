@@ -22,7 +22,7 @@ import { triggerCreditsRefresh } from "@/lib/credits-events";
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
-type ActionItem = Database["public"]["Tables"]["action_items"]["Row"] & { metadata?: Record<string, string> | null };
+type ActionItem = Database["public"]["Tables"]["action_items"]["Row"];
 type NextStepSuggestion = { title: string; due_date_offset_days: number; priority: string; reasoning: string };
 
 function formatDateInput(date: Date | undefined) {
@@ -43,27 +43,27 @@ export function NextStepsSection({ group, membership }: { group: ContactGroup; m
     enabled: !!user && !!membership.id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("action_items" as any)
+        .from("action_items")
         .select("*")
         .eq("user_id", user!.id)
         .eq("metadata->>group_membership_id", membership.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return ((data || []) as unknown) as ActionItem[];
+      return data || [];
     },
   });
 
   const createNextStep = useMutation({
     mutationFn: async () => {
       const body = [form.title.trim(), form.notes.trim()].filter(Boolean).join("\n\n");
-      const { error } = await supabase.from("action_items" as any).insert({
+      const { error } = await supabase.from("action_items").insert({
         user_id: user!.id,
-        contact_id: membership.person_id,
+        contact_id: membership.contact_id,
         content: body,
         priority: form.priority,
         due_date: formatDateInput(dueDate) || null,
         status: "open",
-        metadata: { group_membership_id: membership.id, group_id: group.id, person_id: membership.person_id },
+        metadata: { group_membership_id: membership.id, group_id: group.id, contact_id: membership.contact_id },
       });
       if (error) throw error;
     },
