@@ -87,7 +87,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Database, Json } from "@/integrations/supabase/types";
 
@@ -121,15 +125,28 @@ type SchemaField = {
   target_collection_slug?: string | null;
 };
 type ItemData = Record<string, unknown>;
-type LinkValue = { type: "note" | "person" | "collection_item"; id: string; label: string; collection_id?: string };
+type LinkValue = {
+  type: "note" | "person" | "collection_item";
+  id: string;
+  label: string;
+  collection_id?: string;
+};
 type FormValue = string | number | boolean | string[] | LinkValue | null;
 type FormValues = Record<string, FormValue>;
 type FormErrors = Record<string, string>;
 type Cursor = { updated_at: string; id: string };
 type SortKey = "updated" | "created" | "alpha";
-type LinkValidity = { notes: Set<string>; people: Set<string>; items: Set<string> };
+type LinkValidity = {
+  notes: Set<string>;
+  people: Set<string>;
+  items: Set<string>;
+};
 
-const emptyLinkValidity = (): LinkValidity => ({ notes: new Set(), people: new Set(), items: new Set() });
+const emptyLinkValidity = (): LinkValidity => ({
+  notes: new Set(),
+  people: new Set(),
+  items: new Set(),
+});
 
 const PAGE_SIZE = 50;
 const emojiOptions = [
@@ -227,11 +244,11 @@ function isEmptyValue(value: FormValue) {
 function isLinkValue(value: unknown): value is LinkValue {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof (value as LinkValue).type === "string" &&
-      typeof (value as LinkValue).id === "string" &&
-      typeof (value as LinkValue).label === "string",
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as LinkValue).type === "string" &&
+    typeof (value as LinkValue).id === "string" &&
+    typeof (value as LinkValue).label === "string",
   );
 }
 
@@ -274,17 +291,55 @@ function optionClass(value: string) {
   return variants[index];
 }
 
-function LinkChip({ value, collectionLabel, onOpen }: { value: unknown; collectionLabel?: string; onOpen: (link: LinkValue) => void }) {
-  if (!isLinkValue(value)) return <Badge variant="secondary" className="text-muted-foreground">[deleted]</Badge>;
+function LinkChip({
+  value,
+  collectionLabel,
+  onOpen,
+}: {
+  value: unknown;
+  collectionLabel?: string;
+  onOpen: (link: LinkValue) => void;
+}) {
+  if (!isLinkValue(value))
+    return (
+      <Badge variant="secondary" className="text-muted-foreground">
+        [deleted]
+      </Badge>
+    );
   const deleted = value.label === "[deleted]";
-  const Icon = value.type === "note" ? FileText : value.type === "person" ? User : LayoutGrid;
-  const label = value.type === "note" ? "Note" : value.type === "person" ? "Person" : collectionLabel || "Collection item";
+  const Icon =
+    value.type === "note"
+      ? FileText
+      : value.type === "person"
+        ? User
+        : LayoutGrid;
+  const label =
+    value.type === "note"
+      ? "Note"
+      : value.type === "person"
+        ? "Person"
+        : collectionLabel || "Collection item";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button type="button" disabled={deleted} onClick={(event) => { event.stopPropagation(); onOpen(value); }} className={cn("inline-flex max-w-56 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors", deleted ? "cursor-default border-muted bg-muted text-muted-foreground" : "bg-secondary text-secondary-foreground hover:bg-accent")}>
+        <button
+          type="button"
+          disabled={deleted}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(value);
+          }}
+          className={cn(
+            "inline-flex max-w-56 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
+            deleted
+              ? "cursor-default border-muted bg-muted text-muted-foreground"
+              : "bg-secondary text-secondary-foreground hover:bg-accent",
+          )}
+        >
           <Icon className="h-3 w-3 shrink-0" />
-          <span className="truncate">{deleted ? "[deleted]" : value.label}</span>
+          <span className="truncate">
+            {deleted ? "[deleted]" : value.label}
+          </span>
         </button>
       </TooltipTrigger>
       <TooltipContent>{deleted ? "Deleted" : label}</TooltipContent>
@@ -292,21 +347,57 @@ function LinkChip({ value, collectionLabel, onOpen }: { value: unknown; collecti
   );
 }
 
-function linkValueWithValidity(value: unknown, validity?: LinkValidity): LinkValue | null {
+function linkValueWithValidity(
+  value: unknown,
+  validity?: LinkValidity,
+): LinkValue | null {
   if (!isLinkValue(value)) return null;
-  if (value.type === "note" && validity && !validity.notes.has(value.id)) return { ...value, label: "[deleted]" };
-  if (value.type === "person" && validity && !validity.people.has(value.id)) return { ...value, label: "[deleted]" };
-  if (value.type === "collection_item" && validity && !validity.items.has(value.id)) return { ...value, label: "[deleted]" };
+  if (value.type === "note" && validity && !validity.notes.has(value.id))
+    return { ...value, label: "[deleted]" };
+  if (value.type === "person" && validity && !validity.people.has(value.id))
+    return { ...value, label: "[deleted]" };
+  if (
+    value.type === "collection_item" &&
+    validity &&
+    !validity.items.has(value.id)
+  )
+    return { ...value, label: "[deleted]" };
   return value;
 }
 
-function FieldValue({ field, value, collections, onOpenLink, linkValidity }: { field: SchemaField; value: unknown; collections: Collection[]; onOpenLink: (link: LinkValue) => void; linkValidity?: LinkValidity }) {
+function FieldValue({
+  field,
+  value,
+  collections,
+  onOpenLink,
+  linkValidity,
+}: {
+  field: SchemaField;
+  value: unknown;
+  collections: Collection[];
+  onOpenLink: (link: LinkValue) => void;
+  linkValidity?: LinkValidity;
+}) {
   if (value == null || value === "")
     return <span className="text-muted-foreground">—</span>;
-  if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
+  if (
+    ["link_note", "link_person", "link_collection_item"].includes(field.type)
+  ) {
     const checked = linkValueWithValidity(value, linkValidity);
-    const collectionLabel = checked?.collection_id ? collections.find((collection) => collection.id === checked.collection_id)?.name : collections.find((collection) => collection.slug === field.target_collection_slug)?.name;
-    return <LinkChip value={checked} collectionLabel={collectionLabel} onOpen={onOpenLink} />;
+    const collectionLabel = checked?.collection_id
+      ? collections.find(
+          (collection) => collection.id === checked.collection_id,
+        )?.name
+      : collections.find(
+          (collection) => collection.slug === field.target_collection_slug,
+        )?.name;
+    return (
+      <LinkChip
+        value={checked}
+        collectionLabel={collectionLabel}
+        onOpen={onOpenLink}
+      />
+    );
   }
   if (field.type === "number")
     return (
@@ -422,7 +513,9 @@ function initialFormValues(
     if (field.type === "boolean") values[field.key] = Boolean(value);
     else if (field.type === "multiselect")
       values[field.key] = Array.isArray(value) ? value.map(String) : [];
-    else if (["link_note", "link_person", "link_collection_item"].includes(field.type))
+    else if (
+      ["link_note", "link_person", "link_collection_item"].includes(field.type)
+    )
       values[field.key] = isLinkValue(value) ? value : null;
     else values[field.key] = value == null ? "" : String(value);
     return values;
@@ -480,7 +573,9 @@ function validateItemValues(fields: SchemaField[], values: FormValues) {
       return;
     }
 
-    if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
+    if (
+      ["link_note", "link_person", "link_collection_item"].includes(field.type)
+    ) {
       if (!isLinkValue(value)) return;
       data[field.key] = value as unknown as Json;
     } else if (field.type === "boolean") data[field.key] = Boolean(value);
@@ -492,13 +587,32 @@ function validateItemValues(fields: SchemaField[], values: FormValues) {
   return { errors, data };
 }
 
-function LinkPicker({ field, value, onChange, collections, currentCollection }: { field: SchemaField; value: LinkValue | null; onChange: (value: FormValue) => void; collections: Collection[]; currentCollection: Collection | null }) {
+function LinkPicker({
+  field,
+  value,
+  onChange,
+  collections,
+  currentCollection,
+}: {
+  field: SchemaField;
+  value: LinkValue | null;
+  onChange: (value: FormValue) => void;
+  collections: Collection[];
+  currentCollection: Collection | null;
+}) {
   const { user } = useAuth();
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<Array<{ id: string; label: string; collection_id?: string }>>([]);
+  const [results, setResults] = useState<
+    Array<{ id: string; label: string; collection_id?: string }>
+  >([]);
   const [targetCollectionId, setTargetCollectionId] = useState("");
   const [newPersonName, setNewPersonName] = useState("");
-  const targetCollection = collections.find((collection) => collection.slug === field.target_collection_slug) ?? collections.find((collection) => collection.id === targetCollectionId) ?? currentCollection;
+  const targetCollection =
+    collections.find(
+      (collection) => collection.slug === field.target_collection_slug,
+    ) ??
+    collections.find((collection) => collection.id === targetCollectionId) ??
+    currentCollection;
 
   useEffect(() => {
     if (!user) return;
@@ -506,33 +620,217 @@ function LinkPicker({ field, value, onChange, collections, currentCollection }: 
     const load = async () => {
       const term = search.trim();
       if (field.type === "link_note") {
-        const request = supabase.from("notes").select("id, title").eq("user_id", user.id).eq("is_trashed", false).order("updated_at", { ascending: false }).limit(10);
-        const { data } = term ? await request.or(`title.ilike.%${term}%,content.ilike.%${term}%`) : await request;
-        if (!cancelled) setResults((data ?? []).map((note) => ({ id: note.id, label: note.title || "Untitled" })));
+        const request = supabase
+          .from("notes")
+          .select("id, title")
+          .eq("user_id", user.id)
+          .eq("is_trashed", false)
+          .order("updated_at", { ascending: false })
+          .limit(10);
+        const { data } = term
+          ? await request.or(`title.ilike.%${term}%,content.ilike.%${term}%`)
+          : await request;
+        if (!cancelled)
+          setResults(
+            (data ?? []).map((note) => ({
+              id: note.id,
+              label: note.title || "Untitled",
+            })),
+          );
       } else if (field.type === "link_person") {
-        const request = supabase.from("contacts").select("id, name").eq("user_id", user.id).is("merged_into", null).order("name").limit(10);
-        const { data } = term ? await request.ilike("name", `%${term}%`) : await request;
-        if (!cancelled) setResults((data ?? []).map((person) => ({ id: person.id, label: person.name })));
-      } else if (field.type === "link_collection_item" && targetCollection?.id) {
-        const request = supabase.from("collection_items").select("id, title, collection_id").eq("user_id", user.id).eq("collection_id", targetCollection.id).order("updated_at", { ascending: false }).limit(10);
-        const { data } = term ? await request.or(`title.ilike.%${term}%,indexable_text_1.ilike.%${term}%`) : await request;
-        if (!cancelled) setResults((data ?? []).map((item) => ({ id: item.id, label: item.title || "Untitled", collection_id: item.collection_id })));
+        const request = supabase
+          .from("contacts")
+          .select("id, name")
+          .eq("user_id", user.id)
+          .is("merged_into", null)
+          .order("name")
+          .limit(10);
+        const { data } = term
+          ? await request.ilike("name", `%${term}%`)
+          : await request;
+        if (!cancelled)
+          setResults(
+            (data ?? []).map((person) => ({
+              id: person.id,
+              label: person.name,
+            })),
+          );
+      } else if (
+        field.type === "link_collection_item" &&
+        targetCollection?.id
+      ) {
+        const request = supabase
+          .from("collection_items")
+          .select("id, title, collection_id")
+          .eq("user_id", user.id)
+          .eq("collection_id", targetCollection.id)
+          .order("updated_at", { ascending: false })
+          .limit(10);
+        const { data } = term
+          ? await request.or(
+              `title.ilike.%${term}%,indexable_text_1.ilike.%${term}%`,
+            )
+          : await request;
+        if (!cancelled)
+          setResults(
+            (data ?? []).map((item) => ({
+              id: item.id,
+              label: item.title || "Untitled",
+              collection_id: item.collection_id,
+            })),
+          );
       }
     };
     load();
-    return () => { cancelled = true; };
-  }, [currentCollection, field.target_collection_slug, field.type, search, targetCollection?.id, user]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentCollection,
+    field.target_collection_slug,
+    field.type,
+    search,
+    targetCollection?.id,
+    user,
+  ]);
 
   const createPerson = async () => {
     if (!user || !newPersonName.trim()) return;
-    const { data, error } = await supabase.from("contacts").insert({ user_id: user.id, name: newPersonName.trim(), aliases: [], app_mappings: {} }).select("id, name").single();
-    if (error || !data) return toast.error("Could not create person", { description: error?.message ?? "Please try again." });
+    const { data, error } = await supabase
+      .from("contacts")
+      .insert({
+        user_id: user.id,
+        name: newPersonName.trim(),
+        aliases: [],
+        app_mappings: {},
+      })
+      .select("id, name")
+      .single();
+    if (error || !data)
+      return toast.error("Could not create person", {
+        description: error?.message ?? "Please try again.",
+      });
     onChange({ type: "person", id: data.id, label: data.name });
     setNewPersonName("");
   };
 
-  const buttonLabel = value?.label || (field.type === "link_note" ? "+ Link a note" : field.type === "link_person" ? "+ Link a person" : `+ Link to ${targetCollection?.name ?? "collection item"}`);
-  return <div className="flex items-center gap-2"><Popover><PopoverTrigger asChild><Button type="button" variant="outline" className={cn("min-w-0 flex-1 justify-start", !value && "text-muted-foreground")}>{field.type === "link_note" ? <FileText className="mr-2 h-4 w-4" /> : field.type === "link_person" ? <User className="mr-2 h-4 w-4" /> : <LayoutGrid className="mr-2 h-4 w-4" />}<span className="truncate">{buttonLabel}</span></Button></PopoverTrigger><PopoverContent align="start" className="w-80 space-y-3"><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" />{field.type === "link_collection_item" && !field.target_collection_slug && <Select value={targetCollectionId || currentCollection?.id || ""} onValueChange={setTargetCollectionId}><SelectTrigger><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>)}</SelectContent></Select>}<div className="max-h-64 overflow-y-auto space-y-1">{results.map((result) => <button key={result.id} type="button" className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => onChange(field.type === "link_note" ? { type: "note", id: result.id, label: result.label } : field.type === "link_person" ? { type: "person", id: result.id, label: result.label } : { type: "collection_item", id: result.id, label: result.label, collection_id: result.collection_id ?? targetCollection?.id })}><span className="truncate">{result.label}</span></button>)}{results.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No results</p>}</div>{field.type === "link_person" && <div className="border-t pt-3"><div className="flex gap-2"><Input value={newPersonName} onChange={(event) => setNewPersonName(event.target.value)} placeholder="New person name" /><Button type="button" variant="secondary" onClick={createPerson}>Create</Button></div></div>}</PopoverContent></Popover>{value && <Button type="button" variant="ghost" size="icon" onClick={() => onChange(null)} aria-label="Clear link"><X className="h-4 w-4" /></Button>}</div>;
+  const buttonLabel =
+    value?.label ||
+    (field.type === "link_note"
+      ? "+ Link a note"
+      : field.type === "link_person"
+        ? "+ Link a person"
+        : `+ Link to ${targetCollection?.name ?? "collection item"}`);
+  return (
+    <div className="flex items-center gap-2">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(
+              "min-w-0 flex-1 justify-start",
+              !value && "text-muted-foreground",
+            )}
+          >
+            {field.type === "link_note" ? (
+              <FileText className="mr-2 h-4 w-4" />
+            ) : field.type === "link_person" ? (
+              <User className="mr-2 h-4 w-4" />
+            ) : (
+              <LayoutGrid className="mr-2 h-4 w-4" />
+            )}
+            <span className="truncate">{buttonLabel}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80 space-y-3">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search"
+          />
+          {field.type === "link_collection_item" &&
+            !field.target_collection_slug && (
+              <Select
+                value={targetCollectionId || currentCollection?.id || ""}
+                onValueChange={setTargetCollectionId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose collection" />
+                </SelectTrigger>
+                <SelectContent>
+                  {collections.map((collection) => (
+                    <SelectItem key={collection.id} value={collection.id}>
+                      {collection.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {results.map((result) => (
+              <button
+                key={result.id}
+                type="button"
+                className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
+                onClick={() =>
+                  onChange(
+                    field.type === "link_note"
+                      ? { type: "note", id: result.id, label: result.label }
+                      : field.type === "link_person"
+                        ? { type: "person", id: result.id, label: result.label }
+                        : {
+                            type: "collection_item",
+                            id: result.id,
+                            label: result.label,
+                            collection_id:
+                              result.collection_id ?? targetCollection?.id,
+                          },
+                  )
+                }
+              >
+                <span className="truncate">{result.label}</span>
+              </button>
+            ))}
+            {results.length === 0 && (
+              <p className="px-2 py-3 text-sm text-muted-foreground">
+                No results
+              </p>
+            )}
+          </div>
+          {field.type === "link_person" && (
+            <div className="border-t pt-3">
+              <div className="flex gap-2">
+                <Input
+                  value={newPersonName}
+                  onChange={(event) => setNewPersonName(event.target.value)}
+                  placeholder="New person name"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={createPerson}
+                >
+                  Create
+                </Button>
+              </div>
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+      {value && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => onChange(null)}
+          aria-label="Clear link"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function FieldInput({
@@ -584,17 +882,34 @@ function FieldInput({
     );
   }
 
-  if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
+  if (
+    ["link_note", "link_person", "link_collection_item"].includes(field.type)
+  ) {
     return (
       <div>
         {label}
-        <LinkPicker field={field} value={isLinkValue(value) ? value : null} onChange={onChange} collections={collections} currentCollection={currentCollection} />
+        <LinkPicker
+          field={field}
+          value={isLinkValue(value) ? value : null}
+          onChange={onChange}
+          collections={collections}
+          currentCollection={currentCollection}
+        />
         {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       </div>
     );
   }
 
-  if (["note", "person", "collection"].includes(field.type)) return <div>{label}<div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Link picker coming soon</div>{error && <p className="mt-2 text-xs text-destructive">{error}</p>}</div>;
+  if (["note", "person", "collection"].includes(field.type))
+    return (
+      <div>
+        {label}
+        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          Link picker coming soon
+        </div>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      </div>
+    );
 
   return (
     <div>
@@ -1230,7 +1545,8 @@ export default function CollectionDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
-  const [linkValidity, setLinkValidity] = useState<LinkValidity>(emptyLinkValidity);
+  const [linkValidity, setLinkValidity] =
+    useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
     () => parseSchema(collection?.field_schema ?? []),
     [collection?.field_schema],
@@ -1271,7 +1587,11 @@ export default function CollectionDetail() {
         return;
       }
       setCollection(current);
-      const { data: collectionRows } = await supabase.from("collections").select("*").eq("user_id", user.id).order("name");
+      const { data: collectionRows } = await supabase
+        .from("collections")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
       if (!cancelled) setAllCollections(collectionRows ?? [current]);
       let request = supabase
         .from("collection_items")
@@ -1341,21 +1661,56 @@ export default function CollectionDetail() {
       setLinkValidity(emptyLinkValidity());
       return;
     }
-    const links = items.flatMap((item) => Object.values(asData(item.data))).filter(isLinkValue);
-    const noteIds = links.filter((link) => link.type === "note").map((link) => link.id);
-    const personIds = links.filter((link) => link.type === "person").map((link) => link.id);
-    const itemIds = links.filter((link) => link.type === "collection_item").map((link) => link.id);
+    const links = items
+      .flatMap((item) => Object.values(asData(item.data)))
+      .filter(isLinkValue);
+    const noteIds = links
+      .filter((link) => link.type === "note")
+      .map((link) => link.id);
+    const personIds = links
+      .filter((link) => link.type === "person")
+      .map((link) => link.id);
+    const itemIds = links
+      .filter((link) => link.type === "collection_item")
+      .map((link) => link.id);
     let cancelled = false;
     const load = async () => {
       const [notes, people, linkedItems] = await Promise.all([
-        noteIds.length ? supabase.from("notes").select("id").eq("user_id", user.id).in("id", noteIds).eq("is_trashed", false) : Promise.resolve({ data: [] }),
-        personIds.length ? supabase.from("contacts").select("id").eq("user_id", user.id).in("id", personIds).is("merged_into", null) : Promise.resolve({ data: [] }),
-        itemIds.length ? supabase.from("collection_items").select("id").eq("user_id", user.id).in("id", itemIds) : Promise.resolve({ data: [] }),
+        noteIds.length
+          ? supabase
+              .from("notes")
+              .select("id")
+              .eq("user_id", user.id)
+              .in("id", noteIds)
+              .eq("is_trashed", false)
+          : Promise.resolve({ data: [] }),
+        personIds.length
+          ? supabase
+              .from("contacts")
+              .select("id")
+              .eq("user_id", user.id)
+              .in("id", personIds)
+              .is("merged_into", null)
+          : Promise.resolve({ data: [] }),
+        itemIds.length
+          ? supabase
+              .from("collection_items")
+              .select("id")
+              .eq("user_id", user.id)
+              .in("id", itemIds)
+          : Promise.resolve({ data: [] }),
       ]);
-      if (!cancelled) setLinkValidity({ notes: new Set((notes.data ?? []).map((row) => row.id)), people: new Set((people.data ?? []).map((row) => row.id)), items: new Set((linkedItems.data ?? []).map((row) => row.id)) });
+      if (!cancelled)
+        setLinkValidity({
+          notes: new Set((notes.data ?? []).map((row) => row.id)),
+          people: new Set((people.data ?? []).map((row) => row.id)),
+          items: new Set((linkedItems.data ?? []).map((row) => row.id)),
+        });
     };
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [items, user]);
 
   const duplicateItem = async (item: CollectionItem) => {
@@ -1415,11 +1770,19 @@ export default function CollectionDetail() {
   const openLinkedEntity = async (link: LinkValue) => {
     if (link.label === "[deleted]") return;
     if (link.type === "note") {
-      window.open(`/dashboard/notes/${link.id}`, "_blank", "noopener,noreferrer");
+      window.open(
+        `/dashboard/notes/${link.id}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
       return;
     }
     if (link.type === "person") {
-      window.open(`/dashboard/people?contact=${link.id}`, "_blank", "noopener,noreferrer");
+      window.open(
+        `/dashboard/people?contact=${link.id}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
       return;
     }
     const existing = items.find((item) => item.id === link.id);
@@ -1427,7 +1790,11 @@ export default function CollectionDetail() {
       setSelectedItem(existing);
       return;
     }
-    const { data, error } = await supabase.from("collection_items").select("*").eq("id", link.id).maybeSingle();
+    const { data, error } = await supabase
+      .from("collection_items")
+      .select("*")
+      .eq("id", link.id)
+      .maybeSingle();
     if (error || !data) return toast.error("Linked item not found");
     setSelectedItem(data);
   };
