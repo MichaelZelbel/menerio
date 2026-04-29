@@ -127,6 +127,9 @@ type FormValues = Record<string, FormValue>;
 type FormErrors = Record<string, string>;
 type Cursor = { updated_at: string; id: string };
 type SortKey = "updated" | "created" | "alpha";
+type LinkValidity = { notes: Set<string>; people: Set<string>; items: Set<string> };
+
+const emptyLinkValidity = (): LinkValidity => ({ notes: new Set(), people: new Set(), items: new Set() });
 
 const PAGE_SIZE = 50;
 const emojiOptions = [
