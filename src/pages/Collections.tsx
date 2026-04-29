@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Database } from "@/integrations/supabase/types";
+import { AICollectionDialog } from "@/components/collections/AICollectionDialog";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionWithCount = Collection & { itemCount: number };
@@ -67,7 +68,7 @@ function CollectionsSkeleton() {
   );
 }
 
-function EmptyCollectionsState({ onNewBlank }: { onNewBlank: () => void }) {
+function EmptyCollectionsState({ onNewBlank, onCreateWithAI }: { onNewBlank: () => void; onCreateWithAI: () => void }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-16 text-center">
       <div className="max-w-2xl">
@@ -80,7 +81,7 @@ function EmptyCollectionsState({ onNewBlank }: { onNewBlank: () => void }) {
         </p>
         <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button variant="secondary">Browse Templates</Button>
-          <Button className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">
+          <Button size="lg" className="animate-pulse bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={onCreateWithAI}>
             ✨ Create with AI
           </Button>
         </div>
@@ -246,8 +247,10 @@ function NewCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 export default function Collections() {
   const { user } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [collections, setCollections] = useState<CollectionWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -295,7 +298,7 @@ export default function Collections() {
 
     fetchCollections();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, refreshKey]);
 
   const hasCollections = useMemo(() => collections.length > 0, [collections.length]);
 
@@ -307,7 +310,7 @@ export default function Collections() {
           <h1 className="text-2xl font-bold font-display">Collections</h1>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" size="sm">Templates</Button>
-            <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">✨ Create with AI</Button>
+            <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95" onClick={() => setAiDialogOpen(true)}>✨ Create with AI</Button>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="outline" size="icon" aria-label="New blank collection" onClick={() => setDialogOpen(true)}>
@@ -323,13 +326,14 @@ export default function Collections() {
       {isLoading ? (
         <CollectionsSkeleton />
       ) : collections.length === 0 ? (
-        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} />
+        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} onCreateWithAI={() => setAiDialogOpen(true)} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {collections.map((collection) => <CollectionCard key={collection.id} collection={collection} />)}
         </div>
       )}
       <NewCollectionDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <AICollectionDialog open={aiDialogOpen} onOpenChange={setAiDialogOpen} onCreated={() => setRefreshKey((key) => key + 1)} />
     </div>
   );
 }
