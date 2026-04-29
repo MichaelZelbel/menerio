@@ -834,6 +834,7 @@ function ItemSheet({
   onOpenChange,
   onSaved,
   onDeleted,
+  collections,
 }: {
   collection: Collection | null;
   fields: SchemaField[];
@@ -842,6 +843,7 @@ function ItemSheet({
   onOpenChange: (open: boolean) => void;
   onSaved: (item: CollectionItem) => void;
   onDeleted: (id: string) => void;
+  collections: Collection[];
 }) {
   const { user } = useAuth();
   const [values, setValues] = useState<FormValues>({});
@@ -978,6 +980,8 @@ function ItemSheet({
                       : "")
                 }
                 error={errors[field.key]}
+                collections={collections}
+                currentCollection={collection}
                 onChange={(value) => {
                   setValues((current) => ({ ...current, [field.key]: value }));
                   setErrors((current) => ({ ...current, [field.key]: "" }));
