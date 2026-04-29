@@ -168,7 +168,7 @@ function FieldEditPopover({ field, onChange }: { field: GeneratedField; onChange
           <Select value={field.type} onValueChange={(value) => updateType(value as FieldType)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {fieldTypes.map((type) => <SelectItem key={type} value={type}>{type.replaceAll("_", " ")}</SelectItem>)}
+              {fieldTypes.map((type) => <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -410,7 +410,7 @@ export function AICollectionDialog({ open, onOpenChange, onCreated }: { open: bo
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{field.label}</span>
-                          <Badge variant="outline">{field.type.replaceAll("_", " ")}</Badge>
+                          <Badge variant="outline">{field.type.replace(/_/g, " ")}</Badge>
                           {field.primary && <Badge variant="secondary">Primary</Badge>}
                           {field.indexable && <Badge variant="secondary">Indexable</Badge>}
                         </div>
