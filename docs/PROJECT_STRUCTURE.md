@@ -10,6 +10,8 @@ menerio/
 │   │   ├── ui/              # shadcn/ui primitives (button, dialog, card, etc.)
 │   │   ├── layout/          # Page shells: Header, Footer, DashboardLayout
 │   │   ├── notes/           # Note editor, sidebar, wikilinks, embeds
+│   │   ├── people/          # Contact profiles, relationships, timeline, dedupe
+│   │   ├── groups/          # Group onboarding and migration helpers
 │   │   ├── settings/        # Settings tabs (API keys, integrations, sync)
 │   │   ├── admin/           # Admin-only panels (moderation)
 │   │   ├── profile/         # Profile editor and completeness tracker
@@ -21,12 +23,12 @@ menerio/
 │   ├── hooks/               # Custom hooks (useNotes, useProfile, useAICredits, etc.)
 │   ├── integrations/        # Supabase client and auto-generated types
 │   ├── lib/                 # Shared utilities (API errors, uploads, content helpers)
-│   ├── pages/               # Route-level page components
+│   ├── pages/               # Route-level page components (Notes, People, Groups, Lexicon, Settings, etc.)
 │   ├── test/                # Test setup and example tests
 │   └── utils/               # Pure utility functions
 ├── supabase/
 │   ├── functions/           # Supabase Edge Functions (Deno)
-│   │   ├── _shared/         # Shared helpers (auth, rate limiting, credits)
+│   │   ├── _shared/         # Shared helpers (auth, rate limiting, credits, Hub, group imports)
 │   │   └── <function-name>/ # One directory per edge function
 │   ├── migrations/          # Database migrations (auto-generated, read-only)
 │   └── config.toml          # Edge function configuration
@@ -47,3 +49,5 @@ menerio/
 - **Edge functions are self-contained** — each function has its own `index.ts`; shared code lives in `_shared/`.
 - **Design tokens** — colours and spacing are defined in `src/index.css` and `tailwind.config.ts`, not hard-coded in components.
 - **Auto-generated types** — `src/integrations/supabase/types.ts` is generated from the database schema and must not be edited manually.
+- **Markdown-first notes** — notes are stored as Obsidian-compatible Markdown; avoid HTML-only persistence paths.
+- **Lexicon over Wiki naming** — user-facing routes and docs use “Lexicon”; legacy `/wiki` routes redirect for compatibility.
