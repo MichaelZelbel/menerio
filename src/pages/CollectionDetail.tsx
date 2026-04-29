@@ -271,9 +271,31 @@ function optionClass(value: string) {
   return variants[index];
 }
 
-function FieldValue({ field, value }: { field: SchemaField; value: unknown }) {
+function LinkChip({ value, collectionLabel, onOpen }: { value: unknown; collectionLabel?: string; onOpen: (link: LinkValue) => void }) {
+  if (!isLinkValue(value)) return <Badge variant="secondary" className="text-muted-foreground">[deleted]</Badge>;
+  const deleted = value.label === "[deleted]";
+  const Icon = value.type === "note" ? FileText : value.type === "person" ? User : LayoutGrid;
+  const label = value.type === "note" ? "Note" : value.type === "person" ? "Person" : collectionLabel || "Collection item";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" disabled={deleted} onClick={(event) => { event.stopPropagation(); onOpen(value); }} className={cn("inline-flex max-w-56 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors", deleted ? "cursor-default border-muted bg-muted text-muted-foreground" : "bg-secondary text-secondary-foreground hover:bg-accent")}>
+          <Icon className="h-3 w-3 shrink-0" />
+          <span className="truncate">{deleted ? "[deleted]" : value.label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{deleted ? "Deleted" : label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function FieldValue({ field, value, collections, onOpenLink }: { field: SchemaField; value: unknown; collections: Collection[]; onOpenLink: (link: LinkValue) => void }) {
   if (value == null || value === "")
     return <span className="text-muted-foreground">—</span>;
+  if (["link_note", "link_person", "link_collection_item"].includes(field.type)) {
+    const collectionLabel = isLinkValue(value) && value.collection_id ? collections.find((collection) => collection.id === value.collection_id)?.name : collections.find((collection) => collection.slug === field.target_collection_slug)?.name;
+    return <LinkChip value={value} collectionLabel={collectionLabel} onOpen={onOpenLink} />;
+  }
   if (field.type === "number")
     return (
       <span className="block text-right tabular-nums">
