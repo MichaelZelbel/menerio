@@ -87,7 +87,6 @@ function validateFields(fields: SchemaField[]) {
 function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, onDelete, onPrimary, onToggleIndexable }: { field: SchemaField; collections: Collection[]; errors?: string[]; onChange: (field: SchemaField) => void; onDuplicate: () => void; onDelete: () => void; onPrimary: () => void; onToggleIndexable: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
-  const optionValue = "";
 
   const updateType = (type: FieldType) => onChange({ ...field, type, indexable: indexableTypes.has(type) ? field.indexable : false, options: optionTypes.has(type) ? field.options ?? ["Option"] : undefined });
   const addOption = (value: string) => {
@@ -135,7 +134,7 @@ function SortableFieldRow({ field, collections, errors, onChange, onDuplicate, o
           </DropdownMenu>
         </div>
 
-        {optionTypes.has(field.type) && <div className="mt-4 border-t pt-4"><OptionEditor field={field} onChange={onChange} optionValue={optionValue} addOption={addOption} /></div>}
+        {optionTypes.has(field.type) && <div className="mt-4 border-t pt-4"><OptionEditor field={field} onChange={onChange} addOption={addOption} /></div>}
         {field.type === "collection" && <div className="mt-4 max-w-sm border-t pt-4"><Label>Linked collection</Label><Select value={field.collection_id ?? ""} onValueChange={(collectionId) => onChange({ ...field, collection_id: collectionId })}><SelectTrigger className="mt-2"><SelectValue placeholder="Choose collection" /></SelectTrigger><SelectContent>{collections.map((collection) => <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>)}</SelectContent></Select></div>}
       </CardContent>
     </Card>
