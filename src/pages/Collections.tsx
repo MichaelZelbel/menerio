@@ -263,7 +263,7 @@ export default function Collections() {
 
       if (error) {
         if (!cancelled) {
-          toast({ variant: "destructive", title: "Could not load collections", description: error.message });
+          toast.error("Could not load collections", { description: error.message });
           setIsLoading(false);
         }
         return;
@@ -282,7 +282,7 @@ export default function Collections() {
           return [collection.id, count ?? 0] as const;
         }),
       ).catch((countError: Error) => {
-        if (!cancelled) toast({ variant: "destructive", title: "Could not load item counts", description: countError.message });
+        if (!cancelled) toast.error("Could not load item counts", { description: countError.message });
         return [] as readonly (readonly [string, number])[];
       });
 
@@ -310,7 +310,7 @@ export default function Collections() {
             <Button size="sm" className="bg-gradient-to-r from-primary to-accent text-primary-foreground hover:opacity-95">✨ Create with AI</Button>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="New blank collection">
+                <Button variant="outline" size="icon" aria-label="New blank collection" onClick={() => setDialogOpen(true)}>
                   <Plus className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -323,12 +323,13 @@ export default function Collections() {
       {isLoading ? (
         <CollectionsSkeleton />
       ) : collections.length === 0 ? (
-        <EmptyCollectionsState />
+        <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {collections.map((collection) => <CollectionCard key={collection.id} collection={collection} />)}
         </div>
       )}
+      <NewCollectionDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
   );
 }
