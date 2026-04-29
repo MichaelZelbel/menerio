@@ -36,7 +36,7 @@ export async function syncGroupWikiMembers(groupId: string) {
 
   const { data: memberships, error: membershipsError } = await supabase
     .from("contact_group_memberships")
-    .select("status, position, contacts:person_id(name)")
+    .select("status, position, contacts:contact_id(name)")
     .eq("group_id", groupId)
     .is("archived_at", null)
     .order("position", { ascending: true });
