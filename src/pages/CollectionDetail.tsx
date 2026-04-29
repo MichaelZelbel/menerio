@@ -1229,6 +1229,8 @@ export default function CollectionDetail() {
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [allCollections, setAllCollections] = useState<Collection[]>([]);
+  const [linkValidity, setLinkValidity] = useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
     () => parseSchema(collection?.field_schema ?? []),
     [collection?.field_schema],
@@ -1269,6 +1271,8 @@ export default function CollectionDetail() {
         return;
       }
       setCollection(current);
+      const { data: collectionRows } = await supabase.from("collections").select("*").eq("user_id", user.id).order("name");
+      if (!cancelled) setAllCollections(collectionRows ?? [current]);
       let request = supabase
         .from("collection_items")
         .select("*")
