@@ -55,7 +55,7 @@ export default function GroupDetail() {
   const [activeTab, setActiveTab] = useState(() => window.matchMedia("(max-width: 767px)").matches ? "list" : "pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<GroupStage>(group?.stages ?? []);
-  const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.person_id)), [memberships]);
+  const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.contact_id)), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
   const { data: sourceNotes = [] } = useQuery<NoteSummary[]>({
     queryKey: ["membership_source_notes", user?.id, selectedMembershipId, sourceNoteIds],
