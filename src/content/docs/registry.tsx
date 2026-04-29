@@ -726,9 +726,11 @@ export const allDocs: DocPage[] = [
   contacts,
   actionItems,
   reviewQueue,
+  groups,
   appIntegrations,
   messagingIntegrations,
   githubSync,
+  lexicon,
   profilePage,
   dailyWorkflow,
   weeklyReview,
@@ -762,6 +764,14 @@ export const docCategories: DocCategory[] = [
       { slug: "contacts-crm", title: "People & Contacts" },
       { slug: "action-items", title: "Action Items" },
       { slug: "review-queue", title: "Review Queue" },
+      { slug: "groups", title: "Groups" },
+    ],
+  },
+  {
+    name: "Knowledge",
+    slug: "knowledge",
+    pages: [
+      { slug: "lexicon", title: "Lexicon" },
     ],
   },
   {
@@ -789,16 +799,16 @@ export const docCategories: DocCategory[] = [
     ],
   },
   {
-    name: "Settings",
+    name: "Account",
     slug: "settings",
     pages: [
       { slug: "settings", title: "Settings & Account" },
     ],
   },
   {
-    name: "FAQ",
+    name: "Help",
     slug: "faq",
-    pages: [{ slug: "faq", title: "FAQ" }],
+    pages: [{ slug: "faq", title: "Frequently Asked Questions" }],
   },
 ];
 
