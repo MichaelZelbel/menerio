@@ -1237,6 +1237,36 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_call_logs: {
+        Row: {
+          created_at: string
+          id: string
+          input: Json
+          output_summary: string | null
+          success: boolean
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input?: Json
+          output_summary?: string | null
+          success?: boolean
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input?: Json
+          output_summary?: string | null
+          success?: boolean
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       media_analysis: {
         Row: {
           analysis_status: string
