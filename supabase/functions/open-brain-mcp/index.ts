@@ -13,6 +13,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const MCP_TOKEN_PREFIX = "mnr_mcp_";
+const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
 const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
 
@@ -28,10 +29,46 @@ async function sha256Hex(value: string) {
 
 function extractBearerToken(authHeader: string | undefined) {
   if (!authHeader) return "";
-  const trimmed = authHeader.trim();
+  const trimmed = authHeader
+    .trim()
+    .replace(/^authorization\s*:\s*/i, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "");
   const bearerMatch = trimmed.match(/^bearer\s+(.+)$/i);
   const raw = bearerMatch ? bearerMatch[1] : trimmed;
-  return raw.trim().replace(/^["'`]+|["'`]+$/g, "");
+  return raw.trim().replace(/^["'`]+|["'`]+$/g, "").replace(/\s+/g, "");
+}
+
+async function lookupMcpTokenByPrefixFallback(token: string) {
+  if (!MCP_TOKEN_PATTERN.test(token)) return null;
+
+  const candidatePrefixes = Array.from(new Set([
+    token.slice(0, 32),
+    token.slice(0, 24),
+    token.slice(0, 16),
+  ])).filter((prefix) => prefix.length >= 16);
+
+  const { data, error } = await supabase
+    .from("mcp_api_tokens")
+    .select("id, user_id, token_prefix, expires_at, revoked_at")
+    .in("token_prefix", candidatePrefixes)
+    .is("revoked_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
+
+  if (error) {
+    console.warn("MCP token prefix fallback lookup failed", { message: error.message });
+    return null;
+  }
+
+  const matches = (data || []).filter((row) => token.startsWith(row.token_prefix));
+  if (matches.length !== 1) return null;
+
+  const row = matches[0];
+  await supabase.from("mcp_api_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", row.id);
+  console.warn("MCP token accepted via prefix compatibility fallback", {
+    token_id: row.id,
+    prefix_length: row.token_prefix.length,
+  });
+  return row;
 }
 
 async function authenticateMcpRequest(authHeader: string | undefined) {
@@ -49,6 +86,17 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
   const tokenRow = Array.isArray(data) ? data[0] : null;
 
   if (error || !tokenRow?.user_id) {
+    const fallbackRow = await lookupMcpTokenByPrefixFallback(token);
+    if (fallbackRow?.user_id) {
+      return { userId: fallbackRow.user_id as string, error: null };
+    }
+
+    console.warn("MCP token rejected", {
+      rpc_error: error?.message || null,
+      token_prefix: token.slice(0, 16),
+      token_length: token.length,
+      format_ok: MCP_TOKEN_PATTERN.test(token),
+    });
     return { userId: null, error: { status: 401, message: "Invalid or revoked token." } };
   }
 
