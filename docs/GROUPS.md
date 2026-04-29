@@ -72,7 +72,7 @@ Groups connect to Menerio’s AI features in several ways:
 - Suggest members from notes: scan recent notes and propose people who may belong in the Group.
 - Import members from structured notes: detect Markdown tables or numbered lists, preserve order, match or create people, and store extracted fields such as link, relevance, and first step on the membership.
 - Generate briefing: create a concise Group report.
-- Lexicon page: every Group gets an automatically maintained wiki page with purpose, members, and synthesized insights.
+- Lexicon page: every Group can get an automatically maintained Lexicon page with purpose, members, and synthesized insights.
 - Review Queue: AI member suggestions appear in the Review Queue so you can add, reject, or snooze them.
 
 AI features use the same credit system as the rest of Menerio.
