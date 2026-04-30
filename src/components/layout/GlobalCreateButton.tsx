@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Plus, FileText, UserPlus, ChevronDown, Sparkles } from "lucide-react";
+import { Plus, FileText, UserPlus, ChevronDown, Sparkles, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
