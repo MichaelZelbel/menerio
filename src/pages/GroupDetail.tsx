@@ -34,7 +34,7 @@ const ICON_OPTIONS = Object.entries(iconMap);
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type NoteSummary = Pick<Database["public"]["Tables"]["notes"]["Row"], "id" | "title">;
-type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
+type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color"> & { stages: GroupStage[] };
 
 function GroupIcon({ icon }: { icon?: string | null }) {
   const Icon = icon && icon in iconMap ? iconMap[icon as keyof typeof iconMap] : Users;
