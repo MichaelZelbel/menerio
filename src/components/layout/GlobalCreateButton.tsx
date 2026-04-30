@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Plus, FileText, UserPlus, ChevronDown, Sparkles } from "lucide-react";
+import { Plus, FileText, UserPlus, ChevronDown, Sparkles, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -76,6 +76,10 @@ export function GlobalCreateButton() {
             <DropdownMenuItem onClick={() => navigate("/dashboard/people?action=create")}>
               <UserPlus className="mr-2 h-4 w-4" />
               New Person
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/dashboard/timeline?action=create")}>
+              <Calendar className="mr-2 h-4 w-4" />
+              New Moment
             </DropdownMenuItem>
             {hasIntegrations && <DropdownMenuSeparator />}
             {querinoApp && (

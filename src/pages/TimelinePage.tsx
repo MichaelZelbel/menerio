@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Users } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
@@ -54,6 +55,8 @@ export default function TimelinePage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editMomentData, setEditMomentData] = useState<EditMomentData | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [minImpact, setMinImpact] = useState(1);
   const [minConfTruth, setMinConfTruth] = useState(0);
   const [minConfDate, setMinConfDate] = useState(0);
@@ -89,6 +92,14 @@ export default function TimelinePage() {
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "create") {
+      setCreateDialogOpen(true);
+      searchParams.delete("action");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const filteredMoments = useMemo(() => moments.filter((m) => {
     if (m.impact_level < minImpact) return false;
@@ -173,6 +184,7 @@ export default function TimelinePage() {
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}><SheetContent className="sm:max-w-lg overflow-y-auto">{selectedMoment && <><SheetHeader><SheetTitle>{selectedMoment.title}</SheetTitle><SheetDescription>{format(new Date(selectedMoment.happened_at), "MMMM d, yyyy")}{selectedMoment.happened_end && ` — ${format(new Date(selectedMoment.happened_end), "MMMM d, yyyy")}`}</SheetDescription></SheetHeader><div className="mt-6 space-y-6"><Button variant="outline" size="sm" onClick={() => openEditDialog(selectedMoment)}><Pencil className="mr-2 h-4 w-4" /> Edit Moment</Button>{selectedMoment.description && <p className="text-sm text-muted-foreground">{selectedMoment.description}</p>}<div className="grid grid-cols-3 gap-3 text-center"><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Impact</p><p className="text-lg font-bold">{selectedMoment.impact_level}/4</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Truth</p><p className="text-lg font-bold">{selectedMoment.confidence_truth}/10</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Date</p><p className="text-lg font-bold">{selectedMoment.confidence_date}/10</p></div></div><div className="flex gap-2 flex-wrap"><Badge variant="outline" className={statusClasses[selectedMoment.status] || ""}>{selectedMoment.status.replace("_", " ")}</Badge><Badge variant="outline">Source: {selectedMoment.source}</Badge></div>{selectedMoment.participants && selectedMoment.participants.length > 0 && <div><h2 className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="h-4 w-4" /> Participants</h2><div className="flex gap-2 flex-wrap">{selectedMoment.participants.map((p) => <Badge key={p.id} variant="secondary">{p.name}</Badge>)}</div></div>}</div></>}</SheetContent></Sheet>
       <AddEventDialog people={people} onCreated={fetchData} editEvent={editMomentData} open={editDialogOpen} onOpenChange={setEditDialogOpen} />
+      <AddEventDialog people={people} onCreated={fetchData} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
     </div>
   );
 }
