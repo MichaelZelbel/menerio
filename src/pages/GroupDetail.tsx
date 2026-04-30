@@ -76,14 +76,25 @@ export default function GroupDetail() {
   if (isLoading) return <div className="flex max-w-5xl justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!group) return <div className="max-w-5xl"><SEOHead title="Group not found — Menerio" noIndex /><Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")}><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button><p className="mt-8 text-sm text-muted-foreground">Group not found.</p></div>;
 
-  const form = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color };
+  const form: AboutForm = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color, stages };
+  const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const byStage = (stageId: string) => memberships.filter((membership) => membership.status === stageId);
   const onDragEnd = (event: DragEndEvent) => {
     const membershipId = String(event.active.id);
     const newStatus = event.over?.id ? String(event.over.id) : null;
     if (newStatus && memberships.find((m) => m.id === membershipId)?.status !== newStatus) moveMembership.mutate({ membershipId, newStatus });
   };
-  const saveAbout = () => updateGroup.mutate({ id: group.id, ...form }, { onSuccess: () => { setAboutForm(null); showToast.success("Group updated"); } });
+  const saveAbout = async () => {
+    const newStageIds = new Set(form.stages.map((s) => s.id));
+    const fallback = form.stages[0]?.id;
+    const orphaned = memberships.filter((m) => m.status && !newStageIds.has(m.status));
+    if (orphaned.length > 0 && fallback) {
+      const { error } = await supabase.from("contact_group_memberships").update({ status: fallback }).in("id", orphaned.map((m) => m.id));
+      if (error) { showToast.error(error.message); return; }
+    }
+    const { stages: nextStages, ...rest } = form;
+    updateGroup.mutate({ id: group.id, ...rest, stages: nextStages as unknown as Database["public"]["Tables"]["contact_groups"]["Update"]["stages"] }, { onSuccess: () => { setAboutForm(null); showToast.success("Group updated"); } });
+  };
 
   return (
     <div className="max-w-5xl">
