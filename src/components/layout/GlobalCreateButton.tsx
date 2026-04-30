@@ -77,6 +77,10 @@ export function GlobalCreateButton() {
               <UserPlus className="mr-2 h-4 w-4" />
               New Person
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/dashboard/timeline?action=create")}>
+              <Calendar className="mr-2 h-4 w-4" />
+              New Moment
+            </DropdownMenuItem>
             {hasIntegrations && <DropdownMenuSeparator />}
             {querinoApp && (
               <DropdownMenuItem onClick={handleNewQuerino}>
