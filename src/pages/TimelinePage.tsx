@@ -93,6 +93,14 @@ export default function TimelinePage() {
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
+  useEffect(() => {
+    if (searchParams.get("action") === "create") {
+      setCreateDialogOpen(true);
+      searchParams.delete("action");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   const filteredMoments = useMemo(() => moments.filter((m) => {
     if (m.impact_level < minImpact) return false;
     if (m.confidence_truth < minConfTruth) return false;
