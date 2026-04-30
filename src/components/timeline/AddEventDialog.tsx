@@ -8,6 +8,7 @@ import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import PeopleMultiSelect from "./PeopleMultiSelect";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
