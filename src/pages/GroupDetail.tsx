@@ -26,6 +26,7 @@ import { GoalsTab } from "@/components/groups/GoalsTab";
 import { MembershipSheet } from "@/components/groups/MembershipSheet";
 import { PipelineColumn, type GroupStage } from "@/components/groups/PipelineColumn";
 import { SuggestMembersButton } from "@/components/groups/SuggestMembersButton";
+import { StagesEditor } from "@/components/groups/StagesEditor";
 
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
 const SENSITIVITIES = ["normal", "sensitive", "private"];
