@@ -55,6 +55,8 @@ export default function TimelinePage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editMomentData, setEditMomentData] = useState<EditMomentData | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [minImpact, setMinImpact] = useState(1);
   const [minConfTruth, setMinConfTruth] = useState(0);
   const [minConfDate, setMinConfDate] = useState(0);
