@@ -1,60 +1,48 @@
-## Problem
+## Was du beobachtest
 
-Im "Add Moment"-Dialog (`src/components/timeline/AddEventDialog.tsx`) wird das `People`-Feld als flache Liste von Checkboxes gerendert. Bei vielen Kontakten (>20) wird der Dialog dadurch lang, unübersichtlich, und ausgewählte Personen sind in der Masse kaum erkennbar.
+Stimmt: jede Gruppe speichert ihre eigene Stage-Liste in `contact_groups.stages` (JSON-Array von `{id, label, color}`). Beim Anlegen werden sie aus einem Template übernommen (z. B. "Researching → Contacted → Following Up → Meeting → Decided") oder — bei manuellem Anlegen über `Groups.tsx` — aus einem generischen Default ("New / Active / Done"). Daher die unterschiedlichen Bezeichnungen zwischen alten und neuen Gruppen.
 
-## Lösung: Searchable Multi-Select mit ausgewählten Chips oben
+Aktuell gibt es **keine UI**, um die Stages einer bestehenden Gruppe zu ändern. Das `updateGroup`-Hook unterstützt das Feld bereits, es fehlt nur das Frontend.
 
-Bewährtes Muster (Linear/Notion-Style), das beide Anforderungen erfüllt:
-1. **Sofort sichtbar, wer ausgewählt ist** → ausgewählte Personen erscheinen als entfernbare Chips direkt unter dem Label.
-2. **Schnell jemanden finden / durchscrollen** → ein Combobox-Trigger öffnet ein Popover mit Suchfeld + virtualisierungsfreundlicher, kompakter Ergebnisliste. Tippen filtert sofort, Enter/Klick toggelt Auswahl, ausgewählte Einträge zeigen ein Häkchen und bleiben oben in der Liste.
+## Plan: Stage-Editor im "About"-Tab
 
-### UI-Aufbau (im Dialog, ersetzt Zeile 247)
+Ich baue einen kleinen, einfachen Editor in den **About-Tab** der Gruppe (`/dashboard/groups/:slug` → Tab "About"). Keine Migration nötig — alles existiert schon im Schema.
+
+### Funktionen
+- Liste aller Stages der Gruppe als editierbare Reihen
+- Pro Stage: Label umbenennen, Farbe ändern, hoch/runter verschieben, löschen
+- Button "Add stage" am Ende
+- Speichern zusammen mit den anderen About-Feldern über den vorhandenen "Save changes" Button
+
+### Sicherheit / Datenintegrität
+- Stage-`id` bleibt stabil beim Umbenennen (nur `label` ändert sich) → bestehende Memberships behalten ihren Status, nur das angezeigte Label ändert sich
+- Beim **Löschen** einer Stage: Memberships, die dort liegen, werden auf die erste verbleibende Stage verschoben (Warnung im UI: "X members will move to {firstStage}")
+- Mindestens 1 Stage muss übrig bleiben
+- Neue Stages bekommen automatisch eine generierte `id` (z. B. `slugify(label) + "-" + shortid`)
+
+### UI-Skizze
 
 ```text
-People
-[ @Alice ×] [ @Bob ×] [ @Carla ×]   ← Chips der bereits Ausgewählten
-[ + Add person ▾ ]                  ← Combobox-Trigger
-
-  ┌─ Popover ─────────────────────┐
-  │ 🔍 Search people…             │
-  │ ─────────────────────────────│
-  │ ✓ Alice                      │  ← Selected (sortiert nach oben)
-  │ ✓ Bob                        │
-  │   Andrew Huberman            │
-  │   Andrew Ng                  │
-  │   …                          │
-  └──────────────────────────────┘
+About-Tab
+├─ Name / Type / Description / Purpose / ...   (wie heute)
+└─ Pipeline Stages
+   ┌─────────────────────────────────────────┐
+   │ ⠿  [New          ] [#color] ▲ ▼  🗑    │
+   │ ⠿  [Researching  ] [#color] ▲ ▼  🗑    │
+   │ ⠿  [Contacted    ] [#color] ▲ ▼  🗑    │
+   │ + Add stage                              │
+   └─────────────────────────────────────────┘
+   [Save changes]
 ```
 
-- Chip-Klick auf `×` entfernt die Person sofort.
-- Popover bleibt nach Auswahl offen → mehrere Personen schnell hinzufügbar (Linear-Pattern).
-- Wenn keine Person ausgewählt: Trigger zeigt `+ Add person`. Ansonsten zeigt er `+ Add more` und die Chip-Reihe steht darüber.
-- Suche matched case-insensitive auf `name` (substring).
-- Keine vertikale Inflation mehr: das Feld ist konstant ~1–2 Zeilen hoch, egal wie viele Kontakte existieren.
+### Dateien
+- `src/pages/GroupDetail.tsx` — About-Tab erweitern, `stages` in `aboutForm` aufnehmen, im Save-Call mitsenden
+- (optional) neue Komponente `src/components/groups/StagesEditor.tsx` für Übersichtlichkeit
+- `src/hooks/useGroups.ts` — `updateGroup` akzeptiert `stages` bereits implizit (`Json`); ggf. Typ ergänzen
 
-### Suggested-new-people (KI-Vorschläge, Zeile 248)
+### Bonus (klein, separat)
+Default-Stages beim manuellen Gruppen-Anlegen in `Groups.tsx` an die Template-Konvention angleichen — z. B. "New / Active / Done" → "New / Active / Done" beibehalten, **aber** im Anlege-Dialog optional eine "Use stages from template" Auswahl. (Sage Bescheid, wenn du das auch willst — sonst lasse ich's weg.)
 
-Bleibt als separater Block direkt darunter — diese Liste ist normalerweise klein (1–5 Namen aus dem aktuellen Draft) und profitiert von expliziten Checkboxes. Unverändert.
-
-## Technische Umsetzung
-
-Eine Datei betroffen: `src/components/timeline/AddEventDialog.tsx`.
-
-1. Neue lokale Komponente `PeopleMultiSelect` im selben File (oder ausgelagert nach `src/components/timeline/PeopleMultiSelect.tsx`, falls die Datei sonst zu groß wird):
-   - Props: `people: TimelineContact[]`, `value: string[]`, `onChange: (ids: string[]) => void`.
-   - Aufgebaut aus shadcn `Popover` + `Command` (`CommandInput`, `CommandList`, `CommandEmpty`, `CommandGroup`, `CommandItem`) — beides bereits im Projekt vorhanden (`src/components/ui/popover.tsx`, `src/components/ui/command.tsx`).
-   - Items sortiert: zuerst ausgewählte (mit `Check`-Icon), dann der Rest alphabetisch.
-   - `onSelect` toggelt die ID in `value`; Popover schließt sich nicht (`onSelect` setzt nicht `setOpen(false)`).
-   - Chips oberhalb des Triggers: shadcn `Badge variant="secondary"` mit `X`-Icon-Button (Pattern wie in `NoteMetadataEditor.tsx` Zeilen 192–215).
-
-2. In `AddEventDialog`:
-   - Zeile 247: ersetze `<div className="flex flex-wrap gap-x-4 …">{people.map(...)}` durch `<PeopleMultiSelect people={people} value={matchedPeople} onChange={setMatchedPeople} />`.
-   - `matchedPeople` State und Logik bleiben unverändert.
-
-3. Keine Änderungen an Daten, RPCs, Save-Logik oder am Suggested-new-people-Block.
-
-## Out of Scope
-
-- Keine Änderungen am `draft-event` Edge Function.
-- Keine Änderung des Suggested-new-people-Layouts.
-- Keine Pagination/Virtualisierung — `cmdk` (das `Command` intern nutzt) handhabt mehrere hundert Items performant via Suche/Filter.
+### Nicht enthalten
+- Drag-and-Drop Reordering (nur ▲▼ Buttons) — schneller zu liefern; DnD kann ich nachreichen, wenn gewünscht
+- Globale Stage-Vorlagen / Bibliothek

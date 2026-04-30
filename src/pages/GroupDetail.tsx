@@ -26,6 +26,7 @@ import { GoalsTab } from "@/components/groups/GoalsTab";
 import { MembershipSheet } from "@/components/groups/MembershipSheet";
 import { PipelineColumn, type GroupStage } from "@/components/groups/PipelineColumn";
 import { SuggestMembersButton } from "@/components/groups/SuggestMembersButton";
+import { StagesEditor } from "@/components/groups/StagesEditor";
 
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
 const SENSITIVITIES = ["normal", "sensitive", "private"];
@@ -34,7 +35,7 @@ const ICON_OPTIONS = Object.entries(iconMap);
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type NoteSummary = Pick<Database["public"]["Tables"]["notes"]["Row"], "id" | "title">;
-type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color">;
+type AboutForm = Pick<ContactGroup, "name" | "description" | "purpose" | "type" | "sensitivity" | "icon" | "color"> & { stages: GroupStage[] };
 
 function GroupIcon({ icon }: { icon?: string | null }) {
   const Icon = icon && icon in iconMap ? iconMap[icon as keyof typeof iconMap] : Users;
@@ -76,14 +77,25 @@ export default function GroupDetail() {
   if (isLoading) return <div className="flex max-w-5xl justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!group) return <div className="max-w-5xl"><SEOHead title="Group not found — Menerio" noIndex /><Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")}><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button><p className="mt-8 text-sm text-muted-foreground">Group not found.</p></div>;
 
-  const form = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color };
+  const form: AboutForm = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color, stages };
+  const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const byStage = (stageId: string) => memberships.filter((membership) => membership.status === stageId);
   const onDragEnd = (event: DragEndEvent) => {
     const membershipId = String(event.active.id);
     const newStatus = event.over?.id ? String(event.over.id) : null;
     if (newStatus && memberships.find((m) => m.id === membershipId)?.status !== newStatus) moveMembership.mutate({ membershipId, newStatus });
   };
-  const saveAbout = () => updateGroup.mutate({ id: group.id, ...form }, { onSuccess: () => { setAboutForm(null); showToast.success("Group updated"); } });
+  const saveAbout = async () => {
+    const newStageIds = new Set(form.stages.map((s) => s.id));
+    const fallback = form.stages[0]?.id;
+    const orphaned = memberships.filter((m) => m.status && !newStageIds.has(m.status));
+    if (orphaned.length > 0 && fallback) {
+      const { error } = await supabase.from("contact_group_memberships").update({ status: fallback }).in("id", orphaned.map((m) => m.id));
+      if (error) { showToast.error(error.message); return; }
+    }
+    const { stages: nextStages, ...rest } = form;
+    updateGroup.mutate({ id: group.id, ...rest, stages: nextStages as unknown as Database["public"]["Tables"]["contact_groups"]["Update"]["stages"] }, { onSuccess: () => { setAboutForm(null); showToast.success("Group updated"); } });
+  };
 
   return (
     <div className="max-w-5xl">
@@ -122,7 +134,7 @@ export default function GroupDetail() {
           <GoalsTab group={group} />
         </TabsContent>
         <TabsContent value="about" className="mt-0">
-          <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle className="text-base">About</CardTitle><Button asChild variant="outline" size="sm"><Link to={`/lexicon/group-${group.slug}`}><ExternalLink className="mr-2 h-4 w-4" />Open in Lexicon</Link></Button></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setAboutForm({ ...form, name: e.target.value })} /></div><div className="space-y-2"><Label>Type</Label><Select value={form.type} onValueChange={(value) => setAboutForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{GROUP_TYPES.map((type) => <SelectItem key={type} value={type}>{pretty(type)}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ""} onChange={(e) => setAboutForm({ ...form, description: e.target.value || null })} /></div><div className="space-y-2"><Label>Purpose</Label><Textarea value={form.purpose || ""} onChange={(e) => setAboutForm({ ...form, purpose: e.target.value || null })} /></div><div className="grid gap-4 sm:grid-cols-3"><div className="space-y-2"><Label>Sensitivity</Label><Select value={form.sensitivity} onValueChange={(value) => setAboutForm({ ...form, sensitivity: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SENSITIVITIES.map((value) => <SelectItem key={value} value={value}>{pretty(value)}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Icon</Label><Select value={form.icon && form.icon in iconMap ? form.icon : "Users"} onValueChange={(value) => setAboutForm({ ...form, icon: value })}><SelectTrigger>{(() => { const Icon = iconMap[(form.icon && form.icon in iconMap ? form.icon : "Users") as keyof typeof iconMap]; return <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{form.icon && form.icon in iconMap ? form.icon : "Users"}</span>; })()}</SelectTrigger><SelectContent>{ICON_OPTIONS.map(([name, Icon]) => <SelectItem key={name} value={name}><span className="flex items-center gap-2"><Icon className="h-4 w-4" />{name}</span></SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Color</Label><Input value={form.color || ""} onChange={(e) => setAboutForm({ ...form, color: e.target.value || null })} /></div></div><Button onClick={saveAbout} disabled={updateGroup.isPending}>{updateGroup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></CardContent></Card>
+          <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle className="text-base">About</CardTitle><Button asChild variant="outline" size="sm"><Link to={`/lexicon/group-${group.slug}`}><ExternalLink className="mr-2 h-4 w-4" />Open in Lexicon</Link></Button></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setAboutForm({ ...form, name: e.target.value })} /></div><div className="space-y-2"><Label>Type</Label><Select value={form.type} onValueChange={(value) => setAboutForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{GROUP_TYPES.map((type) => <SelectItem key={type} value={type}>{pretty(type)}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ""} onChange={(e) => setAboutForm({ ...form, description: e.target.value || null })} /></div><div className="space-y-2"><Label>Purpose</Label><Textarea value={form.purpose || ""} onChange={(e) => setAboutForm({ ...form, purpose: e.target.value || null })} /></div><div className="grid gap-4 sm:grid-cols-3"><div className="space-y-2"><Label>Sensitivity</Label><Select value={form.sensitivity} onValueChange={(value) => setAboutForm({ ...form, sensitivity: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SENSITIVITIES.map((value) => <SelectItem key={value} value={value}>{pretty(value)}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Icon</Label><Select value={form.icon && form.icon in iconMap ? form.icon : "Users"} onValueChange={(value) => setAboutForm({ ...form, icon: value })}><SelectTrigger>{(() => { const Icon = iconMap[(form.icon && form.icon in iconMap ? form.icon : "Users") as keyof typeof iconMap]; return <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{form.icon && form.icon in iconMap ? form.icon : "Users"}</span>; })()}</SelectTrigger><SelectContent>{ICON_OPTIONS.map(([name, Icon]) => <SelectItem key={name} value={name}><span className="flex items-center gap-2"><Icon className="h-4 w-4" />{name}</span></SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Color</Label><Input value={form.color || ""} onChange={(e) => setAboutForm({ ...form, color: e.target.value || null })} /></div></div><StagesEditor stages={form.stages} onChange={(next) => setAboutForm({ ...form, stages: next })} membershipCounts={membershipCounts} /><Button onClick={saveAbout} disabled={updateGroup.isPending}>{updateGroup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></CardContent></Card>
         </TabsContent>
       </Tabs>
       <MembershipSheet group={group} membership={selectedMembership} notes={sourceNotes} open={!!selectedMembershipId} onOpenChange={(open) => !open && setSelectedMembershipId(null)} />
