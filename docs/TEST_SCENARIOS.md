@@ -1829,7 +1829,7 @@
   2. Delete all custom entries, custom categories, and agent instructions created during testing
 - **Expected Outcome:** Profile reverts to default/empty state.
 
-### TS-CLEANUP-005: Delete Test User Accounts
+### TS-CLEANUP-004: Delete Test User Accounts
 
 - **Objective:** Remove test personas
 - **Steps:**
