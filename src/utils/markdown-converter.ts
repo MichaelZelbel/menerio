@@ -478,8 +478,24 @@ function inlineMarkdown(text: string): string {
   // Images (before links)
   r = r.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
 
-  // Obsidian image embeds
-  r = r.replace(/!\[\[([^\]]+)\]\]/g, '<img src="$1" alt="$1">');
+  // Obsidian-style attachment embeds: ![[filename.ext]]
+  // Emit a placeholder <img> with the filename in data-attachment-name.
+  // The async resolver (resolveAttachmentImagesInHtml) swaps in a real
+  // signed URL before the editor mounts; non-image attachments fall back
+  // to a wikilink-style link node.
+  r = r.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
+    const name = String(target).trim();
+    const alt = encodeAttribute(display || name);
+    const safeName = encodeAttribute(name);
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+    const isImage = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext);
+    if (isImage) {
+      // Empty src so the browser shows nothing until the resolver fills it in.
+      return `<img src="" alt="${alt}" data-attachment-name="${safeName}">`;
+    }
+    // Non-image attachments: render as a downloadable link placeholder.
+    return `<a href="#" data-attachment-name="${safeName}" class="attachment-link">${alt}</a>`;
+  });
 
   // Obsidian wikilinks
   r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
