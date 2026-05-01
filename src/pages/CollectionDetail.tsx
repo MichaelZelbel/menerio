@@ -17,6 +17,7 @@ import {
   Phone,
   Plus,
   Search,
+  Settings2,
   Trash2,
   User,
   X,
@@ -1858,6 +1859,14 @@ export default function CollectionDetail() {
             <Plus className="mr-2 h-4 w-4" />
             New Item
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/collections/${slug}/schema`)}
+            aria-label="Customize fields"
+          >
+            <Settings2 className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Customize</span>
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1869,11 +1878,6 @@ export default function CollectionDetail() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => navigate(`/collections/${slug}/schema`)}
-              >
-                Edit Schema
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setEditOpen(true)}>
                 Edit Collection
               </DropdownMenuItem>
@@ -1899,13 +1903,20 @@ export default function CollectionDetail() {
               Add your first item, or describe one to your AI assistant — it
               will know how to capture it here.
             </p>
-            <div className="mt-6 flex items-center justify-center">
+            <div className="mt-6 flex flex-col items-center justify-center gap-3">
               <Button
                 onClick={() => setSelectedItem({ id: "new" } as CollectionItem)}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Item
               </Button>
+              <button
+                type="button"
+                onClick={() => navigate(`/collections/${slug}/schema`)}
+                className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                Customize fields & categories
+              </button>
             </div>
           </div>
         </div>
