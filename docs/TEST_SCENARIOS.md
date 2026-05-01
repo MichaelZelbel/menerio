@@ -1374,7 +1374,436 @@
 
 ---
 
-## Section 23: Cleanup — Delete Test Data
+## Section 24: Wikilinks & Backlinks
+
+### TS-WIKI-001: Create a Wikilink Between Notes
+
+- **Objective:** Validate `[[Note Title]]` autocompletes and creates a `note_connections` row
+- **Preconditions:** At least two notes exist with distinct titles
+- **Steps:**
+  1. Open note A in the editor
+  2. Type `[[` and start typing the title of note B
+  3. Pick note B from the autocomplete popover
+  4. Wait for auto-save
+- **Expected Outcome:** A wikilink mark renders inline. A `note_connections` row links A → B. Clicking the wikilink navigates to note B.
+
+### TS-WIKI-002: Backlinks Panel
+
+- **Objective:** Validate Backlinks UI on the target note
+- **Preconditions:** TS-WIKI-001 has been performed
+- **Steps:**
+  1. Open note B
+  2. Open the Backlinks panel
+- **Expected Outcome:** Note A is listed as an incoming reference with a snippet of the linking paragraph.
+
+### TS-WIKI-003: Renaming a Note Updates Resolved Links
+
+- **Objective:** Validate that wikilinks remain resolvable after a rename
+- **Preconditions:** A wikilink `[[Note B]]` exists
+- **Steps:**
+  1. Rename note B to "Note B Renamed"
+  2. Reopen note A
+- **Expected Outcome:** The wikilink continues to resolve to the renamed target via the title-based lookup. The Backlinks panel of "Note B Renamed" still shows note A.
+
+### TS-WIKI-004: Wikilink to Non-Existent Note
+
+- **Objective:** Validate the unresolved-link state
+- **Steps:**
+  1. In a note, type `[[Brand New Topic]]` for a title that does not exist
+- **Expected Outcome:** The wikilink renders in an "unresolved" style. Clicking it offers to create a new note with that title.
+
+---
+
+## Section 25: Folder Vault & Note Organization
+
+### TS-VAULT-001: Create a Folder
+
+- **Objective:** Validate folder creation in the notes sidebar
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Navigate to `/dashboard/notes`
+  2. Use the folder tree's "+ Folder" action
+  3. Enter folder name "Projects"
+- **Expected Outcome:** Folder appears in the tree. Notes can be moved into it.
+
+### TS-VAULT-002: Move Note Between Folders
+
+- **Objective:** Validate `folder_path` updates
+- **Preconditions:** A folder and at least one note exist
+- **Steps:**
+  1. Drag a note onto the folder, or use the overflow menu → "Move to folder"
+  2. Pick the target folder
+- **Expected Outcome:** Note's `folder_path` updates. The note now appears under that folder in the sidebar tree.
+
+### TS-VAULT-003: Vault Insights Popover
+
+- **Objective:** Validate metrics popover (counts, recently edited)
+- **Preconditions:** User has multiple notes across folders
+- **Steps:**
+  1. Open the Vault Insights popover from the notes sidebar header
+- **Expected Outcome:** Popover shows total notes, folder count, recent activity. Numbers update after creating a new note.
+
+---
+
+## Section 26: GitHub / Obsidian Sync
+
+### TS-GH-001: Connect GitHub Repository
+
+- **Objective:** Validate initial GitHub connection setup
+- **Preconditions:** User has a GitHub personal access token with repo scope
+- **Steps:**
+  1. Navigate to `/dashboard/settings` → GitHub Sync
+  2. Paste token, owner, repo name, branch
+  3. Optional: set vault path and attachment folder (default `attachments`)
+  4. Save
+- **Expected Outcome:** Connection row created in `github_connections`. Status panel shows "Connected" with repo name. Sync direction selector visible.
+
+### TS-GH-002: Bulk Export to GitHub
+
+- **Objective:** Validate first-time push of all notes
+- **Preconditions:** Connection exists; user has notes
+- **Steps:**
+  1. Open GitHub Sync settings
+  2. Click "Sync all to GitHub"
+- **Expected Outcome:** Repository is created if missing. Each note appears in the repo as a `.md` file with YAML frontmatter (`id`, `title`, `tags`, `menerio_metadata`). `github_sync_log` rows are created with `synced` status. Toast shows succeeded/failed counts.
+
+### TS-GH-003: Round-Trip — DB Markdown Stays Obsidian-Compatible
+
+- **Objective:** Validate that notes are stored and exported as native Obsidian Markdown (no HTML)
+- **Preconditions:** A note with checklists, headings, a wikilink, and an image attachment
+- **Steps:**
+  1. Open the note, click the source-mode icon
+  2. Inspect the raw content
+  3. Trigger a single-note GitHub export
+  4. Open the file directly in GitHub
+- **Expected Outcome:** Both DB content and the exported `.md` file use plain Markdown — no `<p>`, `<img>`, or `<ul>` tags. Wikilinks use `[[Title]]`, image embeds use `![[filename.ext]]`.
+
+### TS-GH-004: Image Insert Writes Wikilink (Phase B)
+
+- **Objective:** Validate that uploads serialize to `![[filename.ext]]`
+- **Preconditions:** A note is open in the editor
+- **Steps:**
+  1. Drag-and-drop a PNG into the editor (or use the toolbar upload)
+  2. Wait for the upload to complete
+  3. Open source mode
+- **Expected Outcome:** The image renders inline using a signed URL. The serialized markdown contains `![[filename.png]]` (no signed URL, no http reference). A `note_attachments` row is created with `source = 'editor_upload'`.
+
+### TS-GH-005: Editor Resolves `![[filename.ext]]` to Signed URL (Phase A)
+
+- **Objective:** Validate the wikilink → signed-URL resolver in the editor
+- **Preconditions:** A note's markdown contains `![[example.png]]` and a matching `note_attachments` row exists
+- **Steps:**
+  1. Open the note
+- **Expected Outcome:** The image renders correctly. The DOM `<img>` carries a `data-attachment-name="example.png"` attribute and a freshly-resolved signed URL `src`. The DB content is unchanged.
+
+### TS-GH-006: Export Pushes Binaries to `attachments/` (Phase C)
+
+- **Objective:** Validate that referenced binaries are committed alongside the note
+- **Preconditions:** A note contains `![[diagram.png]]` and the binary exists in the `note-attachments` bucket
+- **Steps:**
+  1. Trigger a sync of that note (single or bulk)
+  2. Open the GitHub repo and inspect `attachments/`
+- **Expected Outcome:** `attachments/diagram.png` exists in the repo and matches the original. The `note_attachments.github_sha` and `github_synced_at` fields are populated. Re-running the sync without changes does not re-upload (dedup by SHA).
+
+### TS-GH-007: Legacy Signed URL Normalization
+
+- **Objective:** Validate that legacy signed-URL references are rewritten to wikilinks during export
+- **Preconditions:** A note's markdown contains a Supabase storage signed URL for an attachment
+- **Steps:**
+  1. Sync the note to GitHub
+  2. Reload the note in the app
+- **Expected Outcome:** The DB content is rewritten to use `![[filename.ext]]`. The export contains the wikilink form. A `note_attachments` row is created if missing.
+
+### TS-GH-008: Pull Imports Binaries from Vault Layouts (Phase D)
+
+- **Objective:** Validate that `github-sync-pull` resolves attachments from common Obsidian layouts
+- **Preconditions:** A connected vault contains a note referencing `![[photo.jpg]]` where `photo.jpg` lives in one of: `attachments/`, `_resources/`, `_resources/<NoteName>.resources/`, the same folder as the note, or the vault root
+- **Steps:**
+  1. Trigger a pull from GitHub Sync settings
+- **Expected Outcome:** The note is created/updated in Menerio. The binary is downloaded from GitHub and stored in `note-attachments`. A `note_attachments` row is upserted with `source = 'github_import'` and the matched `github_path` / `github_sha`. The image renders in the editor. The response payload includes `attachments: { resolved, unresolved[], errors[] }`.
+
+### TS-GH-009: Vault Import — Full Bootstrap
+
+- **Objective:** Validate the one-time vault import action
+- **Preconditions:** A connected vault with multiple notes and binaries
+- **Steps:**
+  1. Open Import Vault Dialog
+  2. Click "List files" to preview
+  3. Confirm and run "Import"
+- **Expected Outcome:** Notes are inserted with `source_app = 'obsidian'`, `metadata.imported_from = 'obsidian'`, and `metadata.original_path`. Wikilinks are resolved to internal note IDs in a second pass. Unresolved wikilinks and unresolved attachments are surfaced in the response.
+
+### TS-GH-010: Conflict Resolution
+
+- **Objective:** Validate the conflict workflow when both sides changed
+- **Preconditions:** A note edited locally and on GitHub since the last sync
+- **Steps:**
+  1. Trigger a pull
+  2. Open the Sync Conflicts panel
+  3. Choose "Keep local", "Keep remote", or "Open both"
+- **Expected Outcome:** Conflict appears with `sync_status = 'conflict'`. The chosen resolution updates the note and clears the conflict state.
+
+---
+
+## Section 27: Timeline
+
+### TS-TIMELINE-001: View Timeline
+
+- **Objective:** Validate the timeline page renders chronologically
+- **Preconditions:** User has notes, events, and (optionally) people
+- **Steps:**
+  1. Navigate to `/dashboard/timeline`
+- **Expected Outcome:** Events render grouped by date. Each card shows title, importance, linked people, and an importance indicator.
+
+### TS-TIMELINE-002: Add a Timeline Event Manually
+
+- **Objective:** Validate event creation
+- **Preconditions:** Timeline page is open
+- **Steps:**
+  1. Click "Add event"
+  2. Fill in title, date, importance, and link 1–2 people
+  3. Save
+- **Expected Outcome:** Event appears at the right position in the timeline. Importance slider value persists. Linked people render as chips.
+
+### TS-TIMELINE-003: Filter Timeline by Person
+
+- **Objective:** Validate per-person filtering
+- **Preconditions:** Multiple events with different people exist
+- **Steps:**
+  1. Pick a person filter
+- **Expected Outcome:** Only events linked to that person remain visible.
+
+### TS-TIMELINE-004: AI Event Extraction from Notes
+
+- **Objective:** Validate the `extract-event` / `add_event` Review Queue suggestion
+- **Preconditions:** A note like "Wedding on July 14, 2026 in Lisbon" exists; AI credits available
+- **Steps:**
+  1. Save / process the note
+  2. Open the Review Queue
+  3. Accept the `add_event` suggestion
+- **Expected Outcome:** A timeline event with the parsed date is created and appears on `/dashboard/timeline`.
+
+---
+
+## Section 28: Collections
+
+### TS-COLLECTIONS-001: Create a Collection from Template
+
+- **Objective:** Validate template-based collection creation
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Navigate to `/dashboard/collections`
+  2. Pick a template (e.g. "Books")
+  3. Confirm the suggested schema
+- **Expected Outcome:** Collection is created with field schema, slug, and starter categories. Template usage counter increments.
+
+### TS-COLLECTIONS-002: Generate Schema from Description (AI)
+
+- **Objective:** Validate the AI schema generator
+- **Preconditions:** AI credits available
+- **Steps:**
+  1. From `/dashboard/collections`, choose "Create with AI"
+  2. Describe the collection (e.g. "Vinyl records — artist, album, year, genre, condition")
+  3. Confirm the suggested schema
+- **Expected Outcome:** The proposed schema appears with field types (text, number, select, etc.) and a primary field. Saving creates the collection. Credits are deducted.
+
+### TS-COLLECTIONS-003: Add and Edit Items
+
+- **Objective:** Validate item CRUD with field validation
+- **Preconditions:** A collection exists
+- **Steps:**
+  1. Open the collection
+  2. Add an item filling all fields
+  3. Edit a number field with a non-numeric value
+  4. Edit a URL field with malformed input
+- **Expected Outcome:** Valid items save and appear in the table. Invalid values are rejected by the validation trigger with a clear error message. The primary field cannot be empty.
+
+### TS-COLLECTIONS-004: Customize Schema After Creation
+
+- **Objective:** Validate the visible "Customize" entry point
+- **Preconditions:** A collection with items exists
+- **Steps:**
+  1. Open the collection
+  2. Click "Customize"
+  3. Add a field, change a select option, reorder columns
+  4. Save
+- **Expected Outcome:** Schema updates without losing existing item data. New field is empty for old rows; old fields are preserved.
+
+### TS-COLLECTIONS-005: Search and Sort Items
+
+- **Objective:** Validate text search + indexable sorting
+- **Preconditions:** Multiple items exist
+- **Steps:**
+  1. Type in the search bar
+  2. Sort by an indexable date or number field
+- **Expected Outcome:** Search uses the `search_vector` (case-insensitive across all fields). Sorting uses the corresponding `indexable_*` column for predictable order.
+
+---
+
+## Section 29: Capture Integrations (Telegram, Discord, Slack, Email, MCP)
+
+### TS-CAPTURE-001: Telegram — Pair via 6-Char Code
+
+- **Objective:** Validate Telegram bot pairing
+- **Preconditions:** User is signed in
+- **Steps:**
+  1. Open `/dashboard/settings` → Telegram Integration
+  2. Generate a pairing code
+  3. In Telegram, message the bot with `/pair <code>`
+- **Expected Outcome:** UI flips to "Connected". The user's `telegram_chat_id` is stored.
+
+### TS-CAPTURE-002: Telegram — Capture a Note
+
+- **Objective:** Validate inbound capture
+- **Preconditions:** Telegram is paired
+- **Steps:**
+  1. Send a text message to the bot
+- **Expected Outcome:** A note is created with `source_app = 'telegram'`. The Telegram source badge is visible in the editor header. Bot replies with confirmation.
+
+### TS-CAPTURE-003: Discord — Pair Slash Command
+
+- **Objective:** Validate Discord bot pairing
+- **Preconditions:** User can send DMs to the Menerio bot
+- **Steps:**
+  1. Open `/dashboard/settings` → Discord Integration
+  2. Generate a pairing code
+  3. In Discord, run `/pair <code>` with the bot
+- **Expected Outcome:** "Connected" state in the UI. Discord interaction signature is verified server-side (Ed25519).
+
+### TS-CAPTURE-004: Discord — `/capture` Creates a Note
+
+- **Objective:** Validate slash-command capture
+- **Preconditions:** Discord is paired
+- **Steps:**
+  1. Run `/capture text:"My new idea"` in Discord
+- **Expected Outcome:** A note is created with `source_app = 'discord'`. Discord replies with a confirmation message.
+
+### TS-CAPTURE-005: Slack — Pair and Capture
+
+- **Objective:** Validate the Slack capture flow
+- **Preconditions:** Slack workspace allows the configured bot
+- **Steps:**
+  1. Pair via `/dashboard/settings` → Slack
+  2. Send a message in the configured capture channel
+- **Expected Outcome:** Note is created with `source_app = 'slack'`.
+
+### TS-CAPTURE-006: Email Forwarding (`receive-note`)
+
+- **Objective:** Validate inbound email capture via the `receive-note` function
+- **Preconditions:** User has the per-user inbox address from settings
+- **Steps:**
+  1. Forward an email to that address
+- **Expected Outcome:** A note is created with subject as title, body as content, and source set accordingly. Attachments are uploaded to `note-attachments` and rendered as wikilinks.
+
+### TS-CAPTURE-007: Quick Capture FAB
+
+- **Objective:** Validate in-app quick capture
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Click the global "+" / "New" split button
+  2. Choose "Quick capture"
+  3. Type and submit
+- **Expected Outcome:** Note is created via `quick-capture`, optionally auto-processed (entity type, tags, people).
+
+---
+
+## Section 30: AI Chat & Smart Tags
+
+### TS-CHAT-001: Open Global AI Chat (FAB)
+
+- **Objective:** Validate global Chat FAB and shortcut
+- **Preconditions:** Signed in; AI credits available
+- **Steps:**
+  1. Press `Cmd+Shift+K` (or `Ctrl+Shift+K`)
+- **Expected Outcome:** The Global AI Chat panel opens in "General" mode. Previous conversations are listed.
+
+### TS-CHAT-002: Switch Between General and Note Modes
+
+- **Objective:** Validate mode switching
+- **Preconditions:** A note is open in the editor
+- **Steps:**
+  1. Open the chat FAB
+  2. Switch to "Note" mode
+  3. Ask a question about the open note
+- **Expected Outcome:** The model receives the note's content as context. Switching back to "General" loses note context. Conversations are persisted per mode.
+
+### TS-CHAT-003: Smart Tags Panel from Processed Note
+
+- **Objective:** Validate that `process-note` populates structured fields
+- **Preconditions:** A note has been processed with AI
+- **Steps:**
+  1. Open the note
+  2. Open the Smart Tags / Note Metadata panel
+- **Expected Outcome:** Entity type, tags, topics, people, sentiment, and summary are populated from `metadata`.
+
+### TS-CHAT-004: AI Suggestions Discovery Feed
+
+- **Objective:** Validate the `suggest-connections` discovery feed
+- **Preconditions:** Multiple processed notes exist
+- **Steps:**
+  1. Navigate to `/dashboard` (Today's Connections widget)
+  2. Open the full Discovery Feed
+  3. Dismiss one suggestion, accept another
+- **Expected Outcome:** Accepted suggestions create the corresponding connection. Dismissed ones are tracked and not re-suggested.
+
+---
+
+## Section 31: External APIs (Hub REST API & MCP)
+
+### TS-API-001: Create a Hub API Key
+
+- **Objective:** Validate scoped Bearer key creation
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Navigate to `/dashboard/settings` → API Keys
+  2. Create a new key with selected scopes (e.g. `notes:read`, `notes:write`)
+  3. Copy the `mnr_…` key once shown
+- **Expected Outcome:** A SHA-256 hashed row is stored. The plaintext key is shown only once. The label, scopes, and rate-limit info are visible.
+
+### TS-API-002: Hub API — Create a Note via REST
+
+- **Objective:** Validate `hub-api-notes` POST
+- **Preconditions:** A key with `notes:write` scope
+- **Steps:**
+  1. `curl -X POST` to `/functions/v1/hub-api-notes` with `Authorization: Bearer mnr_…` and a JSON body
+- **Expected Outcome:** 201 with the created note. Note appears in the user's Notes list. Rate-limit headers are present.
+
+### TS-API-003: Hub API — Rate Limit Enforcement
+
+- **Objective:** Validate the 1000/hr limit
+- **Preconditions:** A valid API key
+- **Steps:**
+  1. Send a burst of requests exceeding the threshold
+- **Expected Outcome:** Once exceeded, responses return 429 with `Retry-After`.
+
+### TS-API-004: Hub API — Sync Status Endpoint
+
+- **Objective:** Validate `/sync-status` for spoke apps
+- **Preconditions:** A valid key
+- **Steps:**
+  1. `GET /functions/v1/hub-api-stats/sync-status`
+- **Expected Outcome:** Response includes counts (notes, contacts, last activity) for the calling user.
+
+### TS-API-005: MCP — Generate Token and Connect Client
+
+- **Objective:** Validate MCP token issuance and `open-brain-mcp` proxy
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Open `/dashboard/settings` → MCP Connection Manager
+  2. Generate a token; copy MCP endpoint URL
+  3. Configure the MCP client (e.g. Claude Desktop) with URL + token
+- **Expected Outcome:** MCP client lists Menerio tools (read notes, search, write notes…). Tool calls succeed and respect user RLS via the per-request Supabase client.
+
+### TS-API-006: App Integrations Hub (UI)
+
+- **Objective:** Validate the integrations catalog
+- **Preconditions:** Signed in
+- **Steps:**
+  1. Navigate to `/dashboard/settings` → App Integrations
+- **Expected Outcome:** Catalog renders. Only Querino is shown as an active integration. Connect/disconnect actions update the per-user state.
+
+---
+
+## Section 32: Cleanup — Delete Test Data
 
 ### TS-CLEANUP-001: Delete All Test Notes
 
