@@ -44,7 +44,12 @@ export function TodaysConnections() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (!res.error && res.data && res.data.connections?.length > 0) {
+      // Silently skip on insufficient-credits or any error — widget is optional
+      if (res.error) {
+        // Cache today's date so we don't retry on every dashboard mount
+        localStorage.setItem("menerio-daily-connections-date", today);
+        localStorage.removeItem("menerio-daily-connections");
+      } else if (res.data && res.data.connections?.length > 0) {
         setData(res.data);
         localStorage.setItem("menerio-daily-connections", JSON.stringify(res.data));
         localStorage.setItem("menerio-daily-connections-date", today);
