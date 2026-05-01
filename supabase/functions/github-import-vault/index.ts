@@ -269,6 +269,10 @@ Deno.serve(async (req) => {
       const files = await listVaultFiles(ghToken, owner, repo, branch, vaultPath, path_filter);
       const mdFiles = files.filter((f: any) => f.path.endsWith(".md"));
 
+      // Fetch full repo tree (incl. binaries) for attachment resolution
+      const blobs = await fetchAllBlobs(ghToken, owner, repo, branch);
+      const attachmentFolder = (ghConn as any).attachment_folder || "attachments";
+
       // Get existing notes for duplicate detection
       const { data: existingNotes } = await serviceClient
         .from("notes")
@@ -285,6 +289,7 @@ Deno.serve(async (req) => {
 
       const results: { path: string; status: string; noteId?: string; error?: string }[] = [];
       const importedTitleToId = new Map<string, string>();
+      const attachmentSummary = { resolved: 0, unresolved: [] as string[], errors: [] as string[] };
 
       // First pass: import all notes
       for (const file of mdFiles) {
