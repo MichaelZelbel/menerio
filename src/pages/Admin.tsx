@@ -317,12 +317,15 @@ function UsersTab() {
   };
 
   const openTokenModal = async (userId: string, userName: string) => {
-    // Fetch current allowance
-    const { data } = await supabase
+    // Fetch current allowance — tolerate stray duplicates by ordering + limit(1).
+    const { data: rows } = await supabase
       .from("v_ai_allowance_current" as any)
       .select("*")
       .eq("user_id", userId)
-      .maybeSingle();
+      .order("period_start", { ascending: false })
+      .limit(1);
+
+    const data = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 
     // Get tokens_per_credit
     const { data: settingsData } = await supabase

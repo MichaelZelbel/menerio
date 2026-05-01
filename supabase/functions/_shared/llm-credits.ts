@@ -32,15 +32,18 @@ export async function checkBalance(
   db: any,
   userId: string
 ): Promise<BalanceCheck> {
+  // Tolerate stray duplicate rows (one per period_start) by ordering and taking the first.
   const { data } = await db
     .from("v_ai_allowance_current")
-    .select("remaining_tokens, remaining_credits")
+    .select("remaining_tokens, remaining_credits, period_start")
     .eq("user_id", userId)
-    .maybeSingle();
+    .order("period_start", { ascending: false })
+    .limit(1);
 
-  if (!data) return { allowed: false, remaining_tokens: 0, remaining_credits: 0 };
-  const rt = Number(data.remaining_tokens) || 0;
-  const rc = Number(data.remaining_credits) || 0;
+  const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  if (!row) return { allowed: false, remaining_tokens: 0, remaining_credits: 0 };
+  const rt = Number(row.remaining_tokens) || 0;
+  const rc = Number(row.remaining_credits) || 0;
   return { allowed: rt > 0, remaining_tokens: rt, remaining_credits: rc };
 }
 
