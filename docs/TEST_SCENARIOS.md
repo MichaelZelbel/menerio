@@ -608,53 +608,7 @@
 
 ---
 
-## Section 7: Action Items
-
-### TS-ACTIONS-001: Create an Action Item
-
-- **Objective:** Validate action item creation
-- **Preconditions:** User is signed in
-- **Steps:**
-  1. Navigate to `/dashboard/actions`
-  2. Click "Add Action" (Plus icon)
-  3. Enter content: "Follow up with Jane about the project proposal"
-  4. Set priority to "High"
-  5. Set due date to tomorrow
-  6. Click Save
-- **Expected Outcome:** Action item appears in the list with "High" priority badge, due date, and "Open" status.
-
-### TS-ACTIONS-002: Complete an Action Item
-
-- **Objective:** Validate status transition
-- **Preconditions:** At least one open action item exists
-- **Steps:**
-  1. Navigate to `/dashboard/actions`
-  2. Click the status icon/checkbox on an action item to mark it complete
-- **Expected Outcome:** Status changes to "Done" with a checkmark icon. `completed_at` timestamp is set.
-
-### TS-ACTIONS-003: Filter Actions by Status and Priority
-
-- **Objective:** Validate action filtering
-- **Preconditions:** Multiple action items with different statuses and priorities
-- **Steps:**
-  1. Navigate to `/dashboard/actions`
-  2. Use the status filter to show only "Open" items
-  3. Use the priority filter to show only "High" priority
-- **Expected Outcome:** List filters correctly. Counts update.
-
-### TS-ACTIONS-004: Delete an Action Item
-
-- **Objective:** Validate action deletion
-- **Preconditions:** At least one action item exists
-- **Steps:**
-  1. Navigate to `/dashboard/actions`
-  2. Click delete on an action item
-  3. Confirm deletion
-- **Expected Outcome:** Item is removed from the list.
-
----
-
-## Section 8: Groups
+## Section 7: Groups
 
 ### TS-GROUPS-001: Create a Group from Template
 
