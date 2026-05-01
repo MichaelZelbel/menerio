@@ -309,7 +309,21 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       Placeholder.configure({ placeholder: "Start writing…" }),
       TextStyle,
       Color,
-      ImageExt,
+      ImageExt.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            "data-attachment-name": {
+              default: null,
+              parseHTML: (el: HTMLElement) => el.getAttribute("data-attachment-name"),
+              renderHTML: (attrs: Record<string, unknown>) => {
+                const v = attrs["data-attachment-name"];
+                return v ? { "data-attachment-name": String(v) } : {};
+              },
+            },
+          };
+        },
+      }),
       SuperscriptExt,
       SubscriptExt,
       TableExt.configure({ resizable: true }),
