@@ -562,3 +562,18 @@ function filePathToNoteTitle(filePath: string): string {
   const baseName = filePath.split("/").pop() || filePath;
   return baseName.replace(/\.md$/i, "");
 }
+
+async function fetchAllBlobs(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<GitHubBlobLookup> {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    { headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" } },
+  );
+  if (!res.ok) return buildBlobLookup([]);
+  const data = await res.json();
+  return buildBlobLookup(data.tree || []);
+}
