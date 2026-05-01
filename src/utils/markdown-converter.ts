@@ -418,7 +418,11 @@ function serializeInlineNode(node: TiptapNode): string {
     const display = String(node.attrs?.displayText || "");
     return display && display !== title ? `[[${title}|${display}]]` : `[[${title}]]`;
   }
-  if (node.type === "image") return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+  if (node.type === "image") {
+    const attachName = String(node.attrs?.["data-attachment-name"] || node.attrs?.dataAttachmentName || "");
+    if (attachName) return `![[${attachName}]]`;
+    return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+  }
   return serializeInlineChildren(node);
 }
 
