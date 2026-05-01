@@ -92,7 +92,7 @@ export function DashboardSidebar() {
     },
     {
       items: [
-        { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
+        { title: "Review Queue", url: "/dashboard/review-queue", icon: ClipboardList },
         { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
       ],
     },
@@ -129,7 +129,7 @@ export function DashboardSidebar() {
                         <NavLink to={item.url} end={item.url === "/dashboard"}>
                           <item.icon className="h-4 w-4" />
                           <span>{item.title}</span>
-                          {item.title === "Review" && !collapsed && pendingCount > 0 && (
+                          {item.title === "Review Queue" && !collapsed && pendingCount > 0 && (
                             <Badge variant="default" className="ml-auto text-[10px] px-1.5 py-0 min-w-[1.25rem] justify-center">
                               {pendingCount}
                             </Badge>
