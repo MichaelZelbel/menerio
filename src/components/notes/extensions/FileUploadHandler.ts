@@ -50,10 +50,19 @@ export const FileUploadHandler = Extension.create({
       }
     };
 
-    const insertMedia = (url: string, mediaType: MediaType) => {
+    const insertMedia = (url: string, mediaType: MediaType, filename: string) => {
       switch (mediaType) {
         case "image":
-          editor.chain().focus().setImage({ src: url }).run();
+          // Insert with data-attachment-name so the Markdown serializer
+          // round-trips to Obsidian-compatible `![[filename.ext]]`.
+          editor
+            .chain()
+            .focus()
+            .insertContent({
+              type: "image",
+              attrs: { src: url, "data-attachment-name": filename, alt: filename },
+            })
+            .run();
           break;
         case "video":
           (editor.commands as any).setVideoEmbed({ src: url });
@@ -80,8 +89,8 @@ export const FileUploadHandler = Extension.create({
 
         onUploadStart();
         try {
-          const { url, mediaType, storagePath } = await uploadAttachment(file, userId);
-          insertMedia(url, mediaType);
+          const { url, mediaType, storagePath, filename } = await uploadAttachment(file, userId);
+          insertMedia(url, mediaType, filename);
 
           // Trigger analysis for images and PDFs
           if (mediaType === "image" || mediaType === "pdf") {
