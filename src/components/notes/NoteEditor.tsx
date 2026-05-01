@@ -495,6 +495,36 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient]);
 
+  // Resolve Obsidian wikilink-style attachment placeholders (`![[file.png]]`)
+  // to fresh signed URLs whenever the editor content changes. Runs after
+  // `setContent` so users see embedded images inline without ever exposing
+  // storage paths in the persisted Markdown.
+  useEffect(() => {
+    if (!editor || !user?.id) return;
+    let cancelled = false;
+    const currentHtml = editor.getHTML();
+    if (!currentHtml.includes("data-attachment-name=")) return;
+    // Only swap when at least one placeholder still has an empty/missing src.
+    if (!/<img[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml)) return;
+    const needsResolve = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
+    if (!needsResolve) return;
+
+    void (async () => {
+      try {
+        const resolved = await resolveAttachmentImagesInHtml(currentHtml, user.id);
+        if (cancelled || resolved === currentHtml) return;
+        if (editor.isDestroyed) return;
+        // Avoid clobbering user input mid-edit
+        if (editor.isFocused) return;
+        editor.commands.setContent(resolved, { emitUpdate: false });
+      } catch (err) {
+        console.warn("attachment resolver failed", err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [editor, note.id, note.content, user?.id]);
+
   const checkDuplicateTitle = async (nextTitle: string) => {
     const cleanTitle = nextTitle.trim();
     if (!cleanTitle || cleanTitle === note.title) return null;
