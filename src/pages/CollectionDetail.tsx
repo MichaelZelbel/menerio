@@ -489,7 +489,20 @@ function FieldValue({
         {String(value)}
       </Badge>
     );
-  return <span className="block max-w-80 truncate">{truncate(value)}</span>;
+  if (field.type === "longtext") {
+    const text = String(value);
+    return (
+      <span className="block whitespace-pre-wrap break-words" title={text}>
+        {linkifyText(text)}
+      </span>
+    );
+  }
+  const text = String(value);
+  return (
+    <span className="block max-w-80 truncate" title={text}>
+      {linkifyText(text)}
+    </span>
+  );
 }
 
 function CollectionIcon({
