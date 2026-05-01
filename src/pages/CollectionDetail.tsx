@@ -1636,6 +1636,7 @@ function ItemSheet({
               itemTitle={item.title ?? "Untitled"}
               collectionId={collection.id}
               collectionName={collection.name}
+              onClose={() => onOpenChange(false)}
             />
           )}
         </div>
