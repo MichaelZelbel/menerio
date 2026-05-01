@@ -66,22 +66,37 @@ export function DashboardSidebar() {
       ? location.pathname === "/dashboard"
       : location.pathname.startsWith(path);
 
-  const mainItems = [
-    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-    { title: "Notes", url: "/dashboard/notes", icon: FileText },
-    { title: "Lexicon", url: "/lexicon", icon: BookOpen },
-    { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
-    { title: "People", url: "/dashboard/people", icon: UserCircle },
-    { title: "Groups", url: "/dashboard/groups", icon: Layers },
-    { title: "Collections", url: "/collections", icon: LayoutGrid },
-    
-    { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
-    { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
-    { title: "Note Graph", url: "/dashboard/graph", icon: Network },
-    { title: "Media Library", url: "/dashboard/media", icon: Image },
+  const navGroups: { items: { title: string; url: string; icon: typeof LayoutDashboard }[] }[] = [
+    {
+      items: [{ title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
+    },
+    {
+      items: [
+        { title: "Notes", url: "/dashboard/notes", icon: FileText },
+        { title: "Note Graph", url: "/dashboard/graph", icon: Network },
+        { title: "Lexicon", url: "/lexicon", icon: BookOpen },
+      ],
+    },
+    {
+      items: [
+        { title: "People", url: "/dashboard/people", icon: UserCircle },
+        { title: "Groups", url: "/dashboard/groups", icon: Layers },
+        { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
+      ],
+    },
+    {
+      items: [
+        { title: "Collections", url: "/collections", icon: LayoutGrid },
+        { title: "Media Library", url: "/dashboard/media", icon: Image },
+      ],
+    },
+    {
+      items: [
+        { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
+        { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
+      ],
+    },
   ];
-
-  const premiumItems: typeof mainItems = [];
 
   const systemItems = [
     { title: "My Profile", url: "/dashboard/profile", icon: User },
@@ -102,39 +117,32 @@ export function DashboardSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Main</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                    <NavLink to={item.url} end={item.url === "/dashboard"}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                      {item.title === "Review" && !collapsed && pendingCount > 0 && (
-                        <Badge variant="default" className="ml-auto text-[10px] px-1.5 py-0 min-w-[1.25rem] justify-center">
-                          {pendingCount}
-                        </Badge>
-                      )}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-              {premiumItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <NavLink to={isPremium ? item.url : "#"}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                        {!collapsed && <PremiumBadge className="ml-auto" />}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navGroups.map((group, idx) => (
+          <div key={idx}>
+            {idx > 0 && <SidebarSeparator />}
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                        <NavLink to={item.url} end={item.url === "/dashboard"}>
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.title}</span>
+                          {item.title === "Review" && !collapsed && pendingCount > 0 && (
+                            <Badge variant="default" className="ml-auto text-[10px] px-1.5 py-0 min-w-[1.25rem] justify-center">
+                              {pendingCount}
+                            </Badge>
+                          )}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </div>
+        ))}
 
         <SidebarSeparator />
 

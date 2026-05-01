@@ -1,30 +1,39 @@
-## Goal
+## Reorganize Dashboard Sidebar Menu
 
-Replace the inline Markdown textarea with a proper note workflow: link an **existing** note or create a **new** note that opens the real Notes editor — same UX as everywhere else in the app.
+Restructure the main navigation in `src/components/layout/DashboardSidebar.tsx` into four logical groups, separated by visual dividers, and remove the "Main" group label.
 
-## Behavior (revised)
+### New Structure
 
-In the item editor sheet, the "Notes" section becomes a list with two actions:
+**Group 1 — Overview (no label)**
+- Dashboard
 
-- **+ New note** → creates an empty note (via `useCreateNote`) tagged with `metadata.collection_item_id` + `metadata.collection_id`, then navigates to `/notes/:id` (the full Notes editor with TipTap, attachments, AI, etc.). The item sheet closes.
-- **Link existing note** → opens a popover with search (by title) over the user's notes. Picking one writes the metadata onto that note and refreshes the list.
+**Group 2 — Knowledge (no label)**
+- Notes
+- Note Graph
+- Lexicon
 
-The list shows each linked note with title, snippet, last-updated. Row actions:
-- Click row → navigate to `/notes/:id` (open in real editor).
-- ⋯ menu → "Unlink from item" (clears metadata; note stays in vault) or "Delete note" (soft trash).
+**Group 3 — Relations (no label)**
+- People
+- Groups
+- Timeline
 
-No more inline textarea, no more inline Markdown editing — notes are always edited in the Notes app.
+**Group 4 — Library (no label)**
+- Collections
+- Media Library
 
-## Files
+**Group 5 — Review (no label)**
+- Review (Review Queue, with pending count badge)
+- Weekly Review
 
-- `src/pages/CollectionDetail.tsx` — rewrite `ItemNotesPanel`:
-  - Drop the expand-to-edit textarea/title input and `saveNote` logic.
-  - Keep `load`/`unlinkNote`/`deleteNote`.
-  - `createNote` → use `useCreateNote().mutateAsync({ title: itemTitle, content: "", metadata: {...} })` then `navigate('/notes/' + note.id)` and close the sheet.
-  - Add a "Link existing note" popover using `supabase.from('notes').select(...).ilike('title', '%query%')` (limit 20, exclude already-linked, exclude trashed). On pick → update that note's metadata.
-  - List rows are clickable → navigate to `/notes/:id`.
+The existing **System** group (My Profile, Settings, Connect AI, Documentation, Admin) and footer (Credits, Sign Out) remain unchanged.
 
-## Notes
+### Implementation Details
 
-- Storage approach unchanged (metadata-based, no migration).
-- Closing the item sheet on "+ New note" is needed because the Notes editor is a full page — leaving the sheet open behind it would be confusing.
+- Replace the single `mainItems` array with five small arrays (or one array of arrays) rendered as separate `SidebarGroup` blocks.
+- Omit `<SidebarGroupLabel>` for these new groups so no headings appear above them.
+- Insert a `<SidebarSeparator />` between each of the five groups to keep the visual grouping clear in both expanded and collapsed (icon-only) states.
+- Keep the existing `SidebarSeparator` before the System group.
+- Preserve all current behavior: active route highlighting via `isActive`, the pending-count `Badge` on the Review item, tooltips, and `NavLink` `end` prop on `/dashboard`.
+- The unused `premiumItems` block (currently empty) can be removed for clarity.
+
+No routes, hooks, or other files need to change.
