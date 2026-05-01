@@ -462,6 +462,42 @@
   3. Open `/dashboard/review-queue`
 - **Expected Outcome:** `add_profile_entry` items for that contact appear in the Review Queue with category, label, value, and source note link.
 
+### TS-PEOPLE-010: Auto-Link People by Name (Fuzzy)
+
+- **Objective:** Validate that processed notes auto-link to existing people by fuzzy name match (Levenshtein ≤ 2)
+- **Preconditions:** A contact "Jane Doe" exists; AI credits available
+- **Steps:**
+  1. Create a note containing "Talked to Jane Do today about the project"
+  2. Wait for `process-note` to finish
+- **Expected Outcome:** The note's `metadata.matched_people` includes Jane Doe's contact id. The note shows up under Jane's Timeline / linked notes. No duplicate contact is created in the Review Queue.
+
+### TS-PEOPLE-011: Person Documents (Long-Term Memory)
+
+- **Objective:** Validate the per-person documents tab and embedding-backed memory
+- **Preconditions:** A contact exists
+- **Steps:**
+  1. Open the contact → Documents tab
+  2. Add a document (title + body)
+  3. Open the contact → Conversation tab and ask a question that requires that document
+- **Expected Outcome:** Document is embedded (`person_documents.embedding`). The Conversation answer cites the document via `match_person_documents`.
+
+### TS-PEOPLE-012: Person Conversation (Per-Contact Chat)
+
+- **Objective:** Validate per-person AI chat
+- **Preconditions:** A contact with at least one note or document; AI credits available
+- **Steps:**
+  1. Open the contact → Conversation tab
+  2. Ask a question about the contact
+- **Expected Outcome:** AI replies using the contact's notes, documents, and profile entries as context. Credits are deducted.
+
+### TS-PEOPLE-013: Person Groups Tab
+
+- **Objective:** Validate the per-person groups overview
+- **Preconditions:** The contact is a member of at least one group
+- **Steps:**
+  1. Open the contact → Groups tab
+- **Expected Outcome:** All groups the person belongs to are listed with stage, position, and a link to the group.
+
 ---
 
 ## Section 5: People Relationships
