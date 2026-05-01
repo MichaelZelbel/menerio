@@ -1,48 +1,46 @@
-## Was du beobachtest
+## Problem
 
-Stimmt: jede Gruppe speichert ihre eigene Stage-Liste in `contact_groups.stages` (JSON-Array von `{id, label, color}`). Beim Anlegen werden sie aus einem Template übernommen (z. B. "Researching → Contacted → Following Up → Meeting → Decided") oder — bei manuellem Anlegen über `Groups.tsx` — aus einem generischen Default ("New / Active / Done"). Daher die unterschiedlichen Bezeichnungen zwischen alten und neuen Gruppen.
+At midnight on May 1 (UTC), many concurrent requests (dashboard widgets, AI chat, search, etc.) all tried to create the new monthly allowance period at the same time. The `ensure-token-allowance` Edge Function does a "check then insert" without a unique constraint, so each concurrent caller inserted a separate row. Database shows up to **77 duplicate rows per user** for the same period.
 
-Aktuell gibt es **keine UI**, um die Stages einer bestehenden Gruppe zu ändern. Das `updateGroup`-Hook unterstützt das Feld bereits, es fehlt nur das Frontend.
+This breaks two flows:
 
-## Plan: Stage-Editor im "About"-Tab
+1. **"Insufficient AI credits" everywhere.** `checkBalance()` in `supabase/functions/_shared/llm-credits.ts` calls `v_ai_allowance_current` with `.maybeSingle()`. PostgREST returns an error when more than one row matches `.maybeSingle()`, so `data` is `null` → `allowed: false` → every AI feature throws `INSUFFICIENT_CREDITS`.
 
-Ich baue einen kleinen, einfachen Editor in den **About-Tab** der Gruppe (`/dashboard/groups/:slug` → Tab "About"). Keine Migration nötig — alles existiert schon im Schema.
+2. **Admin "No active period" message.** `openTokenModal()` in `src/pages/Admin.tsx` queries the same view with `.maybeSingle()` and falls into the empty-state branch.
 
-### Funktionen
-- Liste aller Stages der Gruppe als editierbare Reihen
-- Pro Stage: Label umbenennen, Farbe ändern, hoch/runter verschieben, löschen
-- Button "Add stage" am Ende
-- Speichern zusammen mit den anderen About-Feldern über den vorhandenen "Save changes" Button
+The actual `tokens_used` is 0 across the duplicates — the user has plenty of credits, the queries just can't read them.
 
-### Sicherheit / Datenintegrität
-- Stage-`id` bleibt stabil beim Umbenennen (nur `label` ändert sich) → bestehende Memberships behalten ihren Status, nur das angezeigte Label ändert sich
-- Beim **Löschen** einer Stage: Memberships, die dort liegen, werden auf die erste verbleibende Stage verschoben (Warnung im UI: "X members will move to {firstStage}")
-- Mindestens 1 Stage muss übrig bleiben
-- Neue Stages bekommen automatisch eine generierte `id` (z. B. `slugify(label) + "-" + shortid`)
+## Fix
 
-### UI-Skizze
+### 1. Database migration — deduplicate + prevent recurrence
 
-```text
-About-Tab
-├─ Name / Type / Description / Purpose / ...   (wie heute)
-└─ Pipeline Stages
-   ┌─────────────────────────────────────────┐
-   │ ⠿  [New          ] [#color] ▲ ▼  🗑    │
-   │ ⠿  [Researching  ] [#color] ▲ ▼  🗑    │
-   │ ⠿  [Contacted    ] [#color] ▲ ▼  🗑    │
-   │ + Add stage                              │
-   └─────────────────────────────────────────┘
-   [Save changes]
-```
+- Collapse duplicate rows per `(user_id, period_start, period_end)`: keep the row with the highest `tokens_used` (preserves usage if any exists), sum `tokens_used` across duplicates into the survivor as a safety net, delete the rest.
+- Add a partial **unique index** `ai_allowance_periods (user_id, period_start, period_end)` so future race conditions raise a duplicate-key error instead of silently inserting.
 
-### Dateien
-- `src/pages/GroupDetail.tsx` — About-Tab erweitern, `stages` in `aboutForm` aufnehmen, im Save-Call mitsenden
-- (optional) neue Komponente `src/components/groups/StagesEditor.tsx` für Übersichtlichkeit
-- `src/hooks/useGroups.ts` — `updateGroup` akzeptiert `stages` bereits implizit (`Json`); ggf. Typ ergänzen
+### 2. `ensure-token-allowance` Edge Function
 
-### Bonus (klein, separat)
-Default-Stages beim manuellen Gruppen-Anlegen in `Groups.tsx` an die Template-Konvention angleichen — z. B. "New / Active / Done" → "New / Active / Done" beibehalten, **aber** im Anlege-Dialog optional eine "Use stages from template" Auswahl. (Sage Bescheid, wenn du das auch willst — sonst lasse ich's weg.)
+Switch the insert to `.upsert(..., { onConflict: "user_id,period_start,period_end", ignoreDuplicates: true })` and re-select the existing row when conflict happens. This makes concurrent calls idempotent.
 
-### Nicht enthalten
-- Drag-and-Drop Reordering (nur ▲▼ Buttons) — schneller zu liefern; DnD kann ich nachreichen, wenn gewünscht
-- Globale Stage-Vorlagen / Bibliothek
+### 3. Defensive read paths
+
+Even after dedup, harden the read sites so a single stray duplicate never breaks billing again:
+
+- `supabase/functions/_shared/llm-credits.ts` → `checkBalance`: replace `.maybeSingle()` with `.order("period_start", { ascending: false }).limit(1)` and read `data?.[0]`.
+- `src/pages/Admin.tsx` → `openTokenModal`: same change (order by `period_start` desc, `limit(1)`, take first row).
+
+### 4. No changes needed to `deduct_ai_tokens` RPC
+
+It already uses `ORDER BY period_start DESC LIMIT 1 FOR UPDATE`, so it tolerates duplicates. After the unique index is in place, duplicates can't be created anyway.
+
+## Files touched
+
+- New migration: dedupe rows + add unique index on `ai_allowance_periods`.
+- `supabase/functions/ensure-token-allowance/index.ts` — upsert with conflict target.
+- `supabase/functions/_shared/llm-credits.ts` — robust balance read.
+- `src/pages/Admin.tsx` — robust allowance read in token modal.
+
+## Verification after deploy
+
+- Re-query `ai_allowance_periods` for May 2026 → expect exactly 1 row per user.
+- Open the Admin → token modal for any user → "Granted / Used" populated, no "No active period" message.
+- Trigger an AI feature (e.g. AI Chat) → no 402 response.
