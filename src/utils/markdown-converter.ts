@@ -133,7 +133,9 @@ export function htmlToMarkdown(html: string): string {
     return `${header}\n${sep}\n${body}\n\n`;
   });
 
-  // Images
+  // Images — preserve Obsidian wikilink embeds when an attachment marker is present
+  md = md.replace(/<img[^>]*data-attachment-name="([^"]+)"[^>]*\/?>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
+  md = md.replace(/<a[^>]*data-attachment-name="([^"]+)"[^>]*>[\s\S]*?<\/a>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_, src, alt) => `![${alt}](${src})`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, (_, src) => `![](${src})`);
 
