@@ -6,8 +6,8 @@ Das via GitHub-Sync geschriebene Repo soll ein **vollwertiger Obsidian-Vault** w
 
 - [x] **Phase 0**: `note_attachments`-Tabelle, `attachment_folder`-Spalte, Upload-Refactor mit Filename-Lookup.
 - [x] **Phase A (Read-Path Web)**: `markdownToHtml` emittiert `<img data-attachment-name>`-Placeholder; `ImageExt` preserves the attribute; async resolver `resolveAttachmentImagesInHtml` swaps in signed URLs nach `setContent` im `NoteEditor`. Round-Trip via `htmlToMarkdown` und `tiptapJsonToMarkdown` erhält `![[filename.ext]]`.
-- [ ] **Phase B (Editor Insert)**: Image-Drop/Paste so anpassen, dass beim Insert direkt `![[filename]]` (statt Signed URL) eingefügt wird.
-- [ ] **Phase C (GitHub Export)**: `github-sync-export` committet Binaries nach `attachments/`.
+- [x] **Phase B (Editor Insert)**: `FileUploadHandler` setzt `data-attachment-name` beim Insert → Markdown enthält `![[filename]]` statt Signed URL.
+- [x] **Phase C (GitHub Export)**: `github-sync-export` extrahiert `![[…]]` + Legacy-Signed-URLs, committet referenzierte Binaries nach `<vault>/attachments/<filename>` (oder konfigurierbarem Folder), upserted `note_attachments.github_path/sha`, schreibt normalisiertes Markdown ins Repo und persistiert es zurück in die DB.
 - [ ] **Phase D (GitHub Pull/Import)**: Vault-weiter Binary-Scan und Wikilink-Normalisierung.
 - [ ] **Phase E (Backfill)**: Bestehende Signed-URL-Notes nach `![[filename]]` migrieren.
 - [ ] **Phase F (Settings UI)**: `attachment_folder` konfigurierbar machen + Migrate-Card.
