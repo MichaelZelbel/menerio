@@ -66,22 +66,37 @@ export function DashboardSidebar() {
       ? location.pathname === "/dashboard"
       : location.pathname.startsWith(path);
 
-  const mainItems = [
-    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-    { title: "Notes", url: "/dashboard/notes", icon: FileText },
-    { title: "Lexicon", url: "/lexicon", icon: BookOpen },
-    { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
-    { title: "People", url: "/dashboard/people", icon: UserCircle },
-    { title: "Groups", url: "/dashboard/groups", icon: Layers },
-    { title: "Collections", url: "/collections", icon: LayoutGrid },
-    
-    { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
-    { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
-    { title: "Note Graph", url: "/dashboard/graph", icon: Network },
-    { title: "Media Library", url: "/dashboard/media", icon: Image },
+  const navGroups: { items: { title: string; url: string; icon: typeof LayoutDashboard }[] }[] = [
+    {
+      items: [{ title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
+    },
+    {
+      items: [
+        { title: "Notes", url: "/dashboard/notes", icon: FileText },
+        { title: "Note Graph", url: "/dashboard/graph", icon: Network },
+        { title: "Lexicon", url: "/lexicon", icon: BookOpen },
+      ],
+    },
+    {
+      items: [
+        { title: "People", url: "/dashboard/people", icon: UserCircle },
+        { title: "Groups", url: "/dashboard/groups", icon: Layers },
+        { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
+      ],
+    },
+    {
+      items: [
+        { title: "Collections", url: "/collections", icon: LayoutGrid },
+        { title: "Media Library", url: "/dashboard/media", icon: Image },
+      ],
+    },
+    {
+      items: [
+        { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
+        { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
+      ],
+    },
   ];
-
-  const premiumItems: typeof mainItems = [];
 
   const systemItems = [
     { title: "My Profile", url: "/dashboard/profile", icon: User },
