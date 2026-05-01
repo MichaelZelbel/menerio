@@ -1821,15 +1821,7 @@
   2. Delete all contacts created during testing
 - **Expected Outcome:** No test contacts remain.
 
-### TS-CLEANUP-003: Delete All Test Action Items
-
-- **Objective:** Remove test action items
-- **Steps:**
-  1. Navigate to `/dashboard/actions`
-  2. Delete all action items created during testing
-- **Expected Outcome:** No test action items remain.
-
-### TS-CLEANUP-004: Delete Test Profile Data
+### TS-CLEANUP-003: Delete Test Profile Data
 
 - **Objective:** Remove test profile entries and instructions
 - **Steps:**
