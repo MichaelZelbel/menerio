@@ -94,6 +94,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { linkifyText } from "@/lib/linkify";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
