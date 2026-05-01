@@ -1255,7 +1255,7 @@ function ItemNotesPanel({
       return;
     }
     onClose?.();
-    navigate(`/notes/${data.id}`);
+    navigate(`/dashboard/notes/${data.id}`);
   };
 
   const linkExisting = async (note: ItemNote) => {
@@ -1335,7 +1335,7 @@ function ItemNotesPanel({
 
   const openNote = (note: ItemNote) => {
     onClose?.();
-    navigate(`/notes/${note.id}`);
+    navigate(`/dashboard/notes/${note.id}`);
   };
 
   return (
