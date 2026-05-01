@@ -390,8 +390,11 @@ function serializeBlock(node: TiptapNode, depth: number): string {
       return "---";
     case "table":
       return serializeTable(node);
-    case "image":
+    case "image": {
+      const attachName = String(node.attrs?.["data-attachment-name"] || node.attrs?.dataAttachmentName || "");
+      if (attachName) return `![[${attachName}]]`;
       return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+    }
     case "videoEmbed":
       return `![video](${node.attrs?.src || ""})`;
     case "pdfEmbed":
