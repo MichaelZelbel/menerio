@@ -1154,19 +1154,23 @@ function ItemNotesPanel({
   itemTitle,
   collectionId,
   collectionName,
+  onClose,
 }: {
   itemId: string;
   itemTitle: string;
   collectionId: string;
   collectionName: string;
+  onClose?: () => void;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [notes, setNotes] = useState<ItemNote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkResults, setLinkResults] = useState<ItemNote[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -1190,8 +1194,45 @@ function ItemNotesPanel({
     load();
   }, [load]);
 
+  // Search existing notes when popover open
+  useEffect(() => {
+    if (!linkOpen || !user) return;
+    let cancelled = false;
+    const run = async () => {
+      setIsSearching(true);
+      const linkedIds = notes.map((n) => n.id);
+      let query = supabase
+        .from("notes")
+        .select("id, title, content, updated_at")
+        .eq("user_id", user.id)
+        .eq("is_trashed", false)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      if (linkQuery.trim()) {
+        query = query.ilike("title", `%${linkQuery.trim()}%`);
+      }
+      if (linkedIds.length > 0) {
+        query = query.not("id", "in", `(${linkedIds.join(",")})`);
+      }
+      const { data, error } = await query;
+      if (cancelled) return;
+      setIsSearching(false);
+      if (error) {
+        toast.error("Search failed", { description: error.message });
+        return;
+      }
+      setLinkResults((data ?? []) as ItemNote[]);
+    };
+    const t = setTimeout(run, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [linkOpen, linkQuery, notes, user]);
+
   const createNote = async () => {
     if (!user) return;
+    setIsCreating(true);
     const { data, error } = await supabase
       .from("notes")
       .insert({
@@ -1204,52 +1245,70 @@ function ItemNotesPanel({
           collection_name: collectionName,
         },
       })
-      .select("id, title, content, updated_at")
+      .select("id")
       .single();
+    setIsCreating(false);
     if (error || !data) {
       toast.error("Could not create note", {
         description: error?.message ?? "Please try again.",
       });
       return;
     }
-    setNotes((current) => [data as ItemNote, ...current]);
-    setExpandedId(data.id);
-    setDrafts((current) => ({ ...current, [data.id]: data.content ?? "" }));
+    onClose?.();
+    navigate(`/notes/${data.id}`);
   };
 
-  const saveNote = async (note: ItemNote) => {
+  const linkExisting = async (note: ItemNote) => {
     if (!user) return;
-    const draftTitle = drafts[`${note.id}::title`] ?? note.title;
-    const draftContent = drafts[note.id] ?? note.content;
-    setSavingId(note.id);
-    const { data, error } = await supabase
+    // Fetch existing metadata to merge
+    const { data: existing, error: fetchErr } = await supabase
       .from("notes")
-      .update({ title: draftTitle, content: draftContent })
+      .select("metadata")
       .eq("id", note.id)
       .eq("user_id", user.id)
-      .select("id, title, content, updated_at")
       .single();
-    setSavingId(null);
-    if (error || !data) {
-      toast.error("Could not save note", {
-        description: error?.message ?? "Please try again.",
-      });
+    if (fetchErr) {
+      toast.error("Could not link note", { description: fetchErr.message });
       return;
     }
-    setNotes((current) =>
-      current.map((n) => (n.id === note.id ? (data as ItemNote) : n)),
-    );
-    toast.success("Note saved");
+    const merged = {
+      ...((existing?.metadata as Record<string, unknown>) ?? {}),
+      collection_item_id: itemId,
+      collection_id: collectionId,
+      collection_name: collectionName,
+    } as Json;
+    const { error } = await supabase
+      .from("notes")
+      .update({ metadata: merged })
+      .eq("id", note.id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error("Could not link note", { description: error.message });
+      return;
+    }
+    setLinkOpen(false);
+    setLinkQuery("");
+    toast.success("Note linked");
+    load();
   };
 
   const unlinkNote = async (note: ItemNote) => {
     if (!user) return;
     if (!window.confirm("Unlink this note from the item? The note itself stays in your Notes app.")) return;
+    // Preserve other metadata, only strip our keys
+    const { data: existing } = await supabase
+      .from("notes")
+      .select("metadata")
+      .eq("id", note.id)
+      .eq("user_id", user.id)
+      .single();
+    const meta = { ...((existing?.metadata as Record<string, unknown>) ?? {}) };
+    delete meta.collection_item_id;
+    delete meta.collection_id;
+    delete meta.collection_name;
     const { error } = await supabase
       .from("notes")
-      .update({
-        metadata: {} as Json,
-      })
+      .update({ metadata: meta as Json })
       .eq("id", note.id)
       .eq("user_id", user.id);
     if (error) {
@@ -1274,19 +1333,77 @@ function ItemNotesPanel({
     setNotes((current) => current.filter((n) => n.id !== note.id));
   };
 
+  const openNote = (note: ItemNote) => {
+    onClose?.();
+    navigate(`/notes/${note.id}`);
+  };
+
   return (
     <section className="mt-8 border-t pt-6">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold">Notes</h3>
           <p className="text-xs text-muted-foreground">
-            Freeform notes for this item. Stored as Markdown in your vault.
+            Link notes from your vault to this item. Editing happens in the Notes app.
           </p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={createNote}>
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Add note
-        </Button>
+        <div className="flex items-center gap-2">
+          <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+            <PopoverTrigger asChild>
+              <Button type="button" size="sm" variant="outline">
+                <LinkIcon className="mr-1 h-3.5 w-3.5" />
+                Link existing
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 p-0">
+              <div className="border-b p-2">
+                <Input
+                  autoFocus
+                  value={linkQuery}
+                  onChange={(e) => setLinkQuery(e.target.value)}
+                  placeholder="Search notes by title…"
+                  className="h-8"
+                />
+              </div>
+              <div className="max-h-72 overflow-y-auto py-1">
+                {isSearching ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    Searching…
+                  </div>
+                ) : linkResults.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No notes found.
+                  </div>
+                ) : (
+                  linkResults.map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      onClick={() => linkExisting(note)}
+                      className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                    >
+                      <div className="truncate font-medium">
+                        {note.title || "Untitled"}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {formatDistanceToNow(parseISO(note.updated_at), { addSuffix: true })}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button
+            type="button"
+            size="sm"
+            onClick={createNote}
+            disabled={isCreating}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            New note
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -1295,112 +1412,55 @@ function ItemNotesPanel({
         </div>
       ) : notes.length === 0 ? (
         <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
-          No notes yet. Add one to capture freeform context.
+          No notes linked yet.
         </p>
       ) : (
         <ul className="space-y-2">
-          {notes.map((note) => {
-            const isExpanded = expandedId === note.id;
-            const draftTitle = drafts[`${note.id}::title`] ?? note.title;
-            const draftContent = drafts[note.id] ?? note.content;
-            return (
-              <li key={note.id} className="rounded-md border bg-card">
-                <div className="flex items-start justify-between gap-2 p-3">
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 text-left"
-                    onClick={() => {
-                      setExpandedId(isExpanded ? null : note.id);
-                      if (!isExpanded) {
-                        setDrafts((current) => ({
-                          ...current,
-                          [note.id]: note.content ?? "",
-                          [`${note.id}::title`]: note.title,
-                        }));
-                      }
-                    }}
-                  >
-                    <div className="truncate text-sm font-medium">
-                      {note.title || "Untitled"}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {note.content
-                        ? note.content.replace(/[#*_`>\-]+/g, "").slice(0, 80)
-                        : "Empty note"}{" "}
-                      · {formatDistanceToNow(parseISO(note.updated_at), { addSuffix: true })}
-                    </div>
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-7 w-7">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => navigate(`/notes/${note.id}`)}>
-                        <ExternalLink className="mr-2 h-4 w-4" />
-                        Open in Notes
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => unlinkNote(note)}>
-                        Unlink from item
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => deleteNote(note)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete note
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                {isExpanded && (
-                  <div className="space-y-2 border-t p-3">
-                    <Input
-                      value={draftTitle}
-                      onChange={(e) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [`${note.id}::title`]: e.target.value,
-                        }))
-                      }
-                      placeholder="Note title"
-                    />
-                    <Textarea
-                      value={draftContent}
-                      onChange={(e) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [note.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="Write Markdown here…"
-                      className="min-h-[140px] font-mono text-sm"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setExpandedId(null)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => saveNote(note)}
-                        disabled={savingId === note.id}
-                      >
-                        {savingId === note.id ? "Saving…" : "Save note"}
-                      </Button>
-                    </div>
+          {notes.map((note) => (
+            <li key={note.id} className="rounded-md border bg-card">
+              <div className="flex items-start justify-between gap-2 p-3">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => openNote(note)}
+                >
+                  <div className="truncate text-sm font-medium">
+                    {note.title || "Untitled"}
                   </div>
-                )}
-              </li>
-            );
-          })}
+                  <div className="truncate text-xs text-muted-foreground">
+                    {note.content
+                      ? note.content.replace(/[#*_`>\-]+/g, "").slice(0, 80)
+                      : "Empty note"}{" "}
+                    · {formatDistanceToNow(parseISO(note.updated_at), { addSuffix: true })}
+                  </div>
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => openNote(note)}>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Open in Notes
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => unlinkNote(note)}>
+                      Unlink from item
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onClick={() => deleteNote(note)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete note
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </li>
+          ))}
         </ul>
       )}
     </section>
