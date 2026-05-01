@@ -1,26 +1,32 @@
-## Ziel
+## Problem
 
-Der Link "Test in chat" im Empty-State einer Kollektion (`/collections/:slug`) hat keinen Handler und tut nichts. Entfernen.
+Schema- und Kollektions-Bearbeitung sind heute hinter einem ⋯-Icon ohne Label versteckt. Nutzer finden sie nicht und denken, Felder/Kategorien seien nicht editierbar. Die Funktion existiert vollständig in `/collections/:slug/schema` und im "Edit Collection"-Dialog.
 
-## Änderung
+## Änderungen
 
-**Datei:** `src/pages/CollectionDetail.tsx` (Zeilen 1909–1914)
+### 1. Sichtbaren "Customize"-Button auf der Kollektions-Detailseite
 
-Das `<button>`-Element mit "Test in chat" wird ersatzlos gelöscht. Der umgebende Flex-Container behält den "New Item"-Button und zentriert ihn weiterhin korrekt.
+Datei: `src/pages/CollectionDetail.tsx` (Header-Toolbar, ca. Zeile 1860–1888)
 
-Vorher:
-```tsx
-<div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-  <Button onClick={() => setSelectedItem({ id: "new" } as CollectionItem)}>
-    <Plus className="mr-2 h-4 w-4" />
-    New Item
-  </Button>
-  <button type="button" className="text-sm text-primary hover:underline">
-    Test in chat
-  </button>
-</div>
-```
+- Neben "New Item" einen sekundären Button **"Customize"** mit `Settings2`-Icon hinzufügen, der direkt zu `/collections/${slug}/schema` navigiert.
+- Das ⋯-Menü bleibt für "Edit Collection" (Name/Icon/Beschreibung/Agent Instructions) und "Delete Collection".
+- Auf Mobile: nur Icon, Tooltip "Customize fields".
 
-Nachher: nur noch der `New Item`-Button im Container.
+### 2. Empty-State um Hinweis ergänzen
 
-Keine weiteren Stellen betroffen (rg-Suche zeigt nur dieses eine Vorkommen).
+Im Empty-State (bisher nur "New Item"-Button) zusätzlich einen unauffälligen Textlink **"Customize fields"** → führt zum Schema-Editor. Hilft beim ersten Aufruf einer frisch erstellten Kollektion (genau dein Fall).
+
+### 3. Schema-Editor: bessere Beschriftung für Optionen
+
+Datei: `src/pages/CollectionSchema.tsx`
+
+- Bei `select`/`multiselect`-Feldern den Bereich für die Optionen klar mit "Categories / Options" labeln und einen kleinen Helper-Text ergänzen ("These are the choices users can pick from for this field"). Aktuell heißt das nur "Options" und ist für Nicht-Techniker nicht sofort als "Kategorien" erkennbar.
+
+### 4. Memory-Update
+
+Notieren, dass Schema/Collection-Bearbeitung über sichtbaren "Customize"-Button + ⋯-Menü zugänglich ist, damit ich es künftig konsistent halte.
+
+## Out of scope
+
+- Inline-Editing von Feldern direkt aus der Tabellenansicht (größerer Umbau)
+- Migration bestehender Items bei Feld-Umbenennungen (passiert bereits automatisch über `key`-Mapping; UI-Hinweis wäre separates Thema)
