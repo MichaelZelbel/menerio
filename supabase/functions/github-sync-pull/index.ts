@@ -505,6 +505,7 @@ Deno.serve(async (req) => {
       success: true,
       ...results,
       pushed,
+      attachments: attachmentSummary,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("github-sync-pull error:", err);
