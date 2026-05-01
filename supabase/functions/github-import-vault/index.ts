@@ -473,6 +473,7 @@ Deno.serve(async (req) => {
           skipped,
           errors,
           unresolved_links: unresolvedLinks,
+          attachments: attachmentSummary,
           results,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
