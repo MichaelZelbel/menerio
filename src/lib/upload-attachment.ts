@@ -170,3 +170,78 @@ export async function resolveWikilinkAttachment(
   if (urlError || !signed) return null;
   return { url: signed.signedUrl, mimeType: data.mime_type };
 }
+
+/**
+ * Resolve all `data-attachment-name="..."` placeholders inside an HTML string
+ * to real signed URLs by batch-looking up `note_attachments`. Used right
+ * before `editor.commands.setContent(...)` so wikilink-embedded images render
+ * inline without ever exposing storage paths in the persisted Markdown.
+ *
+ * Unknown filenames are left untouched (the placeholder element remains, so
+ * users can still see/edit the wikilink in source mode).
+ */
+export async function resolveAttachmentImagesInHtml(
+  html: string,
+  userId: string,
+): Promise<string> {
+  if (!html || !userId || !html.includes("data-attachment-name=")) return html;
+
+  // Collect every referenced filename (images + links)
+  const names = new Set<string>();
+  const re = /data-attachment-name="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    names.add(decodeHtmlEntities(m[1]));
+  }
+  if (names.size === 0) return html;
+
+  // Batch-fetch storage paths
+  const { data, error } = await supabase
+    .from("note_attachments")
+    .select("filename, storage_path, mime_type")
+    .eq("user_id", userId)
+    .in("filename", Array.from(names));
+
+  if (error || !data || data.length === 0) return html;
+
+  // Sign URLs in parallel
+  const signedEntries = await Promise.all(
+    data.map(async (row) => {
+      const { data: signed } = await supabase.storage
+        .from("note-attachments")
+        .createSignedUrl(row.storage_path, 60 * 60 * 24 * 6);
+      return [row.filename, signed?.signedUrl || null] as const;
+    }),
+  );
+  const urlByName = new Map(signedEntries.filter(([, u]) => !!u) as [string, string][]);
+
+  // Replace src="" on <img data-attachment-name="X"> and href="#" on <a>
+  let out = html.replace(
+    /<img\b([^>]*?)data-attachment-name="([^"]+)"([^>]*)>/gi,
+    (full, pre: string, name: string, post: string) => {
+      const url = urlByName.get(decodeHtmlEntities(name));
+      if (!url) return full;
+      const merged = `${pre}${post}`.replace(/\ssrc="[^"]*"/i, "");
+      return `<img${merged} src="${url}" data-attachment-name="${name}">`;
+    },
+  );
+  out = out.replace(
+    /<a\b([^>]*?)data-attachment-name="([^"]+)"([^>]*)>([\s\S]*?)<\/a>/gi,
+    (full, pre: string, name: string, post: string, label: string) => {
+      const url = urlByName.get(decodeHtmlEntities(name));
+      if (!url) return full;
+      const merged = `${pre}${post}`.replace(/\shref="[^"]*"/i, "");
+      return `<a${merged} href="${url}" data-attachment-name="${name}" target="_blank" rel="noopener">${label}</a>`;
+    },
+  );
+  return out;
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
