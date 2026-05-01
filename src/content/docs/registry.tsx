@@ -818,6 +818,7 @@ export const docCategories: DocCategory[] = [
     slug: "knowledge",
     pages: [
       { slug: "lexicon", title: "Lexicon" },
+      { slug: "collections", title: "Collections" },
     ],
   },
   {
