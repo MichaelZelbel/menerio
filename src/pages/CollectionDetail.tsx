@@ -1305,6 +1305,14 @@ function ItemSheet({
               />
             ))}
           </form>
+          {!isCreate && item && collection && (
+            <ItemNotesPanel
+              itemId={item.id}
+              itemTitle={item.title ?? "Untitled"}
+              collectionId={collection.id}
+              collectionName={collection.name}
+            />
+          )}
         </div>
         <div className="flex items-center justify-between gap-2 border-t pt-4">
           <div>
