@@ -92,7 +92,7 @@ export function DashboardSidebar() {
     },
     {
       items: [
-        { title: "Review", url: "/dashboard/review-queue", icon: ClipboardList },
+        { title: "Review Queue", url: "/dashboard/review-queue", icon: ClipboardList },
         { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
       ],
     },
