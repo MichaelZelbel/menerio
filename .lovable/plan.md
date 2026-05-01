@@ -1,51 +1,154 @@
-## Antwort vorab
+## Ziel
 
-Technisch beides sauber möglich. Praktisch ist aber wichtig:
+Das via GitHub-Sync geschriebene Repo soll ein **vollwertiger Obsidian-Vault** werden — inklusive Bildern und anderen Anhängen. Du sollst das Repo lokal klonen, in Obsidian öffnen, Bilder sehen, neue Bilder einfügen und nach Push wieder in Menerio sehen können. Existierende Vaults (auch Evernote-importierte mit `_resources/<Note>.resources/`) müssen wir lesen können.
 
-- **Ein eigener Feldtyp "Link" ist nicht nötig** — es gibt bereits den Feldtyp **`url`** in Collections. Der speichert URLs validiert und rendert sie als klickbaren Link mit `ExternalLink`-Icon (siehe `FieldValue` in `CollectionDetail.tsx`, Zeilen 447–458). Das ist der saubere Weg für Felder, die *ausschließlich* eine URL enthalten.
-- **Was aktuell fehlt**: In normalen `text`/`longtext`-Feldern werden URLs nur als Plain-Text dargestellt — selbst wenn sie wie eine URL aussehen. Genau das lässt sich sauber nachrüsten, ohne Schema-Migration und ohne neuen Feldtyp.
+## Recherche-Ergebnis: Pfad-Konventionen
 
-## Plan: Auto-Linkify für Text- und Longtext-Felder
+Obsidian rendert `![[file.png]]` **pfadunabhängig** (Default "Shortest path when possible") — die Datei kann irgendwo im Vault liegen. Es gibt keinen einzigen "richtigen" Pfad, sondern verschiedene Konventionen je Quelle:
 
-### Ziel
-URLs (sowie optional E-Mail-Adressen) in `text`- und `longtext`-Feldern werden in der **Anzeige** automatisch erkannt und als klickbare Links gerendert. Das Eingabe-/Speicherverhalten bleibt unverändert (Plain Text in DB).
+| Quelle | Pfad-Schema |
+|---|---|
+| Manuelles Setup (häufigster Default) | `attachments/` |
+| Evernote-Importer / Yarle | `_resources/<NoteName>.resources/` |
+| Notion-Importer | `<NoteName>/` neben der Note |
+| Apple Notes / Bear | `attachments/` oder `media/` |
 
-### Scope
-- Nur Anzeige-Layer (`FieldValue` in `src/pages/CollectionDetail.tsx`).
-- Kein neuer Feldtyp, keine DB-Migration, keine Schema-Änderung.
-- Bestehende Daten profitieren automatisch.
+**Entscheidung:**
+- **Schreiben (Menerio → GitHub)**: Default `attachments/` im Vault-Root (Standard-Konvention der Obsidian-Community).
+- **Lesen (GitHub → Menerio)**: Wir scannen den **gesamten Vault-Tree** nach Binaries und lösen Wikilinks pfadunabhängig per **Filename-Lookup** auf — damit sind wir mit allen oben genannten Layouts inkl. dem Evernote-Schema aus dem Screenshot kompatibel.
 
-### Umsetzung
+## Aktuelle Lücken (Ist-Zustand)
 
-1. **Helper `linkifyText(text: string)`** in `src/lib/utils.ts` (oder neue `src/lib/linkify.ts`):
-   - Erkennt mit Regex:
-     - `https://…` / `http://…`
-     - `www.…` (wird beim Rendern zu `https://www.…`)
-     - E-Mail-Adressen (optional, hinter Flag)
-   - Splittet den String in Segmente und gibt ein `ReactNode[]` zurück: Plain-Text-Stücke + `<a target="_blank" rel="noreferrer" class="text-primary hover:underline">` für Treffer.
-   - Trailing-Satzzeichen (`.`, `,`, `)`, `]`) werden vom Link abgeschnitten und als Plain-Text angehängt.
-   - Escaping: Da wir nicht `dangerouslySetInnerHTML` nutzen, sondern React-Nodes, ist XSS unkritisch.
+- Bilder leben in Supabase Bucket `note-attachments` als `{userId}/{uuid}.{ext}`.
+- Im Markdown stehen **Signed URLs** (7 Tage gültig) → in Obsidian nach Ablauf tot.
+- `github-sync-export` schreibt nur `*.md`, committet keine Binaries.
+- `github-sync-pull` und `github-import-vault` lesen nur `*.md`, ignorieren Binaries und `![[…]]`-Embeds.
 
-2. **Integration in `FieldValue` (`src/pages/CollectionDetail.tsx`)**:
-   - Im `text`-Branch (aktuell letzte Zeile 492 `return <span>…{truncate(value)}…`):
-     - Statt `truncate(value)` → `linkifyText(String(value))` rendern (mit `truncate` nur fürs Tooltip / `title`-Attribut, nicht für die Linkify-Quelle, sonst werden URLs zerstört).
-   - Für `longtext`: gleiches Verhalten, aber ohne `truncate`, damit lange Texte vollständig sichtbar/klickbar bleiben (separater Branch für `field.type === "longtext"` einführen).
+## Architektur
 
-3. **Klick-Verhalten innerhalb der Tabellenzeile**:
-   - `onClick={(e) => e.stopPropagation()}` auf den generierten `<a>`-Tags, damit das Anklicken eines Links nicht versehentlich die Zeilenauswahl/Detailansicht öffnet.
+```
+┌─────────────────┐       Export        ┌────────────────────────┐
+│ Supabase Bucket │  ────────────────▶  │ GitHub Repo            │
+│ note-attachments│   schreibt nach     │  attachments/*.png     │
+│ {uid}/{uuid}.ext│                     │  notes/*.md            │
+│                 │  ◀────────────────  │  (liest auch:          │
+│                 │   Pull/Import       │   _resources/*/*,      │
+│                 │   scannt ALLES      │   assets/*, images/*)  │
+└─────────────────┘                     └────────────────────────┘
+        ▲                                         ▲
+        │                                         │
+   Web-Anzeige                              Obsidian-Anzeige
+   (Signed URL via                          (Wikilink-Resolver,
+    Resolver)                                pfadunabhängig)
+```
 
-4. **Edit-Mode bleibt unverändert**:
-   - `Input` / `Textarea` zeigen weiterhin Plain Text — das ist Standard und erwartbar (vergleichbar mit Notion, Airtable).
+**DB-Format (Single Source of Truth):** Markdown enthält Obsidian-Wikilink-Embeds `![[filename.ext]]`. Beim Web-Render löst eine Resolver-Schicht den Filename gegen `note_attachments` auf und ersetzt zur Anzeige durch Signed URLs.
 
-### Was nicht enthalten ist
-- Kein neuer `link`-Feldtyp (wäre redundant zu `url`).
-- Kein Linkify in der Edit-Ansicht (nicht standardgemäß; würde Eingabe verkomplizieren).
-- Keine Markdown-Verarbeitung in Collection-Feldern (`longtext` bleibt Plain Text — falls reichhaltige Formatierung gewünscht ist, wäre das ein separater, größerer Schritt mit Tiptap).
+## Datenmodell
 
-### Empfehlung an dich
-- Für reine Link-Felder (z. B. "IMDb-URL"): weiterhin Feldtyp **URL** verwenden — sauber validiert.
-- Für gemischte Texte (z. B. Notiz mit eingebetteter URL): profitiert automatisch von Auto-Linkify nach diesem Plan.
+Neue Tabelle `note_attachments`:
 
-### Geänderte Dateien
-- `src/lib/linkify.ts` (neu) — Helper.
-- `src/pages/CollectionDetail.tsx` — `FieldValue` für `text`/`longtext` anpassen.
+```sql
+create table public.note_attachments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  filename text not null,            -- "screenshot-2026-01.png"
+  storage_path text not null,        -- "{uid}/{uuid}.png" im Bucket
+  size_bytes integer,
+  mime_type text,
+  sha256 text,                       -- für Sync-Diffing
+  github_path text,                  -- "attachments/screenshot-2026-01.png" oder importierter Pfad
+  github_sha text,                   -- aktueller Blob-SHA im Repo
+  github_synced_at timestamptz,
+  source text default 'menerio',     -- 'menerio' | 'imported' | 'github'
+  created_at timestamptz default now(),
+  unique (user_id, filename)
+);
+```
+
+RLS: nur Owner. Indexe auf `(user_id, filename)` und `(user_id, sha256)`.
+
+## Upload-Flow (`src/lib/upload-attachment.ts`)
+
+- Filename: `sanitize(file.name)` + Kollisionssuffix (`-2`, `-3`, …) bei Duplikaten pro User.
+- Storage-Pfad bleibt intern `{userId}/{uuid}.{ext}` (stabil, unabhängig vom Anzeigenamen).
+- Nach Upload: Eintrag in `note_attachments` (filename, storage_path, sha256, mime_type, size_bytes).
+- Rückgabe um `filename` ergänzt.
+- TipTap-Image-Insert schreibt im Markdown **nicht** mehr Signed URL, sondern `![[filename.ext]]`.
+
+## Web-Render
+
+`src/utils/markdown-converter.ts` erkennt bereits `![[...]]` als Bild. Ergänzung:
+- Vor dem Render einmalig referenzierte Filenames in `note_attachments` nachschlagen.
+- Signed URLs erzeugen (Cache pro Session, TTL 6 Tage).
+- Im HTML als `<img src="signed-url" data-wikilink-filename="…">` einsetzen.
+
+## Edge Function `github-sync-export`
+
+1. Markdown der Note parsen, alle `![[filename.ext]]` und Legacy-`![](signed-url)` extrahieren.
+2. Pro Attachment:
+   - In `note_attachments` lookuppen (per filename).
+   - Falls noch nicht im Repo **oder** lokaler `sha256` ≠ Repo-`github_sha`: Datei aus Bucket holen, base64 nach `<vault>/attachments/<filename>` committen (GitHub Contents API), `github_path`, `github_sha`, `github_synced_at` aktualisieren.
+3. Markdown vor dem Schreiben normalisieren: Signed-URL-Bilder → `![[filename.ext]]`.
+4. `<vault>/notes/...md` committen wie bisher.
+
+## Edge Function `github-sync-pull`
+
+1. Vollen Vault-Tree via `git/trees?recursive=1` ziehen.
+2. Alle Binär-Pfade erkennen (Extension-Filter: png/jpg/jpeg/gif/webp/svg/pdf/mp3/mp4/m4a/wav/ogg/heic) — **egal in welchem Ordner** (`attachments/`, `_resources/Foo.resources/`, `assets/`, `images/`, `media/`, …).
+3. Pro Binary:
+   - Filename extrahieren = letzter Pfad-Bestandteil.
+   - Falls in `note_attachments` (per filename) und `github_sha` aktuell: skip.
+   - Sonst: Blob laden, in Bucket unter neuem `{uid}/{uuid}.{ext}` ablegen, Eintrag in `note_attachments` upserten (filename als key, `github_path` = Original-Pfad, `source = 'github'`).
+4. Konflikt zweier Files mit gleichem Filename in unterschiedlichen Ordnern: zweiter bekommt Suffix `-2`, im DB-Record festhalten.
+5. Markdown-Pull bleibt; `![[filename]]` wird übernommen, `![](relativer/pfad/file.png)` zu `![[file.png]]` normalisiert.
+
+## Edge Function `github-import-vault`
+
+- Vor dem Notes-Import den vollständigen Tree scannen und alle Binaries wie in `github-sync-pull` in Bucket + `note_attachments` synchronisieren — funktioniert damit out-of-the-box für Evernote-importierte Vaults (`_resources/<Note>.resources/*.jpg`).
+- Beim Notes-Import: `![](irgendein/pfad/file.png)` → `![[file.png]]` rewriten.
+
+## Settings (`GitHubSyncSettings.tsx`)
+
+- Neues Feld **"Attachment folder"** mit Default `attachments` — speichert in `github_connections.attachment_folder`. Wird vom Export verwendet. Lesen/Pull ignoriert das Feld und scannt alles.
+- Migrate-Card: "X bestehende Bilder können in Obsidian-Format überführt werden — jetzt migrieren" (triggert Backfill).
+
+## Backfill (`backfill-attachment-filenames`)
+
+Einmaliger Job:
+1. Alle Notes durchscannen, Signed-URL-Referenzen auf `note-attachments`-Bucket erkennen.
+2. Pro Storage-Path lesbaren Filename ableiten (`attachment-{shortid}.{ext}` falls UUID-basiert).
+3. `note_attachments`-Eintrag erzeugen (`source = 'menerio'`).
+4. Markdown der Note rewriten: Signed URL → `![[filename.ext]]`.
+5. Beim nächsten GitHub-Sync werden die Files automatisch ins `attachments/` gepusht.
+
+## Edge Cases & Entscheidungen
+
+- **Filename-Kollisionen** (gleicher Name aus verschiedenen Quellen): zweiter bekommt Suffix `-2`. Wikilinks werden nicht umgeschrieben, falls Note bereits darauf zeigt — der "ältere" Filename gewinnt.
+- **Nicht-Bild-Anhänge** (PDF, mp3, mp4): gleiches Schema, gleicher Ordner. Obsidian rendert nativ.
+- **Dateigröße**: GitHub Contents API erlaubt 100 MB/File, harmonisiert mit unserem 20 MB Bucket-Limit.
+- **Privates Repo empfohlen**: Da Bilder jetzt im Repo liegen. Hinweis in den Settings.
+- **Web bleibt funktional ohne GitHub-Sync**: Wikilinks werden auch ohne Sync via Resolver/Signed URL aufgelöst — DB ist Single Source of Truth.
+- **Evernote-Vault-Kompatibilität (Screenshot)**: Beim Import werden alle `_resources/*.resources/*.{jpg,png}` automatisch eingelesen. Wikilinks im Markdown finden sie über den Filename. Beim späteren Export legt Menerio neue Bilder zentral in `attachments/` ab — alte Bilder bleiben in ihren Original-Ordnern (nicht-destruktiv). Optional in Settings: "Re-organize all attachments into attachments/" Button.
+
+## Geänderte / neue Dateien
+
+**Neu:**
+- `supabase/migrations/<ts>_note_attachments.sql` — Tabelle + RLS + Indexe.
+- `supabase/migrations/<ts>_github_attachment_folder.sql` — Spalte `attachment_folder` in `github_connections`.
+- `supabase/functions/backfill-attachment-filenames/index.ts` — One-shot Migration.
+
+**Angepasst:**
+- `src/lib/upload-attachment.ts` — Filename-Sanitize, Kollisions-Suffix, `note_attachments`-Insert, `filename`-Rückgabe.
+- `src/components/notes/extensions/*` (Image-Insert) — `![[filename]]` schreiben statt URL.
+- `src/utils/markdown-converter.ts` — Wikilink-Embed Resolver (filename-Lookup → Signed URL).
+- `supabase/functions/github-sync-export/index.ts` — Attachment-Extraction, Binary-Commit nach `attachments/`, URL→Wikilink-Normalisierung.
+- `supabase/functions/github-sync-pull/index.ts` — Vault-weiter Binary-Scan, Bucket-Upload, Pfad-Normalisierung.
+- `supabase/functions/github-import-vault/index.ts` — Binary-Vorabsync (inkl. `_resources/`-Layout), Pfad→Wikilink-Rewrite.
+- `src/components/settings/GitHubSyncSettings.tsx` — `attachment_folder`-Feld, Migrate-Card, optionaler "Re-organize"-Button.
+
+## Out of Scope
+
+- Auto-Reorganisation existierender Vaults in einen einheitlichen Ordner (außer per Opt-in-Button).
+- Bild-Resizing/Optimierung für Web.
+- Versionierung von Attachments (überschreibt by-filename).
