@@ -147,28 +147,47 @@ Deno.serve(async (req) => {
 
       const source = role === "free" ? "free_tier" : "role_based";
 
+      // Race-safe insert: relies on the unique index (user_id, period_start, period_end).
+      // If a concurrent caller just inserted a row, ignoreDuplicates returns no rows
+      // and we re-select the existing one.
       const { data: inserted, error: insertErr } = await db
         .from("ai_allowance_periods")
-        .insert({
-          user_id: userId,
-          tokens_granted: tokensGranted,
-          tokens_used: 0,
-          period_start,
-          period_end,
-          source,
-          metadata: {
-            base_tokens: baseTokens,
-            rollover_tokens: rolloverTokens,
-            credits_per_month: creditsPerMonth,
-            tokens_per_credit: tokensPerCredit,
-            role,
+        .upsert(
+          {
+            user_id: userId,
+            tokens_granted: tokensGranted,
+            tokens_used: 0,
+            period_start,
+            period_end,
+            source,
+            metadata: {
+              base_tokens: baseTokens,
+              rollover_tokens: rolloverTokens,
+              credits_per_month: creditsPerMonth,
+              tokens_per_credit: tokensPerCredit,
+              role,
+            },
           },
-        })
+          { onConflict: "user_id,period_start,period_end", ignoreDuplicates: true }
+        )
         .select()
-        .single();
+        .maybeSingle();
 
       if (insertErr) throw insertErr;
-      return inserted;
+
+      if (inserted) return inserted;
+
+      // Conflict path: another request inserted concurrently. Re-select the winning row.
+      const { data: winner, error: reselectErr } = await db
+        .from("ai_allowance_periods")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("period_start", period_start)
+        .eq("period_end", period_end)
+        .maybeSingle();
+
+      if (reselectErr) throw reselectErr;
+      return winner;
     }
 
     // --- Batch init ---
