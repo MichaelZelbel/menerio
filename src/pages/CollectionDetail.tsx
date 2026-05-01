@@ -94,6 +94,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { linkifyText } from "@/lib/linkify";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
@@ -489,7 +490,20 @@ function FieldValue({
         {String(value)}
       </Badge>
     );
-  return <span className="block max-w-80 truncate">{truncate(value)}</span>;
+  if (field.type === "longtext") {
+    const text = String(value);
+    return (
+      <span className="block whitespace-pre-wrap break-words" title={text}>
+        {linkifyText(text)}
+      </span>
+    );
+  }
+  const text = String(value);
+  return (
+    <span className="block max-w-80 truncate" title={text}>
+      {linkifyText(text)}
+    </span>
+  );
 }
 
 function CollectionIcon({
