@@ -406,6 +406,19 @@ Deno.serve(async (req) => {
             },
             { onConflict: "user_id,note_id" }
           );
+
+          // Phase D: resolve & import attachments referenced by this note
+          try {
+            const attRes = await importNoteAttachments(
+              serviceClient, userId, noteId, mdBody, file.path,
+              ghToken, owner, repo, branch, vaultPath, attachmentFolder, blobs,
+            );
+            attachmentSummary.resolved += attRes.resolved;
+            attachmentSummary.unresolved.push(...attRes.unresolved.map((n) => `${file.path}: ${n}`));
+            attachmentSummary.errors.push(...attRes.errors.map((e) => `${file.path}: ${e}`));
+          } catch (err) {
+            attachmentSummary.errors.push(`${file.path}: attachment import — ${String(err)}`);
+          }
         } catch (err) {
           results.push({ path: file.path, status: "error", error: String(err) });
         }
