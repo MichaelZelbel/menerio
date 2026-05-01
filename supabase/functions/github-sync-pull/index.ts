@@ -334,6 +334,19 @@ Deno.serve(async (req) => {
 
           results.pulled++;
           results.details.push({ path, action: "pulled", noteId: note.id });
+
+          // Phase D: import attachments referenced by this note
+          try {
+            const attRes = await importNoteAttachments(
+              serviceClient, userId, note.id, mdBody, path,
+              ghToken, owner, repo, branch, vaultPath, attachmentFolder, blobs,
+            );
+            attachmentSummary.resolved += attRes.resolved;
+            attachmentSummary.unresolved.push(...attRes.unresolved.map((n) => `${path}: ${n}`));
+            attachmentSummary.errors.push(...attRes.errors.map((e) => `${path}: ${e}`));
+          } catch (err) {
+            attachmentSummary.errors.push(`${path}: attachment import — ${String(err)}`);
+          }
         } catch (err) {
           results.errors++;
           results.details.push({ path, action: "error", error: String(err) });
