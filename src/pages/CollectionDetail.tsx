@@ -1142,6 +1142,271 @@ function FieldInput({
   );
 }
 
+type ItemNote = {
+  id: string;
+  title: string;
+  content: string;
+  updated_at: string;
+};
+
+function ItemNotesPanel({
+  itemId,
+  itemTitle,
+  collectionId,
+  collectionName,
+}: {
+  itemId: string;
+  itemTitle: string;
+  collectionId: string;
+  collectionName: string;
+}) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [notes, setNotes] = useState<ItemNote[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setIsLoading(true);
+    const { data, error } = await supabase
+      .from("notes")
+      .select("id, title, content, updated_at")
+      .eq("user_id", user.id)
+      .eq("is_trashed", false)
+      .filter("metadata->>collection_item_id", "eq", itemId)
+      .order("updated_at", { ascending: false });
+    setIsLoading(false);
+    if (error) {
+      toast.error("Could not load notes", { description: error.message });
+      return;
+    }
+    setNotes((data ?? []) as ItemNote[]);
+  }, [itemId, user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createNote = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("notes")
+      .insert({
+        user_id: user.id,
+        title: itemTitle,
+        content: "",
+        metadata: {
+          collection_item_id: itemId,
+          collection_id: collectionId,
+          collection_name: collectionName,
+        },
+      })
+      .select("id, title, content, updated_at")
+      .single();
+    if (error || !data) {
+      toast.error("Could not create note", {
+        description: error?.message ?? "Please try again.",
+      });
+      return;
+    }
+    setNotes((current) => [data as ItemNote, ...current]);
+    setExpandedId(data.id);
+    setDrafts((current) => ({ ...current, [data.id]: data.content ?? "" }));
+  };
+
+  const saveNote = async (note: ItemNote) => {
+    if (!user) return;
+    const draftTitle = drafts[`${note.id}::title`] ?? note.title;
+    const draftContent = drafts[note.id] ?? note.content;
+    setSavingId(note.id);
+    const { data, error } = await supabase
+      .from("notes")
+      .update({ title: draftTitle, content: draftContent })
+      .eq("id", note.id)
+      .eq("user_id", user.id)
+      .select("id, title, content, updated_at")
+      .single();
+    setSavingId(null);
+    if (error || !data) {
+      toast.error("Could not save note", {
+        description: error?.message ?? "Please try again.",
+      });
+      return;
+    }
+    setNotes((current) =>
+      current.map((n) => (n.id === note.id ? (data as ItemNote) : n)),
+    );
+    toast.success("Note saved");
+  };
+
+  const unlinkNote = async (note: ItemNote) => {
+    if (!user) return;
+    if (!window.confirm("Unlink this note from the item? The note itself stays in your Notes app.")) return;
+    const { error } = await supabase
+      .from("notes")
+      .update({
+        metadata: {} as Json,
+      })
+      .eq("id", note.id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error("Could not unlink note", { description: error.message });
+      return;
+    }
+    setNotes((current) => current.filter((n) => n.id !== note.id));
+  };
+
+  const deleteNote = async (note: ItemNote) => {
+    if (!user) return;
+    if (!window.confirm("Delete this note? It will be moved to trash.")) return;
+    const { error } = await supabase
+      .from("notes")
+      .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+      .eq("id", note.id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error("Could not delete note", { description: error.message });
+      return;
+    }
+    setNotes((current) => current.filter((n) => n.id !== note.id));
+  };
+
+  return (
+    <section className="mt-8 border-t pt-6">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Notes</h3>
+          <p className="text-xs text-muted-foreground">
+            Freeform notes for this item. Stored as Markdown in your vault.
+          </p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={createNote}>
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          Add note
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : notes.length === 0 ? (
+        <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
+          No notes yet. Add one to capture freeform context.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {notes.map((note) => {
+            const isExpanded = expandedId === note.id;
+            const draftTitle = drafts[`${note.id}::title`] ?? note.title;
+            const draftContent = drafts[note.id] ?? note.content;
+            return (
+              <li key={note.id} className="rounded-md border bg-card">
+                <div className="flex items-start justify-between gap-2 p-3">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => {
+                      setExpandedId(isExpanded ? null : note.id);
+                      if (!isExpanded) {
+                        setDrafts((current) => ({
+                          ...current,
+                          [note.id]: note.content ?? "",
+                          [`${note.id}::title`]: note.title,
+                        }));
+                      }
+                    }}
+                  >
+                    <div className="truncate text-sm font-medium">
+                      {note.title || "Untitled"}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {note.content
+                        ? note.content.replace(/[#*_`>\-]+/g, "").slice(0, 80)
+                        : "Empty note"}{" "}
+                      · {formatDistanceToNow(parseISO(note.updated_at), { addSuffix: true })}
+                    </div>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => navigate(`/notes/${note.id}`)}>
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Open in Notes
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => unlinkNote(note)}>
+                        Unlink from item
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => deleteNote(note)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete note
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                {isExpanded && (
+                  <div className="space-y-2 border-t p-3">
+                    <Input
+                      value={draftTitle}
+                      onChange={(e) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [`${note.id}::title`]: e.target.value,
+                        }))
+                      }
+                      placeholder="Note title"
+                    />
+                    <Textarea
+                      value={draftContent}
+                      onChange={(e) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [note.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Write Markdown here…"
+                      className="min-h-[140px] font-mono text-sm"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setExpandedId(null)}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => saveNote(note)}
+                        disabled={savingId === note.id}
+                      >
+                        {savingId === note.id ? "Saving…" : "Save note"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ItemSheet({
   collection,
   fields,
@@ -1305,6 +1570,14 @@ function ItemSheet({
               />
             ))}
           </form>
+          {!isCreate && item && collection && (
+            <ItemNotesPanel
+              itemId={item.id}
+              itemTitle={item.title ?? "Untitled"}
+              collectionId={collection.id}
+              collectionName={collection.name}
+            />
+          )}
         </div>
         <div className="flex items-center justify-between gap-2 border-t pt-4">
           <div>

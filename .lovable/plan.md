@@ -1,32 +1,61 @@
-## Problem
+## Goal
 
-Schema- und Kollektions-Bearbeitung sind heute hinter einem ⋯-Icon ohne Label versteckt. Nutzer finden sie nicht und denken, Felder/Kategorien seien nicht editierbar. Die Funktion existiert vollständig in `/collections/:slug/schema` und im "Edit Collection"-Dialog.
+Yes — items can already be linked to notes via a `link_note` schema field, but that only points to ONE existing note and requires schema setup. The user wants a **native, always-available freeform notes area** on every collection item — a place to jot unstructured info alongside the structured fields.
 
-## Änderungen
+## What exists today
 
-### 1. Sichtbaren "Customize"-Button auf der Kollektions-Detailseite
+- Schema field type `link_note` lets the user manually add a "Link to Note" field to a collection. They then pick one existing note from a popover.
+- This is hidden, requires schema editing, and only links to a pre-existing note.
 
-Datei: `src/pages/CollectionDetail.tsx` (Header-Toolbar, ca. Zeile 1860–1888)
+## Proposed solution
 
-- Neben "New Item" einen sekundären Button **"Customize"** mit `Settings2`-Icon hinzufügen, der direkt zu `/collections/${slug}/schema` navigiert.
-- Das ⋯-Menü bleibt für "Edit Collection" (Name/Icon/Beschreibung/Agent Instructions) und "Delete Collection".
-- Auf Mobile: nur Icon, Tooltip "Customize fields".
+Add a built-in **Notes section** to the item editor sheet (`ItemSheet` in `src/pages/CollectionDetail.tsx`). Every item gets it — no schema setup needed.
 
-### 2. Empty-State um Hinweis ergänzen
+### Behavior
 
-Im Empty-State (bisher nur "New Item"-Button) zusätzlich einen unauffälligen Textlink **"Customize fields"** → führt zum Schema-Editor. Hilft beim ersten Aufruf einer frisch erstellten Kollektion (genau dein Fall).
+- Below the structured fields in the item editor, show a "Notes" section.
+- Lists notes already linked to this item (in chronological order, newest first).
+- "+ Add note" button → creates a new note, prefilled with item title as note title, and links it to the item. Opens inline Markdown editor (small TipTap or simple textarea — see decision below).
+- "Link existing note" secondary action → opens the same picker the `link_note` field uses.
+- Each linked note row shows: title, snippet, last-updated, with actions: open in Notes app (`/notes/:id`), unlink, delete note.
+- Notes created here are real notes — they appear in the Notes app, knowledge graph, search, etc.
 
-### 3. Schema-Editor: bessere Beschriftung für Optionen
+### Data model
 
-Datei: `src/pages/CollectionSchema.tsx`
+No schema changes needed. We reuse the existing `note_connections` table:
+- `connection_type = 'collection_item'`
+- `source_note_id = note.id`
+- `target_note_id` is uuid-typed, so we can't store a collection_item id there directly without a migration.
 
-- Bei `select`/`multiselect`-Feldern den Bereich für die Optionen klar mit "Categories / Options" labeln und einen kleinen Helper-Text ergänzen ("These are the choices users can pick from for this field"). Aktuell heißt das nur "Options" und ist für Nicht-Techniker nicht sofort als "Kategorien" erkennbar.
+**Two options** (asking below):
 
-### 4. Memory-Update
+**Option A — Use note metadata** (no migration)
+Store the item link in `notes.metadata.collection_item_id` and `notes.metadata.collection_id`. Query by JSON filter. Simplest, no schema change.
 
-Notieren, dass Schema/Collection-Bearbeitung über sichtbaren "Customize"-Button + ⋯-Menü zugänglich ist, damit ich es künftig konsistent halte.
+**Option B — New table** `collection_item_notes(id, user_id, item_id, note_id, created_at)` with RLS. Cleaner relational model, supports many-to-many properly, easier indexing.
 
-## Out of scope
+I recommend **Option A** for speed and simplicity — a collection item "owns" its notes via metadata, similar to how groups/people relate to notes already.
 
-- Inline-Editing von Feldern direkt aus der Tabellenansicht (größerer Umbau)
-- Migration bestehender Items bei Feld-Umbenennungen (passiert bereits automatisch über `key`-Mapping; UI-Hinweis wäre separates Thema)
+### UI changes
+
+- `src/pages/CollectionDetail.tsx` — `ItemSheet` component:
+  - New `<NotesPanel itemId=... collectionId=... />` section under the structured fields.
+  - Loads notes where `metadata->>'collection_item_id' = itemId`.
+  - "Add note" creates a note via `supabase.from('notes').insert({...})` with metadata set, then refreshes.
+  - Inline expand/collapse to edit a note without leaving the sheet (simple textarea editing `content` as Markdown — keeping with the project's Obsidian-Markdown-native rule).
+- "Open in Notes" deep-links to `/notes/:id` (existing route).
+- When an item is deleted, optionally orphan the notes (don't auto-delete) — show a small confirmation: "X notes are linked. They will remain in your Notes app."
+
+### Out of scope
+
+- No bidirectional schema field needed — this replaces the manual `link_note` workflow for the common case.
+- Not changing how `link_note` schema fields work; they remain for users who want a structured single-link field.
+
+## Files to touch
+
+- `src/pages/CollectionDetail.tsx` — add NotesPanel inside ItemSheet, add helpers to fetch/create/unlink notes.
+- `mem://features/collections-editing` — note the new built-in notes affordance.
+
+## Question for you
+
+Which storage approach do you prefer?
