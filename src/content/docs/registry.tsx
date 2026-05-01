@@ -714,6 +714,51 @@ const faq: DocPage = {
   ),
 };
 
+const collections: DocPage = {
+  slug: "collections",
+  title: "Collections",
+  description: "Build structured lists — books, recipes, gadgets, anything — with custom fields, categories, and linked notes.",
+  category: "Knowledge",
+  headings: [
+    { id: "what-are-collections", title: "What are Collections?" },
+    { id: "creating-a-collection", title: "Creating a Collection" },
+    { id: "adding-items", title: "Adding Items" },
+    { id: "customizing-schema", title: "Customizing Fields & Categories" },
+    { id: "linking-notes", title: "Linking Notes to Items" },
+  ],
+  searchText: "collections structured data items fields schema categories options customize edit rename add remove notes link new note existing",
+  content: () => (
+    <>
+      <h2 id="what-are-collections">What are Collections?</h2>
+      <p>Collections are structured lists alongside your free-form notes. Use them whenever you want consistent fields across many items — a book library, recipe box, gadget inventory, wine cellar, household knowledge base, and so on. Each Collection has its own <strong>schema</strong> (fields), <strong>categories</strong>, and <strong>items</strong>.</p>
+      <Callout type="tip" title="Notes vs. Collections">Reach for a Note when the content is unstructured prose. Reach for a Collection when you'll be repeating the same fields over and over.</Callout>
+
+      <h2 id="creating-a-collection">Creating a Collection</h2>
+      <p>Open <strong>Collections</strong> from the sidebar and click <strong>"+ New Collection"</strong>. You can either start from a template (Books, Recipes, Movies, …) or describe what you want in plain language and let the AI generate a starting schema for you.</p>
+
+      <h2 id="adding-items">Adding Items</h2>
+      <p>Inside any Collection, click <strong>"+ Add item"</strong> to open the item drawer. Fill in the fields defined by the schema and save. Items appear in the table view and can be filtered by category, sorted, and searched.</p>
+
+      <h2 id="customizing-schema">Customizing Fields & Categories</h2>
+      <p>Schemas aren't fixed — you can change them at any time as your needs evolve.</p>
+      <ul>
+        <li><strong>Customize button</strong> — at the top of any Collection, click <strong>"Customize"</strong> to edit the schema: rename fields, change field types, add or remove fields, and reorder them.</li>
+        <li><strong>⋯ menu</strong> — the overflow menu on each Collection lets you edit <strong>categories</strong> (the high-level grouping for items) and <strong>options</strong> (for select / multi-select fields). Add, rename, or remove entries without touching existing items.</li>
+      </ul>
+      <Callout type="info">Renaming a field or category updates it everywhere instantly. Removing a field hides it from the editor but doesn't delete data already stored on items.</Callout>
+
+      <h2 id="linking-notes">Linking Notes to Items</h2>
+      <p>Each Collection item has a <strong>Notes</strong> section in its drawer for unstructured context — meeting prep for a contact, tasting notes for a wine, repair history for a gadget. Notes use the full Notes editor (TipTap, attachments, wikilinks, AI), not a stripped-down textarea.</p>
+      <ul>
+        <li><strong>+ New note</strong> — creates a fresh note pre-tagged to the item and opens it in the full Notes editor.</li>
+        <li><strong>Link existing note</strong> — search your vault and attach any existing note to the item.</li>
+        <li><strong>⋯ menu on a linked note</strong> — open in the Notes app, unlink from the item (the note stays in your vault), or delete (move to trash).</li>
+      </ul>
+      <Callout type="tip">Linked notes show up in both places — the item drawer and the regular Notes app — so you can keep working however you prefer.</Callout>
+    </>
+  ),
+};
+
 // ── Registry ──
 
 export const allDocs: DocPage[] = [
@@ -731,6 +776,7 @@ export const allDocs: DocPage[] = [
   messagingIntegrations,
   githubSync,
   lexicon,
+  collections,
   profilePage,
   dailyWorkflow,
   weeklyReview,
@@ -772,6 +818,7 @@ export const docCategories: DocCategory[] = [
     slug: "knowledge",
     pages: [
       { slug: "lexicon", title: "Lexicon" },
+      { slug: "collections", title: "Collections" },
     ],
   },
   {
