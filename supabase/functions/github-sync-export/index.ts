@@ -559,7 +559,16 @@ async function handleBulkSync(
 
   const results: { note_id: string; title: string; success: boolean; error?: string }[] = [];
 
+  // Fetch attachment_folder once to avoid N queries
+  const { data: conn } = await supabase
+    .from("github_connections")
+    .select("attachment_folder")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const attachmentFolder = conn?.attachment_folder || "attachments";
+
   for (const note of (notes || [])) {
+    (note as any)._attachment_folder = attachmentFolder;
     const r = await syncSingleNote(supabase, userId, ghToken, owner, repo, branch, vaultPath, note, "update");
     results.push({ note_id: note.id, title: note.title, success: r.success, error: r.error });
   }
