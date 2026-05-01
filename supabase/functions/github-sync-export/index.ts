@@ -90,6 +90,202 @@ function incrementPath(path: string, index: number): string {
   return path.replace(/\.md$/i, ` ${index}.md`);
 }
 
+// ─── Attachment helpers ──────────────────────────────────────────────
+
+const SIGNED_URL_RE = /\/storage\/v1\/object\/(?:sign|public)\/note-attachments\/([^?")\s]+)/g;
+
+/** Extract wikilink filenames `![[file.ext]]` and storage paths from signed URLs in markdown. */
+function extractAttachmentRefs(md: string): { wikilinkNames: Set<string>; signedStoragePaths: Set<string> } {
+  const wikilinkNames = new Set<string>();
+  const signedStoragePaths = new Set<string>();
+
+  for (const m of md.matchAll(/!\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]/g)) {
+    const name = m[1].trim().split("/").pop();
+    if (name) wikilinkNames.add(name);
+  }
+  for (const m of md.matchAll(SIGNED_URL_RE)) {
+    try {
+      signedStoragePaths.add(decodeURIComponent(m[1]));
+    } catch {
+      signedStoragePaths.add(m[1]);
+    }
+  }
+  return { wikilinkNames, signedStoragePaths };
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Sync attachments referenced by a note's markdown into the GitHub repo.
+ * - Resolves wikilink filenames via `note_attachments` lookup.
+ * - For legacy signed-URL refs: ensures a `note_attachments` row exists, then rewrites the URL to `![[filename]]`.
+ * - Returns the (possibly rewritten) markdown.
+ */
+async function syncAttachmentsForNote(
+  supabase: DbClient,
+  userId: string,
+  ghToken: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  vaultPath: string,
+  attachmentFolder: string,
+  markdown: string,
+): Promise<string> {
+  let body = markdown;
+  const { wikilinkNames, signedStoragePaths } = extractAttachmentRefs(body);
+
+  // 1. Resolve legacy signed URLs → ensure note_attachments row, rewrite to wikilink
+  if (signedStoragePaths.size > 0) {
+    const paths = Array.from(signedStoragePaths);
+    const { data: existingByPath } = await supabase
+      .from("note_attachments")
+      .select("filename, storage_path")
+      .eq("user_id", userId)
+      .in("storage_path", paths);
+    const pathToFilename = new Map<string, string>();
+    for (const row of existingByPath || []) {
+      pathToFilename.set(row.storage_path, row.filename);
+    }
+
+    // Create rows for unknown storage paths
+    for (const p of paths) {
+      if (pathToFilename.has(p)) continue;
+      // Derive a readable filename from the storage path
+      const last = p.split("/").pop() || "attachment";
+      const ext = last.includes(".") ? last.slice(last.lastIndexOf(".")) : "";
+      const baseName = `attachment-${last.slice(0, 8).replace(/[^a-zA-Z0-9]/g, "")}${ext}`;
+      const filename = await resolveUniqueFilename(supabase, userId, baseName);
+      const { error: insErr } = await supabase.from("note_attachments").insert({
+        user_id: userId,
+        filename,
+        storage_path: p,
+        source: "menerio",
+      });
+      if (!insErr) pathToFilename.set(p, filename);
+    }
+
+    // Rewrite markdown: replace signed URLs with `![[filename]]`
+    body = body.replace(
+      /!\[[^\]]*\]\(([^)]*\/storage\/v1\/object\/(?:sign|public)\/note-attachments\/[^)?\s]+)(?:\?[^)]*)?\)/g,
+      (full, url) => {
+        const m = url.match(/note-attachments\/([^?")\s]+)/);
+        if (!m) return full;
+        let path: string;
+        try { path = decodeURIComponent(m[1]); } catch { path = m[1]; }
+        const fn = pathToFilename.get(path);
+        return fn ? `![[${fn}]]` : full;
+      },
+    );
+
+    // Add newly-resolved filenames to the wikilink set so they get pushed below
+    for (const fn of pathToFilename.values()) wikilinkNames.add(fn);
+  }
+
+  // 2. Push wikilink-referenced attachments to GitHub
+  if (wikilinkNames.size === 0) return body;
+
+  const folder = normalizePathPart(attachmentFolder || "attachments");
+  const vaultBase = normalizePathPart(vaultPath);
+
+  const { data: attachments } = await supabase
+    .from("note_attachments")
+    .select("*")
+    .eq("user_id", userId)
+    .in("filename", Array.from(wikilinkNames));
+
+  for (const att of attachments || []) {
+    try {
+      // Skip if already synced and SHA unchanged
+      const targetPath = att.github_path || [vaultBase, folder, att.filename].filter(Boolean).join("/");
+
+      // Download from bucket
+      const { data: blob, error: dlErr } = await supabase.storage
+        .from("note-attachments")
+        .download(att.storage_path);
+      if (dlErr || !blob) {
+        console.warn(`Skip attachment ${att.filename}: download failed`, dlErr);
+        continue;
+      }
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const localSha = att.sha256 || (await sha256Hex(bytes));
+
+      // Check remote
+      const remote = await githubGetFile(ghToken, owner, repo, targetPath, branch);
+      if (remote && att.github_sha === remote.sha && att.sha256 === localSha) {
+        continue; // up to date
+      }
+
+      const b64 = bytesToBase64(bytes);
+      const putRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(targetPath)}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `token ${ghToken}`,
+            Accept: "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: `Attachment: ${att.filename}`,
+            content: b64,
+            branch,
+            ...(remote?.sha ? { sha: remote.sha } : {}),
+          }),
+        },
+      );
+      if (!putRes.ok) {
+        console.warn(`Failed to push attachment ${att.filename}: ${putRes.status}`);
+        continue;
+      }
+      const putJson = await putRes.json();
+      await supabase
+        .from("note_attachments")
+        .update({
+          github_path: targetPath,
+          github_sha: putJson.content?.sha || null,
+          github_synced_at: new Date().toISOString(),
+          sha256: localSha,
+          size_bytes: bytes.byteLength,
+        })
+        .eq("id", att.id);
+    } catch (err) {
+      console.warn(`Attachment sync error for ${att.filename}:`, err);
+    }
+  }
+
+  return body;
+}
+
+async function resolveUniqueFilename(supabase: DbClient, userId: string, desired: string): Promise<string> {
+  const dot = desired.lastIndexOf(".");
+  const base = dot > 0 ? desired.slice(0, dot) : desired;
+  const ext = dot > 0 ? desired.slice(dot) : "";
+  for (let i = 0; i < 1000; i++) {
+    const candidate = i === 0 ? desired : `${base}-${i + 1}${ext}`;
+    const { data } = await supabase
+      .from("note_attachments")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("filename", candidate)
+      .maybeSingle();
+    if (!data) return candidate;
+  }
+  return `${base}-${Date.now()}${ext}`;
+}
+
 function buildFrontmatter(note: Record<string, unknown>): string {
   const meta = (note.metadata || {}) as Record<string, unknown>;
   const lines: string[] = ["---"];
