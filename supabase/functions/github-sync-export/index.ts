@@ -437,7 +437,21 @@ async function syncSingleNote(
     const frontmatter = buildFrontmatter(note);
     // Content is now stored as Markdown; only convert if legacy HTML detected
     const rawContent = String(note.content || "");
-    const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdown(rawContent) : rawContent;
+    let mdBody = looksLikeHtml(rawContent) ? htmlToMarkdown(rawContent) : rawContent;
+
+    // Phase C: sync attachments to GitHub + normalize signed URLs → wikilinks
+    const attachmentFolder = (note as any)._attachment_folder
+      || (await supabase.from("github_connections").select("attachment_folder").eq("user_id", userId).maybeSingle()).data?.attachment_folder
+      || "attachments";
+    mdBody = await syncAttachmentsForNote(
+      supabase, userId, ghToken, owner, repo, branch, vaultPath, attachmentFolder, mdBody,
+    );
+
+    // Persist normalized markdown back to the note if it changed (so DB and Web stay in sync)
+    if (mdBody !== rawContent && !looksLikeHtml(rawContent)) {
+      await supabase.from("notes").update({ content: mdBody }).eq("id", note.id).eq("user_id", userId);
+    }
+
     const fullContent = `${frontmatter}\n\n${mdBody}`;
 
     const desiredPath = buildNotePath(vaultPath, note);
