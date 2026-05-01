@@ -954,6 +954,7 @@ export type Database = {
       }
       github_connections: {
         Row: {
+          attachment_folder: string
           branch: string | null
           created_at: string | null
           github_token: string
@@ -969,6 +970,7 @@ export type Database = {
           vault_path: string | null
         }
         Insert: {
+          attachment_folder?: string
           branch?: string | null
           created_at?: string | null
           github_token: string
@@ -984,6 +986,7 @@ export type Database = {
           vault_path?: string | null
         }
         Update: {
+          attachment_folder?: string
           branch?: string | null
           created_at?: string | null
           github_token?: string
@@ -1582,6 +1585,54 @@ export type Database = {
           updated_at?: string
           user_id?: string
           verified?: boolean
+        }
+        Relationships: []
+      }
+      note_attachments: {
+        Row: {
+          created_at: string
+          filename: string
+          github_path: string | null
+          github_sha: string | null
+          github_synced_at: string | null
+          id: string
+          mime_type: string | null
+          sha256: string | null
+          size_bytes: number | null
+          source: string
+          storage_path: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          filename: string
+          github_path?: string | null
+          github_sha?: string | null
+          github_synced_at?: string | null
+          id?: string
+          mime_type?: string | null
+          sha256?: string | null
+          size_bytes?: number | null
+          source?: string
+          storage_path: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          filename?: string
+          github_path?: string | null
+          github_sha?: string | null
+          github_synced_at?: string | null
+          id?: string
+          mime_type?: string | null
+          sha256?: string | null
+          size_bytes?: number | null
+          source?: string
+          storage_path?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
