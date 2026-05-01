@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildBlobLookup, importNoteAttachments } from "../_shared/obsidian-attachments.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -249,6 +250,11 @@ Deno.serve(async (req) => {
     const remoteByPath = new Map<string, any>();
     for (const f of remoteFiles) remoteByPath.set(f.path, f);
 
+    // Phase D: full blob lookup (incl. binaries) for attachment resolution
+    const blobs = buildBlobLookup(treeData.tree || []);
+    const attachmentFolder = (ghConn as any).attachment_folder || "attachments";
+    const attachmentSummary = { resolved: 0, unresolved: [] as string[], errors: [] as string[] };
+
     const results = { pulled: 0, conflicts: 0, new_imports: 0, deleted_remote: 0, errors: 0, repository_created: repoState.created, details: [] as any[] };
 
     // 3. Check each tracked file for changes
@@ -328,6 +334,19 @@ Deno.serve(async (req) => {
 
           results.pulled++;
           results.details.push({ path, action: "pulled", noteId: note.id });
+
+          // Phase D: import attachments referenced by this note
+          try {
+            const attRes = await importNoteAttachments(
+              serviceClient, userId, note.id, mdBody, path,
+              ghToken, owner, repo, branch, vaultPath, attachmentFolder, blobs,
+            );
+            attachmentSummary.resolved += attRes.resolved;
+            attachmentSummary.unresolved.push(...attRes.unresolved.map((n) => `${path}: ${n}`));
+            attachmentSummary.errors.push(...attRes.errors.map((e) => `${path}: ${e}`));
+          } catch (err) {
+            attachmentSummary.errors.push(`${path}: attachment import — ${String(err)}`);
+          }
         } catch (err) {
           results.errors++;
           results.details.push({ path, action: "error", error: String(err) });
@@ -383,6 +402,19 @@ Deno.serve(async (req) => {
 
         results.new_imports++;
         results.details.push({ path, action: "new_import", noteId: inserted.id });
+
+        // Phase D: import attachments referenced by this note
+        try {
+          const attRes = await importNoteAttachments(
+            serviceClient, userId, inserted.id, mdBody, path,
+            ghToken, owner, repo, branch, vaultPath, attachmentFolder, blobs,
+          );
+          attachmentSummary.resolved += attRes.resolved;
+          attachmentSummary.unresolved.push(...attRes.unresolved.map((n) => `${path}: ${n}`));
+          attachmentSummary.errors.push(...attRes.errors.map((e) => `${path}: ${e}`));
+        } catch (err) {
+          attachmentSummary.errors.push(`${path}: attachment import — ${String(err)}`);
+        }
       } catch (err) {
         results.errors++;
         results.details.push({ path, action: "error", error: String(err) });
@@ -473,6 +505,7 @@ Deno.serve(async (req) => {
       success: true,
       ...results,
       pushed,
+      attachments: attachmentSummary,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("github-sync-pull error:", err);
