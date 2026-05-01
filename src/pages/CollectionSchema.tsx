@@ -406,7 +406,12 @@ function OptionEditor({
   const [value, setValue] = useState("");
   return (
     <div className="space-y-3">
-      <Label>Options</Label>
+      <div>
+        <Label>Categories / Options</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The choices users (and the AI) can pick from for this field.
+        </p>
+      </div>
       <div className="flex flex-wrap gap-2">
         {(field.options ?? []).map((option, index) => (
           <span
