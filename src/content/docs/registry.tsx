@@ -776,6 +776,7 @@ export const allDocs: DocPage[] = [
   messagingIntegrations,
   githubSync,
   lexicon,
+  collections,
   profilePage,
   dailyWorkflow,
   weeklyReview,
