@@ -250,6 +250,11 @@ Deno.serve(async (req) => {
     const remoteByPath = new Map<string, any>();
     for (const f of remoteFiles) remoteByPath.set(f.path, f);
 
+    // Phase D: full blob lookup (incl. binaries) for attachment resolution
+    const blobs = buildBlobLookup(treeData.tree || []);
+    const attachmentFolder = (ghConn as any).attachment_folder || "attachments";
+    const attachmentSummary = { resolved: 0, unresolved: [] as string[], errors: [] as string[] };
+
     const results = { pulled: 0, conflicts: 0, new_imports: 0, deleted_remote: 0, errors: 0, repository_created: repoState.created, details: [] as any[] };
 
     // 3. Check each tracked file for changes
