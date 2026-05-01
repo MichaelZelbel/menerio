@@ -1358,7 +1358,7 @@
 - **Objective:** Validate all sidebar navigation items
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Click each sidebar item in order: Dashboard, Notes, People, Groups, Review Queue, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
+  1. Click each sidebar item in order: Dashboard, Notes, People, Groups, Collections, Timeline, Lexicon, Review Queue, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
 - **Expected Outcome:** Each click navigates to the correct page. Active item is highlighted.
 
 ### TS-NAV-002: Profile Completeness Dot in Sidebar
