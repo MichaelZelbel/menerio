@@ -1899,19 +1899,13 @@ export default function CollectionDetail() {
               Add your first item, or describe one to your AI assistant — it
               will know how to capture it here.
             </p>
-            <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-6 flex items-center justify-center">
               <Button
                 onClick={() => setSelectedItem({ id: "new" } as CollectionItem)}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Item
               </Button>
-              <button
-                type="button"
-                className="text-sm text-primary hover:underline"
-              >
-                Test in chat
-              </button>
             </div>
           </div>
         </div>
