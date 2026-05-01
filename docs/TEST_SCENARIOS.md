@@ -1852,8 +1852,16 @@
 | Note | TS-NOTES-002 | "E2E Test Note — Updated" | Free |
 | Shared Note | TS-SHARE-001 | Public link for test note | Free |
 | Contact | TS-PEOPLE-001 | "Jane Doe" — jane@example.com | Free |
-| Action Item | TS-ACTIONS-001 | "Follow up with Jane about the project proposal" | Free |
 | Profile Entry | TS-PROFILE-002 | "Full Name" = "Test User" | Free |
 | Profile Category | TS-PROFILE-005 | "Hobbies" (custom) | Free |
+| Agent Instruction | TS-PROFILE-008 | "Always address me informally" | Free |
+| Weekly Review | TS-REVIEW-001 | Generated review for current week | Premium |
+| Wikilink | TS-WIKI-001 | A → B reference | Free |
+| Folder | TS-VAULT-001 | "Projects" | Free |
+| GitHub Connection | TS-GH-001 | Test repo configured | Free |
+| Timeline Event | TS-TIMELINE-002 | Manual test event | Free |
+| Collection | TS-COLLECTIONS-001 | Books collection from template | Free |
+| Telegram Pairing | TS-CAPTURE-001 | Bot paired to test account | Free |
+| Hub API Key | TS-API-001 | `mnr_…` key with `notes:read/write` | Free |
 | Agent Instruction | TS-PROFILE-008 | "Always address me informally" | Free |
 | Weekly Review | TS-REVIEW-001 | Generated review for current week | Premium |
