@@ -133,7 +133,9 @@ export function htmlToMarkdown(html: string): string {
     return `${header}\n${sep}\n${body}\n\n`;
   });
 
-  // Images
+  // Images — preserve Obsidian wikilink embeds when an attachment marker is present
+  md = md.replace(/<img[^>]*data-attachment-name="([^"]+)"[^>]*\/?>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
+  md = md.replace(/<a[^>]*data-attachment-name="([^"]+)"[^>]*>[\s\S]*?<\/a>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_, src, alt) => `![${alt}](${src})`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, (_, src) => `![](${src})`);
 
@@ -388,8 +390,11 @@ function serializeBlock(node: TiptapNode, depth: number): string {
       return "---";
     case "table":
       return serializeTable(node);
-    case "image":
+    case "image": {
+      const attachName = String(node.attrs?.["data-attachment-name"] || node.attrs?.dataAttachmentName || "");
+      if (attachName) return `![[${attachName}]]`;
       return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+    }
     case "videoEmbed":
       return `![video](${node.attrs?.src || ""})`;
     case "pdfEmbed":
@@ -413,7 +418,11 @@ function serializeInlineNode(node: TiptapNode): string {
     const display = String(node.attrs?.displayText || "");
     return display && display !== title ? `[[${title}|${display}]]` : `[[${title}]]`;
   }
-  if (node.type === "image") return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+  if (node.type === "image") {
+    const attachName = String(node.attrs?.["data-attachment-name"] || node.attrs?.dataAttachmentName || "");
+    if (attachName) return `![[${attachName}]]`;
+    return `![${node.attrs?.alt || ""}](${node.attrs?.src || ""})`;
+  }
   return serializeInlineChildren(node);
 }
 
@@ -478,8 +487,24 @@ function inlineMarkdown(text: string): string {
   // Images (before links)
   r = r.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
 
-  // Obsidian image embeds
-  r = r.replace(/!\[\[([^\]]+)\]\]/g, '<img src="$1" alt="$1">');
+  // Obsidian-style attachment embeds: ![[filename.ext]]
+  // Emit a placeholder <img> with the filename in data-attachment-name.
+  // The async resolver (resolveAttachmentImagesInHtml) swaps in a real
+  // signed URL before the editor mounts; non-image attachments fall back
+  // to a wikilink-style link node.
+  r = r.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
+    const name = String(target).trim();
+    const alt = encodeAttribute(display || name);
+    const safeName = encodeAttribute(name);
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+    const isImage = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext);
+    if (isImage) {
+      // Empty src so the browser shows nothing until the resolver fills it in.
+      return `<img src="" alt="${alt}" data-attachment-name="${safeName}">`;
+    }
+    // Non-image attachments: render as a downloadable link placeholder.
+    return `<a href="#" data-attachment-name="${safeName}" class="attachment-link">${alt}</a>`;
+  });
 
   // Obsidian wikilinks
   r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {

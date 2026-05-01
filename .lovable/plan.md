@@ -2,6 +2,18 @@
 
 Das via GitHub-Sync geschriebene Repo soll ein **vollwertiger Obsidian-Vault** werden — inklusive Bildern und anderen Anhängen. Du sollst das Repo lokal klonen, in Obsidian öffnen, Bilder sehen, neue Bilder einfügen und nach Push wieder in Menerio sehen können. Existierende Vaults (auch Evernote-importierte mit `_resources/<Note>.resources/`) müssen wir lesen können.
 
+## Status
+
+- [x] **Phase 0**: `note_attachments`-Tabelle, `attachment_folder`-Spalte, Upload-Refactor mit Filename-Lookup.
+- [x] **Phase A (Read-Path Web)**: `markdownToHtml` emittiert `<img data-attachment-name>`-Placeholder; `ImageExt` preserves the attribute; async resolver `resolveAttachmentImagesInHtml` swaps in signed URLs nach `setContent` im `NoteEditor`. Round-Trip via `htmlToMarkdown` und `tiptapJsonToMarkdown` erhält `![[filename.ext]]`.
+- [ ] **Phase B (Editor Insert)**: Image-Drop/Paste so anpassen, dass beim Insert direkt `![[filename]]` (statt Signed URL) eingefügt wird.
+- [ ] **Phase C (GitHub Export)**: `github-sync-export` committet Binaries nach `attachments/`.
+- [ ] **Phase D (GitHub Pull/Import)**: Vault-weiter Binary-Scan und Wikilink-Normalisierung.
+- [ ] **Phase E (Backfill)**: Bestehende Signed-URL-Notes nach `![[filename]]` migrieren.
+- [ ] **Phase F (Settings UI)**: `attachment_folder` konfigurierbar machen + Migrate-Card.
+
+
+
 ## Recherche-Ergebnis: Pfad-Konventionen
 
 Obsidian rendert `![[file.png]]` **pfadunabhängig** (Default "Shortest path when possible") — die Datei kann irgendwo im Vault liegen. Es gibt keinen einzigen "richtigen" Pfad, sondern verschiedene Konventionen je Quelle:
