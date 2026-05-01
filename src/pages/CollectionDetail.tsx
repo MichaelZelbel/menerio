@@ -1335,7 +1335,7 @@ function ItemNotesPanel({
 
   const openNote = (note: ItemNote) => {
     onClose?.();
-    navigate(`/notes/${note.id}`);
+    navigate(`/dashboard/notes/${note.id}`);
   };
 
   return (
