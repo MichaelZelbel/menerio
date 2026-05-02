@@ -322,6 +322,10 @@ export function EditorToolbar({ editor, quickActions, noteActions }: EditorToolb
         <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo (Ctrl+Shift+Z)">
           <Redo className="h-3.5 w-3.5" />
         </ToolbarButton>
+
+        {(quickActions || noteActions) && <Separator orientation="vertical" className="h-5 mx-1" />}
+        {quickActions}
+        {noteActions}
       </div>
 
       {/* Contextual table toolbar */}
