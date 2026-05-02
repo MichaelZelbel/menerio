@@ -1043,7 +1043,7 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Action items extraction removed
 
     // Generate review queue suggestions (no extra LLM calls)
-    await generateReviewItems(note.user_id, noteId, note.title, note.content, metadata);
+    await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
     // Generate profile suggestions for matched people (one extra LLM call)
     await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);
