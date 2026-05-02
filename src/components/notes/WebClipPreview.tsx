@@ -15,42 +15,73 @@ interface Props {
 }
 
 /**
- * Renders the saved SingleFile HTML snapshot inside a sandboxed iframe so the
- * user sees the page exactly as it was clipped. Scripts are blocked via the
- * sandbox attribute (no `allow-scripts`) and `referrerpolicy="no-referrer"`
- * suppresses any tracking pixels in the captured HTML.
+ * Renders the saved SingleFile HTML snapshot inside a sandboxed iframe.
+ * We fetch the HTML as text and inject it via `srcDoc` so the browser
+ * always renders it as HTML (some browsers/extensions display Supabase
+ * Storage responses as plain text when loaded via `src`). Scripts are
+ * blocked via the sandbox attribute (no `allow-scripts`) and we inject
+ * a meta CSP for belt-and-suspenders.
  */
 export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [html, setHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const storagePath = webClip.snapshot_storage_path;
 
   useEffect(() => {
-    if (!open || !storagePath || signedUrl) return;
+    if (!open || !storagePath || html) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    supabase.storage
-      .from("note-attachments")
-      .createSignedUrl(storagePath, 60 * 60 * 24 * 7)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error || !data) {
-          setError(error?.message || "Could not load snapshot.");
-        } else {
-          setSignedUrl(data.signedUrl);
+
+    (async () => {
+      try {
+        const { data: signed, error: signedErr } = await supabase.storage
+          .from("note-attachments")
+          .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+        if (signedErr || !signed) {
+          throw new Error(signedErr?.message || "Could not sign snapshot URL.");
         }
-      })
-      .finally(() => {
+        if (!cancelled) setSignedUrl(signed.signedUrl);
+
+        const res = await fetch(signed.signedUrl);
+        if (!res.ok) throw new Error(`Snapshot fetch failed (${res.status}).`);
+        let text = await res.text();
+
+        // Neutralize <base> tags so relative URLs don't try to hit external origins.
+        text = text.replace(/<base\b[^>]*>/gi, "");
+
+        // Inject a strict CSP meta to block scripts even if sandbox flags vary.
+        const csp =
+          `<meta http-equiv="Content-Security-Policy" content="` +
+          `default-src 'self' data: blob: https:; ` +
+          `img-src * data: blob:; ` +
+          `style-src * 'unsafe-inline' data:; ` +
+          `font-src * data:; ` +
+          `script-src 'none'; ` +
+          `frame-src 'none'; ` +
+          `object-src 'none';">`;
+        if (/<head[^>]*>/i.test(text)) {
+          text = text.replace(/<head([^>]*)>/i, `<head$1>${csp}`);
+        } else {
+          text = `<!doctype html><html><head>${csp}</head><body>${text}</body></html>`;
+        }
+
+        if (!cancelled) setHtml(text);
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message || "Could not load snapshot.");
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [open, storagePath, signedUrl]);
+  }, [open, storagePath, html]);
 
   if (!storagePath) return null;
 
@@ -100,14 +131,14 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
               {error}
             </div>
           )}
-          {!loading && !error && signedUrl && (
+          {!loading && !error && html && (
             <iframe
-              src={signedUrl}
+              srcDoc={html}
               title="Page snapshot"
               sandbox="allow-same-origin"
               referrerPolicy="no-referrer"
               loading="lazy"
-              className="w-full h-[700px] rounded-lg border border-border bg-background"
+              className="w-full h-[700px] rounded-lg border border-border bg-white"
             />
           )}
         </div>
