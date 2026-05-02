@@ -120,6 +120,15 @@ const searchAndOrganise: DocPage = {
 
       <h2 id="trash">Trash & Recovery</h2>
       <p>Deleted notes move to the Trash instead of being removed permanently. You can restore them at any time, or empty the trash to free up space.</p>
+
+      <h2 id="vault-cleanup">Vault Cleanup</h2>
+      <p>Open the <strong>Vault Insights</strong> popover (the <code>#</code> hash icon in the Notes toolbar) for one-click maintenance actions across your whole vault:</p>
+      <ul>
+        <li><strong>Classify unclassified notes</strong> — runs AI classification on every note still missing a type.</li>
+        <li><strong>Trash empty notes</strong> — moves all notes that have no title <em>and</em> no real content to the Trash in a single step. Perfect after accidental "+ New Note" clicks or when an import left behind blank scaffolding.</li>
+      </ul>
+      <Callout type="info">"Empty" means the title is blank or "Untitled" <strong>and</strong> the body has no text once HTML, Markdown markers, and whitespace are stripped. Notes with attachments, images, or any real text are never touched.</Callout>
+      <Callout type="tip">Both buttons only appear when there's something to do — if your vault is already clean, you won't see them.</Callout>
     </>
   ),
 };
