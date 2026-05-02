@@ -57,6 +57,10 @@ import { useState } from "react";
 
 interface EditorToolbarProps {
   editor: Editor | null;
+  /** Quick-action icon buttons rendered right before the overflow menu (e.g. Favorite, Pin, AI Chat). */
+  quickActions?: React.ReactNode;
+  /** Overflow / "more" menu rendered at the far right (typically a DropdownMenu trigger). */
+  noteActions?: React.ReactNode;
 }
 
 const TEXT_COLORS = [
