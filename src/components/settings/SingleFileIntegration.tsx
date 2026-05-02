@@ -9,8 +9,7 @@ import { Globe, Copy, Check, ExternalLink, Info } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { Link } from "react-router-dom";
 
-const SUPABASE_URL = "https://tjeapelvjlmbxafsmjef.supabase.co";
-const ENDPOINT_URL = `${SUPABASE_URL}/functions/v1/singlefile-capture`;
+const ENDPOINT_URL = "https://clip.menerio.com";
 
 interface CopyableProps {
   label: string;
