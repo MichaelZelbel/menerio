@@ -27,6 +27,9 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 
+export type NoteTreeSortField = "updated_at" | "created_at" | "title";
+export type NoteTreeSortDirection = "asc" | "desc";
+
 interface NoteTreeProps {
   notes: (Note | SemanticSearchResult)[];
   folderPaths: string[];
@@ -37,6 +40,8 @@ interface NoteTreeProps {
   onCreateNoteInFolder: (path: string) => void;
   onCreateFolderInFolder: (path: string) => void;
   onMoveNote: (noteId: string, path: string) => void;
+  sortField?: NoteTreeSortField;
+  sortDirection?: NoteTreeSortDirection;
 }
 
 interface FolderNode {
