@@ -61,13 +61,19 @@ Content-Type: multipart/form-data
 
 1. Open the **Settings → Web Clipper** tab in Menerio and copy the values.
 2. In Chrome, click the SingleFile toolbar icon → ⚙️ **Options**.
-3. Scroll to **Destination** and choose **Upload to a REST Form API**.
-4. Paste:
-   - **URL**: `https://<your-supabase-url>/functions/v1/singlefile-capture`
-   - **HTTP Method**: `POST`
-   - **File field name**: `file`
-   - **Authorization header**: `Bearer mnr_…`
-5. (Optional) Add extra fields under **Additional fields**, e.g. `tags=research,inspiration`.
+3. Scroll to **Destination** and enable **upload to a REST Form API**.
+4. Fill in the dialog as follows:
+
+   | SingleFile field            | Value                                                    |
+   |-----------------------------|----------------------------------------------------------|
+   | **secret key**              | *Leave empty.* Menerio doesn't use SingleFile's shared-secret signing — the API key in the authorization token is what authenticates the request. |
+   | **URL**                     | `https://<your-supabase-url>/functions/v1/singlefile-capture` |
+   | **authorization token**     | `Bearer mnr_YOUR_API_KEY` *(include the literal `Bearer ` prefix and the trailing space)* |
+   | **archive data field name** | `file` — the form field that carries the HTML snapshot. Must match Menerio's `file` field. |
+   | **archive URL field name**  | `url` — the form field that carries the original page URL. Must match Menerio's `url` field so the source link is recorded. |
+
+5. (Optional) Add extra fields under SingleFile's **extra HTTP headers / fields**
+   section, e.g. `tags=research,inspiration` or `folder=Reading List`.
 6. Save the options and capture pages as usual — each capture becomes a note.
 
 ## Security model
