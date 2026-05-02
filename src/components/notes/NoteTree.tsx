@@ -117,6 +117,8 @@ export function NoteTree({
   onCreateNoteInFolder,
   onCreateFolderInFolder,
   onMoveNote,
+  sortField = "updated_at",
+  sortDirection = "desc",
 }: NoteTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -142,9 +144,9 @@ export function NoteTree({
 
     allFolderPaths.forEach((path) => ensureFolder(root, path));
     notes.forEach((note) => ensureFolder(root, normalizePath(note.folder_path)).notes.push(note));
-    sortFolder(root);
+    sortFolder(root, sortField, sortDirection);
     return root;
-  }, [folderPaths, notes]);
+  }, [folderPaths, notes, sortField, sortDirection]);
 
   useEffect(() => {
     setExpanded((current) => {
