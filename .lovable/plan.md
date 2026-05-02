@@ -1,118 +1,112 @@
-# Note-Toolbar konsolidieren (Obsidian-Stil)
+## Goal
 
-## Ziel
+Make web-clipped notes visually recognizable: show a hero image at the top, plus a way to view the full captured page exactly as it looked, while keeping all text searchable.
 
-Die separate **Action-Toolbar** über dem Editor (Favorite, Pin, Tag, Info, Connections, Local Graph, Version History, Send-to-App, Classify, Source Mode, AI Chat, Copy, Download, Link, Open-in-Tab, Share, Trash) entfernt die visuelle Konkurrenz mit der **Formatierungstoolbar**, indem sie in ein Drei-Punkte-Menü (`⋯`) am rechten Ende der Formatierungstoolbar wandert — analog zu Obsidian.
+## Why the current note looks empty
 
-Das ist UI-technisch eine **gute** Lösung:
-- Reduziert visuellen Lärm um eine ganze Toolbar-Zeile
-- Sekundäre/seltene Aktionen gehören in ein Overflow-Menü
-- Häufige Aktionen (Favorite, Pin, AI Chat) bleiben als Quick-Access sichtbar
-- Etablierte Konvention (Obsidian, Notion, Google Docs)
+The SingleFile capture function only extracts the page's plain text and stores the original HTML as an attachment. It never pulls out an image, and the snapshot HTML is only a downloadable file — never rendered. So the note for `menerio.com` shows "Source + text", no visuals.
 
-## Aufteilung: Sichtbar vs. im Menü
+Three changes fix this.
 
-**Sichtbar bleiben (rechts in der Formatierungstoolbar, vor `⋯`)** — die 2–3 häufigsten Aktionen:
-- ⭐ Favorite (Toggle, mit aktivem State)
-- 📌 Pin (Toggle, mit aktivem State)
-- 💬 AI Chat (Toggle, mit aktivem State)
-- "Shared"-Badge wenn aktiv
+---
 
-**Ins Drei-Punkte-Menü (`⋯`)** — gruppiert mit Separators:
+## 1. Extract a hero image during capture
 
-*Gruppe 1 — View & Info*
-- Note info
-- Add tag
-- Source mode (mit Check-Indikator wenn aktiv)
+In `supabase/functions/singlefile-capture/index.ts`, after parsing the HTML, look for a representative image in this priority order:
 
-*Gruppe 2 — Connections*
-- Find connections
-- Local graph (mit Check wenn aktiv)
-- Version history (nur wenn `syncLog` existiert)
+1. `<meta property="og:image">`
+2. `<meta name="twitter:image">`
+3. `<link rel="image_src">`
+4. The first reasonably-sized `<img>` in `<body>` (skip tiny icons/tracking pixels — width/height ≥ 200, or unknown but not in `<header>`/nav).
 
-*Gruppe 3 — AI*
-- Classify with AI (nur wenn keine Metadata, nicht trashed)
+SingleFile inlines images as `data:image/...;base64,...` URIs, so in most cases the bytes are already inside the uploaded HTML — no extra network fetch needed.
 
-*Gruppe 4 — Share & Export*
-- Copy to clipboard
-- Download Markdown
-- Copy note link
-- Open in new tab
-- Share publicly / Stop sharing / Copy public link
-- Send to app
+For each candidate:
 
-*Gruppe 5 — Destructive*
-- Move to trash (rot)
+- If it's a `data:` URI → decode the base64 directly.
+- If it's an `http(s)` URL → fetch it server-side (with a 5 s timeout, 5 MB cap, and content-type allow-list of `image/jpeg|png|webp|gif`). Skip on failure.
 
-**Trashed-State**: Im Menü nur Restore + Delete Forever.
+Save the image to the `note-attachments` bucket as `<slug>-hero.<ext>`, register it in `note_attachments` (source `singlefile`), and embed it at the very top of the Markdown body using the existing Obsidian-style wikilink syntax:
 
-**External-Notes**: Action-Toolbar entfällt komplett (existierende `is_external` Read-Only-Bar bleibt unverändert).
+```md
+![[menerio-com-hero.jpg]]
 
-## Technische Umsetzung
+**Source:** [menerio.com](https://menerio.com)
 
-### 1. `src/components/notes/EditorToolbar.tsx`
-- Neue optionale Props: `noteActions?: React.ReactNode` und `quickActions?: React.ReactNode`.
-- `quickActions` wird vor dem bestehenden `flex-1`-Spacer (vor Undo/Redo) eingefügt — oder besser nach Undo/Redo am rechten Rand.
-- `noteActions` wird ganz rechts als `⋯`-DropdownMenu gerendert (nutzt vorhandenes `DropdownMenu`/`DropdownMenuItem`/`DropdownMenuSeparator` aus shadcn).
-- Wenn beide Props undefiniert sind, ändert sich nichts (Editor-Komponente außerhalb von NoteEditor bleibt unberührt).
-
-### 2. `src/components/notes/NoteEditor.tsx`
-- Block "Action toolbar" (Zeilen 760–903) wird gelöscht.
-- Stattdessen werden zwei Render-Helfer in der Render-Funktion gebaut:
-  - `quickActions`: Favorite + Pin + AI Chat + Shared-Badge als kompakte Icon-Buttons.
-  - `noteActions`: `<DropdownMenu>` mit `MoreHorizontal`-Trigger und allen oben gelisteten `DropdownMenuItem`s, gruppiert via `DropdownMenuSeparator`. Jeder Item-Eintrag hat `<Icon />` + Label.
-- Beide werden via Props an `<EditorToolbar editor={editor} quickActions={...} noteActions={...} />` übergeben.
-- Für External Notes (Read-Only) wird kein Menü übergeben — die existierende Read-Only-Action-Bar bleibt.
-- Für trashed Notes: nur Restore + Delete Forever im Menü.
-
-### 3. Info-Panel-Verhalten
-Das `showInfo`-Panel (Zeilen 905–923) bleibt bestehen — getoggelt jetzt vom Menüeintrag "Note info" statt vom Toolbar-Icon.
-
-### 4. Keine Funktionalitätsänderungen
-Alle Handler (`toggleFavorite`, `togglePin`, `moveToTrash`, `downloadMarkdown`, `processNote.mutate`, `shareNote.mutate`, `unshareNote.mutate`, `copyShareLink.mutate`, `setShowChat`, `setShowConnections`, `onToggleLocalGraph`, `setShowHistory`, `setShowForwardDialog`, `toggleSourceMode`, `setShowTagInput`, `setShowInfo`, Restore, Delete Forever) bleiben unverändert — nur die Trigger-UI wandert.
-
-## Visuelles Ergebnis
-
-```text
-Vorher:
-┌─────────────────────────────────────────────────────────────┐
-│ ⭐ 📌 🏷 ℹ 🔗 🕸 📜 📤 ✨Classify </> 💬 📋 ⬇ 🔗 ↗ 🌐 🗑  │  ← Action toolbar
-├─────────────────────────────────────────────────────────────┤
-│ ¶ Normal | B I U S … | 🎨 | • 1. ☑ | " — </>  | ↶ ↷       │  ← Format toolbar
-└─────────────────────────────────────────────────────────────┘
-
-Nachher:
-┌─────────────────────────────────────────────────────────────┐
-│ ¶ Normal | B I U S … | 🎨 | • 1. ☑ | " — </>  | ↶ ↷  ⭐📌💬 ⋯│
-└─────────────────────────────────────────────────────────────┘
-                                                            │
-                                          ┌─────────────────┘
-                                          │ ℹ  Note info    │
-                                          │ 🏷 Add tag       │
-                                          │ </> Source mode │
-                                          │ ───────────────  │
-                                          │ 🔗 Find connections│
-                                          │ 🕸 Local graph   │
-                                          │ 📜 Version history│
-                                          │ ───────────────  │
-                                          │ ✨ Classify      │
-                                          │ ───────────────  │
-                                          │ 📋 Copy          │
-                                          │ ⬇  Download      │
-                                          │ 🔗 Copy link     │
-                                          │ ↗  Open new tab  │
-                                          │ 🌐 Share publicly│
-                                          │ 📤 Send to app   │
-                                          │ ───────────────  │
-                                          │ 🗑 Move to trash │
-                                          └─────────────────┘
+> Meta description here…
 ```
 
-## Geänderte Dateien
+This reuses the existing `resolveAttachmentImagesInHtml` pipeline in `src/lib/upload-attachment.ts`, so the image renders inline in the editor with no other UI changes.
 
-- `src/components/notes/EditorToolbar.tsx` — zwei optionale Props + Render-Slots
-- `src/components/notes/NoteEditor.tsx` — alte Action-Toolbar entfernen, Quick-Actions + Dropdown bauen und an Editor-Toolbar übergeben
+## 2. Render the saved snapshot as a visual preview
 
-## Aufwand
+Add a "Page snapshot" panel to the note view that loads the saved HTML attachment in a sandboxed `<iframe>`, giving an exact visual of the clipped page (since SingleFile already inlined CSS + images).
 
-Klein bis mittel. Eine einzelne Änderungs-Session, keine Migrations, keine Hook-Änderungen, kein Risiko für bestehende Tests.
+- Create `src/components/notes/WebClipPreview.tsx`.
+- Render only when `note.metadata.web_clip?.snapshot_storage_path` is set.
+- Fetch a signed URL for the snapshot (7-day TTL, matching other attachments).
+- Embed inside `<iframe sandbox="allow-same-origin" referrerpolicy="no-referrer" loading="lazy">` — no `allow-scripts`, so any scripts inside the snapshot can't run. Tracking pixels in the captured HTML are blocked by `referrerpolicy`.
+- Collapsible, default open at ~500 px height with an "Open full snapshot" link to the signed URL in a new tab.
+
+Wire it into `src/components/notes/NoteEditor.tsx` (or wherever the existing source-badge for `source_app === 'singlefile'` lives — check both `NoteEditor.tsx` and any sidebar panel before placing it).
+
+## 3. Keep text searchable (no change needed, but verify)
+
+The existing `htmlToPlainText` extraction (capped at 50 k chars) and the fire-and-forget `process-note` call already cover full-text + semantic search. We'll re-confirm both still run after the new hero-image step inserts a new attachment.
+
+---
+
+## Technical details
+
+**New helper in `singlefile-capture/index.ts`**
+
+```ts
+async function extractHeroImage(html: string): Promise<{ bytes: Uint8Array; mime: string; ext: string } | null>
+```
+
+- Regex-scan `<meta>`, `<link>`, then first `<img src="...">`.
+- Resolve `data:` URIs locally; fetch `http(s)` with `AbortSignal.timeout(5000)` and `Content-Length` ≤ 5 MB.
+- Return `null` on any failure; capture must still succeed without a hero image.
+
+**Storage layout (unchanged buckets)**
+
+- `note-attachments/<userId>/<uuid>.html` — full snapshot (existing)
+- `note-attachments/<userId>/<uuid>.<ext>` — new hero image, registered in `note_attachments` with a readable filename like `hero-menerio-com.jpg`
+
+**Metadata addition** on the note:
+
+```json
+"web_clip": {
+  ...,
+  "hero_image_attachment": "hero-menerio-com.jpg",
+  "hero_image_storage_path": "<userId>/<uuid>.jpg"
+}
+```
+
+**WebClipPreview component sketch**
+
+```tsx
+<div className="rounded-lg border bg-muted/20">
+  <button onClick={() => setOpen(!open)} className="...">
+    Page snapshot {open ? <ChevronUp/> : <ChevronDown/>}
+  </button>
+  {open && signedUrl && (
+    <iframe
+      src={signedUrl}
+      sandbox="allow-same-origin"
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      className="w-full h-[500px] rounded-b-lg bg-white"
+    />
+  )}
+</div>
+```
+
+**Backfill (optional)**: Existing web clips won't have hero images. Add a one-shot script later if the user wants to backfill — out of scope for this change unless requested.
+
+**Tests**: Extend `supabase/functions/singlefile-capture/` Deno tests (or add one) with two cases: HTML with `og:image` data URI → hero saved; HTML with no images → note still created, no hero.
+
+## Out of scope
+
+- Server-side screenshots via headless Chromium (heavy infra, not needed since SingleFile already captures a faithful HTML snapshot we can re-render).
+- Inlining all images from the page into the Markdown body (would balloon notes; the iframe preview covers this).
