@@ -1054,6 +1054,25 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </Badge>
           )}
         </div>
+        {/* Web clip snapshot — render at the top so it's the first thing the user sees */}
+        {note.source_app === "singlefile" &&
+          metadata &&
+          typeof (metadata as Record<string, unknown>).web_clip === "object" &&
+          (metadata as Record<string, unknown>).web_clip !== null && (
+            <div className="mb-4 -mx-4">
+              <WebClipPreview
+                defaultOpen
+                webClip={
+                  (metadata as Record<string, unknown>).web_clip as {
+                    url?: string | null;
+                    hostname?: string | null;
+                    snapshot_storage_path?: string | null;
+                    snapshot_attachment?: string | null;
+                  }
+                }
+              />
+            </div>
+          )}
         {sourceMode ? (
           <textarea
             value={sourceText}
