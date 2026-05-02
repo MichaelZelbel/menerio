@@ -95,8 +95,9 @@ const searchAndOrganise: DocPage = {
     { id: "filters", title: "Filters & Sorting" },
     { id: "favourites-pins", title: "Favourites & Pins" },
     { id: "trash", title: "Trash & Recovery" },
+    { id: "vault-cleanup", title: "Vault Cleanup" },
   ],
-  searchText: "search find filter sort favourite pin trash delete recover keyword semantic smart AI",
+  searchText: "search find filter sort favourite pin trash delete recover keyword semantic smart AI vault insights cleanup empty notes bulk classify",
   content: () => (
     <>
       <h2 id="keyword-search">Keyword Search</h2>
