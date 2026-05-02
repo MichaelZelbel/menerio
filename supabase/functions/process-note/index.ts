@@ -235,6 +235,10 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
 async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
   const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
   const confidence = suggestion.confidence_score ?? 0;
+  // Never auto-apply add_contact — creating a new person is an identity decision the user should confirm.
+  if (suggestion.suggestion_type === "add_contact") {
+    return { ...suggestion, status: "pending_review" };
+  }
   const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
 
   if (!canAutoApply) {
