@@ -128,9 +128,9 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
             </span>
           )}
         </span>
-        {open && signedUrl && (
+        {open && (blobUrl || signedUrl) && (
           <a
-            href={signedUrl}
+            href={blobUrl || signedUrl!}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
