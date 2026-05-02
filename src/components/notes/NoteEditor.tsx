@@ -765,150 +765,43 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   return (
     <div className="flex h-full">
     <div className="flex flex-col h-full flex-1 min-w-0">
-      {/* Action toolbar */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleFavorite} title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}>
-          <Star className={cn("h-4 w-4", note.is_favorite && "fill-warning text-warning")} />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={togglePin} title={note.is_pinned ? "Unpin" : "Pin to top"}>
-          <Pin className={cn("h-4 w-4", note.is_pinned && "text-primary")} />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowTagInput(!showTagInput)} title="Add tag">
-          <Tag className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowInfo(!showInfo)} title="Note info">
-          <Info className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConnections(!showConnections)} title="Find connections">
-          <Link2 className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showLocalGraph && "bg-accent")} onClick={() => onToggleLocalGraph?.()} title="Local graph">
-          <Network className="h-4 w-4" />
-        </Button>
-        {syncLog && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(!showHistory)} title="Version history">
-            <GitCommit className="h-4 w-4" />
-          </Button>
-        )}
-        {!note.is_trashed && !note.is_external && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowForwardDialog(true)} title="An App senden">
-            <Send className="h-4 w-4" />
-          </Button>
-        )}
-        {!note.is_trashed && !metadata?.type && (
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { if (checkCredits()) processNote.mutate(note.id); }} disabled={processNote.isPending} title="Extract metadata with AI">
-            {processNote.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            Classify
-          </Button>
-        )}
-
-        {!note.is_trashed && !note.is_external && (
-          <Button variant="ghost" size="icon" className={cn("h-8 w-8", sourceMode && "bg-accent text-accent-foreground")} onClick={toggleSourceMode} title={sourceMode ? "Rich text mode" : "Markdown source"}>
-            <Code2 className="h-4 w-4" />
-          </Button>
-        )}
-        {sharedNote?.is_active && (
-          <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground">
-            <Globe className="h-3 w-3" /> Shared
-          </Badge>
-        )}
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
-          <MessageSquare className="h-4 w-4" />
-        </Button>
-
-        {note.is_trashed ? (
-          <>
-            <Button variant="ghost" size="sm" onClick={restoreFromTrash} className="gap-1.5 text-xs">
-              <RotateCcw className="h-3.5 w-3.5" /> Restore
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowDeleteDialog(true)} className="gap-1.5 text-xs text-destructive hover:text-destructive">
-              <Trash2 className="h-3.5 w-3.5" /> Delete Forever
-            </Button>
-          </>
-        ) : (
-          <>
-            {/* Direct action icons */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}
-              title="Copy to clipboard"
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={downloadMarkdown}
-              title="Download Markdown"
-            >
-              <Download className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}
-              title="Copy note link"
-            >
-              <Link2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}
-              title="Open in new tab"
-            >
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-            {sharedNote?.is_active ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => copyShareLink.mutate(sharedNote.share_token)}
-                  title="Copy public link"
-                >
-                  <Globe className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => unshareNote.mutate(note.id)}
-                  title="Stop sharing"
-                >
-                  <Unlink className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => shareNote.mutate({ noteId: note.id, title, content: editor?.getHTML() || note.content }, { onSuccess: (result: ShareNoteResult) => { if (result.blocked && result.moderation) setModerationBlock(result.moderation); } })}
-                disabled={shareNote.isPending}
-                title="Share note"
-              >
-                <Share2 className="h-4 w-4" />
+      {/* Action toolbar — only for trashed/source-mode/external notes; for normal notes, actions are merged into the formatting toolbar below */}
+      {(note.is_trashed || sourceMode || note.is_external) && (
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-background shrink-0">
+          {sharedNote?.is_active && (
+            <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground">
+              <Globe className="h-3 w-3" /> Shared
+            </Badge>
+          )}
+          {note.is_trashed ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={restoreFromTrash} className="gap-1.5 text-xs">
+                <RotateCcw className="h-3.5 w-3.5" /> Restore
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={moveToTrash}
-              title="Move to trash"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-      </div>
+              <Button variant="ghost" size="sm" onClick={() => setShowDeleteDialog(true)} className="gap-1.5 text-xs text-destructive hover:text-destructive">
+                <Trash2 className="h-3.5 w-3.5" /> Delete Forever
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleFavorite} title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}>
+                <Star className={cn("h-4 w-4", note.is_favorite && "fill-warning text-warning")} />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={togglePin} title={note.is_pinned ? "Unpin" : "Pin to top"}>
+                <Pin className={cn("h-4 w-4", note.is_pinned && "text-primary")} />
+              </Button>
+              {!note.is_external && (
+                <Button variant="ghost" size="icon" className={cn("h-8 w-8", sourceMode && "bg-accent text-accent-foreground")} onClick={toggleSourceMode} title={sourceMode ? "Rich text mode" : "Markdown source"}>
+                  <Code2 className="h-4 w-4" />
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" className={cn("h-8 w-8", showChat && "bg-accent text-accent-foreground")} onClick={() => setShowChat(!showChat)} title="AI Chat">
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Info panel */}
       {showInfo && (
