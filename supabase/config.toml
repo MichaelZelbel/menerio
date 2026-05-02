@@ -119,3 +119,6 @@ verify_jwt = false
 
 [functions.generate_collection_schema]
 verify_jwt = false
+
+[functions.singlefile-capture]
+verify_jwt = false
