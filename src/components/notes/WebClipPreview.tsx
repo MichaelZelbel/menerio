@@ -26,8 +26,10 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [html, setHtml] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   const storagePath = webClip.snapshot_storage_path;
 
