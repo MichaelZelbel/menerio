@@ -240,7 +240,7 @@ function MediaBadge({ element, status, matches, isExpanded, onToggle, noteId, st
           zIndex: 10,
         }}
       >
-        <div className="bg-background/90 backdrop-blur-sm border border-border rounded-md px-1.5 py-0.5 shadow-sm cursor-pointer">
+        <div className="bg-background border border-border rounded-md px-1.5 py-0.5 shadow-sm cursor-pointer">
           {badgeContent()}
         </div>
       </div>

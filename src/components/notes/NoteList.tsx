@@ -1,6 +1,8 @@
+import { memo, useRef, useMemo, useCallback } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
-import { Star, Pin, Trash2, ExternalLink, MessageSquare, Zap, Link2, Send, Gamepad2, Image, FileText as FileTextIcon } from "lucide-react";
+import { Star, Pin, Trash2, Link2, Image, FileText as FileTextIcon } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
@@ -13,26 +15,6 @@ interface NoteListProps {
   onTopicClick?: (topic: string) => void;
 }
 
-const ENTITY_COLORS: Record<string, string> = {
-  person: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  event: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
-  prompt: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  document: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
-  note: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
-};
-
-const TYPE_COLORS: Record<string, string> = {
-  observation: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
-  task: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  idea: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
-  reference: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
-  person_note: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  meeting_note: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
-  decision: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  project: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
-};
-
 function getSimilarityColor(score: number): string {
   if (score >= 0.8) return "bg-emerald-500";
   if (score >= 0.65) return "bg-primary";
@@ -40,7 +22,126 @@ function getSimilarityColor(score: number): string {
   return "bg-muted-foreground";
 }
 
-export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicClick }: NoteListProps) {
+interface RowProps {
+  note: Note | SemanticSearchResult;
+  isSelected: boolean;
+  showSimilarity?: boolean;
+  onSelect: (id: string) => void;
+}
+
+const NoteRow = memo(function NoteRow({ note, isSelected, showSimilarity, onSelect }: RowProps) {
+  const similarity = "similarity" in note ? (note as SemanticSearchResult).similarity : null;
+  const matchSource = "match_source" in note ? (note as SemanticSearchResult).match_source : undefined;
+  const mediaDesc = "media_description" in note ? (note as SemanticSearchResult).media_description : undefined;
+  const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
+  const isMediaMatch = matchSource === "media" || matchSource === "both";
+
+  const relativeTime = useMemo(
+    () => formatDistanceToNow(new Date(note.updated_at), { addSuffix: true }),
+    [note.updated_at]
+  );
+  const previewText = useMemo(() => getNotePreviewText(note.content), [note.content]);
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+        e.preventDefault();
+        onSelect(note.id);
+      }
+    },
+    [note.id, onSelect]
+  );
+
+  const handleCopy = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const url = `${window.location.origin}/dashboard/notes/${note.id}`;
+      navigator.clipboard.writeText(url);
+      showToast.copied();
+    },
+    [note.id]
+  );
+
+  return (
+    <a
+      href={`/dashboard/notes/${note.id}`}
+      onClick={handleClick}
+      className={cn(
+        "group block w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
+        isSelected && "bg-accent"
+      )}
+    >
+      <div className="flex items-center gap-1.5 mb-0.5">
+        {note.is_pinned && <Pin className="h-3 w-3 text-primary shrink-0" />}
+        {note.is_favorite && <Star className="h-3 w-3 text-warning fill-warning shrink-0" />}
+        {note.is_trashed && <Trash2 className="h-3 w-3 text-destructive shrink-0" />}
+        <h4 className="text-sm font-medium truncate flex-1">{note.title || "Untitled"}</h4>
+        {showSimilarity && similarity !== null && similarity !== undefined && (
+          <span className="flex items-center gap-1 shrink-0" title={`${Math.round(similarity * 100)}% match`}>
+            <span className={cn("h-1.5 w-1.5 rounded-full", getSimilarityColor(similarity))} />
+            <span className="text-[9px] text-muted-foreground font-mono">
+              {Math.round(similarity * 100)}%
+            </span>
+          </span>
+        )}
+      </div>
+
+      {isMediaMatch && (
+        <div className="flex items-center gap-2 mb-1.5">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] font-medium text-primary flex items-center gap-1">
+              {mediaMatchType === "pdf" || mediaMatchType === "pdf_page" ? (
+                <><FileTextIcon className="h-2.5 w-2.5" /> Matched in PDF</>
+              ) : (
+                <><Image className="h-2.5 w-2.5" /> Matched in image</>
+              )}
+              {matchSource === "both" && (
+                <span className="text-muted-foreground ml-1">+ note text</span>
+              )}
+            </span>
+            {mediaDesc && (
+              <p className="text-[10px] text-muted-foreground truncate">{mediaDesc}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!isMediaMatch && (
+        <p className="text-xs text-muted-foreground truncate mb-1.5">{previewText}</p>
+      )}
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] text-muted-foreground/70">{relativeTime}</span>
+        <button
+          onClick={handleCopy}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+          title="Copy link"
+        >
+          <Link2 className="h-2.5 w-2.5" />
+        </button>
+      </div>
+    </a>
+  );
+});
+
+export const NoteList = memo(function NoteList({
+  notes,
+  selectedId,
+  onSelect,
+  showSimilarity,
+}: NoteListProps) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const rowVirtualizer = useVirtualizer({
+    count: notes.length,
+    getScrollElement: () => parentRef.current,
+    // Average row height — typical row is ~84px (title + preview + meta)
+    estimateSize: () => 92,
+    overscan: 8,
+    getItemKey: (index) => notes[index]?.id ?? index,
+  });
+
   if (notes.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-6 text-center">
@@ -49,98 +150,42 @@ export function NoteList({ notes, selectedId, onSelect, showSimilarity, onTopicC
     );
   }
 
+  const items = rowVirtualizer.getVirtualItems();
+
   return (
-    <div className="flex-1 overflow-y-auto">
-      {notes.map((note) => {
-        const similarity = "similarity" in note ? (note as SemanticSearchResult).similarity : null;
-        const matchSource = "match_source" in note ? (note as SemanticSearchResult).match_source : undefined;
-        const mediaDesc = "media_description" in note ? (note as SemanticSearchResult).media_description : undefined;
-        const mediaPath = "media_storage_path" in note ? (note as SemanticSearchResult).media_storage_path : undefined;
-        const mediaMatchType = "media_type" in note ? (note as SemanticSearchResult).media_type : undefined;
-        const meta = note.metadata as Record<string, unknown> | null;
-        const isMediaMatch = matchSource === "media" || matchSource === "both";
-
-        return (
-          <a
-            key={note.id}
-            href={`/dashboard/notes/${note.id}`}
-            onClick={(e) => {
-              if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
-                e.preventDefault();
-                onSelect(note.id);
-              }
-            }}
-            className={cn(
-              "group block w-full text-left px-4 py-3 border-b border-border transition-colors hover:bg-accent/50",
-              selectedId === note.id && "bg-accent"
-            )}
-          >
-            <div className="flex items-center gap-1.5 mb-0.5">
-              {note.is_pinned && <Pin className="h-3 w-3 text-primary shrink-0" />}
-              {note.is_favorite && <Star className="h-3 w-3 text-warning fill-warning shrink-0" />}
-              {note.is_trashed && <Trash2 className="h-3 w-3 text-destructive shrink-0" />}
-              <h4 className="text-sm font-medium truncate flex-1">
-                {note.title || "Untitled"}
-              </h4>
-              {showSimilarity && similarity !== null && similarity !== undefined && (
-                <span className="flex items-center gap-1 shrink-0" title={`${Math.round(similarity * 100)}% match`}>
-                  <span className={cn("h-1.5 w-1.5 rounded-full", getSimilarityColor(similarity))} />
-                  <span className="text-[9px] text-muted-foreground font-mono">
-                    {Math.round(similarity * 100)}%
-                  </span>
-                </span>
-              )}
+    <div ref={parentRef} className="flex-1 overflow-y-auto">
+      <div
+        style={{
+          height: `${rowVirtualizer.getTotalSize()}px`,
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        {items.map((virtualRow) => {
+          const note = notes[virtualRow.index];
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              ref={rowVirtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <NoteRow
+                note={note}
+                isSelected={selectedId === note.id}
+                showSimilarity={showSimilarity}
+                onSelect={onSelect}
+              />
             </div>
-
-            {/* Media match indicator */}
-            {isMediaMatch && (
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="min-w-0 flex-1">
-                  <span className="text-[10px] font-medium text-primary flex items-center gap-1">
-                    {mediaMatchType === "pdf" || mediaMatchType === "pdf_page" ? (
-                      <><FileTextIcon className="h-2.5 w-2.5" /> Matched in PDF</>
-                    ) : (
-                      <><Image className="h-2.5 w-2.5" /> Matched in image</>
-                    )}
-                    {matchSource === "both" && (
-                      <span className="text-muted-foreground ml-1">+ note text</span>
-                    )}
-                  </span>
-                  {mediaDesc && (
-                    <p className="text-[10px] text-muted-foreground truncate">{mediaDesc}</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {!isMediaMatch && (
-              <p className="text-xs text-muted-foreground truncate mb-1.5">
-                {getNotePreviewText(note.content)}
-              </p>
-            )}
-
-            {/* Metadata pills */}
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] text-muted-foreground/70">
-                {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
-              </span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const url = `${window.location.origin}/dashboard/notes/${note.id}`;
-                  navigator.clipboard.writeText(url);
-                  showToast.copied();
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                title="Copy link"
-              >
-                <Link2 className="h-2.5 w-2.5" />
-              </button>
-            </div>
-          </a>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
-}
+});

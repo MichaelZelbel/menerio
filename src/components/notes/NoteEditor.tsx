@@ -422,6 +422,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
+  // Cancel every pending timer when the editor unmounts so we don't fire
+  // stale saves / sync calls / process triggers against a destroyed instance.
+  useEffect(() => {
+    return () => {
+      if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+      if (processTimer.current) clearTimeout(processTimer.current);
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    };
+  }, []);
+
   // Sync when note changes
   useEffect(() => {
     const noteChanged = activeNoteIdRef.current !== note.id;
@@ -442,6 +453,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setShowInfo(false);
     setSourceMode(false);
     if (processTimer.current) clearTimeout(processTimer.current);
+    if (noteChanged) {
+      if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    }
     if (!editor) return;
 
     const editorContent = contentToEditorHtml(note.content, note);

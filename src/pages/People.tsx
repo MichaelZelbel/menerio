@@ -497,7 +497,7 @@ export default function People() {
       </div>
 
       {selectedPeople.length > 0 && (
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-lg border bg-background p-3 shadow-sm">
           <span className="text-sm font-medium">{selectedPeople.length} selected</span>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => setBulkAddOpen(true)}>Add to Group</Button>
