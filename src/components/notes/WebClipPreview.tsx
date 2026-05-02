@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Globe } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -26,8 +26,10 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [html, setHtml] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   const storagePath = webClip.snapshot_storage_path;
 
@@ -70,7 +72,17 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
           text = `<!doctype html><html><head>${csp}</head><body>${text}</body></html>`;
         }
 
-        if (!cancelled) setHtml(text);
+        if (!cancelled) {
+          setHtml(text);
+          // Build a blob: URL with explicit text/html so the "Open full page"
+          // link renders the snapshot as HTML in a new tab (Supabase Storage
+          // serves attachments as octet-stream, which browsers show as text).
+          const blob = new Blob([text], { type: "text/html;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = url;
+          setBlobUrl(url);
+        }
       } catch (e) {
         if (!cancelled) setError((e as Error).message || "Could not load snapshot.");
       } finally {
@@ -82,6 +94,16 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
       cancelled = true;
     };
   }, [open, storagePath, html]);
+
+  // Revoke blob URL on unmount to free memory.
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, []);
 
   if (!storagePath) return null;
 
@@ -106,9 +128,9 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
             </span>
           )}
         </span>
-        {open && signedUrl && (
+        {open && (blobUrl || signedUrl) && (
           <a
-            href={signedUrl}
+            href={blobUrl || signedUrl!}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
