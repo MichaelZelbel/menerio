@@ -699,6 +699,23 @@ export default function Notes() {
                       </Button>
                     </>
                   )}
+
+                  {/* Trash empty notes */}
+                  {emptyNotes.length > 0 && (
+                    <>
+                      <Separator />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-1.5 text-xs h-8"
+                        onClick={handleTrashEmptyNotes}
+                        disabled={isTrashingEmpty}
+                      >
+                        {isTrashingEmpty ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        Trash {emptyNotes.length} empty note{emptyNotes.length === 1 ? "" : "s"}
+                      </Button>
+                    </>
+                  )}
                 </div>
               </ScrollArea>
             </PopoverContent>
