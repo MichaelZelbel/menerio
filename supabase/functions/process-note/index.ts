@@ -90,7 +90,7 @@ function isSensitiveSuggestion(suggestionType: string, payload: Record<string, u
 async function getSuggestionPreferences(userId: string) {
   const { data } = await supabase
     .from("ai_suggestion_preferences")
-    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, person_blocklist")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -98,7 +98,125 @@ async function getSuggestionPreferences(userId: string) {
     mode: (data as any)?.suggestion_mode || "auto",
     sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
     autoAddSensitive: (data as any)?.auto_add_sensitive === true,
+    personBlocklist: Array.isArray((data as any)?.person_blocklist)
+      ? ((data as any).person_blocklist as string[]).map((n) => String(n).trim().toLowerCase()).filter(Boolean)
+      : [],
   };
+}
+
+/* ── Source-aware confidence dampening ──
+ * Notes captured from external/foreign content (web clips, forwards) are far less likely
+ * to mention people who actually belong in the user's contact book. */
+function getSourceConfidenceFactor(metadata: Record<string, unknown>): { factor: number; sourceTag: string } {
+  const source = String((metadata as any)?.source || (metadata as any)?.source_app || "").toLowerCase();
+  // Web clips: heavily dampened — almost everything is third-party content.
+  if (source === "singlefile" || source === "web_clip" || source === "webclip" || source === "browser_clip") {
+    return { factor: 0.5, sourceTag: "web_clip" };
+  }
+  // Forwarded/relayed content: moderately dampened.
+  if (source === "telegram" || source === "discord" || source === "github" || source === "github_sync" || source === "email") {
+    return { factor: 0.7, sourceTag: "forwarded" };
+  }
+  // First-party capture surfaces: full trust.
+  return { factor: 1.0, sourceTag: "first_party" };
+}
+
+/* ── Generic / demo names that virtually never belong in a real contact list ── */
+const GENERIC_PERSON_NAMES = new Set([
+  "john doe", "jane doe", "john smith", "jane smith",
+  "max mustermann", "erika mustermann", "lieschen müller", "lieschen mueller",
+  "lorem ipsum", "foo bar", "alice", "bob", "alice and bob",
+  "test user", "demo user", "example user",
+]);
+
+/* ── Mention-strength scoring (no LLM, pure heuristic) ──
+ * Returns a multiplier 0..1 for confidence, and a `drop` flag when the mention is too weak. */
+function scorePersonMention(
+  name: string,
+  fullText: string,
+  sourceTag: string,
+): { score: number; drop: boolean; reason?: string } {
+  const text = fullText;
+  const lower = text.toLowerCase();
+  const nameLower = name.toLowerCase();
+
+  // Hard block: generic placeholder names.
+  if (GENERIC_PERSON_NAMES.has(nameLower)) {
+    return { score: 0, drop: true, reason: "generic_name" };
+  }
+
+  // Count occurrences (word-boundary, case-insensitive).
+  const escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = lower.match(new RegExp(`\\b${escaped}\\b`, "g"));
+  const occurrences = matches ? matches.length : 0;
+
+  if (occurrences === 0) {
+    // Substring fallback (e.g. multi-word vs first-name only). Don't drop here — caller handles.
+    return { score: 0.5, drop: false, reason: "no_word_boundary_match" };
+  }
+
+  // Look at the 60-char windows around each mention for context signals.
+  const windows: string[] = [];
+  let searchFrom = 0;
+  while (searchFrom < lower.length) {
+    const idx = lower.indexOf(nameLower, searchFrom);
+    if (idx === -1) break;
+    const start = Math.max(0, idx - 60);
+    const end = Math.min(lower.length, idx + nameLower.length + 60);
+    windows.push(lower.slice(start, end));
+    searchFrom = idx + nameLower.length;
+  }
+  const ctx = windows.join(" | ");
+
+  // Strong relational markers — first-person involvement.
+  const firstPersonMarkers = [
+    "my friend", "my colleague", "my coworker", "my partner", "my boss", "my client", "my mentor",
+    "my brother", "my sister", "my mother", "my father", "my mom", "my dad", "my wife", "my husband", "my son", "my daughter",
+    "i met", "we met", "i spoke with", "i talked to", "i called", "called me", "wrote me", "asked me", "told me",
+    "i had lunch", "i had dinner", "i had coffee", "had a meeting with", "meeting with",
+    // German equivalents
+    "mein freund", "meine freundin", "mein kollege", "meine kollegin", "mein chef", "meine chefin",
+    "habe mit", "gesprochen mit", "getroffen", "treffen mit", "telefoniert mit",
+  ];
+  const hasFirstPerson = firstPersonMarkers.some((m) => ctx.includes(m));
+
+  // Web-content "third party" markers — strong negative signal.
+  const thirdPartyMarkers = [
+    "ceo", "cto", "founder", "co-founder", "cofounder", "president", "director",
+    "testimonial", "review by", "writes:", "says:", "according to", "interviewed",
+    "author", "reporter", "journalist",
+    // German
+    "geschäftsführer", "gründer", "vorstand", "autor", "autorin", "redakteur",
+  ];
+  const hasThirdParty = thirdPartyMarkers.some((m) => ctx.includes(m));
+
+  // Density: very long doc + only a single mention => almost certainly incidental.
+  const isLongDoc = text.length > 5000;
+
+  // Decision logic.
+  if (sourceTag === "web_clip") {
+    // Web clip is hostile territory — require strong evidence to even SUGGEST.
+    if (hasFirstPerson && !hasThirdParty) {
+      return { score: 0.8, drop: false };
+    }
+    if (occurrences >= 3 && !hasThirdParty) {
+      return { score: 0.5, drop: false, reason: "repeated_mention" };
+    }
+    return { score: 0, drop: true, reason: hasThirdParty ? "third_party_context" : (isLongDoc ? "incidental_in_long_doc" : "weak_mention") };
+  }
+
+  if (sourceTag === "forwarded") {
+    if (hasFirstPerson) return { score: 0.9, drop: false };
+    if (hasThirdParty && occurrences === 1) return { score: 0, drop: true, reason: "third_party_context" };
+    if (isLongDoc && occurrences === 1) return { score: 0.4, drop: false, reason: "single_mention_long_doc" };
+    return { score: occurrences >= 2 ? 0.85 : 0.65, drop: false };
+  }
+
+  // First-party (manual / quick-capture / slack): trust by default.
+  if (hasThirdParty && occurrences === 1 && isLongDoc) {
+    return { score: 0.5, drop: false, reason: "third_party_context" };
+  }
+  return { score: 1.0, drop: false };
 }
 
 async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSuggestion[]) {
@@ -117,6 +235,10 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
 async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
   const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
   const confidence = suggestion.confidence_score ?? 0;
+  // Never auto-apply add_contact — creating a new person is an identity decision the user should confirm.
+  if (suggestion.suggestion_type === "add_contact") {
+    return { ...suggestion, status: "pending_review" };
+  }
   const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
 
   if (!canAutoApply) {
@@ -301,11 +423,20 @@ async function generateReviewItems(
       }
 
       const fullText = `${noteTitle}\n${noteContent}`;
+      const { factor: sourceFactor, sourceTag } = getSourceConfidenceFactor(metadata);
+      const blocklist = new Set(preferences.personBlocklist || []);
+
       for (const person of people) {
         // 1. Exact match
         if (nameToContact.has(person.toLowerCase())) continue;
 
-        // 2. Fuzzy match — find close match among all contact names/aliases
+        // 2. User-defined / generic blocklist — drop completely.
+        if (blocklist.has(person.toLowerCase())) {
+          console.log(`Skipping blocklisted name "${person}"`);
+          continue;
+        }
+
+        // 3. Fuzzy match — find close match among all contact names/aliases
         let fuzzyMatch: { id: string; name: string } | null = null;
         for (const [key, contact] of nameToContact) {
           if (isFuzzyMatch(person, key)) {
@@ -315,7 +446,14 @@ async function generateReviewItems(
         }
 
         if (fuzzyMatch) {
-          // Suggest adding as alias instead of new contact
+          // Aliases are still gated by source/mention strength: don't add an alias
+          // to an existing contact based on a random name on a clipped homepage.
+          const aliasMention = scorePersonMention(person, fullText, sourceTag);
+          if (aliasMention.drop) {
+            console.log(`Skipping weak alias suggestion "${person}" → ${fuzzyMatch.name} (${aliasMention.reason})`);
+            continue;
+          }
+          const aliasConfidence = Math.max(0.1, Math.min(1, DEFAULT_CONFIDENCE.add_alias * sourceFactor * aliasMention.score));
           suggestions.push({
             user_id: userId,
             source_note_id: noteId,
@@ -328,18 +466,27 @@ async function generateReviewItems(
             target_entity_id: fuzzyMatch.id,
             source_title: noteTitle,
             extracted_value: person,
-            confidence_score: DEFAULT_CONFIDENCE.add_alias,
+            confidence_score: aliasConfidence,
             is_sensitive: isSensitiveSuggestion("add_alias", { person, contact_name: fuzzyMatch.name }, noteContent),
             suppression_key: buildSuppressionKey("add_alias", "contact", fuzzyMatch.id, person),
           });
           continue;
         }
 
-        // 3. No match — validate name appears in source text before suggesting
+        // 4. No match — validate name appears in source text before suggesting
         if (!nameAppearsInText(person, fullText)) {
           console.log(`Skipping hallucinated name "${person}" — not found in note text`);
           continue;
         }
+
+        // 5. Mention-strength scoring (drops weak / third-party mentions on web clips & forwards).
+        const mention = scorePersonMention(person, fullText, sourceTag);
+        if (mention.drop) {
+          console.log(`Skipping weak person suggestion "${person}" from source=${sourceTag} (${mention.reason})`);
+          continue;
+        }
+
+        const adjustedConfidence = Math.max(0.1, Math.min(1, DEFAULT_CONFIDENCE.add_contact * sourceFactor * mention.score));
 
         suggestions.push({
           user_id: userId,
@@ -352,7 +499,7 @@ async function generateReviewItems(
           target_entity_type: "contact",
           source_title: noteTitle,
           extracted_value: person,
-          confidence_score: DEFAULT_CONFIDENCE.add_contact,
+          confidence_score: adjustedConfidence,
           is_sensitive: isSensitiveSuggestion("add_contact", { name: person }, noteContent),
           suppression_key: buildSuppressionKey("add_contact", "contact", null, person),
         });
@@ -921,7 +1068,7 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Action items extraction removed
 
     // Generate review queue suggestions (no extra LLM calls)
-    await generateReviewItems(note.user_id, noteId, note.title, note.content, metadata);
+    await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
     // Generate profile suggestions for matched people (one extra LLM call)
     await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);

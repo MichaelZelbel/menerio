@@ -210,6 +210,7 @@ export type Database = {
           auto_add_sensitive: boolean
           created_at: string
           id: string
+          person_blocklist: string[]
           suggestion_mode: string
           suggestion_sensitivity: string
           updated_at: string
@@ -219,6 +220,7 @@ export type Database = {
           auto_add_sensitive?: boolean
           created_at?: string
           id?: string
+          person_blocklist?: string[]
           suggestion_mode?: string
           suggestion_sensitivity?: string
           updated_at?: string
@@ -228,6 +230,7 @@ export type Database = {
           auto_add_sensitive?: boolean
           created_at?: string
           id?: string
+          person_blocklist?: string[]
           suggestion_mode?: string
           suggestion_sensitivity?: string
           updated_at?: string

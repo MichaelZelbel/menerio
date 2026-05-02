@@ -1,134 +1,80 @@
-## Two real bugs found
+## Problem
 
-I checked your Grammarly clip in the database. Two things are broken:
+Beim Klippen von Webseiten (SingleFile, Telegram-Forwards, Discord-Captures, etc.) extrahiert der LLM **alle** im Text erwähnten Personennamen — Testimonial-Autoren, fiktive Beispielfiguren ("Jordan macht einen Trip"), CEOs, Autorenzeilen. `process-note` erstellt daraus blind `add_contact`-Vorschläge im Review Queue, die bei Sensitivität "balanced" (Threshold 0.7) und Default-Confidence 0.8 sogar **auto-appliziert** werden.
 
-### Bug 1 — `metadata.web_clip` is wiped out after AI processing
+Heutige Schutzmaßnahmen (Hallucination-Check `nameAppearsInText`, Levenshtein-Fuzzy-Match) verhindern nur Erfindungen, nicht aber **irrelevante echte Namen** aus Fremdtexten.
 
-The capture function correctly stores `metadata.web_clip = { snapshot_storage_path, hero_image_attachment, hostname, … }` on the note. But the background `process-note` edge function then **replaces** the entire `metadata` field with the AI-extracted topics/summary/people (`supabase/functions/process-note/index.ts` line 904 — `update({ embedding, metadata })`). So:
+## Lösungsansatz: 3 Filter-Layer + 1 Default-Änderung
 
-- `metadata.web_clip` → `null` (you can verify in the DB: the Grammarly note has no `web_clip` key anymore).
-- The "Page snapshot" panel only renders when `metadata.web_clip?.snapshot_storage_path` exists, so it's invisible — that's why you can't click anything to see the rendered page.
-- This also affects every Telegram/Discord/SingleFile clip and any field other code paths add to metadata.
+### 1. Source-Aware Confidence-Dämpfung (zentrale Maßnahme)
 
-### Bug 2 — Hero image is "any image" instead of the page's preview image
+In `process-note/index.ts` (`generateReviewItems`): Confidence von `add_contact` und `add_alias` runterstufen, wenn die Note von einer **fremdgenerierten Quelle** stammt.
 
-The picker's regex for `og:image` requires the attributes in a specific order (`property` before `content`). Many sites — Grammarly included — emit them in a different order or use multi-line tags, so the regex misses, and the function falls through to "first body `<img>` ≥80px", which on Grammarly is a customer-testimonial avatar.
-
-Plus, the candidate picker stops at the first match instead of trying multiple `og:image` tags or comparing them.
-
----
-
-## Fix
-
-### Change 1 — `supabase/functions/process-note/index.ts` (preserve metadata)
-
-Merge instead of replace. Keep all existing top-level keys and only overwrite the AI-derived ones:
-
-```ts
-// line 897-904 area
-const existingMeta = (note.metadata as Record<string, unknown> | null) ?? {};
-const mergedMetadata = { ...existingMeta, ...metadata };
-
-const updatePayload: Record<string, unknown> = {
-  embedding,
-  metadata: mergedMetadata,
-};
+```text
+Note-Source                    | add_contact base conf | nach Dämpfung
+-------------------------------|-----------------------|----------------
+manual / quick-capture / slack | 0.80                  | 0.80 (unverändert)
+telegram / discord (forward)   | 0.80                  | 0.55
+singlefile / web_clip          | 0.80                  | 0.40
+github sync                    | 0.80                  | 0.55
 ```
 
-This restores `web_clip`, `source`, `is_quick_capture`, and any future per-source fields. The "Page snapshot" iframe panel will start showing immediately on new clips. (Existing clips are already lost — see Backfill below.)
+Bei "balanced" (0.7) und "conservative" (0.85) wird damit aus Web-Clips **nichts mehr auto-appliziert** — alles landet im Review Queue mit "low confidence"-Label. Bei "exploratory" (0.55) bleiben Telegram/Discord auto-applizierbar, Web-Clips nicht.
 
-### Change 2 — `supabase/functions/singlefile-capture/index.ts` (better hero picker)
+Source wird aus `metadata.source` bzw. `source_app` der Note gelesen (bereits vorhanden, siehe `singlefile-capture` setzt `source_app: "singlefile"`).
 
-Make the OG/Twitter image regexes order-agnostic and try every match before giving up:
+### 2. Mention-Strength-Heuristik
 
-```ts
-function findMetaContent(html: string, attrName: string, attrVal: string): string | null {
-  // Match <meta ... attrName="attrVal" ... content="..."> OR
-  //       <meta ... content="..." ... attrName="attrVal">
-  const tagRe = /<meta\b[^>]*>/gi;
-  let m: RegExpExecArray | null;
-  const wantAttr = new RegExp(`\\b${attrName}\\s*=\\s*["']${attrVal}["']`, "i");
-  const contentAttr = /\bcontent\s*=\s*["']([^"']+)["']/i;
-  while ((m = tagRe.exec(html)) !== null) {
-    const tag = m[0];
-    if (wantAttr.test(tag)) {
-      const c = tag.match(contentAttr);
-      if (c && c[1].trim()) return decodeEntities(c[1]).trim();
-    }
-  }
-  return null;
-}
+Pro extrahiertem Namen einen einfachen Score berechnen, **bevor** ein Suggestion erzeugt wird. Vorschlag wird gedroppt (oder zusätzlich gedämpft), wenn Score zu niedrig.
 
-function findHeroImageCandidate(html: string): string | null {
-  return (
-    findMetaContent(html, "property", "og:image:secure_url") ||
-    findMetaContent(html, "property", "og:image:url") ||
-    findMetaContent(html, "property", "og:image") ||
-    findMetaContent(html, "name", "twitter:image:src") ||
-    findMetaContent(html, "name", "twitter:image") ||
-    findLinkRel(html, "image_src") ||
-    extractFirstBodyImageSrc(html) // last-resort fallback, unchanged
-  );
-}
-```
+Signale (alle billig, ohne LLM):
+- **Mention-Frequency**: Name kommt nur 1× im Text vor → schwach. ≥2× → ok.
+- **Position**: Name nur in "Testimonial"-/"Author"-/"CEO"-/"Founder"-/"Quote"-Kontext (Wort im 30-Zeichen-Umfeld) → schwach.
+- **Possessive/Relational Marker im Umfeld**: "my friend", "we met", "called", "wrote me", "asked me", "I/me + Name" → stark. Wenn keiner dieser Marker existiert UND Source = web_clip → droppen.
+- **Density-Ratio**: bei sehr langen Notes (>5000 Zeichen, typisch Web-Clip) und nur 1 Mention → droppen.
 
-Also tighten `extractFirstBodyImageSrc`: skip anything inside `<header>`, `<nav>`, or with class/id matching `avatar|logo|icon|tracker|pixel`. (Won't help the lost Grammarly note retroactively, but it'll matter when og:image really is missing.)
+Implementiert als `scorePersonMention(name, text, source)` → returnt `{ score: 0..1, drop: boolean }`. Bei `drop=true` wird kein Suggestion erzeugt; sonst wird Score in Confidence eingerechnet (`confidence = base * source_factor * mention_score`).
 
-### Change 3 — Make the snapshot panel discoverable
+### 3. Stoppliste für offensichtliche Web-Artefakte
 
-Right now the "Page snapshot" panel sits at the bottom of the note view, collapsed, between External-note section and the metadata editor. Two small UX tweaks:
+Kleine eingebaute Liste (englisch + deutsch) klassischer Beispielnamen + Marketing-Klischees, die in Demo-Texten auftauchen:
+- "John Doe", "Jane Doe", "Max Mustermann", "Erika Mustermann", "Lorem Ipsum"
+- Optional erweiterbar via `ai_suggestion_preferences.person_blocklist` (text[]) — Nutzer kann eigene Namen blockieren ("Jordan" im Menerio-Demo).
 
-1. **Default open** for SingleFile notes (collapsed elsewhere). The whole point of clipping is to see the page.
-2. **Add a button right under the source link** in the body area of web-clip notes that scrolls to / opens the snapshot. Cheaper alternative: render the panel directly under the title instead of at the bottom.
+Treffer → Suggestion komplett überspringen (kein Review-Eintrag).
 
-I'll go with: move the `WebClipPreview` component to render *between the title bar and the editor* in `NoteEditor.tsx`, default-open, ~600 px tall. That makes the visual page the first thing you see.
+### 4. Default-Anpassung: Auto-Apply NICHT für `add_contact`
 
-### Change 4 — Backfill existing web clips
+`prepareSuggestionForInsert` lässt aktuell `add_contact` auto-applizieren wenn Confidence ≥ Threshold. Vorschlag: **`add_contact` IMMER in `pending_review` halten**, unabhängig von Confidence. Andere Suggestion-Typen (`add_alias`, `add_profile_entry`, `add_relationship`) bleiben wie bisher, weil sie an einen bereits bestätigten Kontakt anknüpfen.
 
-For notes that already lost their `web_clip` metadata, write a one-shot SQL script you can run from the migration tool that re-derives `snapshot_storage_path` and `hero_image_attachment` from `note_attachments`:
+Begründung: Ein neuer Kontakt ist eine "Identity-Decision" — der irreversibelste/sichtbarste Eintrag im Notebook. Auto-Apply bringt hier wenig Tempo-Vorteil aber viel Aufräum-Aufwand.
 
-```sql
-update notes n
-set metadata = coalesce(n.metadata, '{}'::jsonb) || jsonb_build_object(
-  'web_clip', jsonb_build_object(
-    'snapshot_attachment', snap.filename,
-    'snapshot_storage_path', snap.storage_path,
-    'hero_image_attachment', hero.filename,
-    'hero_image_storage_path', hero.storage_path,
-    'url', n.source_url,
-    'hostname', regexp_replace(split_part(n.source_url, '/', 3), '^www\.', '')
-  )
-)
-from (
-  select user_id, filename, storage_path
-  from note_attachments
-  where source = 'singlefile' and mime_type = 'text/html'
-) snap
-left join (
-  select user_id, filename, storage_path
-  from note_attachments
-  where source = 'singlefile' and mime_type like 'image/%'
-) hero on hero.user_id = snap.user_id
-       and hero.filename like (regexp_replace(snap.filename, '\.html?$', '') || '%')
-where n.source_app = 'singlefile'
-  and (n.metadata->'web_clip') is null
-  and snap.user_id = n.user_id
-  and snap.storage_path like (n.user_id::text || '/%');
-```
+## Technische Details
 
-The matching by user + filename prefix is approximate — for clips where multiple snapshots collide we'll just pick one. That's acceptable for a one-time recovery.
+**Datei-Änderungen:**
+- `supabase/functions/process-note/index.ts`:
+  - Neuer Helper `getSourceConfidenceFactor(metadata)` → Faktor 0.4..1.0
+  - Neuer Helper `scorePersonMention(name, fullText, sourceFactor)` → `{score, drop, reason}`
+  - Neue Konstante `GENERIC_PERSON_NAMES` (Stoppliste)
+  - Loop in `generateReviewItems`: Vor jeder `add_contact`/`add_alias`-Suggestion Score berechnen, dropen oder Confidence anpassen
+  - `prepareSuggestionForInsert`: für `suggestion_type === "add_contact"` immer `pending_review` zurückgeben
+- `supabase/functions/singlefile-capture/index.ts`: sicherstellen, dass `metadata.source = "web_clip"` gesetzt ist (bereits "singlefile" — wird im Helper berücksichtigt)
 
----
+**DB-Änderung (optional, klein):**
+- `ai_suggestion_preferences.person_blocklist text[] default '{}'` — Nutzer-eigene Stoppliste
+- UI-Erweiterung in den Settings würde **nicht** Teil dieser Iteration sein, kann nachgereicht werden — Backend liest die Spalte schon.
 
-## Out of scope
+**Kein UI-Eingriff in Review Queue** nötig: bestehende "low confidence"-Anzeige wird automatisch häufiger erscheinen.
 
-- Replacing the iframe with a server-rendered PNG screenshot (would need Firecrawl or headless Chromium — much heavier; the iframe gives the same visual fidelity from the data we already have).
-- Re-running AI extraction on every existing clip — only the metadata-merge fix is needed going forward.
+## Erwartetes Verhalten nach Deployment
 
-## Summary
+| Szenario                                              | Heute             | Danach                                |
+|-------------------------------------------------------|-------------------|---------------------------------------|
+| Web-Clip Grammarly-Homepage, "Janine Anderson" 1×     | Auto-add Contact  | Komplett verworfen (drop)             |
+| Web-Clip Menerio, "Jordan" in Demo-Text               | Auto-add Contact  | Drop (single mention, kein "I/me")    |
+| Web-Clip Blog-Artikel über Person X (5 Mentions)      | Auto-add Contact  | Pending Review, Confidence ~0.4       |
+| Quick-Capture "Hatte heute Mittag mit Lisa gesprochen"| Pending Review    | Pending Review (unverändert)          |
+| Telegram-Forward "Anna hat Geburtstag"                | Auto-add Contact  | Pending Review (Source-Dämpfung)      |
+| Slack-Capture vom Brain-Owner selbst                  | Auto-add Contact  | Auto-add (Source = trusted)           |
 
-After this lands:
-
-1. New web clips show the `og:image` (Grammarly's actual blue brand banner, not a testimonial avatar).
-2. New web clips show a fully-rendered, scrollable preview of the saved page right under the title — that's your "see the whole website" visual.
-3. Old clips can be repaired with the SQL backfill so their snapshots become visible too (the underlying HTML attachments are still in storage).
+Falls dir das zu aggressiv ist, können wir Schritt 4 (Auto-Apply abschalten) auch weglassen oder per Setting umschaltbar machen — sag Bescheid.
