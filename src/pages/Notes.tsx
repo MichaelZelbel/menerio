@@ -318,9 +318,11 @@ export default function Notes() {
       if (sortField === "title") {
         return dir * (a.title || "").localeCompare(b.title || "");
       }
-      const aVal = a[sortField] || "";
-      const bVal = b[sortField] || "";
-      return dir * aVal.localeCompare(bVal);
+      const aRaw = (a as unknown as Record<string, unknown>)[sortField];
+      const bRaw = (b as unknown as Record<string, unknown>)[sortField];
+      const aTs = typeof aRaw === "string" ? new Date(aRaw).getTime() : 0;
+      const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
+      return dir * (aTs - bTs);
     });
     return sorted;
   }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
@@ -825,6 +827,8 @@ export default function Notes() {
             onCreateNoteInFolder={handleCreateInFolder}
             onCreateFolderInFolder={handleCreateFolderInFolder}
             onMoveNote={handleMoveNote}
+            sortField={sortField}
+            sortDirection={sortDirection}
           />
         )}
       </div>

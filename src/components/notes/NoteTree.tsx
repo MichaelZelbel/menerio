@@ -27,6 +27,9 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 
+export type NoteTreeSortField = "updated_at" | "created_at" | "title";
+export type NoteTreeSortDirection = "asc" | "desc";
+
 interface NoteTreeProps {
   notes: (Note | SemanticSearchResult)[];
   folderPaths: string[];
@@ -37,6 +40,8 @@ interface NoteTreeProps {
   onCreateNoteInFolder: (path: string) => void;
   onCreateFolderInFolder: (path: string) => void;
   onMoveNote: (noteId: string, path: string) => void;
+  sortField?: NoteTreeSortField;
+  sortDirection?: NoteTreeSortDirection;
 }
 
 interface FolderNode {
@@ -65,15 +70,31 @@ function ensureFolder(root: FolderNode, path: string) {
   return cursor;
 }
 
-function sortFolder(node: FolderNode) {
+function sortFolder(
+  node: FolderNode,
+  sortField: NoteTreeSortField,
+  sortDirection: NoteTreeSortDirection,
+) {
+  // Folder names always alphabetical — sorting them by date doesn't apply.
   node.children.sort((a, b) => a.name.localeCompare(b.name));
+
+  const dir = sortDirection === "asc" ? 1 : -1;
   node.notes.sort((a, b) => {
     const aPinned = a.is_pinned ? 1 : 0;
     const bPinned = b.is_pinned ? 1 : 0;
-    if (aPinned !== bPinned) return bPinned - aPinned;
-    return (a.title || "Untitled").localeCompare(b.title || "Untitled");
+    if (aPinned !== bPinned) return bPinned - aPinned; // pinned always first
+
+    if (sortField === "title") {
+      return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
+    }
+    const aRaw = (a as unknown as Record<string, unknown>)[sortField];
+    const bRaw = (b as unknown as Record<string, unknown>)[sortField];
+    const aTs = typeof aRaw === "string" ? new Date(aRaw).getTime() : 0;
+    const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
+    return dir * (aTs - bTs);
   });
-  node.children.forEach(sortFolder);
+
+  node.children.forEach((child) => sortFolder(child, sortField, sortDirection));
 }
 
 function countNestedNotes(node: FolderNode): number {
@@ -96,6 +117,8 @@ export function NoteTree({
   onCreateNoteInFolder,
   onCreateFolderInFolder,
   onMoveNote,
+  sortField = "updated_at",
+  sortDirection = "desc",
 }: NoteTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -121,9 +144,9 @@ export function NoteTree({
 
     allFolderPaths.forEach((path) => ensureFolder(root, path));
     notes.forEach((note) => ensureFolder(root, normalizePath(note.folder_path)).notes.push(note));
-    sortFolder(root);
+    sortFolder(root, sortField, sortDirection);
     return root;
-  }, [folderPaths, notes]);
+  }, [folderPaths, notes, sortField, sortDirection]);
 
   useEffect(() => {
     setExpanded((current) => {
