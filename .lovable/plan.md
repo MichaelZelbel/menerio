@@ -1,82 +1,118 @@
-# Performance-Optimierungen für den Browser
+# Note-Toolbar konsolidieren (Obsidian-Stil)
 
-Ziel: Die App fühlt sich im Browser flüssiger an — schnellerer Start, weniger Ruckler beim Scrollen und Tippen, geringere Speichernutzung. **Keine sichtbare Funktionalität wird entfernt oder geändert.**
+## Ziel
 
-Die Maßnahmen sind nach Wirkung sortiert. Jede ist isoliert und kann einzeln zurückgerollt werden.
+Die separate **Action-Toolbar** über dem Editor (Favorite, Pin, Tag, Info, Connections, Local Graph, Version History, Send-to-App, Classify, Source Mode, AI Chat, Copy, Download, Link, Open-in-Tab, Share, Trash) entfernt die visuelle Konkurrenz mit der **Formatierungstoolbar**, indem sie in ein Drei-Punkte-Menü (`⋯`) am rechten Ende der Formatierungstoolbar wandert — analog zu Obsidian.
 
----
+Das ist UI-technisch eine **gute** Lösung:
+- Reduziert visuellen Lärm um eine ganze Toolbar-Zeile
+- Sekundäre/seltene Aktionen gehören in ein Overflow-Menü
+- Häufige Aktionen (Favorite, Pin, AI Chat) bleiben als Quick-Access sichtbar
+- Etablierte Konvention (Obsidian, Notion, Google Docs)
 
-## 1. NoteList virtualisieren (größter spürbarer Gewinn)
+## Aufteilung: Sichtbar vs. im Menü
 
-`src/components/notes/NoteList.tsx` rendert heute jede Notiz als DOM-Knoten. Bei 200+ Notizen (typische Vault-Größe) entstehen tausende DOM-Elemente mit `formatDistanceToNow`, Icons und Hover-Listenern — das macht Scrollen und das Wechseln der Auswahl spürbar zäh.
+**Sichtbar bleiben (rechts in der Formatierungstoolbar, vor `⋯`)** — die 2–3 häufigsten Aktionen:
+- ⭐ Favorite (Toggle, mit aktivem State)
+- 📌 Pin (Toggle, mit aktivem State)
+- 💬 AI Chat (Toggle, mit aktivem State)
+- "Shared"-Badge wenn aktiv
 
-- `@tanstack/react-virtual` einführen (klein, ~5 KB, bereits Peer-kompatibel).
-- Nur sichtbare Zeilen + ein kleiner Overscan rendern.
-- Verhalten bleibt identisch (Klick, Tastatur-Navigation, Hover-Copy-Button, Selection-Highlight).
-- Edgecase „leere Liste" weiter unterstützen.
+**Ins Drei-Punkte-Menü (`⋯`)** — gruppiert mit Separators:
 
-## 2. Re-Renders in der Notizenliste senken
+*Gruppe 1 — View & Info*
+- Note info
+- Add tag
+- Source mode (mit Check-Indikator wenn aktiv)
 
-- `NoteList` in `React.memo` packen und einen stabilen `onSelect` (in `Notes.tsx` per `useCallback`) übergeben.
-- Die einzelne Zeile in eine memoisierte Sub-Komponente `NoteListItem` extrahieren, sodass das Auswählen einer Notiz nur die zwei betroffenen Zeilen neu rendert statt der ganzen Liste.
-- `formatDistanceToNow` einmal pro Zeile berechnen, nicht erneut bei jedem Parent-Render.
+*Gruppe 2 — Connections*
+- Find connections
+- Local graph (mit Check wenn aktiv)
+- Version history (nur wenn `syncLog` existiert)
 
-## 3. Header-/Overlay-Backdrop-Blur ersetzen oder begrenzen
+*Gruppe 3 — AI*
+- Classify with AI (nur wenn keine Metadata, nicht trashed)
 
-`backdrop-blur-[14px]` im `Header` läuft auf jedem Frame und ist laut bekanntem Performance-Pattern ein Hauptverursacher von Jank, besonders während Scroll-Animationen.
+*Gruppe 4 — Share & Export*
+- Copy to clipboard
+- Download Markdown
+- Copy note link
+- Open in new tab
+- Share publicly / Stop sharing / Copy public link
+- Send to app
 
-- Header: `backdrop-blur` entfernen, stattdessen leicht erhöhte Opazität des Hintergrunds (z. B. `bg-[rgba(255,255,255,.96)]`) + sehr feine `border` für den „Glas"-Look. Optisch fast identisch, aber kein Per-Frame-Resampling.
-- `QuickCapture`-Overlay und `MediaAnalysisOverlay`: `backdrop-blur-sm` durch eine etwas dunklere/opakere Backdrop-Farbe ersetzen.
-- `People.tsx` Sticky-Header: dito.
+*Gruppe 5 — Destructive*
+- Move to trash (rot)
 
-## 4. `ProfileIcon` aufhören, jedes Icon einzeln zu lazy-laden
+**Trashed-State**: Im Menü nur Restore + Delete Forever.
 
-`src/components/profile/ProfileIcon.tsx` nutzt `lucide-react/dynamicIconImports` mit `React.lazy` pro Icon. Jedes Icon erzeugt einen separaten Netzwerk-Chunk + Suspense-Übergang — sichtbar als Flackern und viele kleine Requests.
+**External-Notes**: Action-Toolbar entfällt komplett (existierende `is_external` Read-Only-Bar bleibt unverändert).
 
-- Auf einen kuratierten statischen Map-Import der tatsächlich verwendeten Icons umstellen (bestehende Icon-Auswahl im Profile-Bereich auflisten und nur die importieren).
-- Fallback auf `Circle` bleibt.
-- Resultat: deutlich weniger Requests, kein Suspense-Flackern, Bundle wächst nur minimal, weil dieselben Icons schon anderswo via Tree-Shaking enthalten sind.
+## Technische Umsetzung
 
-## 5. Build-/Bundle-Splitting verbessern
+### 1. `src/components/notes/EditorToolbar.tsx`
+- Neue optionale Props: `noteActions?: React.ReactNode` und `quickActions?: React.ReactNode`.
+- `quickActions` wird vor dem bestehenden `flex-1`-Spacer (vor Undo/Redo) eingefügt — oder besser nach Undo/Redo am rechten Rand.
+- `noteActions` wird ganz rechts als `⋯`-DropdownMenu gerendert (nutzt vorhandenes `DropdownMenu`/`DropdownMenuItem`/`DropdownMenuSeparator` aus shadcn).
+- Wenn beide Props undefiniert sind, ändert sich nichts (Editor-Komponente außerhalb von NoteEditor bleibt unberührt).
 
-`vite.config.ts` bündelt aktuell nur `vendor`, `ui`, `query`. Tiptap, framer-motion und lucide-react landen ungesplittet im großen Hauptchunk.
+### 2. `src/components/notes/NoteEditor.tsx`
+- Block "Action toolbar" (Zeilen 760–903) wird gelöscht.
+- Stattdessen werden zwei Render-Helfer in der Render-Funktion gebaut:
+  - `quickActions`: Favorite + Pin + AI Chat + Shared-Badge als kompakte Icon-Buttons.
+  - `noteActions`: `<DropdownMenu>` mit `MoreHorizontal`-Trigger und allen oben gelisteten `DropdownMenuItem`s, gruppiert via `DropdownMenuSeparator`. Jeder Item-Eintrag hat `<Icon />` + Label.
+- Beide werden via Props an `<EditorToolbar editor={editor} quickActions={...} noteActions={...} />` übergeben.
+- Für External Notes (Read-Only) wird kein Menü übergeben — die existierende Read-Only-Action-Bar bleibt.
+- Für trashed Notes: nur Restore + Delete Forever im Menü.
 
-- Manual chunks ergänzen für `tiptap` (`@tiptap/*`), `editor-extras` (`framer-motion`, `date-fns`), und `icons` (`lucide-react`).
-- Resultat: kleinerer Initial-Chunk → schnellerer Time-to-Interactive auf Routen ohne Editor.
+### 3. Info-Panel-Verhalten
+Das `showInfo`-Panel (Zeilen 905–923) bleibt bestehen — getoggelt jetzt vom Menüeintrag "Note info" statt vom Toolbar-Icon.
 
-## 6. Defensive Aufräumarbeiten in `NoteEditor`
+### 4. Keine Funktionalitätsänderungen
+Alle Handler (`toggleFavorite`, `togglePin`, `moveToTrash`, `downloadMarkdown`, `processNote.mutate`, `shareNote.mutate`, `unshareNote.mutate`, `copyShareLink.mutate`, `setShowChat`, `setShowConnections`, `onToggleLocalGraph`, `setShowHistory`, `setShowForwardDialog`, `toggleSourceMode`, `setShowTagInput`, `setShowInfo`, Restore, Delete Forever) bleiben unverändert — nur die Trigger-UI wandert.
 
-`NoteEditor.tsx` (1252 Zeilen) hält 4 Timer-Refs und mehrere `useEffect`-Hooks.
+## Visuelles Ergebnis
 
-- Sicherstellen, dass alle `setTimeout`s in einem zentralen Cleanup beim Unmount **und** beim Wechsel der `noteId` gecleart werden (Teil-Leck heute möglich → führt zu „Geist-Saves" und CPU-Last beim schnellen Notizenwechsel).
-- Keine Logik-Änderung, nur striktere Cleanup-Hygiene.
+```text
+Vorher:
+┌─────────────────────────────────────────────────────────────┐
+│ ⭐ 📌 🏷 ℹ 🔗 🕸 📜 📤 ✨Classify </> 💬 📋 ⬇ 🔗 ↗ 🌐 🗑  │  ← Action toolbar
+├─────────────────────────────────────────────────────────────┤
+│ ¶ Normal | B I U S … | 🎨 | • 1. ☑ | " — </>  | ↶ ↷       │  ← Format toolbar
+└─────────────────────────────────────────────────────────────┘
 
-## 7. `console.log`-Rauschen im Prod entfernen
+Nachher:
+┌─────────────────────────────────────────────────────────────┐
+│ ¶ Normal | B I U S … | 🎨 | • 1. ☑ | " — </>  | ↶ ↷  ⭐📌💬 ⋯│
+└─────────────────────────────────────────────────────────────┘
+                                                            │
+                                          ┌─────────────────┘
+                                          │ ℹ  Note info    │
+                                          │ 🏷 Add tag       │
+                                          │ </> Source mode │
+                                          │ ───────────────  │
+                                          │ 🔗 Find connections│
+                                          │ 🕸 Local graph   │
+                                          │ 📜 Version history│
+                                          │ ───────────────  │
+                                          │ ✨ Classify      │
+                                          │ ───────────────  │
+                                          │ 📋 Copy          │
+                                          │ ⬇  Download      │
+                                          │ 🔗 Copy link     │
+                                          │ ↗  Open new tab  │
+                                          │ 🌐 Share publicly│
+                                          │ 📤 Send to app   │
+                                          │ ───────────────  │
+                                          │ 🗑 Move to trash │
+                                          └─────────────────┘
+```
 
-Build-Schritt: `esbuild.drop: ['console', 'debugger']` für Production-Build in `vite.config.ts` setzen. Schont Hauptthread und Speicher, vor allem in Routinen mit häufigen Logs (Editor, Sync). Dev bleibt unberührt.
+## Geänderte Dateien
 
----
+- `src/components/notes/EditorToolbar.tsx` — zwei optionale Props + Render-Slots
+- `src/components/notes/NoteEditor.tsx` — alte Action-Toolbar entfernen, Quick-Actions + Dropdown bauen und an Editor-Toolbar übergeben
 
-## Was NICHT geändert wird
+## Aufwand
 
-- Keine Features, keine Routen, keine Datenmodelle.
-- Keine UI-Texte, keine Farben außer minimaler Anpassung der Header-Opazität.
-- Kein Eingriff in Edge Functions, Auth, RLS oder Supabase-Client.
-- Keine neuen großen Abhängigkeiten außer `@tanstack/react-virtual` (sehr klein, vom selben Maintainer wie `react-query`, das ihr bereits nutzt).
-
-## Reihenfolge der Umsetzung
-
-1. NoteList virtualisieren + memoisieren (Punkte 1 + 2)
-2. Backdrop-Blur ersetzen (Punkt 3)
-3. ProfileIcon statisch (Punkt 4)
-4. Vite chunks + console-drop (Punkte 5 + 7)
-5. NoteEditor-Cleanup (Punkt 6)
-
-Nach jedem Schritt kurze visuelle Prüfung; falls etwas anders aussieht als gewünscht, isoliert revertierbar.
-
-## Erwartete Wirkung
-
-- Spürbar flüssigeres Scrollen in der Notizliste (vor allem ab ~100 Notizen).
-- Kein Header-Jank mehr beim Scrollen.
-- Schnellerer initialer Seitenaufbau auf Dashboard/Landing (kleinerer Hauptchunk, weniger Icon-Requests).
-- Geringere CPU-Last beim Tippen im Editor.
+Klein bis mittel. Eine einzelne Änderungs-Session, keine Migrations, keine Hook-Änderungen, kein Risiko für bestehende Tests.

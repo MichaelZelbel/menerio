@@ -57,6 +57,10 @@ import { useState } from "react";
 
 interface EditorToolbarProps {
   editor: Editor | null;
+  /** Quick-action icon buttons rendered right before the overflow menu (e.g. Favorite, Pin, AI Chat). */
+  quickActions?: React.ReactNode;
+  /** Overflow / "more" menu rendered at the far right (typically a DropdownMenu trigger). */
+  noteActions?: React.ReactNode;
 }
 
 const TEXT_COLORS = [
@@ -99,7 +103,7 @@ function ToolbarButton({
   );
 }
 
-export function EditorToolbar({ editor }: EditorToolbarProps) {
+export function EditorToolbar({ editor, quickActions, noteActions }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
 
@@ -318,6 +322,10 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
         <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo (Ctrl+Shift+Z)">
           <Redo className="h-3.5 w-3.5" />
         </ToolbarButton>
+
+        {(quickActions || noteActions) && <Separator orientation="vertical" className="h-5 mx-1" />}
+        {quickActions}
+        {noteActions}
       </div>
 
       {/* Contextual table toolbar */}
