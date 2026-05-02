@@ -11,6 +11,7 @@ interface WebClipMetadata {
 
 interface Props {
   webClip: WebClipMetadata;
+  defaultOpen?: boolean;
 }
 
 /**
@@ -19,8 +20,8 @@ interface Props {
  * sandbox attribute (no `allow-scripts`) and `referrerpolicy="no-referrer"`
  * suppresses any tracking pixels in the captured HTML.
  */
-export function WebClipPreview({ webClip }: Props) {
-  const [open, setOpen] = useState(false);
+export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
+  const [open, setOpen] = useState(defaultOpen);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
