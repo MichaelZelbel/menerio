@@ -70,15 +70,31 @@ function ensureFolder(root: FolderNode, path: string) {
   return cursor;
 }
 
-function sortFolder(node: FolderNode) {
+function sortFolder(
+  node: FolderNode,
+  sortField: NoteTreeSortField,
+  sortDirection: NoteTreeSortDirection,
+) {
+  // Folder names always alphabetical — sorting them by date doesn't apply.
   node.children.sort((a, b) => a.name.localeCompare(b.name));
+
+  const dir = sortDirection === "asc" ? 1 : -1;
   node.notes.sort((a, b) => {
     const aPinned = a.is_pinned ? 1 : 0;
     const bPinned = b.is_pinned ? 1 : 0;
-    if (aPinned !== bPinned) return bPinned - aPinned;
-    return (a.title || "Untitled").localeCompare(b.title || "Untitled");
+    if (aPinned !== bPinned) return bPinned - aPinned; // pinned always first
+
+    if (sortField === "title") {
+      return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
+    }
+    const aRaw = (a as Record<string, unknown>)[sortField];
+    const bRaw = (b as Record<string, unknown>)[sortField];
+    const aTs = typeof aRaw === "string" ? new Date(aRaw).getTime() : 0;
+    const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
+    return dir * (aTs - bTs);
   });
-  node.children.forEach(sortFolder);
+
+  node.children.forEach((child) => sortFolder(child, sortField, sortDirection));
 }
 
 function countNestedNotes(node: FolderNode): number {
