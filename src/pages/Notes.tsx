@@ -97,6 +97,7 @@ export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
