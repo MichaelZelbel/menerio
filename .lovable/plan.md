@@ -1,166 +1,82 @@
-## Ziel
+# Performance-Optimierungen für den Browser
 
-Das via GitHub-Sync geschriebene Repo soll ein **vollwertiger Obsidian-Vault** werden — inklusive Bildern und anderen Anhängen. Du sollst das Repo lokal klonen, in Obsidian öffnen, Bilder sehen, neue Bilder einfügen und nach Push wieder in Menerio sehen können. Existierende Vaults (auch Evernote-importierte mit `_resources/<Note>.resources/`) müssen wir lesen können.
+Ziel: Die App fühlt sich im Browser flüssiger an — schnellerer Start, weniger Ruckler beim Scrollen und Tippen, geringere Speichernutzung. **Keine sichtbare Funktionalität wird entfernt oder geändert.**
 
-## Status
+Die Maßnahmen sind nach Wirkung sortiert. Jede ist isoliert und kann einzeln zurückgerollt werden.
 
-- [x] **Phase 0**: `note_attachments`-Tabelle, `attachment_folder`-Spalte, Upload-Refactor mit Filename-Lookup.
-- [x] **Phase A (Read-Path Web)**: `markdownToHtml` emittiert `<img data-attachment-name>`-Placeholder; `ImageExt` preserves the attribute; async resolver `resolveAttachmentImagesInHtml` swaps in signed URLs nach `setContent` im `NoteEditor`. Round-Trip via `htmlToMarkdown` und `tiptapJsonToMarkdown` erhält `![[filename.ext]]`.
-- [x] **Phase B (Editor Insert)**: `FileUploadHandler` setzt `data-attachment-name` beim Insert → Markdown enthält `![[filename]]` statt Signed URL.
-- [x] **Phase C (GitHub Export)**: `github-sync-export` extrahiert `![[…]]` + Legacy-Signed-URLs, committet referenzierte Binaries nach `<vault>/attachments/<filename>` (oder konfigurierbarem Folder), upserted `note_attachments.github_path/sha`, schreibt normalisiertes Markdown ins Repo und persistiert es zurück in die DB.
-- [ ] **Phase D (GitHub Pull/Import)**: Vault-weiter Binary-Scan und Wikilink-Normalisierung.
-- [ ] **Phase E (Backfill)**: Bestehende Signed-URL-Notes nach `![[filename]]` migrieren.
-- [ ] **Phase F (Settings UI)**: `attachment_folder` konfigurierbar machen + Migrate-Card.
+---
 
+## 1. NoteList virtualisieren (größter spürbarer Gewinn)
 
+`src/components/notes/NoteList.tsx` rendert heute jede Notiz als DOM-Knoten. Bei 200+ Notizen (typische Vault-Größe) entstehen tausende DOM-Elemente mit `formatDistanceToNow`, Icons und Hover-Listenern — das macht Scrollen und das Wechseln der Auswahl spürbar zäh.
 
-## Recherche-Ergebnis: Pfad-Konventionen
+- `@tanstack/react-virtual` einführen (klein, ~5 KB, bereits Peer-kompatibel).
+- Nur sichtbare Zeilen + ein kleiner Overscan rendern.
+- Verhalten bleibt identisch (Klick, Tastatur-Navigation, Hover-Copy-Button, Selection-Highlight).
+- Edgecase „leere Liste" weiter unterstützen.
 
-Obsidian rendert `![[file.png]]` **pfadunabhängig** (Default "Shortest path when possible") — die Datei kann irgendwo im Vault liegen. Es gibt keinen einzigen "richtigen" Pfad, sondern verschiedene Konventionen je Quelle:
+## 2. Re-Renders in der Notizenliste senken
 
-| Quelle | Pfad-Schema |
-|---|---|
-| Manuelles Setup (häufigster Default) | `attachments/` |
-| Evernote-Importer / Yarle | `_resources/<NoteName>.resources/` |
-| Notion-Importer | `<NoteName>/` neben der Note |
-| Apple Notes / Bear | `attachments/` oder `media/` |
+- `NoteList` in `React.memo` packen und einen stabilen `onSelect` (in `Notes.tsx` per `useCallback`) übergeben.
+- Die einzelne Zeile in eine memoisierte Sub-Komponente `NoteListItem` extrahieren, sodass das Auswählen einer Notiz nur die zwei betroffenen Zeilen neu rendert statt der ganzen Liste.
+- `formatDistanceToNow` einmal pro Zeile berechnen, nicht erneut bei jedem Parent-Render.
 
-**Entscheidung:**
-- **Schreiben (Menerio → GitHub)**: Default `attachments/` im Vault-Root (Standard-Konvention der Obsidian-Community).
-- **Lesen (GitHub → Menerio)**: Wir scannen den **gesamten Vault-Tree** nach Binaries und lösen Wikilinks pfadunabhängig per **Filename-Lookup** auf — damit sind wir mit allen oben genannten Layouts inkl. dem Evernote-Schema aus dem Screenshot kompatibel.
+## 3. Header-/Overlay-Backdrop-Blur ersetzen oder begrenzen
 
-## Aktuelle Lücken (Ist-Zustand)
+`backdrop-blur-[14px]` im `Header` läuft auf jedem Frame und ist laut bekanntem Performance-Pattern ein Hauptverursacher von Jank, besonders während Scroll-Animationen.
 
-- Bilder leben in Supabase Bucket `note-attachments` als `{userId}/{uuid}.{ext}`.
-- Im Markdown stehen **Signed URLs** (7 Tage gültig) → in Obsidian nach Ablauf tot.
-- `github-sync-export` schreibt nur `*.md`, committet keine Binaries.
-- `github-sync-pull` und `github-import-vault` lesen nur `*.md`, ignorieren Binaries und `![[…]]`-Embeds.
+- Header: `backdrop-blur` entfernen, stattdessen leicht erhöhte Opazität des Hintergrunds (z. B. `bg-[rgba(255,255,255,.96)]`) + sehr feine `border` für den „Glas"-Look. Optisch fast identisch, aber kein Per-Frame-Resampling.
+- `QuickCapture`-Overlay und `MediaAnalysisOverlay`: `backdrop-blur-sm` durch eine etwas dunklere/opakere Backdrop-Farbe ersetzen.
+- `People.tsx` Sticky-Header: dito.
 
-## Architektur
+## 4. `ProfileIcon` aufhören, jedes Icon einzeln zu lazy-laden
 
-```
-┌─────────────────┐       Export        ┌────────────────────────┐
-│ Supabase Bucket │  ────────────────▶  │ GitHub Repo            │
-│ note-attachments│   schreibt nach     │  attachments/*.png     │
-│ {uid}/{uuid}.ext│                     │  notes/*.md            │
-│                 │  ◀────────────────  │  (liest auch:          │
-│                 │   Pull/Import       │   _resources/*/*,      │
-│                 │   scannt ALLES      │   assets/*, images/*)  │
-└─────────────────┘                     └────────────────────────┘
-        ▲                                         ▲
-        │                                         │
-   Web-Anzeige                              Obsidian-Anzeige
-   (Signed URL via                          (Wikilink-Resolver,
-    Resolver)                                pfadunabhängig)
-```
+`src/components/profile/ProfileIcon.tsx` nutzt `lucide-react/dynamicIconImports` mit `React.lazy` pro Icon. Jedes Icon erzeugt einen separaten Netzwerk-Chunk + Suspense-Übergang — sichtbar als Flackern und viele kleine Requests.
 
-**DB-Format (Single Source of Truth):** Markdown enthält Obsidian-Wikilink-Embeds `![[filename.ext]]`. Beim Web-Render löst eine Resolver-Schicht den Filename gegen `note_attachments` auf und ersetzt zur Anzeige durch Signed URLs.
+- Auf einen kuratierten statischen Map-Import der tatsächlich verwendeten Icons umstellen (bestehende Icon-Auswahl im Profile-Bereich auflisten und nur die importieren).
+- Fallback auf `Circle` bleibt.
+- Resultat: deutlich weniger Requests, kein Suspense-Flackern, Bundle wächst nur minimal, weil dieselben Icons schon anderswo via Tree-Shaking enthalten sind.
 
-## Datenmodell
+## 5. Build-/Bundle-Splitting verbessern
 
-Neue Tabelle `note_attachments`:
+`vite.config.ts` bündelt aktuell nur `vendor`, `ui`, `query`. Tiptap, framer-motion und lucide-react landen ungesplittet im großen Hauptchunk.
 
-```sql
-create table public.note_attachments (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  filename text not null,            -- "screenshot-2026-01.png"
-  storage_path text not null,        -- "{uid}/{uuid}.png" im Bucket
-  size_bytes integer,
-  mime_type text,
-  sha256 text,                       -- für Sync-Diffing
-  github_path text,                  -- "attachments/screenshot-2026-01.png" oder importierter Pfad
-  github_sha text,                   -- aktueller Blob-SHA im Repo
-  github_synced_at timestamptz,
-  source text default 'menerio',     -- 'menerio' | 'imported' | 'github'
-  created_at timestamptz default now(),
-  unique (user_id, filename)
-);
-```
+- Manual chunks ergänzen für `tiptap` (`@tiptap/*`), `editor-extras` (`framer-motion`, `date-fns`), und `icons` (`lucide-react`).
+- Resultat: kleinerer Initial-Chunk → schnellerer Time-to-Interactive auf Routen ohne Editor.
 
-RLS: nur Owner. Indexe auf `(user_id, filename)` und `(user_id, sha256)`.
+## 6. Defensive Aufräumarbeiten in `NoteEditor`
 
-## Upload-Flow (`src/lib/upload-attachment.ts`)
+`NoteEditor.tsx` (1252 Zeilen) hält 4 Timer-Refs und mehrere `useEffect`-Hooks.
 
-- Filename: `sanitize(file.name)` + Kollisionssuffix (`-2`, `-3`, …) bei Duplikaten pro User.
-- Storage-Pfad bleibt intern `{userId}/{uuid}.{ext}` (stabil, unabhängig vom Anzeigenamen).
-- Nach Upload: Eintrag in `note_attachments` (filename, storage_path, sha256, mime_type, size_bytes).
-- Rückgabe um `filename` ergänzt.
-- TipTap-Image-Insert schreibt im Markdown **nicht** mehr Signed URL, sondern `![[filename.ext]]`.
+- Sicherstellen, dass alle `setTimeout`s in einem zentralen Cleanup beim Unmount **und** beim Wechsel der `noteId` gecleart werden (Teil-Leck heute möglich → führt zu „Geist-Saves" und CPU-Last beim schnellen Notizenwechsel).
+- Keine Logik-Änderung, nur striktere Cleanup-Hygiene.
 
-## Web-Render
+## 7. `console.log`-Rauschen im Prod entfernen
 
-`src/utils/markdown-converter.ts` erkennt bereits `![[...]]` als Bild. Ergänzung:
-- Vor dem Render einmalig referenzierte Filenames in `note_attachments` nachschlagen.
-- Signed URLs erzeugen (Cache pro Session, TTL 6 Tage).
-- Im HTML als `<img src="signed-url" data-wikilink-filename="…">` einsetzen.
+Build-Schritt: `esbuild.drop: ['console', 'debugger']` für Production-Build in `vite.config.ts` setzen. Schont Hauptthread und Speicher, vor allem in Routinen mit häufigen Logs (Editor, Sync). Dev bleibt unberührt.
 
-## Edge Function `github-sync-export`
+---
 
-1. Markdown der Note parsen, alle `![[filename.ext]]` und Legacy-`![](signed-url)` extrahieren.
-2. Pro Attachment:
-   - In `note_attachments` lookuppen (per filename).
-   - Falls noch nicht im Repo **oder** lokaler `sha256` ≠ Repo-`github_sha`: Datei aus Bucket holen, base64 nach `<vault>/attachments/<filename>` committen (GitHub Contents API), `github_path`, `github_sha`, `github_synced_at` aktualisieren.
-3. Markdown vor dem Schreiben normalisieren: Signed-URL-Bilder → `![[filename.ext]]`.
-4. `<vault>/notes/...md` committen wie bisher.
+## Was NICHT geändert wird
 
-## Edge Function `github-sync-pull`
+- Keine Features, keine Routen, keine Datenmodelle.
+- Keine UI-Texte, keine Farben außer minimaler Anpassung der Header-Opazität.
+- Kein Eingriff in Edge Functions, Auth, RLS oder Supabase-Client.
+- Keine neuen großen Abhängigkeiten außer `@tanstack/react-virtual` (sehr klein, vom selben Maintainer wie `react-query`, das ihr bereits nutzt).
 
-1. Vollen Vault-Tree via `git/trees?recursive=1` ziehen.
-2. Alle Binär-Pfade erkennen (Extension-Filter: png/jpg/jpeg/gif/webp/svg/pdf/mp3/mp4/m4a/wav/ogg/heic) — **egal in welchem Ordner** (`attachments/`, `_resources/Foo.resources/`, `assets/`, `images/`, `media/`, …).
-3. Pro Binary:
-   - Filename extrahieren = letzter Pfad-Bestandteil.
-   - Falls in `note_attachments` (per filename) und `github_sha` aktuell: skip.
-   - Sonst: Blob laden, in Bucket unter neuem `{uid}/{uuid}.{ext}` ablegen, Eintrag in `note_attachments` upserten (filename als key, `github_path` = Original-Pfad, `source = 'github'`).
-4. Konflikt zweier Files mit gleichem Filename in unterschiedlichen Ordnern: zweiter bekommt Suffix `-2`, im DB-Record festhalten.
-5. Markdown-Pull bleibt; `![[filename]]` wird übernommen, `![](relativer/pfad/file.png)` zu `![[file.png]]` normalisiert.
+## Reihenfolge der Umsetzung
 
-## Edge Function `github-import-vault`
+1. NoteList virtualisieren + memoisieren (Punkte 1 + 2)
+2. Backdrop-Blur ersetzen (Punkt 3)
+3. ProfileIcon statisch (Punkt 4)
+4. Vite chunks + console-drop (Punkte 5 + 7)
+5. NoteEditor-Cleanup (Punkt 6)
 
-- Vor dem Notes-Import den vollständigen Tree scannen und alle Binaries wie in `github-sync-pull` in Bucket + `note_attachments` synchronisieren — funktioniert damit out-of-the-box für Evernote-importierte Vaults (`_resources/<Note>.resources/*.jpg`).
-- Beim Notes-Import: `![](irgendein/pfad/file.png)` → `![[file.png]]` rewriten.
+Nach jedem Schritt kurze visuelle Prüfung; falls etwas anders aussieht als gewünscht, isoliert revertierbar.
 
-## Settings (`GitHubSyncSettings.tsx`)
+## Erwartete Wirkung
 
-- Neues Feld **"Attachment folder"** mit Default `attachments` — speichert in `github_connections.attachment_folder`. Wird vom Export verwendet. Lesen/Pull ignoriert das Feld und scannt alles.
-- Migrate-Card: "X bestehende Bilder können in Obsidian-Format überführt werden — jetzt migrieren" (triggert Backfill).
-
-## Backfill (`backfill-attachment-filenames`)
-
-Einmaliger Job:
-1. Alle Notes durchscannen, Signed-URL-Referenzen auf `note-attachments`-Bucket erkennen.
-2. Pro Storage-Path lesbaren Filename ableiten (`attachment-{shortid}.{ext}` falls UUID-basiert).
-3. `note_attachments`-Eintrag erzeugen (`source = 'menerio'`).
-4. Markdown der Note rewriten: Signed URL → `![[filename.ext]]`.
-5. Beim nächsten GitHub-Sync werden die Files automatisch ins `attachments/` gepusht.
-
-## Edge Cases & Entscheidungen
-
-- **Filename-Kollisionen** (gleicher Name aus verschiedenen Quellen): zweiter bekommt Suffix `-2`. Wikilinks werden nicht umgeschrieben, falls Note bereits darauf zeigt — der "ältere" Filename gewinnt.
-- **Nicht-Bild-Anhänge** (PDF, mp3, mp4): gleiches Schema, gleicher Ordner. Obsidian rendert nativ.
-- **Dateigröße**: GitHub Contents API erlaubt 100 MB/File, harmonisiert mit unserem 20 MB Bucket-Limit.
-- **Privates Repo empfohlen**: Da Bilder jetzt im Repo liegen. Hinweis in den Settings.
-- **Web bleibt funktional ohne GitHub-Sync**: Wikilinks werden auch ohne Sync via Resolver/Signed URL aufgelöst — DB ist Single Source of Truth.
-- **Evernote-Vault-Kompatibilität (Screenshot)**: Beim Import werden alle `_resources/*.resources/*.{jpg,png}` automatisch eingelesen. Wikilinks im Markdown finden sie über den Filename. Beim späteren Export legt Menerio neue Bilder zentral in `attachments/` ab — alte Bilder bleiben in ihren Original-Ordnern (nicht-destruktiv). Optional in Settings: "Re-organize all attachments into attachments/" Button.
-
-## Geänderte / neue Dateien
-
-**Neu:**
-- `supabase/migrations/<ts>_note_attachments.sql` — Tabelle + RLS + Indexe.
-- `supabase/migrations/<ts>_github_attachment_folder.sql` — Spalte `attachment_folder` in `github_connections`.
-- `supabase/functions/backfill-attachment-filenames/index.ts` — One-shot Migration.
-
-**Angepasst:**
-- `src/lib/upload-attachment.ts` — Filename-Sanitize, Kollisions-Suffix, `note_attachments`-Insert, `filename`-Rückgabe.
-- `src/components/notes/extensions/*` (Image-Insert) — `![[filename]]` schreiben statt URL.
-- `src/utils/markdown-converter.ts` — Wikilink-Embed Resolver (filename-Lookup → Signed URL).
-- `supabase/functions/github-sync-export/index.ts` — Attachment-Extraction, Binary-Commit nach `attachments/`, URL→Wikilink-Normalisierung.
-- `supabase/functions/github-sync-pull/index.ts` — Vault-weiter Binary-Scan, Bucket-Upload, Pfad-Normalisierung.
-- `supabase/functions/github-import-vault/index.ts` — Binary-Vorabsync (inkl. `_resources/`-Layout), Pfad→Wikilink-Rewrite.
-- `src/components/settings/GitHubSyncSettings.tsx` — `attachment_folder`-Feld, Migrate-Card, optionaler "Re-organize"-Button.
-
-## Out of Scope
-
-- Auto-Reorganisation existierender Vaults in einen einheitlichen Ordner (außer per Opt-in-Button).
-- Bild-Resizing/Optimierung für Web.
-- Versionierung von Attachments (überschreibt by-filename).
+- Spürbar flüssigeres Scrollen in der Notizliste (vor allem ab ~100 Notizen).
+- Kein Header-Jank mehr beim Scrollen.
+- Schnellerer initialer Seitenaufbau auf Dashboard/Landing (kleinerer Hauptchunk, weniger Icon-Requests).
+- Geringere CPU-Last beim Tippen im Editor.
