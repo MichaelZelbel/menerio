@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key, Globe } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { AppIntegrations } from "@/components/settings/AppIntegrations";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
@@ -37,6 +37,7 @@ import { NotificationPreferences } from "@/components/settings/NotificationPrefe
 import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
+import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -228,6 +229,7 @@ export default function Settings() {
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
           <TabsTrigger value="telegram" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5 hidden sm:block" /> Telegram</TabsTrigger>
           <TabsTrigger value="discord" className="gap-1.5 text-xs"><Gamepad2 className="h-3.5 w-3.5 hidden sm:block" /> Discord</TabsTrigger>
+          <TabsTrigger value="singlefile" className="gap-1.5 text-xs"><Globe className="h-3.5 w-3.5 hidden sm:block" /> Web Clipper</TabsTrigger>
           <TabsTrigger value="github" className="gap-1.5 text-xs"><Github className="h-3.5 w-3.5 hidden sm:block" /> GitHub</TabsTrigger>
           <TabsTrigger value="apikeys" className="gap-1.5 text-xs"><Key className="h-3.5 w-3.5 hidden sm:block" /> API Keys</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
@@ -408,6 +410,11 @@ export default function Settings() {
         {/* ── Discord Integration Tab ── */}
         <TabsContent value="discord">
           <DiscordIntegration />
+        </TabsContent>
+
+        {/* ── SingleFile Web Clipper Tab ── */}
+        <TabsContent value="singlefile">
+          <SingleFileIntegration />
         </TabsContent>
 
         {/* ── GitHub Sync Tab ── */}
