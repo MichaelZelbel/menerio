@@ -842,7 +842,126 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
 
       {/* Rich text formatting toolbar — hidden for external read-only notes */}
-      {!note.is_trashed && !sourceMode && !note.is_external && <EditorToolbar editor={editor} />}
+      {!note.is_trashed && !sourceMode && !note.is_external && (
+        <EditorToolbar
+          editor={editor}
+          quickActions={
+            <>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleFavorite} title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}>
+                <Star className={cn("h-3.5 w-3.5", note.is_favorite && "fill-warning text-warning")} />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={togglePin} title={note.is_pinned ? "Unpin" : "Pin to top"}>
+                <Pin className={cn("h-3.5 w-3.5", note.is_pinned && "text-primary")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7", showChat && "bg-accent text-accent-foreground")}
+                onClick={() => setShowChat(!showChat)}
+                title="AI Chat"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+              </Button>
+              {sharedNote?.is_active && (
+                <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground ml-1">
+                  <Globe className="h-3 w-3" /> Shared
+                </Badge>
+              )}
+            </>
+          }
+          noteActions={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" title="More actions">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setShowInfo(!showInfo)}>
+                  <Info className="mr-2 h-4 w-4" /> Note info
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowTagInput(!showTagInput)}>
+                  <Tag className="mr-2 h-4 w-4" /> Add tag
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={toggleSourceMode}>
+                  <Code2 className="mr-2 h-4 w-4" /> {sourceMode ? "Rich text mode" : "Markdown source"}
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem onClick={() => setShowConnections(!showConnections)}>
+                  <Link2 className="mr-2 h-4 w-4" /> Find connections
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onToggleLocalGraph?.()}>
+                  <Network className="mr-2 h-4 w-4" /> Local graph
+                </DropdownMenuItem>
+                {syncLog && (
+                  <DropdownMenuItem onClick={() => setShowHistory(!showHistory)}>
+                    <GitCommit className="mr-2 h-4 w-4" /> Version history
+                  </DropdownMenuItem>
+                )}
+
+                {!metadata?.type && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => { if (checkCredits()) processNote.mutate(note.id); }}
+                      disabled={processNote.isPending}
+                    >
+                      {processNote.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                      Classify with AI
+                    </DropdownMenuItem>
+                  </>
+                )}
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}>
+                  <Copy className="mr-2 h-4 w-4" /> Copy to clipboard
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={downloadMarkdown}>
+                  <Download className="mr-2 h-4 w-4" /> Download Markdown
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
+                  <Link2 className="mr-2 h-4 w-4" /> Copy note link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}>
+                  <ExternalLink className="mr-2 h-4 w-4" /> Open in new tab
+                </DropdownMenuItem>
+                {sharedNote?.is_active ? (
+                  <>
+                    <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
+                      <Globe className="mr-2 h-4 w-4" /> Copy public link
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => unshareNote.mutate(note.id)}>
+                      <Unlink className="mr-2 h-4 w-4" /> Stop sharing
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={() => shareNote.mutate({ noteId: note.id, title, content: editor?.getHTML() || note.content }, { onSuccess: (result: ShareNoteResult) => { if (result.blocked && result.moderation) setModerationBlock(result.moderation); } })}
+                    disabled={shareNote.isPending}
+                  >
+                    <Share2 className="mr-2 h-4 w-4" /> Share publicly
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => setShowForwardDialog(true)}>
+                  <Send className="mr-2 h-4 w-4" /> Send to app
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem
+                  onClick={moveToTrash}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Move to trash
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
+      )}
 
       {/* Read-only action bar for external notes */}
       {!note.is_trashed && note.is_external && (
