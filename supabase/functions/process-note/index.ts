@@ -423,11 +423,20 @@ async function generateReviewItems(
       }
 
       const fullText = `${noteTitle}\n${noteContent}`;
+      const { factor: sourceFactor, sourceTag } = getSourceConfidenceFactor(metadata);
+      const blocklist = new Set(preferences.personBlocklist || []);
+
       for (const person of people) {
         // 1. Exact match
         if (nameToContact.has(person.toLowerCase())) continue;
 
-        // 2. Fuzzy match — find close match among all contact names/aliases
+        // 2. User-defined / generic blocklist — drop completely.
+        if (blocklist.has(person.toLowerCase())) {
+          console.log(`Skipping blocklisted name "${person}"`);
+          continue;
+        }
+
+        // 3. Fuzzy match — find close match among all contact names/aliases
         let fuzzyMatch: { id: string; name: string } | null = null;
         for (const [key, contact] of nameToContact) {
           if (isFuzzyMatch(person, key)) {
@@ -437,7 +446,14 @@ async function generateReviewItems(
         }
 
         if (fuzzyMatch) {
-          // Suggest adding as alias instead of new contact
+          // Aliases are still gated by source/mention strength: don't add an alias
+          // to an existing contact based on a random name on a clipped homepage.
+          const aliasMention = scorePersonMention(person, fullText, sourceTag);
+          if (aliasMention.drop) {
+            console.log(`Skipping weak alias suggestion "${person}" → ${fuzzyMatch.name} (${aliasMention.reason})`);
+            continue;
+          }
+          const aliasConfidence = Math.max(0.1, Math.min(1, DEFAULT_CONFIDENCE.add_alias * sourceFactor * aliasMention.score));
           suggestions.push({
             user_id: userId,
             source_note_id: noteId,
@@ -450,18 +466,27 @@ async function generateReviewItems(
             target_entity_id: fuzzyMatch.id,
             source_title: noteTitle,
             extracted_value: person,
-            confidence_score: DEFAULT_CONFIDENCE.add_alias,
+            confidence_score: aliasConfidence,
             is_sensitive: isSensitiveSuggestion("add_alias", { person, contact_name: fuzzyMatch.name }, noteContent),
             suppression_key: buildSuppressionKey("add_alias", "contact", fuzzyMatch.id, person),
           });
           continue;
         }
 
-        // 3. No match — validate name appears in source text before suggesting
+        // 4. No match — validate name appears in source text before suggesting
         if (!nameAppearsInText(person, fullText)) {
           console.log(`Skipping hallucinated name "${person}" — not found in note text`);
           continue;
         }
+
+        // 5. Mention-strength scoring (drops weak / third-party mentions on web clips & forwards).
+        const mention = scorePersonMention(person, fullText, sourceTag);
+        if (mention.drop) {
+          console.log(`Skipping weak person suggestion "${person}" from source=${sourceTag} (${mention.reason})`);
+          continue;
+        }
+
+        const adjustedConfidence = Math.max(0.1, Math.min(1, DEFAULT_CONFIDENCE.add_contact * sourceFactor * mention.score));
 
         suggestions.push({
           user_id: userId,
@@ -474,7 +499,7 @@ async function generateReviewItems(
           target_entity_type: "contact",
           source_title: noteTitle,
           extracted_value: person,
-          confidence_score: DEFAULT_CONFIDENCE.add_contact,
+          confidence_score: adjustedConfidence,
           is_sensitive: isSensitiveSuggestion("add_contact", { name: person }, noteContent),
           suppression_key: buildSuppressionKey("add_contact", "contact", null, person),
         });
