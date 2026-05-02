@@ -87,8 +87,8 @@ function sortFolder(
     if (sortField === "title") {
       return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
     }
-    const aRaw = (a as Record<string, unknown>)[sortField];
-    const bRaw = (b as Record<string, unknown>)[sortField];
+    const aRaw = (a as unknown as Record<string, unknown>)[sortField];
+    const bRaw = (b as unknown as Record<string, unknown>)[sortField];
     const aTs = typeof aRaw === "string" ? new Date(aRaw).getTime() : 0;
     const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
     return dir * (aTs - bTs);
