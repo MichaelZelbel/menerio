@@ -54,7 +54,7 @@ export function Header() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-50 w-full border-b border-[hsl(var(--border)/.08)] bg-[rgba(255,255,255,.85)] backdrop-blur-[14px] transition-all duration-200 dark:border-[hsl(var(--landing-plain-white)/.06)] dark:bg-[hsl(var(--landing-panel)/.86)]",
+        "sticky top-0 z-50 w-full border-b border-[hsl(var(--border)/.08)] bg-[rgba(255,255,255,.96)] transition-shadow duration-200 dark:border-[hsl(var(--landing-plain-white)/.06)] dark:bg-[hsl(var(--landing-panel)/.97)]",
         scrolled && "shadow-[0_10px_30px_rgba(15,35,70,.08)] dark:shadow-[0_10px_30px_hsl(var(--landing-ink)/.24)]"
       )}
     >

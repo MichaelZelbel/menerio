@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, type ComponentType } from "react";
+import { Suspense, lazy, useMemo } from "react";
 import { Circle, type LucideProps } from "lucide-react";
 import dynamicIconImports from "lucide-react/dynamicIconImports";
 
@@ -16,22 +16,24 @@ const fallback = <div className="h-4 w-4" />;
  * forced React to re-suspend and re-import the icon chunk every time —
  * the main cause of icon flickering and excess network requests.
  */
-const iconCache = new Map<string, ComponentType<LucideProps>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const iconCache = new Map<string, any>();
 
-function getLazyIcon(name: string): ComponentType<LucideProps> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getLazyIcon(name: string): any {
   const cached = iconCache.get(name);
   if (cached) return cached;
-  const importer =
-    (dynamicIconImports as Record<string, () => Promise<{ default: ComponentType<LucideProps> }>>)[name];
-  if (!importer) return Circle;
-  const Component = lazy(importer);
+  const importer = (dynamicIconImports as Record<string, () => Promise<unknown>>)[name];
+  if (!importer) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Component = lazy(importer as any);
   iconCache.set(name, Component);
   return Component;
 }
 
 export function ProfileIcon({ name, ...props }: ProfileIconProps) {
   const LucideIcon = useMemo(() => getLazyIcon(name), [name]);
-  if (LucideIcon === Circle) return <Circle {...props} />;
+  if (!LucideIcon) return <Circle {...props} />;
   return (
     <Suspense fallback={fallback}>
       <LucideIcon {...props} />
