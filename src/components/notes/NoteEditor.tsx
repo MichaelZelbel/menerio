@@ -1112,6 +1112,23 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         </details>
       )}
 
+      {/* Web clip snapshot preview (SingleFile captures) */}
+      {note.source_app === "singlefile" &&
+        metadata &&
+        typeof (metadata as Record<string, unknown>).web_clip === "object" &&
+        (metadata as Record<string, unknown>).web_clip !== null && (
+          <WebClipPreview
+            webClip={
+              (metadata as Record<string, unknown>).web_clip as {
+                url?: string | null;
+                hostname?: string | null;
+                snapshot_storage_path?: string | null;
+                snapshot_attachment?: string | null;
+              }
+            }
+          />
+        )}
+
       {/* Note Metadata editor */}
       {!note.is_trashed && (
         <NoteMetadataEditor
