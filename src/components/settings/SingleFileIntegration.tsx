@@ -104,35 +104,76 @@ export function SingleFileIntegration() {
           <Separator />
 
           <div className="space-y-4">
-            <Copyable label="URL" value={ENDPOINT_URL} />
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Copyable label="HTTP Method" value="POST" />
-              <Copyable label="File field name" value="file" />
-            </div>
-            <Copyable
-              label="Authorization header"
-              value="Bearer mnr_YOUR_API_KEY_HERE"
-              multiline
-            />
+            <h3 className="text-sm font-semibold">SingleFile dialog fields</h3>
             <p className="text-xs text-muted-foreground">
-              Replace <code className="bg-muted px-1 rounded">mnr_YOUR_API_KEY_HERE</code> with
-              an API key generated in the <Link to="/dashboard/settings?tab=apikeys" className="text-primary hover:underline">API Keys tab</Link>.
-              The key needs the <code className="bg-muted px-1 rounded">notes</code> scope.
+              In the SingleFile options dialog, enable{" "}
+              <strong>upload to a REST Form API</strong> and fill in the fields
+              exactly as shown below. Leave any field not listed here empty.
             </p>
+
+            <div className="space-y-1.5">
+              <Copyable label="URL" value={ENDPOINT_URL} />
+              <p className="text-xs text-muted-foreground">
+                The Menerio endpoint that receives your captured pages.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Copyable
+                label="authorization token"
+                value="Bearer mnr_YOUR_API_KEY_HERE"
+                multiline
+              />
+              <p className="text-xs text-muted-foreground">
+                Paste your API key prefixed with <code className="bg-muted px-1 rounded">Bearer </code>
+                (note the trailing space). Replace{" "}
+                <code className="bg-muted px-1 rounded">mnr_YOUR_API_KEY_HERE</code> with
+                a key generated in the <Link to="/dashboard/settings?tab=apikeys" className="text-primary hover:underline">API Keys tab</Link>{" "}
+                — it needs the <code className="bg-muted px-1 rounded">notes</code> scope.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Copyable label="archive data field name" value="file" />
+                <p className="text-xs text-muted-foreground">
+                  Form field that carries the HTML snapshot. Must be{" "}
+                  <code className="bg-muted px-1 rounded">file</code>.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Copyable label="archive URL field name" value="url" />
+                <p className="text-xs text-muted-foreground">
+                  Form field that carries the original page URL. Must be{" "}
+                  <code className="bg-muted px-1 rounded">url</code> so Menerio
+                  can record the source.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">secret key</Label>
+              <p className="text-xs text-muted-foreground">
+                Leave empty. Menerio doesn't use SingleFile's shared-secret
+                signing — your API key in the authorization token already
+                authenticates requests.
+              </p>
+            </div>
           </div>
 
           <Separator />
 
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold">Optional form fields</h3>
+            <h3 className="text-sm font-semibold">Optional extra form fields</h3>
             <p className="text-xs text-muted-foreground">
-              SingleFile lets you append extra fields under <em>Additional fields</em>:
+              SingleFile can append additional fields to every upload (look for{" "}
+              <em>extra HTTP headers / fields</em> in the SingleFile options).
+              All are optional:
             </p>
             <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside ml-2">
-              <li><code className="bg-muted px-1 rounded">url</code> — original page URL (auto-detected from the snapshot if omitted)</li>
-              <li><code className="bg-muted px-1 rounded">title</code> — overrides the page title</li>
-              <li><code className="bg-muted px-1 rounded">tags</code> — comma-separated, e.g. <code className="bg-muted px-1 rounded">research,inspiration</code></li>
-              <li><code className="bg-muted px-1 rounded">folder</code> — folder path (defaults to <code className="bg-muted px-1 rounded">Web Clips</code>)</li>
+              <li><code className="bg-muted px-1 rounded">title</code> — overrides the page title (defaults to the page's <code className="bg-muted px-1 rounded">&lt;title&gt;</code>)</li>
+              <li><code className="bg-muted px-1 rounded">tags</code> — comma-separated, e.g. <code className="bg-muted px-1 rounded">research,inspiration</code> (defaults to <code className="bg-muted px-1 rounded">web-clip</code>)</li>
+              <li><code className="bg-muted px-1 rounded">folder</code> — folder path for the new note (defaults to <code className="bg-muted px-1 rounded">Web Clips</code>)</li>
             </ul>
           </div>
 
