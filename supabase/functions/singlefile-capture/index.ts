@@ -429,9 +429,61 @@ Deno.serve(async (req) => {
     console.warn("note_attachments insert failed (non-fatal):", regErr.message);
   }
 
+  // ── Hero image (best-effort, non-fatal) ──
+  let heroFilename: string | null = null;
+  let heroStoragePath: string | null = null;
+  try {
+    const candidate = findHeroImageCandidate(htmlText);
+    if (candidate) {
+      const hero = await resolveHeroImage(candidate, sourceUrl);
+      if (hero) {
+        const hostSlug = (hostname || "page")
+          .replace(/[^a-z0-9]+/gi, "-")
+          .replace(/^-+|-+$/g, "")
+          .toLowerCase() || "page";
+        const baseHero = sanitizeImageName(`${hostSlug}-hero.${hero.ext}`, `hero.${hero.ext}`);
+        heroFilename = baseHero.replace(
+          new RegExp(`\\.${hero.ext}$`, "i"),
+          `-${crypto.randomUUID().slice(0, 6)}.${hero.ext}`,
+        );
+        heroStoragePath = `${userId}/${crypto.randomUUID()}.${hero.ext}`;
+
+        const { error: heroUploadErr } = await supabaseAdmin.storage
+          .from("note-attachments")
+          .upload(heroStoragePath, hero.bytes, {
+            contentType: hero.mime,
+            upsert: false,
+          });
+        if (heroUploadErr) {
+          console.warn("hero upload failed (non-fatal):", heroUploadErr.message);
+          heroFilename = null;
+          heroStoragePath = null;
+        } else {
+          const { error: heroRegErr } = await supabaseAdmin.from("note_attachments").insert({
+            user_id: userId,
+            filename: heroFilename,
+            storage_path: heroStoragePath,
+            size_bytes: hero.bytes.byteLength,
+            mime_type: hero.mime,
+            source: "singlefile",
+          });
+          if (heroRegErr) {
+            console.warn("hero attachment insert failed (non-fatal):", heroRegErr.message);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("hero extraction failed (non-fatal):", (e as Error).message);
+  }
+
   // ── Build Markdown body ──
   // Obsidian-compatible: links via [text](url), embed snapshot via wikilink.
   const lines: string[] = [];
+  if (heroFilename) {
+    lines.push(`![[${heroFilename}]]`);
+    lines.push("");
+  }
   if (sourceUrl) lines.push(`**Source:** [${hostname || sourceUrl}](${sourceUrl})`);
   if (description) {
     lines.push("");
@@ -469,6 +521,8 @@ Deno.serve(async (req) => {
           description,
           snapshot_attachment: uniqueName,
           snapshot_storage_path: storagePath,
+          hero_image_attachment: heroFilename,
+          hero_image_storage_path: heroStoragePath,
           captured_at: new Date().toISOString(),
         },
       },
