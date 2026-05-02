@@ -208,9 +208,8 @@ export default function Notes() {
   // Strips HTML tags, empty markdown headings/list bullets/horizontal rules and all
   // whitespace (incl. &nbsp;) so notes that contain only invisible editor scaffolding
   // still count as empty. Notes with embedded images/videos keep markup and survive.
-  const allNotesForCleanup = useNotes("all").data ?? [];
   const emptyNotes = useMemo(() => {
-    return allNotesForCleanup.filter((n) => {
+    return allNotes.filter((n) => {
       const title = (n.title || "").trim().toLowerCase();
       const titleEmpty = !title || title === "untitled";
       const bodyText = String(n.content || "")
@@ -222,7 +221,7 @@ export default function Notes() {
         .replace(/[\s\u00A0]+/g, "");
       return titleEmpty && bodyText.length === 0;
     });
-  }, [allNotesForCleanup]);
+  }, [allNotes]);
 
   const [isTrashingEmpty, setIsTrashingEmpty] = useState(false);
   const handleTrashEmptyNotes = useCallback(async () => {
