@@ -161,25 +161,35 @@ const HERO_MIME_TO_EXT: Record<string, string> = {
   "image/gif": "gif",
 };
 
+/** Class/id patterns that almost always indicate a non-hero image. */
+const NON_HERO_PATTERN = /\b(avatar|logo|icon|tracker|pixel|sprite|emoji|badge)\b/i;
+
 /** Extract the first non-tracking <img> src from <body>, with a min-size hint. */
 function extractFirstBodyImageSrc(html: string): string | null {
   const bodyMatch = html.match(/<body[\s\S]*?<\/body>/i);
-  const scope = bodyMatch ? bodyMatch[0] : html;
+  let scope = bodyMatch ? bodyMatch[0] : html;
+  // Strip header/nav/footer where logos and avatars typically live.
+  scope = scope
+    .replace(/<header[\s\S]*?<\/header>/gi, " ")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, " ");
   const imgRe = /<img\b([^>]*?)>/gi;
   let m: RegExpExecArray | null;
   while ((m = imgRe.exec(scope)) !== null) {
-    const tag = m[0];
     const attrs = m[1];
     const srcMatch = attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
     if (!srcMatch) continue;
     const src = srcMatch[1].trim();
     if (!src) continue;
+    // Skip obvious non-hero candidates by class/id/alt.
+    const classMatch = attrs.match(/\b(?:class|id|alt)\s*=\s*["']([^"']*)["']/gi);
+    if (classMatch && classMatch.some((a) => NON_HERO_PATTERN.test(a))) continue;
     // Skip obvious 1x1 trackers and tiny icons.
     const widthMatch = attrs.match(/\bwidth\s*=\s*["']?(\d+)/i);
     const heightMatch = attrs.match(/\bheight\s*=\s*["']?(\d+)/i);
     const w = widthMatch ? parseInt(widthMatch[1], 10) : null;
     const h = heightMatch ? parseInt(heightMatch[1], 10) : null;
-    if ((w !== null && w < 80) || (h !== null && h < 80)) continue;
+    if ((w !== null && w < 200) || (h !== null && h < 120)) continue;
     // Require a reasonable image MIME for data URIs.
     if (src.startsWith("data:")) {
       const mime = src.slice(5, src.indexOf(";")).toLowerCase();
@@ -190,19 +200,51 @@ function extractFirstBodyImageSrc(html: string): string | null {
   return null;
 }
 
+/**
+ * Order-agnostic <meta> attribute lookup: scans every <meta> tag and returns
+ * the `content` value of the first whose `attrName="attrVal"` matches,
+ * regardless of attribute order in the source.
+ */
+function findMetaContent(html: string, attrName: string, attrVal: string): string | null {
+  const tagRe = /<meta\b[^>]*>/gi;
+  const wantAttr = new RegExp(`\\b${attrName}\\s*=\\s*["']${attrVal}["']`, "i");
+  const contentAttr = /\bcontent\s*=\s*["']([^"']+)["']/i;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(html)) !== null) {
+    const tag = m[0];
+    if (!wantAttr.test(tag)) continue;
+    const c = tag.match(contentAttr);
+    if (c && c[1].trim()) return decodeEntities(c[1]).trim();
+  }
+  return null;
+}
+
+function findLinkRelHref(html: string, rel: string): string | null {
+  const tagRe = /<link\b[^>]*>/gi;
+  const wantRel = new RegExp(`\\brel\\s*=\\s*["']${rel}["']`, "i");
+  const hrefAttr = /\bhref\s*=\s*["']([^"']+)["']/i;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(html)) !== null) {
+    const tag = m[0];
+    if (!wantRel.test(tag)) continue;
+    const h = tag.match(hrefAttr);
+    if (h && h[1].trim()) return decodeEntities(h[1]).trim();
+  }
+  return null;
+}
+
 /** Find a hero image candidate URL/data-URI from meta tags first, then body. */
 function findHeroImageCandidate(html: string): string | null {
-  const ogRe =
-    /<meta\s+[^>]*property\s*=\s*["']og:image(?::secure_url|:url)?["'][^>]*content\s*=\s*["']([^"']+)["']/i;
-  const twRe =
-    /<meta\s+[^>]*name\s*=\s*["']twitter:image(?::src)?["'][^>]*content\s*=\s*["']([^"']+)["']/i;
-  const linkRe =
-    /<link\s+[^>]*rel\s*=\s*["']image_src["'][^>]*href\s*=\s*["']([^"']+)["']/i;
-  for (const re of [ogRe, twRe, linkRe]) {
-    const m = html.match(re);
-    if (m && m[1]) return decodeEntities(m[1]).trim();
-  }
-  return extractFirstBodyImageSrc(html);
+  return (
+    findMetaContent(html, "property", "og:image:secure_url") ||
+    findMetaContent(html, "property", "og:image:url") ||
+    findMetaContent(html, "property", "og:image") ||
+    findMetaContent(html, "name", "og:image") || // some sites use name= by mistake
+    findMetaContent(html, "name", "twitter:image:src") ||
+    findMetaContent(html, "name", "twitter:image") ||
+    findLinkRelHref(html, "image_src") ||
+    extractFirstBodyImageSrc(html)
+  );
 }
 
 /** Decode a base64 data: URI to bytes + mime. */

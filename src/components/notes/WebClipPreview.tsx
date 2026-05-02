@@ -11,6 +11,7 @@ interface WebClipMetadata {
 
 interface Props {
   webClip: WebClipMetadata;
+  defaultOpen?: boolean;
 }
 
 /**
@@ -19,8 +20,8 @@ interface Props {
  * sandbox attribute (no `allow-scripts`) and `referrerpolicy="no-referrer"`
  * suppresses any tracking pixels in the captured HTML.
  */
-export function WebClipPreview({ webClip }: Props) {
-  const [open, setOpen] = useState(false);
+export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
+  const [open, setOpen] = useState(defaultOpen);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +91,7 @@ export function WebClipPreview({ webClip }: Props) {
       {open && (
         <div className="px-4 pb-4">
           {loading && (
-            <div className="h-[500px] flex items-center justify-center text-xs text-muted-foreground bg-background rounded-lg border border-border">
+            <div className="h-[700px] flex items-center justify-center text-xs text-muted-foreground bg-background rounded-lg border border-border">
               Loading snapshot…
             </div>
           )}
@@ -106,7 +107,7 @@ export function WebClipPreview({ webClip }: Props) {
               sandbox="allow-same-origin"
               referrerPolicy="no-referrer"
               loading="lazy"
-              className="w-full h-[500px] rounded-lg border border-border bg-background"
+              className="w-full h-[700px] rounded-lg border border-border bg-background"
             />
           )}
         </div>

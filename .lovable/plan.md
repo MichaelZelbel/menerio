@@ -1,55 +1,134 @@
-## Bug
+## Two real bugs found
 
-The "Sort notes" dropdown on the All Notes page (sort by Created / Updated / Title, asc/desc) appears to do nothing. Confirmed by reading the code.
+I checked your Grammarly clip in the database. Two things are broken:
 
-## Root cause
+### Bug 1 — `metadata.web_clip` is wiped out after AI processing
 
-`src/pages/Notes.tsx` correctly sorts `currentNotes` by the user's selected field/direction. But when the user is *not* in search mode, that array is rendered by `<NoteTree>` (not `<NoteList>`), and `NoteTree` builds its own folder tree and **re-sorts notes alphabetically by title** inside `sortFolder()` (`src/components/notes/NoteTree.tsx` lines 68–77). The page-level sort gets thrown away.
+The capture function correctly stores `metadata.web_clip = { snapshot_storage_path, hero_image_attachment, hostname, … }` on the note. But the background `process-note` edge function then **replaces** the entire `metadata` field with the AI-extracted topics/summary/people (`supabase/functions/process-note/index.ts` line 904 — `update({ embedding, metadata })`). So:
 
-`<NoteList>` (used only in search mode) does respect the page-level order, which is why sort "works" while searching but not in the normal All Notes view.
+- `metadata.web_clip` → `null` (you can verify in the DB: the Grammarly note has no `web_clip` key anymore).
+- The "Page snapshot" panel only renders when `metadata.web_clip?.snapshot_storage_path` exists, so it's invisible — that's why you can't click anything to see the rendered page.
+- This also affects every Telegram/Discord/SingleFile clip and any field other code paths add to metadata.
+
+### Bug 2 — Hero image is "any image" instead of the page's preview image
+
+The picker's regex for `og:image` requires the attributes in a specific order (`property` before `content`). Many sites — Grammarly included — emit them in a different order or use multi-line tags, so the regex misses, and the function falls through to "first body `<img>` ≥80px", which on Grammarly is a customer-testimonial avatar.
+
+Plus, the candidate picker stops at the first match instead of trying multiple `og:image` tags or comparing them.
+
+---
 
 ## Fix
 
-Pass the chosen sort to `NoteTree` and use it instead of the hard-coded title sort. Folder names stay alphabetical (folders aren't notes — sorting them by "created" makes no sense).
+### Change 1 — `supabase/functions/process-note/index.ts` (preserve metadata)
 
-### Change 1 — `src/components/notes/NoteTree.tsx`
-
-- Export `NoteTreeSortField = "updated_at" | "created_at" | "title"` and `NoteTreeSortDirection = "asc" | "desc"`.
-- Add optional `sortField` (default `"updated_at"`) and `sortDirection` (default `"desc"`) to `NoteTreeProps`.
-- Replace the body of `sortFolder` so notes use those values:
+Merge instead of replace. Keep all existing top-level keys and only overwrite the AI-derived ones:
 
 ```ts
-function sortNotesArray(notes, sortField, sortDirection) {
-  const dir = sortDirection === "asc" ? 1 : -1;
-  return notes.sort((a, b) => {
-    const aPinned = a.is_pinned ? 1 : 0;
-    const bPinned = b.is_pinned ? 1 : 0;
-    if (aPinned !== bPinned) return bPinned - aPinned; // pinned always first
+// line 897-904 area
+const existingMeta = (note.metadata as Record<string, unknown> | null) ?? {};
+const mergedMetadata = { ...existingMeta, ...metadata };
 
-    if (sortField === "title") {
-      return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
+const updatePayload: Record<string, unknown> = {
+  embedding,
+  metadata: mergedMetadata,
+};
+```
+
+This restores `web_clip`, `source`, `is_quick_capture`, and any future per-source fields. The "Page snapshot" iframe panel will start showing immediately on new clips. (Existing clips are already lost — see Backfill below.)
+
+### Change 2 — `supabase/functions/singlefile-capture/index.ts` (better hero picker)
+
+Make the OG/Twitter image regexes order-agnostic and try every match before giving up:
+
+```ts
+function findMetaContent(html: string, attrName: string, attrVal: string): string | null {
+  // Match <meta ... attrName="attrVal" ... content="..."> OR
+  //       <meta ... content="..." ... attrName="attrVal">
+  const tagRe = /<meta\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  const wantAttr = new RegExp(`\\b${attrName}\\s*=\\s*["']${attrVal}["']`, "i");
+  const contentAttr = /\bcontent\s*=\s*["']([^"']+)["']/i;
+  while ((m = tagRe.exec(html)) !== null) {
+    const tag = m[0];
+    if (wantAttr.test(tag)) {
+      const c = tag.match(contentAttr);
+      if (c && c[1].trim()) return decodeEntities(c[1]).trim();
     }
-    // created_at / updated_at — ISO strings sort chronologically as strings,
-    // but use Date for safety against nulls.
-    const aTs = a[sortField] ? new Date(a[sortField]).getTime() : 0;
-    const bTs = b[sortField] ? new Date(b[sortField]).getTime() : 0;
-    return dir * (aTs - bTs);
-  });
+  }
+  return null;
+}
+
+function findHeroImageCandidate(html: string): string | null {
+  return (
+    findMetaContent(html, "property", "og:image:secure_url") ||
+    findMetaContent(html, "property", "og:image:url") ||
+    findMetaContent(html, "property", "og:image") ||
+    findMetaContent(html, "name", "twitter:image:src") ||
+    findMetaContent(html, "name", "twitter:image") ||
+    findLinkRel(html, "image_src") ||
+    extractFirstBodyImageSrc(html) // last-resort fallback, unchanged
+  );
 }
 ```
 
-- Pipe `sortField` / `sortDirection` through `sortFolder()` recursively.
-- Add them to the `useMemo` dependency array so the tree re-builds when sort changes.
+Also tighten `extractFirstBodyImageSrc`: skip anything inside `<header>`, `<nav>`, or with class/id matching `avatar|logo|icon|tracker|pixel`. (Won't help the lost Grammarly note retroactively, but it'll matter when og:image really is missing.)
 
-### Change 2 — `src/pages/Notes.tsx`
+### Change 3 — Make the snapshot panel discoverable
 
-- Forward the existing `sortField` and `sortDirection` state to `<NoteTree>` (around line 818).
+Right now the "Page snapshot" panel sits at the bottom of the note view, collapsed, between External-note section and the metadata editor. Two small UX tweaks:
 
-### Side cleanup (small)
+1. **Default open** for SingleFile notes (collapsed elsewhere). The whole point of clipping is to see the page.
+2. **Add a button right under the source link** in the body area of web-clip notes that scrolls to / opens the snapshot. Cheaper alternative: render the panel directly under the title instead of at the bottom.
 
-In `Notes.tsx` `currentNotes` (line 312–324) the comparator does `(a[sortField] || "").localeCompare(...)` for date fields. That's still string-correct for ISO timestamps but brittle if a value is ever `null`. Switch to the same `Date.getTime()` comparison used in `NoteTree` so both paths stay identical.
+I'll go with: move the `WebClipPreview` component to render *between the title bar and the editor* in `NoteEditor.tsx`, default-open, ~600 px tall. That makes the visual page the first thing you see.
+
+### Change 4 — Backfill existing web clips
+
+For notes that already lost their `web_clip` metadata, write a one-shot SQL script you can run from the migration tool that re-derives `snapshot_storage_path` and `hero_image_attachment` from `note_attachments`:
+
+```sql
+update notes n
+set metadata = coalesce(n.metadata, '{}'::jsonb) || jsonb_build_object(
+  'web_clip', jsonb_build_object(
+    'snapshot_attachment', snap.filename,
+    'snapshot_storage_path', snap.storage_path,
+    'hero_image_attachment', hero.filename,
+    'hero_image_storage_path', hero.storage_path,
+    'url', n.source_url,
+    'hostname', regexp_replace(split_part(n.source_url, '/', 3), '^www\.', '')
+  )
+)
+from (
+  select user_id, filename, storage_path
+  from note_attachments
+  where source = 'singlefile' and mime_type = 'text/html'
+) snap
+left join (
+  select user_id, filename, storage_path
+  from note_attachments
+  where source = 'singlefile' and mime_type like 'image/%'
+) hero on hero.user_id = snap.user_id
+       and hero.filename like (regexp_replace(snap.filename, '\.html?$', '') || '%')
+where n.source_app = 'singlefile'
+  and (n.metadata->'web_clip') is null
+  and snap.user_id = n.user_id
+  and snap.storage_path like (n.user_id::text || '/%');
+```
+
+The matching by user + filename prefix is approximate — for clips where multiple snapshots collide we'll just pick one. That's acceptable for a one-time recovery.
+
+---
 
 ## Out of scope
 
-- The 1000-row server limit in `useNotes.ts` (`.order("updated_at", { ascending: false })` then implicit limit). Not the cause of the visible bug. If a user has more than 1000 notes the oldest ones won't appear regardless of sort — separate issue, can be addressed later with pagination or a server-side sort param.
-- No changes to the dropdown UI or state.
+- Replacing the iframe with a server-rendered PNG screenshot (would need Firecrawl or headless Chromium — much heavier; the iframe gives the same visual fidelity from the data we already have).
+- Re-running AI extraction on every existing clip — only the metadata-merge fix is needed going forward.
+
+## Summary
+
+After this lands:
+
+1. New web clips show the `og:image` (Grammarly's actual blue brand banner, not a testimonial avatar).
+2. New web clips show a fully-rendered, scrollable preview of the saved page right under the title — that's your "see the whole website" visual.
+3. Old clips can be repaired with the SQL backfill so their snapshots become visible too (the underlying HTML attachments are still in storage).
