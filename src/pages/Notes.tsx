@@ -204,6 +204,51 @@ export default function Notes() {
     selectNote(note.id);
   }, [activeFolderPath, createNote, selectNote]);
 
+  // Detect "empty" notes: no meaningful title and no meaningful body content.
+  // Strips HTML tags, empty markdown headings/list bullets/horizontal rules and all
+  // whitespace (incl. &nbsp;) so notes that contain only invisible editor scaffolding
+  // still count as empty. Notes with embedded images/videos keep markup and survive.
+  const allNotesForCleanup = useNotes("all").data ?? [];
+  const emptyNotes = useMemo(() => {
+    return allNotesForCleanup.filter((n) => {
+      const title = (n.title || "").trim().toLowerCase();
+      const titleEmpty = !title || title === "untitled";
+      const bodyText = String(n.content || "")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/^#+\s*$/gm, "")
+        .replace(/^[-*+]\s*$/gm, "")
+        .replace(/^[-*_]{3,}\s*$/gm, "")
+        .replace(/&nbsp;/gi, "")
+        .replace(/[\s\u00A0]+/g, "");
+      return titleEmpty && bodyText.length === 0;
+    });
+  }, [allNotesForCleanup]);
+
+  const [isTrashingEmpty, setIsTrashingEmpty] = useState(false);
+  const handleTrashEmptyNotes = useCallback(async () => {
+    if (emptyNotes.length === 0 || isTrashingEmpty) return;
+    const confirmed = window.confirm(
+      `Move ${emptyNotes.length} empty note${emptyNotes.length === 1 ? "" : "s"} to Trash? You can restore them from the Trash filter.`,
+    );
+    if (!confirmed) return;
+    setIsTrashingEmpty(true);
+    try {
+      const ids = emptyNotes.map((n) => n.id);
+      const { error } = await supabase
+        .from("notes")
+        .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+        .in("id", ids);
+      if (error) throw error;
+      if (selectedId && ids.includes(selectedId)) selectNote(null);
+      await queryClient.invalidateQueries({ queryKey: ["notes"] });
+      showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
+    } finally {
+      setIsTrashingEmpty(false);
+    }
+  }, [emptyNotes, isTrashingEmpty, selectedId, selectNote, queryClient]);
+
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
     setActiveFolderPath(folderPath);
     const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
