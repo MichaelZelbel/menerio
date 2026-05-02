@@ -143,6 +143,138 @@ function sanitizeFilename(name: string, fallback: string): string {
     : `${safe}.html`;
 }
 
+/** Sanitize a non-HTML filename (for hero images) — keeps the original ext. */
+function sanitizeImageName(name: string, fallback: string): string {
+  const base = (name || "").replace(/^.*[\\/]/, "").trim();
+  const safe = base
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  return safe || fallback;
+}
+
+const HERO_MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+/** Extract the first non-tracking <img> src from <body>, with a min-size hint. */
+function extractFirstBodyImageSrc(html: string): string | null {
+  const bodyMatch = html.match(/<body[\s\S]*?<\/body>/i);
+  const scope = bodyMatch ? bodyMatch[0] : html;
+  const imgRe = /<img\b([^>]*?)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRe.exec(scope)) !== null) {
+    const tag = m[0];
+    const attrs = m[1];
+    const srcMatch = attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+    if (!srcMatch) continue;
+    const src = srcMatch[1].trim();
+    if (!src) continue;
+    // Skip obvious 1x1 trackers and tiny icons.
+    const widthMatch = attrs.match(/\bwidth\s*=\s*["']?(\d+)/i);
+    const heightMatch = attrs.match(/\bheight\s*=\s*["']?(\d+)/i);
+    const w = widthMatch ? parseInt(widthMatch[1], 10) : null;
+    const h = heightMatch ? parseInt(heightMatch[1], 10) : null;
+    if ((w !== null && w < 80) || (h !== null && h < 80)) continue;
+    // Require a reasonable image MIME for data URIs.
+    if (src.startsWith("data:")) {
+      const mime = src.slice(5, src.indexOf(";")).toLowerCase();
+      if (!HERO_MIME_TO_EXT[mime]) continue;
+    }
+    return src;
+  }
+  return null;
+}
+
+/** Find a hero image candidate URL/data-URI from meta tags first, then body. */
+function findHeroImageCandidate(html: string): string | null {
+  const ogRe =
+    /<meta\s+[^>]*property\s*=\s*["']og:image(?::secure_url|:url)?["'][^>]*content\s*=\s*["']([^"']+)["']/i;
+  const twRe =
+    /<meta\s+[^>]*name\s*=\s*["']twitter:image(?::src)?["'][^>]*content\s*=\s*["']([^"']+)["']/i;
+  const linkRe =
+    /<link\s+[^>]*rel\s*=\s*["']image_src["'][^>]*href\s*=\s*["']([^"']+)["']/i;
+  for (const re of [ogRe, twRe, linkRe]) {
+    const m = html.match(re);
+    if (m && m[1]) return decodeEntities(m[1]).trim();
+  }
+  return extractFirstBodyImageSrc(html);
+}
+
+/** Decode a base64 data: URI to bytes + mime. */
+function decodeDataUri(uri: string): { bytes: Uint8Array; mime: string } | null {
+  try {
+    const comma = uri.indexOf(",");
+    if (comma < 0) return null;
+    const meta = uri.slice(5, comma); // strip "data:"
+    const semi = meta.indexOf(";");
+    const mime = (semi >= 0 ? meta.slice(0, semi) : meta).toLowerCase();
+    const isBase64 = meta.toLowerCase().includes(";base64");
+    const payload = uri.slice(comma + 1);
+    if (!isBase64) return null; // we only support base64 for binary images
+    const bin = atob(payload);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return { bytes, mime };
+  } catch {
+    return null;
+  }
+}
+
+const MAX_HERO_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/** Resolve a hero candidate (data URI or http(s)) into { bytes, mime, ext }. */
+async function resolveHeroImage(
+  candidate: string,
+  pageUrl: string | null,
+): Promise<{ bytes: Uint8Array; mime: string; ext: string } | null> {
+  if (candidate.startsWith("data:")) {
+    const decoded = decodeDataUri(candidate);
+    if (!decoded) return null;
+    const ext = HERO_MIME_TO_EXT[decoded.mime];
+    if (!ext) return null;
+    if (decoded.bytes.byteLength > MAX_HERO_BYTES) return null;
+    return { ...decoded, ext };
+  }
+
+  // Resolve protocol-relative or relative URLs against the page URL when possible.
+  let resolved: string;
+  try {
+    if (candidate.startsWith("//")) {
+      resolved = `https:${candidate}`;
+    } else if (/^https?:\/\//i.test(candidate)) {
+      resolved = candidate;
+    } else if (pageUrl) {
+      resolved = new URL(candidate, pageUrl).toString();
+    } else {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  try {
+    const res = await fetch(resolved, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(5_000),
+      headers: { "User-Agent": "Menerio-WebClipper/1.0" },
+    });
+    if (!res.ok) return null;
+    const mime = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const ext = HERO_MIME_TO_EXT[mime];
+    if (!ext) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength === 0 || buf.byteLength > MAX_HERO_BYTES) return null;
+    return { bytes: new Uint8Array(buf), mime, ext };
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
