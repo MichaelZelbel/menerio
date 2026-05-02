@@ -552,7 +552,10 @@ Deno.serve(async (req) => {
       folder_path: folderPath,
       source_app: "singlefile",
       source_url: sourceUrl,
-      source_id: sourceUrl || storagePath,
+      // Make each clip unique so users can re-clip the same URL multiple times
+      // (e.g. to capture page changes over time). The dedup index covers
+      // (user_id, source_app, source_id) so we append a per-capture suffix.
+      source_id: `${sourceUrl || hostname || "clip"}#${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
       metadata: {
         is_quick_capture: false,
         source: "singlefile",
