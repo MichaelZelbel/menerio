@@ -825,6 +825,8 @@ export default function Notes() {
             onCreateNoteInFolder={handleCreateInFolder}
             onCreateFolderInFolder={handleCreateFolderInFolder}
             onMoveNote={handleMoveNote}
+            sortField={sortField}
+            sortDirection={sortDirection}
           />
         )}
       </div>
