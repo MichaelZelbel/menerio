@@ -894,14 +894,18 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Only use AI-generated title for quick-capture notes (where the user didn't write the title).
     // Never overwrite a user-authored title.
-    const existingMeta = note.metadata as Record<string, unknown> | null;
+    const existingMeta = (note.metadata as Record<string, unknown> | null) ?? {};
     const isQuickCapture = existingMeta?.is_quick_capture === true;
     const aiTitle = isQuickCapture && typeof metadata.title === "string" && metadata.title.trim()
       ? metadata.title.trim()
       : null;
 
+    // Merge AI-derived metadata onto existing keys so per-source fields like
+    // web_clip, source, is_quick_capture, etc. survive enrichment.
+    const mergedMetadata = { ...existingMeta, ...metadata };
+
     // Update the note with embedding, metadata, and optionally a smarter title
-    const updatePayload: Record<string, unknown> = { embedding, metadata };
+    const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
     if (aiTitle) updatePayload.title = aiTitle;
 
     const { error: updateErr } = await supabase
