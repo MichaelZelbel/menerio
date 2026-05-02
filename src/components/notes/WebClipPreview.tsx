@@ -91,7 +91,7 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
       {open && (
         <div className="px-4 pb-4">
           {loading && (
-            <div className="h-[500px] flex items-center justify-center text-xs text-muted-foreground bg-background rounded-lg border border-border">
+            <div className="h-[700px] flex items-center justify-center text-xs text-muted-foreground bg-background rounded-lg border border-border">
               Loading snapshot…
             </div>
           )}
@@ -107,7 +107,7 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
               sandbox="allow-same-origin"
               referrerPolicy="no-referrer"
               loading="lazy"
-              className="w-full h-[500px] rounded-lg border border-border bg-background"
+              className="w-full h-[700px] rounded-lg border border-border bg-background"
             />
           )}
         </div>
