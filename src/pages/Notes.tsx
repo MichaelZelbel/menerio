@@ -226,12 +226,27 @@ export default function Notes() {
     setActiveFolderPath(folderPath);
   }, [updateNote]);
 
+  // Handle ?action=create from external "+ New Note" buttons (header, deep links).
+  // Use a ref-guard so the effect fires exactly once per occurrence of action=create,
+  // regardless of how many times handleCreate's identity changes due to mutation state.
+  const createTriggerRef = useRef<string | null>(null);
   useEffect(() => {
-    if (searchParams.get("action") === "create" && !createNote.isPending) {
-      setSearchParams({}, { replace: true });
-      handleCreate();
+    if (searchParams.get("action") !== "create") {
+      createTriggerRef.current = null;
+      return;
     }
-  }, [searchParams, createNote.isPending, handleCreate, setSearchParams]);
+    // Use the raw search string as a fingerprint so re-navigating to the same URL re-triggers.
+    const fingerprint = searchParams.toString();
+    if (createTriggerRef.current === fingerprint) return;
+    createTriggerRef.current = fingerprint;
+
+    // Strip the param synchronously, then run create on the next tick so React-Router
+    // commits the URL change before the mutation kicks off (avoids race with re-mounts).
+    setSearchParams({}, { replace: true });
+    queueMicrotask(() => {
+      handleCreate();
+    });
+  }, [searchParams, handleCreate, setSearchParams]);
 
   const counts = {
     all: allNotes.length,
