@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Globe } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
