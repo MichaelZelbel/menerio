@@ -2237,14 +2237,6 @@ function getAuthHeader(c: { req: { header: (name: string) => string | undefined 
   );
 }
 
-// Discovery / health probes — no auth required so MCP clients (Craig, Claude, etc.)
-// don't fail their initial endpoint check before sending the authenticated POST.
-app.on("HEAD", "*", () =>
-  new Response(null, {
-    status: 200,
-    headers: { "WWW-Authenticate": 'Bearer realm="MCP"' },
-  })
-);
 
 app.all("*", async (c) => {
   const authHeader = getAuthHeader(c);
