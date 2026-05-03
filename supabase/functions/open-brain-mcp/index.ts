@@ -2228,11 +2228,50 @@ app.get("/favicon.png", (c) => {
 
 app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
+function getAuthHeader(c: { req: { header: (name: string) => string | undefined } }) {
+  return (
+    c.req.header("authorization") ||
+    c.req.header("Authorization") ||
+    c.req.header("x-mcp-token") ||
+    c.req.header("x-api-key")
+  );
+}
+
+
 app.all("*", async (c) => {
-  const authHeader = c.req.header("authorization") || c.req.header("Authorization") || c.req.header("x-mcp-token") || c.req.header("x-api-key");
+  const authHeader = getAuthHeader(c);
+  const method = c.req.method;
+
+  // Discovery / health probes — no auth required so MCP clients (Craig, Claude, etc.)
+  // don't fail their initial endpoint check before sending the authenticated POST.
+  if (method === "HEAD") {
+    return new Response(null, {
+      status: 200,
+      headers: { "WWW-Authenticate": 'Bearer realm="MCP"' },
+    });
+  }
+
+  // Unauthenticated GET → return server metadata (no user data).
+  if (!authHeader && method === "GET") {
+    return c.json({
+      name: "open-brain",
+      version: "1.0.0",
+      transport: "streamable-http",
+      auth: "Authorization: Bearer mnr_mcp_<token>",
+    });
+  }
+
   const auth = await authenticateMcpRequest(authHeader);
 
   if (auth.error) {
+    console.warn("MCP request rejected", {
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      has_auth_header: Boolean(authHeader),
+      auth_scheme: authHeader
+        ? (authHeader.toLowerCase().startsWith("bearer ") ? "bearer" : "other")
+        : "none",
+    });
     return c.json({ error: auth.error.message }, auth.error.status as 401);
   }
 
