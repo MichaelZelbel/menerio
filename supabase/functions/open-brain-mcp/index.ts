@@ -2228,6 +2228,15 @@ app.get("/favicon.png", (c) => {
 
 app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
+function getAuthHeader(c: { req: { header: (name: string) => string | undefined } }) {
+  return (
+    c.req.header("authorization") ||
+    c.req.header("Authorization") ||
+    c.req.header("x-mcp-token") ||
+    c.req.header("x-api-key")
+  );
+}
+
 // Discovery / health probes — no auth required so MCP clients (Craig, Claude, etc.)
 // don't fail their initial endpoint check before sending the authenticated POST.
 app.on("HEAD", "*", () =>
@@ -2237,25 +2246,20 @@ app.on("HEAD", "*", () =>
   })
 );
 
-// Unauthenticated GET returns server metadata only (no user data).
-// Authenticated GETs (e.g. SSE streams from the MCP transport) fall through to app.all below.
-app.get("*", (c) => {
-  const hasAuth =
-    c.req.header("authorization") ||
-    c.req.header("Authorization") ||
-    c.req.header("x-mcp-token") ||
-    c.req.header("x-api-key");
-  if (hasAuth) return c.notFound(); // let app.all handle it
-  return c.json({
-    name: "open-brain",
-    version: "1.0.0",
-    transport: "streamable-http",
-    auth: "Authorization: Bearer mnr_mcp_<token>",
-  });
-});
-
 app.all("*", async (c) => {
-  const authHeader = c.req.header("authorization") || c.req.header("Authorization") || c.req.header("x-mcp-token") || c.req.header("x-api-key");
+  const authHeader = getAuthHeader(c);
+
+  // Unauthenticated GET → return server metadata (no user data).
+  // Lets MCP clients probe the endpoint without failing on 401.
+  if (!authHeader && c.req.method === "GET") {
+    return c.json({
+      name: "open-brain",
+      version: "1.0.0",
+      transport: "streamable-http",
+      auth: "Authorization: Bearer mnr_mcp_<token>",
+    });
+  }
+
   const auth = await authenticateMcpRequest(authHeader);
 
   if (auth.error) {
