@@ -1,49 +1,78 @@
-## Ziel
+## Diagnose
 
-Eine Aktion einbauen, mit der der Nutzer **alle komplett leeren Notizen** (kein Titel, kein Inhalt) in einem Schritt in den Papierkorb verschieben kann.
+Der Token selbst funktioniert. Verifizierung:
 
-## Wo wird die Aktion platziert?
+- DB-Eintrag vorhanden: `mcp_api_tokens.id = 8dbe682b...`, Hash matcht, **nicht** revoked, kein `expires_at`.
+- `last_used_at` wird bei jedem Lookup aktualisiert → Server hat den Token **mehrfach erfolgreich** angenommen (zuletzt 20:48:51, dann erneut beim Test).
+- Direkter Test mit Bearer-Token gegen `https://mcp.menerio.com/` → **HTTP 200** mit gültiger MCP `initialize`-Antwort.
 
-In **`src/pages/Notes.tsx`**, im bestehenden **Vault Insights Popover** (das `#`-Hash-Icon in der Notes-Toolbar). Direkt unter dem schon vorhandenen "Classify unclassified vault notes"-Button — gleiche Stelle, gleicher Stil. Wenn keine leeren Notizen existieren, wird der Button gar nicht angezeigt (analog zum Classify-Button).
+In den Edge-Function-Logs taucht ein `HEAD /open-brain-mcp/ → 401` auf. Reproduktion:
 
-Begründung: Das ist die zentrale Anlaufstelle für Vault-weite Aufräum-Aktionen. Kein neuer Tab in Settings, keine neue Route. Folgt dem bestehenden Muster.
+| Methode | Auth-Header | Resultat |
+|---|---|---|
+| `POST` | Bearer mnr_mcp_… | **200** ✅ |
+| `HEAD` | _kein_ | **401** ❌ |
+| `GET` | _kein_ | **401** ❌ |
+| `HEAD` | Bearer mnr_mcp_… | 405 (Allow: GET, POST, DELETE) — vom MCP-Transport |
 
-## Wie wird "leer" definiert?
+**Ursache:** Der MCP-Client von Craig (OpenCLAW) macht vor der eigentlichen JSON-RPC-Verbindung einen Discovery-Request (`HEAD /` oder `GET /`) **ohne** Authorization-Header, um zu prüfen ob der Endpoint existiert. Unsere `app.all("*")` lehnt diesen sofort mit 401 ab. Craig zeigt das als „401 Unauthorized" an, obwohl die spätere POST-Verbindung mit Bearer-Token gar nicht mehr versucht wird (oder wird, aber nach dem ersten Fehlschlag abgebrochen).
 
-Eine Notiz gilt als leer, wenn **beides** zutrifft:
+Ein zweiter, untergeordneter Faktor: Manche MCP-Clients senden den Token in einem Custom-Header (z.B. `X-API-Key`). Das ist hier aktuell unterstützt (`x-mcp-token`, `x-api-key`), aber möglicherweise nicht dokumentiert.
 
-- **Titel leer** — leer, nur Whitespace, oder wörtlich "Untitled".
-- **Inhalt leer** — nach dem Strippen von HTML-Tags, leeren Markdown-Headings (`#`), leeren List-Bullets (`- `, `* `), Horizontal Rules und allem Whitespace (inkl. `&nbsp;`) bleibt nichts übrig.
+## Plan
 
-Damit fängt man auch Notizen ab, die nur unsichtbares Editor-Gerüst enthalten (häufig bei versehentlichem "+ New Note"-Klick).
+### 1. Edge Function `open-brain-mcp`: Discovery-Probes ohne Auth zulassen
 
-**Was nicht angefasst wird:**
-- Notizen mit Anhängen/Bildern (HTML enthält dann `<img>`/`<video>`-Inhalte → Body wird nicht als leer erkannt)
-- Bereits getrashte Notizen (`is_trashed = true` ist nicht in `allNotes` enthalten)
-- Notizen mit irgendeinem echten Text
+In `supabase/functions/open-brain-mcp/index.ts` direkt vor dem `app.all("*")`-Handler eine kleine Whitelist einbauen:
 
-## UI-Verhalten
+- `HEAD /` und `HEAD /*` → `200 OK` mit `WWW-Authenticate: Bearer realm="MCP"` Header (kein Body).
+- `GET /` (ohne Auth) → `200` mit minimalem JSON `{ "name": "open-brain", "version": "1.0.0", "auth": "Bearer mnr_mcp_…" }`. Das ist für reine Discovery harmlos und enthält keinerlei Userdaten.
+- Alle anderen Methoden / `GET` mit Body laufen weiter durch `authenticateMcpRequest`.
 
-- Button-Text: **"Trash N empty note(s)"** mit `Trash2`-Icon, gleicher Stil wie der Classify-Button.
-- Beim Klick: native `confirm()`-Dialog ("Move N empty notes to Trash? You can restore them from the Trash filter.")
-- Bei Bestätigung: Bulk-Update via einem einzigen Supabase-Statement (`update notes set is_trashed=true, trashed_at=now() where id in (...)`).
-- Notes-Cache wird invalidiert, leere Notizen sind sofort weg.
-- Falls die gerade geöffnete Notiz dabei ist: Auswahl wird aufgehoben.
-- Toast: "Moved N empty notes to Trash". Fehlerfall → Error-Toast.
+So bekommen Discovery-Tools, Health-Checks und Browser-Probes ein 200 / 405 statt 401, und der eigentliche `POST` mit Bearer-Token funktioniert weiterhin.
+
+### 2. Logging verbessern (5 Zeilen)
+
+Beim 401 zusätzlich loggen: `request.method`, `has_auth_header`, `auth_scheme` (z.B. `bearer` / `none` / `other`). Erleichtert das nächste Debugging deutlich.
+
+### 3. UI-Hinweis in `MCPConnectionManager.tsx`
+
+Im Connection-Snippet-Bereich ergänzen:
+- expliziter Hinweis dass der Token **als `Authorization: Bearer mnr_mcp_…`** zu senden ist (nicht als URL-Parameter, nicht als `X-API-Key` — auch wenn letzteres als Fallback akzeptiert wird).
+- Alternative Header-Namen (`X-API-Key`, `X-MCP-Token`) als „Falls dein Client kein Bearer kann"-Block in einem Accordion.
+
+### 4. Verifikation nach Deploy
+
+- `curl -I https://mcp.menerio.com/` → erwartet **200** (vorher 401).
+- `curl -X POST https://mcp.menerio.com/ -H "Authorization: Bearer mnr_mcp_YM5Q…" -d '{"jsonrpc":"2.0",…initialize…}'` → erwartet weiterhin **200**.
+- Craig (OpenCLAW) erneut verbinden lassen.
 
 ## Technische Details
 
-**Datei:** `src/pages/Notes.tsx`
+**Datei:** `supabase/functions/open-brain-mcp/index.ts` (Zeilen ~2229–2245)
 
-- Neuer `useMemo` `emptyNotes` (filtert `allNotes` mit dem oben beschriebenen "Empty"-Test).
-- Neuer `useCallback` `handleTrashEmptyNotes` (Confirm + Bulk-Update + Cache-Invalidate + Toast).
-- Neuer Lokal-State `isTrashingEmpty` für den Loading-Spinner.
-- Im Vault Insights Popover, direkt nach dem Classify-Block: ein `<Button variant="outline" size="sm">` der nur gerendert wird wenn `emptyNotes.length > 0`.
-- `queryClient` wird über `useQueryClient()` aus `@tanstack/react-query` geholt (Import-Erweiterung).
-- Reuse: `supabase`, `showToast`, `Trash2`-Icon — alle bereits importiert.
+```ts
+// Discovery / health probes — no auth required
+app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
-**Kein Backend-Change.** Kein neuer Hook. Keine Migration. RLS bleibt unverändert (User darf nur eigene Notizen updaten).
+app.on(["HEAD"], "*", (c) =>
+  new Response(null, { status: 200, headers: { "WWW-Authenticate": 'Bearer realm="MCP"' } })
+);
 
-## Optional (NICHT Teil dieser Iteration, falls du später willst)
+app.get("/", (c) => c.json({
+  name: "open-brain",
+  version: "1.0.0",
+  transport: "streamable-http",
+  auth: "Authorization: Bearer mnr_mcp_<token>"
+}));
 
-- Gleiche Aktion für Trash-Filter: "Empty Trash" (alle getrashten Notizen permanent löschen). Sag Bescheid, wenn du das auch möchtest.
+app.all("*", async (c) => { /* unverändert: authenticateMcpRequest + transport.handleRequest */ });
+```
+
+**Warum keine Code-Änderung an Token-Validation?** Der bestehende Hash-/Pattern-Check funktioniert. `last_used_at = 20:48:51` und der Live-Curl-Test (200 OK + `initialize` Response) sind der direkte Beweis.
+
+## Was nicht geändert wird
+
+- Token-Format, Pattern, Hash-Funktion, `lookup_mcp_token` RPC, RLS-Policies — alles korrekt.
+- `verify_jwt = false` in `supabase/config.toml` — bereits gesetzt.
+- Cloudflare-Worker auf `mcp.menerio.com` — leitet sauber durch.
