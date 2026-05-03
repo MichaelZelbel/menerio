@@ -2237,9 +2237,9 @@ app.on("HEAD", "*", () =>
   })
 );
 
-// Unauthenticated GET / returns server metadata only (no user data).
+// Unauthenticated GET returns server metadata only (no user data).
 // Authenticated GETs (e.g. SSE streams from the MCP transport) fall through to app.all below.
-app.get("/", (c) => {
+app.get("*", (c) => {
   const hasAuth =
     c.req.header("authorization") ||
     c.req.header("Authorization") ||
