@@ -2248,10 +2248,19 @@ app.on("HEAD", "*", () =>
 
 app.all("*", async (c) => {
   const authHeader = getAuthHeader(c);
+  const method = c.req.method;
+
+  // Discovery / health probes — no auth required so MCP clients (Craig, Claude, etc.)
+  // don't fail their initial endpoint check before sending the authenticated POST.
+  if (method === "HEAD") {
+    return new Response(null, {
+      status: 200,
+      headers: { "WWW-Authenticate": 'Bearer realm="MCP"' },
+    });
+  }
 
   // Unauthenticated GET → return server metadata (no user data).
-  // Lets MCP clients probe the endpoint without failing on 401.
-  if (!authHeader && c.req.method === "GET") {
+  if (!authHeader && method === "GET") {
     return c.json({
       name: "open-brain",
       version: "1.0.0",
