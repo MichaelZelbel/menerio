@@ -1,78 +1,28 @@
-## Diagnose
+# Outgoing Links Panel
 
-Der Token selbst funktioniert. Verifizierung:
+Add a new collapsible panel that shows all notes the current note links **to** (manual `[[wikilinks]]`), mirroring the existing `BacklinksPanel`.
 
-- DB-Eintrag vorhanden: `mcp_api_tokens.id = 8dbe682b...`, Hash matcht, **nicht** revoked, kein `expires_at`.
-- `last_used_at` wird bei jedem Lookup aktualisiert → Server hat den Token **mehrfach erfolgreich** angenommen (zuletzt 20:48:51, dann erneut beim Test).
-- Direkter Test mit Bearer-Token gegen `https://mcp.menerio.com/` → **HTTP 200** mit gültiger MCP `initialize`-Antwort.
+## Why
+Currently you can only see *who links to me* (Backlinks). When you insert a wikilink via the Suggested Links panel, it gets dropped into the editor body — but there's no compact list view to see all outgoing links of a note at a glance.
 
-In den Edge-Function-Logs taucht ein `HEAD /open-brain-mcp/ → 401` auf. Reproduktion:
+## What to build
 
-| Methode | Auth-Header | Resultat |
-|---|---|---|
-| `POST` | Bearer mnr_mcp_… | **200** ✅ |
-| `HEAD` | _kein_ | **401** ❌ |
-| `GET` | _kein_ | **401** ❌ |
-| `HEAD` | Bearer mnr_mcp_… | 405 (Allow: GET, POST, DELETE) — vom MCP-Transport |
+**New file: `src/components/notes/OutgoingLinksPanel.tsx`**
+- Same UX shell as `BacklinksPanel` (collapsible header, count badge, empty state).
+- Query `note_connections` where `source_note_id = noteId` AND `connection_type = 'manual_link'`.
+- Resolve `target_note_id` → fetch `notes (id, title, updated_at)`, filter `is_trashed = false`.
+- Render each as a clickable row → `onNavigate(targetId)`.
+- Header label: "Links" with `ArrowUpRight` icon, count in parentheses.
+- Empty state copy: "This note doesn't link to any other notes yet. Use [[wikilinks]] in the editor to create connections."
 
-**Ursache:** Der MCP-Client von Craig (OpenCLAW) macht vor der eigentlichen JSON-RPC-Verbindung einen Discovery-Request (`HEAD /` oder `GET /`) **ohne** Authorization-Header, um zu prüfen ob der Endpoint existiert. Unsere `app.all("*")` lehnt diesen sofort mit 401 ab. Craig zeigt das als „401 Unauthorized" an, obwohl die spätere POST-Verbindung mit Bearer-Token gar nicht mehr versucht wird (oder wird, aber nach dem ersten Fehlschlag abgebrochen).
+**Wire into `src/components/notes/NoteEditor.tsx`**
+- Import and render `<OutgoingLinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />` directly **above** the existing `<BacklinksPanel ... />` (line ~1158), so the order in the right rail reads: Links → Backlinks → Suggested Links.
 
-Ein zweiter, untergeordneter Faktor: Manche MCP-Clients senden den Token in einem Custom-Header (z.B. `X-API-Key`). Das ist hier aktuell unterstützt (`x-mcp-token`, `x-api-key`), aber möglicherweise nicht dokumentiert.
+## Technical notes
+- Uses existing `note_connections` table; no schema changes, no edge function, no new RLS.
+- `manual_link` rows are already kept in sync with `[[wikilinks]]` in the editor body (see `mem://features/wikilinks-and-backlinks`), so this panel will reflect inserts/removals automatically after the next save.
+- React Query key: `["outgoing-links", noteId, user?.id]` so it invalidates per note.
 
-## Plan
-
-### 1. Edge Function `open-brain-mcp`: Discovery-Probes ohne Auth zulassen
-
-In `supabase/functions/open-brain-mcp/index.ts` direkt vor dem `app.all("*")`-Handler eine kleine Whitelist einbauen:
-
-- `HEAD /` und `HEAD /*` → `200 OK` mit `WWW-Authenticate: Bearer realm="MCP"` Header (kein Body).
-- `GET /` (ohne Auth) → `200` mit minimalem JSON `{ "name": "open-brain", "version": "1.0.0", "auth": "Bearer mnr_mcp_…" }`. Das ist für reine Discovery harmlos und enthält keinerlei Userdaten.
-- Alle anderen Methoden / `GET` mit Body laufen weiter durch `authenticateMcpRequest`.
-
-So bekommen Discovery-Tools, Health-Checks und Browser-Probes ein 200 / 405 statt 401, und der eigentliche `POST` mit Bearer-Token funktioniert weiterhin.
-
-### 2. Logging verbessern (5 Zeilen)
-
-Beim 401 zusätzlich loggen: `request.method`, `has_auth_header`, `auth_scheme` (z.B. `bearer` / `none` / `other`). Erleichtert das nächste Debugging deutlich.
-
-### 3. UI-Hinweis in `MCPConnectionManager.tsx`
-
-Im Connection-Snippet-Bereich ergänzen:
-- expliziter Hinweis dass der Token **als `Authorization: Bearer mnr_mcp_…`** zu senden ist (nicht als URL-Parameter, nicht als `X-API-Key` — auch wenn letzteres als Fallback akzeptiert wird).
-- Alternative Header-Namen (`X-API-Key`, `X-MCP-Token`) als „Falls dein Client kein Bearer kann"-Block in einem Accordion.
-
-### 4. Verifikation nach Deploy
-
-- `curl -I https://mcp.menerio.com/` → erwartet **200** (vorher 401).
-- `curl -X POST https://mcp.menerio.com/ -H "Authorization: Bearer mnr_mcp_YM5Q…" -d '{"jsonrpc":"2.0",…initialize…}'` → erwartet weiterhin **200**.
-- Craig (OpenCLAW) erneut verbinden lassen.
-
-## Technische Details
-
-**Datei:** `supabase/functions/open-brain-mcp/index.ts` (Zeilen ~2229–2245)
-
-```ts
-// Discovery / health probes — no auth required
-app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
-
-app.on(["HEAD"], "*", (c) =>
-  new Response(null, { status: 200, headers: { "WWW-Authenticate": 'Bearer realm="MCP"' } })
-);
-
-app.get("/", (c) => c.json({
-  name: "open-brain",
-  version: "1.0.0",
-  transport: "streamable-http",
-  auth: "Authorization: Bearer mnr_mcp_<token>"
-}));
-
-app.all("*", async (c) => { /* unverändert: authenticateMcpRequest + transport.handleRequest */ });
-```
-
-**Warum keine Code-Änderung an Token-Validation?** Der bestehende Hash-/Pattern-Check funktioniert. `last_used_at = 20:48:51` und der Live-Curl-Test (200 OK + `initialize` Response) sind der direkte Beweis.
-
-## Was nicht geändert wird
-
-- Token-Format, Pattern, Hash-Funktion, `lookup_mcp_token` RPC, RLS-Policies — alles korrekt.
-- `verify_jwt = false` in `supabase/config.toml` — bereits gesetzt.
-- Cloudflare-Worker auf `mcp.menerio.com` — leitet sauber durch.
+## Out of scope
+- No changes to graph, suggestions, or wikilink extension.
+- Not adding inline anchors/jump-to-position in the body (separate feature).

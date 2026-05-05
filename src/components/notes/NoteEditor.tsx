@@ -35,6 +35,7 @@ import { WebClipPreview } from "./WebClipPreview";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { OutgoingLinksPanel } from "./OutgoingLinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
@@ -1154,6 +1155,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       )}
 
 
+      {/* Outgoing links panel */}
+      <OutgoingLinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
       {/* Backlinks panel */}
       <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
 
