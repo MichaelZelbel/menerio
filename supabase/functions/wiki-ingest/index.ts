@@ -431,13 +431,14 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
   for (const group of groups.values()) {
     const { data: page, error: pageError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, content, last_synthesized_at")
+      .select("id, slug, title, content, last_synthesized_at, protected_sections")
       .eq("slug", `group-${group.slug}`)
       .eq("page_type", "group")
       .maybeSingle();
     if (pageError) throw pageError;
     if (!page) continue;
     if (page.last_synthesized_at && new Date(page.last_synthesized_at).getTime() > cutoff) continue;
+    if (Array.isArray(page.protected_sections) && page.protected_sections.includes("insights")) continue;
 
     const { data: interactions, error: interactionsError } = await db
       .from("contact_interactions")
