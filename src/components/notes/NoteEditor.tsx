@@ -251,6 +251,36 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const { data: ghConn } = useGitHubConnection();
   const ghSync = useGitHubSyncExport();
   const { data: syncLog } = useSyncLogForNote(note.id);
+
+  // Title -> id map for resolving raw `[[Title]]` markdown into clickable wikilink nodes
+  const { data: titleMap } = useQuery({
+    queryKey: ["wikilink-title-map", user?.id],
+    enabled: !!user,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false);
+      const map = new Map<string, string>();
+      (data || []).forEach((n: any) => {
+        if (n.title) {
+          const k = String(n.title).trim().toLowerCase();
+          if (k && !map.has(k)) map.set(k, n.id);
+        }
+      });
+      return map;
+    },
+  });
+  const titleMapRef = useRef(titleMap);
+  useEffect(() => { titleMapRef.current = titleMap; }, [titleMap]);
+
+  const resolveWikilinks = useCallback((html: string): string => {
+    const m = titleMapRef.current;
+    if (!m || !html || !html.includes("[[")) return html;
+    return resolveWikilinksInHtml(html, m);
+  }, []);
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
