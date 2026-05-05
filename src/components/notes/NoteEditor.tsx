@@ -382,7 +382,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (!editor) return;
     try {
       const newNote = await createNote.mutateAsync({ title });
-      editor.commands.insertWikilink({ noteId: newNote.id, noteTitle: title });
+      insertWikilinkSafely(editor, { noteId: newNote.id, noteTitle: title });
       setWikilinkOpen(false);
     } catch {
       showToast.error("Failed to create note");
@@ -1257,7 +1257,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         noteId={note.id}
         onInsertWikilink={(targetId, targetTitle) => {
           if (editor) {
-            editor.commands.insertWikilink({ noteId: targetId, noteTitle: targetTitle });
+            insertWikilinkSafely(editor, { noteId: targetId, noteTitle: targetTitle });
           }
         }}
       />
