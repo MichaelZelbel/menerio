@@ -236,6 +236,30 @@ async function syncManualLinks(
   }
 }
 
+/** Insert a wikilink at the current cursor, ensuring it doesn't get embedded inside a word.
+ *  Adds whitespace padding when adjacent characters are word characters. */
+function insertWikilinkSafely(editor: any, attrs: { noteId: string; noteTitle: string; displayText?: string }) {
+  try {
+    const { state } = editor;
+    const { from, to, empty } = state.selection;
+    const isWordChar = (ch: string) => /\w/.test(ch);
+    let prefix = "";
+    let suffix = "";
+    if (empty) {
+      const before = state.doc.textBetween(Math.max(0, from - 1), from, "\n", "\n");
+      const after = state.doc.textBetween(to, Math.min(state.doc.content.size, to + 1), "\n", "\n");
+      if (before && isWordChar(before)) prefix = " ";
+      if (after && isWordChar(after)) suffix = " ";
+    }
+    const chain = editor.chain().focus();
+    if (prefix) chain.insertContent(prefix);
+    chain.insertWikilink(attrs);
+    if (suffix) chain.insertContent(suffix);
+    chain.run();
+  } catch {
+    editor.commands.insertWikilink(attrs);
+  }
+
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
