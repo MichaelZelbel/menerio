@@ -1401,5 +1401,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     />
     </div>
   );
+  }
 }
 
