@@ -259,6 +259,7 @@ function insertWikilinkSafely(editor: any, attrs: { noteId: string; noteTitle: s
   } catch {
     editor.commands.insertWikilink(attrs);
   }
+}
 
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
   const updateNote = useUpdateNote();
@@ -1401,6 +1402,5 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     />
     </div>
   );
-  }
 }
 
