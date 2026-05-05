@@ -1,0 +1,1 @@
+ALTER TABLE public.wiki_pages ADD COLUMN IF NOT EXISTS protected_sections text[] NOT NULL DEFAULT '{}';
