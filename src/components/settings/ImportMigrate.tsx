@@ -61,6 +61,23 @@ function splitByParagraphs(text: string): { title: string; content: string }[] {
 export function ImportMigrate() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [backfillLoading, setBackfillLoading] = useState(false);
+
+  const runWikilinkBackfill = async () => {
+    setBackfillLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-wikilinks", { body: {} });
+      if (error) throw error;
+      toast({
+        title: "Wikilink backfill complete",
+        description: `Scanned ${data?.scanned ?? 0} notes, added ${data?.links_added ?? 0} connections${data?.unresolved_count ? `, ${data.unresolved_count} unresolved titles` : ""}.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Backfill failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
 
   // AI Memory import
   const [aiText, setAiText] = useState("");
@@ -172,6 +189,7 @@ export function ImportMigrate() {
   const currentProgress = progressTotal > 0 ? (progress / progressTotal) * 100 : 0;
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
@@ -307,6 +325,26 @@ export function ImportMigrate() {
         </Tabs>
       </CardContent>
     </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="h-4 w-4 text-primary" />
+          Rebuild wikilink connections
+        </CardTitle>
+        <CardDescription>
+          Scans every note for <code className="bg-background px-1 rounded text-xs">[[Title]]</code> references
+          and adds any missing connections. Safe to re-run.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={runWikilinkBackfill} disabled={backfillLoading}>
+          {backfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Rebuild now
+        </Button>
+      </CardContent>
+    </Card>
+    </div>
   );
 }
 

@@ -105,6 +105,7 @@ import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
+import { resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -122,7 +123,7 @@ interface NoteEditorProps {
   onNoteSelect?: (noteId: string) => void;
 }
 
-/** Extract all wikilink noteIds from editor JSON content */
+/** Extract all wikilink noteIds from editor JSON content (resolved nodes only) */
 function extractWikilinkIds(doc: any): string[] {
   const ids: string[] = [];
   function walk(node: any) {
@@ -133,6 +134,19 @@ function extractWikilinkIds(doc: any): string[] {
   }
   if (doc) walk(doc);
   return [...new Set(ids)];
+}
+
+/** Extract raw `[[Title]]` strings from editor text (fallback for unresolved markdown) */
+function extractRawWikilinkTitles(editor: { getText: () => string }): string[] {
+  const text = editor.getText();
+  const out = new Set<string>();
+  const re = /\[\[([^\[\]\n]+?)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[1].trim();
+    if (t) out.add(t);
+  }
+  return [...out];
 }
 
 function contentToEditorHtml(content: string | null | undefined, note: Pick<Note, "is_external" | "title">): string {
@@ -157,10 +171,34 @@ function countMarkdownLinks(content: string | null | undefined): number {
   return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
 }
 
-/** Sync manual_link connections based on wikilinks in content */
-async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
+/** Sync manual_link connections based on wikilinks in content.
+ *  Resolves both ID-bearing wikilink nodes AND raw `[[Title]]` text fallbacks. */
+async function syncManualLinks(
+  noteId: string,
+  userId: string,
+  linkedNoteIds: string[],
+  rawTitles: string[] = [],
+) {
   try {
-    // Get existing manual_link connections from this note
+    let allTargetIds = [...linkedNoteIds];
+    if (rawTitles.length > 0) {
+      const { data: matches } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", userId)
+        .eq("is_trashed", false)
+        .in("title", rawTitles);
+      const titleMap = new Map<string, string>();
+      (matches || []).forEach((r: any) => {
+        if (r.title) titleMap.set(String(r.title).toLowerCase(), r.id);
+      });
+      for (const t of rawTitles) {
+        const id = titleMap.get(t.toLowerCase());
+        if (id) allTargetIds.push(id);
+      }
+    }
+    allTargetIds = [...new Set(allTargetIds)].filter((id) => id !== noteId);
+
     const { data: existing } = await supabase
       .from("note_connections" as any)
       .select("id, target_note_id")
@@ -169,9 +207,8 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
       .eq("user_id", userId);
 
     const existingMap = new Map((existing || []).map((e: any) => [e.target_note_id, e.id]));
-    const newTargets = new Set(linkedNoteIds);
+    const newTargets = new Set(allTargetIds);
 
-    // Delete removed links
     const toDelete = (existing || [])
       .filter((e: any) => !newTargets.has(e.target_note_id))
       .map((e: any) => e.id);
@@ -180,8 +217,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
       await supabase.from("note_connections" as any).delete().in("id", toDelete);
     }
 
-    // Upsert new links
-    const toUpsert = linkedNoteIds
+    const toUpsert = allTargetIds
       .filter((id) => !existingMap.has(id))
       .map((targetId) => ({
         user_id: userId,
@@ -197,6 +233,31 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
     }
   } catch (err) {
     console.error("Failed to sync manual links:", err);
+  }
+}
+
+/** Insert a wikilink at the current cursor, ensuring it doesn't get embedded inside a word.
+ *  Adds whitespace padding when adjacent characters are word characters. */
+function insertWikilinkSafely(editor: any, attrs: { noteId: string; noteTitle: string; displayText?: string }) {
+  try {
+    const { state } = editor;
+    const { from, to, empty } = state.selection;
+    const isWordChar = (ch: string) => /\w/.test(ch);
+    let prefix = "";
+    let suffix = "";
+    if (empty) {
+      const before = state.doc.textBetween(Math.max(0, from - 1), from, "\n", "\n");
+      const after = state.doc.textBetween(to, Math.min(state.doc.content.size, to + 1), "\n", "\n");
+      if (before && isWordChar(before)) prefix = " ";
+      if (after && isWordChar(after)) suffix = " ";
+    }
+    const chain = editor.chain().focus();
+    if (prefix) chain.insertContent(prefix);
+    chain.insertWikilink(attrs);
+    if (suffix) chain.insertContent(suffix);
+    chain.run();
+  } catch {
+    editor.commands.insertWikilink(attrs);
   }
 }
 
@@ -216,6 +277,36 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const { data: ghConn } = useGitHubConnection();
   const ghSync = useGitHubSyncExport();
   const { data: syncLog } = useSyncLogForNote(note.id);
+
+  // Title -> id map for resolving raw `[[Title]]` markdown into clickable wikilink nodes
+  const { data: titleMap } = useQuery({
+    queryKey: ["wikilink-title-map", user?.id],
+    enabled: !!user,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false);
+      const map = new Map<string, string>();
+      (data || []).forEach((n: any) => {
+        if (n.title) {
+          const k = String(n.title).trim().toLowerCase();
+          if (k && !map.has(k)) map.set(k, n.id);
+        }
+      });
+      return map;
+    },
+  });
+  const titleMapRef = useRef(titleMap);
+  useEffect(() => { titleMapRef.current = titleMap; }, [titleMap]);
+
+  const resolveWikilinks = useCallback((html: string): string => {
+    const m = titleMapRef.current;
+    if (!m || !html || !html.includes("[[")) return html;
+    return resolveWikilinksInHtml(html, m);
+  }, []);
   const [title, setTitle] = useState(note.title);
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
@@ -283,7 +374,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const handleWikilinkSelect = useCallback((title: string, noteId: string) => {
     if (!editor) return;
-    editor.commands.insertWikilink({ noteId, noteTitle: title });
+    insertWikilinkSafely(editor, { noteId, noteTitle: title });
     setWikilinkOpen(false);
   }, []);
 
@@ -291,7 +382,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (!editor) return;
     try {
       const newNote = await createNote.mutateAsync({ title });
-      editor.commands.insertWikilink({ noteId: newNote.id, noteTitle: title });
+      insertWikilinkSafely(editor, { noteId: newNote.id, noteTitle: title });
       setWikilinkOpen(false);
     } catch {
       showToast.error("Failed to create note");
@@ -385,7 +476,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     content: (() => {
       // Convert Markdown deterministically to HTML so checklists and other
       // block constructs always render as real TipTap nodes on first load.
-      return contentToEditorHtml(note.content, note);
+      return resolveWikilinks(contentToEditorHtml(note.content, note));
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
@@ -411,7 +502,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (user) {
           const doc = e.getJSON();
           const linkedIds = extractWikilinkIds(doc);
-          syncManualLinks(note.id, user.id, linkedIds);
+          const rawTitles = extractRawWikilinkTitles(e);
+          syncManualLinks(note.id, user.id, linkedIds, rawTitles);
           queryClient.invalidateQueries({ queryKey: ["backlinks"] });
         }
       }, 800);
@@ -470,7 +562,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }
     if (!editor) return;
 
-    const editorContent = contentToEditorHtml(note.content, note);
+    const editorContent = resolveWikilinks(contentToEditorHtml(note.content, note));
     const currentHtml = editor.getHTML();
     const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
     const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
@@ -505,7 +597,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           .eq("id", note.id)
           .single();
         if (error || !data) return;
-        const html = contentToEditorHtml((data as any).content || "", note);
+        const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
           editor.commands.setContent(html, { emitUpdate: false });
           lastLocalContentRef.current = (data as any).content || "";
@@ -743,7 +835,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(contentToEditorHtml(sourceText, { ...note, is_external: false }), { emitUpdate: false });
+      editor.commands.setContent(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })), { emitUpdate: false });
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
@@ -1165,7 +1257,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         noteId={note.id}
         onInsertWikilink={(targetId, targetTitle) => {
           if (editor) {
-            editor.commands.insertWikilink({ noteId: targetId, noteTitle: targetTitle });
+            insertWikilinkSafely(editor, { noteId: targetId, noteTitle: targetTitle });
           }
         }}
       />
