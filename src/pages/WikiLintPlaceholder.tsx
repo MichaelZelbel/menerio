@@ -279,7 +279,10 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge>{item.pages.map((slug) => <PageLink key={slug} slug={slug} title={pageTitles.get(slug)} />)}</div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.pages[0])}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
               </div>
             ))}
           </LintSection>
@@ -289,31 +292,26 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /><span className="text-muted-foreground">{item.section}</span></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-              </div>
-            ))}
-          </LintSection>
-
-          <LintSection title="Gaps" count={findings.gaps.length}>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
             {findings.gaps.map((item, index) => (
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /><code className="rounded bg-muted px-1.5 py-0.5 text-xs">{item.missing_link}</code></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-              </div>
-            ))}
-          </LintSection>
-
-          <LintSection title="Stale syntheses" count={findings.stale_syntheses.length}>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
             {findings.stale_syntheses.map((item, index) => (
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-              </div>
-            ))}
-          </LintSection>
-        </>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
       )}
     </div>
   );
