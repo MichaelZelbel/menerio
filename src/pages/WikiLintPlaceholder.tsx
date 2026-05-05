@@ -188,10 +188,15 @@ export default function WikiLintPlaceholder() {
             Last lint: {lastRunQuery.isLoading ? "Loading…" : lastRunQuery.data ? relativeTime(lastRunQuery.data.created_at) : "Never run."}
           </p>
         </div>
-        <Button onClick={runLint} disabled={isRunning || hasNoPages}>
-          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          Run lint
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={stripDeadLinks} disabled={isRunning || hasNoPages}>
+            <Scissors className="h-4 w-4" /> Strip dead links
+          </Button>
+          <Button onClick={runLint} disabled={isRunning || hasNoPages}>
+            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Run lint
+          </Button>
+        </div>
       </div>
 
       {pagesQuery.isLoading ? (
