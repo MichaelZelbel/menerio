@@ -349,7 +349,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const handleWikilinkSelect = useCallback((title: string, noteId: string) => {
     if (!editor) return;
-    editor.commands.insertWikilink({ noteId, noteTitle: title });
+    insertWikilinkSafely(editor, { noteId, noteTitle: title });
     setWikilinkOpen(false);
   }, []);
 
