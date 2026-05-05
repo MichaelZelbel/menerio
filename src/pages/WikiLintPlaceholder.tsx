@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RotateCcw } from "lucide-react";
+import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RefreshCw, RotateCcw, Scissors } from "lucide-react";
+import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -146,6 +147,34 @@ export default function WikiLintPlaceholder() {
   };
 
   const openPage = (slug: string) => navigate(pagePath(slug));
+
+  const stripDeadLinks = async () => {
+    if (!confirm("Strip all dead [[wikilinks]] from every Lexicon page?")) return;
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
+      if (invokeError) throw invokeError;
+      toast.success(`Stripped ${data?.links_removed ?? 0} dead links across ${data?.pages_changed ?? 0} pages`);
+      await runLint();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Strip failed");
+    }
+  };
+
+  const rebuildPage = async (slug: string) => {
+    const page = pagesQuery.data?.find((p) => p.slug === slug);
+    if (!page) return toast.error("Page not found");
+    if (!confirm(`Rebuild "${page.title}" strictly from its source notes? This discards the current content.`)) return;
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", {
+        body: { mode: "rebuild_page", page_id: page.id },
+      });
+      if (invokeError) throw invokeError;
+      if (!data?.ok) throw new Error(data?.error || "Rebuild failed");
+      toast.success(`Rebuilt "${page.title}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Rebuild failed");
+    }
+  };
 
   return (
     <div className="space-y-6">
