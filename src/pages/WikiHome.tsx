@@ -2,28 +2,15 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { BookOpen, FileText, Loader2, Search, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { BookOpen, FileText, Search } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-
-type CleanupCandidate = {
-  id: string;
-  slug: string;
-  title: string;
-  page_type: string;
-  source_count: number;
-  inbound_links: number;
-  reason: string;
-};
 
 type WikiPage = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevision = Database["public"]["Tables"]["wiki_revisions"]["Row"];
