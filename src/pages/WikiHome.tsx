@@ -186,7 +186,23 @@ export default function WikiHome() {
             Your AI-generated knowledge lexicon, built automatically from your notes.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (!confirm("Remove all dead [[wikilinks]] (links pointing to non-existent pages) from every Lexicon page?")) return;
+              try {
+                const { data, error } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
+                if (error) throw error;
+                toast.success(`Stripped ${data?.links_removed ?? 0} dead links across ${data?.pages_changed ?? 0} pages`);
+                navigate(0);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Strip failed");
+              }
+            }}
+          >
+            Strip dead links
+          </Button>
           <Button variant="outline" onClick={openCleanup}>
             <Trash2 className="h-4 w-4" /> Cleanup
           </Button>

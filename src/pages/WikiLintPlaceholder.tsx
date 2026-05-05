@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RotateCcw } from "lucide-react";
+import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RefreshCw, RotateCcw, Scissors } from "lucide-react";
+import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -147,6 +148,34 @@ export default function WikiLintPlaceholder() {
 
   const openPage = (slug: string) => navigate(pagePath(slug));
 
+  const stripDeadLinks = async () => {
+    if (!confirm("Strip all dead [[wikilinks]] from every Lexicon page?")) return;
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
+      if (invokeError) throw invokeError;
+      toast.success(`Stripped ${data?.links_removed ?? 0} dead links across ${data?.pages_changed ?? 0} pages`);
+      await runLint();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Strip failed");
+    }
+  };
+
+  const rebuildPage = async (slug: string) => {
+    const page = pagesQuery.data?.find((p) => p.slug === slug);
+    if (!page) return toast.error("Page not found");
+    if (!confirm(`Rebuild "${page.title}" strictly from its source notes? This discards the current content.`)) return;
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", {
+        body: { mode: "rebuild_page", page_id: page.id },
+      });
+      if (invokeError) throw invokeError;
+      if (!data?.ok) throw new Error(data?.error || "Rebuild failed");
+      toast.success(`Rebuilt "${page.title}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Rebuild failed");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <SEOHead title="Lexicon health check — Menerio" noIndex />
@@ -159,10 +188,15 @@ export default function WikiLintPlaceholder() {
             Last lint: {lastRunQuery.isLoading ? "Loading…" : lastRunQuery.data ? relativeTime(lastRunQuery.data.created_at) : "Never run."}
           </p>
         </div>
-        <Button onClick={runLint} disabled={isRunning || hasNoPages}>
-          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          Run lint
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={stripDeadLinks} disabled={isRunning || hasNoPages}>
+            <Scissors className="h-4 w-4" /> Strip dead links
+          </Button>
+          <Button onClick={runLint} disabled={isRunning || hasNoPages}>
+            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Run lint
+          </Button>
+        </div>
       </div>
 
       {pagesQuery.isLoading ? (
@@ -245,7 +279,10 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge>{item.pages.map((slug) => <PageLink key={slug} slug={slug} title={pageTitles.get(slug)} />)}</div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.pages[0])}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
               </div>
             ))}
           </LintSection>
@@ -255,7 +292,10 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /><span className="text-muted-foreground">{item.section}</span></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
               </div>
             ))}
           </LintSection>
@@ -265,7 +305,10 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /><code className="rounded bg-muted px-1.5 py-0.5 text-xs">{item.missing_link}</code></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
               </div>
             ))}
           </LintSection>
@@ -275,7 +318,10 @@ export default function WikiLintPlaceholder() {
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /></div>
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
-                <Button className="mt-3" size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
+                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                </div>
               </div>
             ))}
           </LintSection>
@@ -284,3 +330,4 @@ export default function WikiLintPlaceholder() {
     </div>
   );
 }
+
