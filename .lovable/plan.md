@@ -1,82 +1,68 @@
-# Robust Wikilinks: Resolution, Backfill & Insert UX
+# Verschwindender Text beim Speichern — Diagnose & Fix
 
-Right now `[[Title]]` strings only become real links if they were inserted *after* the WikilinkExtension/Outgoing-panel logic existed AND the cursor landed cleanly. Everything else stays as plain text and never reaches `note_connections`. This plan fixes all four layers so existing and future wikilinks always work.
+## Symptom
+Texte wie `/plugin install skill-creator@claude-plugins-official` lassen sich eingeben, verschwinden aber, sobald man die Notiz verlässt (= nach Autosave + Reload).
 
----
+## Hypothese (Reihenfolge der Wahrscheinlichkeit)
 
-## A. Markdown → Node resolution on load (visual fix)
+1. **Markdown-Roundtrip-Verlust (sehr wahrscheinlich)**
+   `tiptapJsonToMarkdown` → DB → `markdownToHtml` beim Reload. In `markdownToHtml` werden Zeilen, die mit `- `, `* `, `+ ` oder `\d+. ` beginnen, als Listen behandelt. Eine Zeile, die mit **`/`** beginnt, ist unkritisch — aber `escapeMarkdownText` und `inlineMarkdown` haben mehrere Regex-Pässe, die mit `@`, `[`, `]`, `*` interagieren. Konkret prüfen:
+   - `escapeMarkdownText` macht `text.replace(/\\([#*_[\]()`])/g, "$1")` — entfernt Escapes statt sie zu setzen.
+   - Beim Serialisieren werden Zeichen wie `*`, `_`, `[`, `]` **nicht** escaped → ein roher String wie `skill-creator@claude-plugins-official` ist safe, aber `*`-haltige oder `[…]`-haltige Texte könnten beim Re-Parse als Bold/Link interpretiert werden.
 
-**File:** `src/components/notes/NoteEditor.tsx` (function `contentToEditorHtml`, ~line 138)
+2. **`onUpdate`-Skip-Regel verwirft den Save**
+   ```ts
+   if (!e.isFocused && countMarkdownLinks(note.content) > countMarkdownLinks(md)) return;
+   ```
+   `countMarkdownLinks` matcht `https?:\/\/\S+`. Wenn die alte Notiz mehr URL-ähnliche Strings enthielt als die neue, wird der Save *stillschweigend verworfen* (nur ein `console.warn`). Das könnte erklären, warum Änderungen einfach „weg" sind.
 
-- Before handing markdown/HTML to the editor, run a regex pass over `[[Title]]` patterns (avoiding code blocks).
-- For each match, resolve the title against the user's notes via a small in-memory cache (one query per note open: `select id, title from notes where user_id=… and is_trashed=false`).
-- Replace matches with the WikilinkExtension's expected HTML:
-  ```
-  <span data-wikilink="true" data-note-id="…" data-note-title="…" data-display-text="…" class="wikilink-node" contenteditable="false">[[Title]]</span>
-  ```
-- Unresolved titles → render as `<span class="wikilink-broken">[[Title]]</span>` (red/dashed style, click opens the create-note dialog with the title prefilled). Add the style to `src/index.css`.
+3. **`tiptap-markdown` Markdown-Extension parst `/befehl` oder `@mention` als Sonder-Token**
+   Mit `transformPastedText: true` werden eingefügte Texte durch den Markdown-Parser geschickt. Beim Tippen normalerweise nicht — aber wenn die Zeile beim Autosave wieder durch `getJSON → tiptapJsonToMarkdown` und beim nächsten Mount durch `markdownToHtml` läuft, kann sich was verlieren.
 
-**Result:** existing `[[Root Discord DM]]`-style strings instantly become real, clickable, ID-bearing nodes again.
+4. **WikilinkResolver greift nicht** — early-return bei fehlendem `[[`. Sehr unwahrscheinlich Ursache. ✗
 
----
+## Diagnose-Schritte (vor Fix!)
 
-## B. Title-fallback in `extractLinkedNoteIds` (sync safety net)
+1. **DB-Inhalt prüfen** für die betroffene Notiz `1cbbd31f-4238-41a9-be75-ab17bd464567`:
+   ```sql
+   select length(content), content from notes
+   where id = '1cbbd31f-4238-41a9-be75-ab17bd464567';
+   ```
+   → Steht der String tatsächlich in der DB oder nicht? Damit grenzen wir auf „Save-Verlust" vs. „Render-Verlust" ein.
 
-**File:** `src/components/notes/NoteEditor.tsx` (`extractLinkedNoteIds` ~line 122 + `syncManualLinks` ~line 161)
+2. **Console-Logs lesen** während Reproduktion: tritt `"Skipped non-user editor update that would remove links"` auf?
 
-- Extend `extractLinkedNoteIds` to also collect raw `[[Title]]` text occurrences from the editor's text content, not just `wikilink` nodes.
-- In `syncManualLinks`, resolve any title-only references to note IDs via a single `select id from notes where user_id=… and lower(title)=any(...)` query before computing the upsert/delete diff.
-- Skip self-references and unresolved titles.
+3. **Roundtrip-Test schreiben** in `src/utils/__tests__/markdown-converter.test.ts`: Input `/plugin install skill-creator@claude-plugins-official` → `markdownToHtml` → simulierte Tiptap-JSON → `tiptapJsonToMarkdown` → muss bit-genau gleich zurückkommen.
 
-**Result:** even if step A is bypassed (e.g. raw paste), the next save still writes the correct `manual_link` rows.
+## Fix-Plan (abhängig von Diagnose, aber alle additiv)
 
----
+### A. Skip-Regel entschärfen
+`onUpdate` darf Saves **nicht stillschweigend verwerfen**. Entweder:
+- Regel komplett entfernen (sie war ein Workaround gegen ein anderes Problem), oder
+- nur skippen, wenn das Verhältnis dramatisch ist UND der User wirklich nicht fokussiert ist (z.B. Notenwechsel), und in jedem Fall **toasten** statt nur loggen.
 
-## C. One-time backfill edge function
+### B. Roundtrip härten in `markdownToHtml` / `tiptapJsonToMarkdown`
+- `escapeMarkdownText` umbenennen + invertieren: aktuell *entfernt* es Escapes (Name lügt). Stattdessen Sonderzeichen wie `*`, `_`, `[`, `]`, `\`` in Text-Knoten beim Serialisieren mit Backslash escapen, damit Re-Parse sie nicht als Markup interpretiert.
+- `markdownToHtml`: Zeilen die mit `/` oder anderen Slash-Befehlen beginnen, sind eh Plain-Text — keine Sonderbehandlung. Aber prüfen, dass `@xxx` nicht als Mention/Autolink gefressen wird (sollte nicht, aber Test absichern).
 
-**New file:** `supabase/functions/backfill-wikilinks/index.ts`
+### C. Tests
+- Neuer Roundtrip-Test mit den problematischen Strings:
+  - `/plugin install skill-creator@claude-plugins-official`
+  - `npm install @scope/package-name@1.2.3`
+  - `https://example.com/path?x=1&y=2`
+  - Strings mit `*`, `_`, `[`, `]` mitten im Wort
 
-- Auth: standard `Authorization` header → per-request Supabase client (per Edge Auth memory rule).
-- Logic:
-  1. Load all of the user's non-trashed notes (`id, title, content`).
-  2. Build a `lower(title) → id` lookup map.
-  3. For each note, regex-extract `[[Title]]` matches from `content`.
-  4. Resolve to target IDs (skip self, skip unknown).
-  5. Diff against existing `manual_link` rows in `note_connections` for that source.
-  6. Insert missing rows in batches; do NOT delete existing rows (idempotent, safe to re-run).
-  7. Return `{ scanned, links_added, unresolved: [...] }`.
-
-**UI trigger:** add a "Rebuild wikilink connections" button in `src/components/settings/ImportMigrate.tsx` next to existing maintenance actions. Shows result toast with counts.
-
-**Result:** historical wikilinks (including the user's "Root" → "Root Discord DM") become visible in the Outgoing panel without manually re-inserting anything.
-
----
-
-## D. Robust insert on suggestion accept
-
-**File:** `src/components/notes/NoteEditor.tsx` — wherever `editor.commands.insertWikilink({...})` is called in response to the SuggestedLinksPanel callback (also check `SuggestedLinksPanel.tsx`).
-
-Before inserting:
-- Inspect the character immediately to the left and right of the current selection.
-- If the left char is a non-whitespace word character, prepend a space.
-- If the right char is a non-whitespace word character, append a space.
-- If the editor is currently focused inside a word (selection is a caret in the middle of a text node), move the caret to the end of that word first.
-
-**Result:** prevents future occurrences like `Fv[[Root Discord DM]]ctory`.
-
----
+### D. Wikilink-Resolver lassen wie er ist
+Der Resolver hat einen sicheren early-return; er ist nicht das Problem. Keine Änderung dort.
 
 ## Out of scope
+- Editor-Refactor (z.B. weg von tiptap-markdown). Erstmal die zwei konkreten Lecks abdichten.
 
-- Renaming notes does not auto-update existing `[[Title]]` strings (Obsidian behavior). Could be a follow-up.
-- No changes to graph rendering, suggestions ranking, or the WikilinkExtension itself.
-- No DB schema changes.
+## Reihenfolge der Umsetzung
+1. DB-Read der konkreten Notiz (sofort, klärt Hypothese in 30s).
+2. Konsolen-Logs lesen.
+3. Je nach Befund: A (Skip-Regel) und/oder B (Escape) implementieren.
+4. Tests in `markdown-converter.test.ts` ergänzen.
+5. Manuelle Verifikation in der betroffenen Notiz.
 
----
-
-## Technical notes
-
-- All four changes are additive; no migrations.
-- Resolution queries are scoped by `user_id` (RLS already enforces this).
-- The backfill function deduplicates per `(source, target)` pair before insert; existing unique constraints on `note_connections` (if any) plus the existence-check make it safe to re-run.
-- Title matching is **case-insensitive, exact** (no fuzzy) to match Obsidian's wikilink semantics.
+Soll ich genau so vorgehen?

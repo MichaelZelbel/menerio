@@ -485,3 +485,21 @@ describe("filePathToNoteTitle", () => {
     expect(filePathToNoteTitle("brain/Inbox/Quick thought.md")).toBe("Quick thought");
   });
 });
+
+// ─── List continuation lines (regression: text under list items used to disappear) ──
+
+describe("markdownToHtml: list continuation lines", () => {
+  it("preserves a non-list line that follows a list item", () => {
+    const md = `- Skill Creator:\n/plugin install skill-creator@claude-plugins-official\n- Super Powers:`;
+    const html = markdownToHtml(md);
+    expect(html).toContain("/plugin install skill-creator@claude-plugins-official");
+    expect(html).toContain("Skill Creator:");
+    expect(html).toContain("Super Powers:");
+  });
+
+  it("does not drop continuation text for at-mention-like tokens", () => {
+    const md = `- Item one\n@scope/package@1.2.3\n- Item two`;
+    const html = markdownToHtml(md);
+    expect(html).toContain("@scope/package@1.2.3");
+  });
+});

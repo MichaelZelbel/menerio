@@ -481,10 +481,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = editorToMarkdown(e);
-      if (!e.isFocused && countMarkdownLinks(note.content) > countMarkdownLinks(md)) {
-        console.warn("Skipped non-user editor update that would remove links", { noteId: note.id });
-        return;
-      }
+      // Note: previously we skipped non-focused updates that appeared to remove links,
+      // but that silently dropped legitimate user edits (e.g. continuation lines under
+      // list items). Always persist what the editor produced.
       lastLocalContentRef.current = md;
       pendingSaveContentRef.current = md;
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
