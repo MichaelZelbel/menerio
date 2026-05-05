@@ -493,7 +493,7 @@ serve(async (req) => {
 
     const { data: existingPages, error: pagesError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, page_type, summary, content")
+      .select("id, slug, title, page_type, summary, content, protected_sections")
       .order("page_type", { ascending: true })
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
@@ -502,9 +502,12 @@ serve(async (req) => {
       .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
       .join("\n") || "No existing pages yet.";
 
-    const existingBySlug = new Map<string, { content: string }>();
+    const existingBySlug = new Map<string, { content: string; protected_sections: string[] }>();
     for (const page of existingPages || []) {
-      existingBySlug.set(page.slug, { content: page.content || "" });
+      existingBySlug.set(page.slug, {
+        content: page.content || "",
+        protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
+      });
     }
 
     const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
@@ -530,12 +533,23 @@ serve(async (req) => {
     for (const action of parsed.actions) {
       const existing = existingBySlug.get(action.slug)?.content ?? null;
       const result = validateAction(action, contentText, existing);
-      if (result.ok) {
-        acceptedActions.push(result.action);
-        validationLog.push({ slug: action.slug, outcome: "accepted" });
-      } else {
+      if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
+        continue;
       }
+
+      // Respect user-protected sections: never overwrite content the user has edited.
+      const meta = existingBySlug.get(action.slug);
+      if (meta && meta.protected_sections.length > 0) {
+        const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
+        const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
+        if ((result.action as any).content !== undefined) (result.action as any).content = merged;
+        if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
+        validationLog.push({ slug: action.slug, outcome: "accepted_merged_protected" });
+      } else {
+        validationLog.push({ slug: action.slug, outcome: "accepted" });
+      }
+      acceptedActions.push(result.action);
     }
     parsed.actions = acceptedActions;
     // Also drop source_links pointing to rejected pages.
