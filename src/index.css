@@ -669,6 +669,16 @@
   text-decoration: underline;
 }
 
+.wikilink-broken {
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.08);
+  border: 1px dashed hsl(var(--destructive) / 0.5);
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 0.95em;
+  cursor: help;
+}
+
 /* Legacy wikilink decoration (for backwards compat) */
 .wikilink-decoration {
   color: hsl(var(--primary));
