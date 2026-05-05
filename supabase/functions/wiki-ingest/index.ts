@@ -16,6 +16,68 @@ const MAX_DELETION_RATIO = 0.4;
 // Maximum number of new wikilinks an action may introduce that aren't grounded in the note.
 const MAX_UNGROUNDED_NEW_LINKS = 0;
 
+const INTRO_SLUG = "__intro__";
+
+function slugifyHeading(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+
+type WikiSection = { slug: string; heading: string; body: string };
+
+function parseSections(markdown: string): WikiSection[] {
+  const text = (markdown || "").replace(/\r\n/g, "\n");
+  const sections: WikiSection[] = [];
+  let current: WikiSection = { slug: INTRO_SLUG, heading: "", body: "" };
+  const buf: string[] = [];
+  const flush = () => {
+    current.body = buf.join("\n").replace(/\n+$/, "");
+    if (current.slug !== INTRO_SLUG || current.body.trim().length > 0) sections.push(current);
+    buf.length = 0;
+  };
+  for (const line of text.split("\n")) {
+    const m = line.match(/^##\s+(.+?)\s*$/);
+    if (m) {
+      flush();
+      current = { slug: slugifyHeading(m[1].trim()), heading: m[1].trim(), body: "" };
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  return sections;
+}
+
+function mergeWithProtectedSections(current: string, proposed: string, protectedSlugs: string[]): string {
+  const protectedSet = new Set(protectedSlugs);
+  const currentBySlug = new Map(parseSections(current).map((s) => [s.slug, s]));
+  const proposedSections = parseSections(proposed);
+  const out: WikiSection[] = [];
+  const seen = new Set<string>();
+  for (const section of proposedSections) {
+    seen.add(section.slug);
+    if (protectedSet.has(section.slug) && currentBySlug.has(section.slug)) {
+      out.push(currentBySlug.get(section.slug)!);
+    } else {
+      out.push(section);
+    }
+  }
+  for (const slug of protectedSlugs) {
+    if (!seen.has(slug) && currentBySlug.has(slug)) {
+      out.push(currentBySlug.get(slug)!);
+      seen.add(slug);
+    }
+  }
+  const parts: string[] = [];
+  for (const s of out) {
+    if (s.slug === INTRO_SLUG) {
+      if (s.body.trim()) parts.push(s.body.trim());
+    } else {
+      parts.push(`## ${s.heading}\n${s.body}`.trimEnd());
+    }
+  }
+  return parts.join("\n\n").trim() + "\n";
+}
+
 type WikiAction = {
   op: "create" | "update";
   slug: string;
