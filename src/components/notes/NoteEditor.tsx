@@ -122,7 +122,7 @@ interface NoteEditorProps {
   onNoteSelect?: (noteId: string) => void;
 }
 
-/** Extract all wikilink noteIds from editor JSON content */
+/** Extract all wikilink noteIds from editor JSON content (resolved nodes only) */
 function extractWikilinkIds(doc: any): string[] {
   const ids: string[] = [];
   function walk(node: any) {
@@ -133,6 +133,19 @@ function extractWikilinkIds(doc: any): string[] {
   }
   if (doc) walk(doc);
   return [...new Set(ids)];
+}
+
+/** Extract raw `[[Title]]` strings from editor text (fallback for unresolved markdown) */
+function extractRawWikilinkTitles(editor: { getText: () => string }): string[] {
+  const text = editor.getText();
+  const out = new Set<string>();
+  const re = /\[\[([^\[\]\n]+?)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[1].trim();
+    if (t) out.add(t);
+  }
+  return [...out];
 }
 
 function contentToEditorHtml(content: string | null | undefined, note: Pick<Note, "is_external" | "title">): string {
@@ -157,10 +170,34 @@ function countMarkdownLinks(content: string | null | undefined): number {
   return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
 }
 
-/** Sync manual_link connections based on wikilinks in content */
-async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: string[]) {
+/** Sync manual_link connections based on wikilinks in content.
+ *  Resolves both ID-bearing wikilink nodes AND raw `[[Title]]` text fallbacks. */
+async function syncManualLinks(
+  noteId: string,
+  userId: string,
+  linkedNoteIds: string[],
+  rawTitles: string[] = [],
+) {
   try {
-    // Get existing manual_link connections from this note
+    let allTargetIds = [...linkedNoteIds];
+    if (rawTitles.length > 0) {
+      const { data: matches } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", userId)
+        .eq("is_trashed", false)
+        .in("title", rawTitles);
+      const titleMap = new Map<string, string>();
+      (matches || []).forEach((r: any) => {
+        if (r.title) titleMap.set(String(r.title).toLowerCase(), r.id);
+      });
+      for (const t of rawTitles) {
+        const id = titleMap.get(t.toLowerCase());
+        if (id) allTargetIds.push(id);
+      }
+    }
+    allTargetIds = [...new Set(allTargetIds)].filter((id) => id !== noteId);
+
     const { data: existing } = await supabase
       .from("note_connections" as any)
       .select("id, target_note_id")
@@ -169,9 +206,8 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
       .eq("user_id", userId);
 
     const existingMap = new Map((existing || []).map((e: any) => [e.target_note_id, e.id]));
-    const newTargets = new Set(linkedNoteIds);
+    const newTargets = new Set(allTargetIds);
 
-    // Delete removed links
     const toDelete = (existing || [])
       .filter((e: any) => !newTargets.has(e.target_note_id))
       .map((e: any) => e.id);
@@ -180,8 +216,7 @@ async function syncManualLinks(noteId: string, userId: string, linkedNoteIds: st
       await supabase.from("note_connections" as any).delete().in("id", toDelete);
     }
 
-    // Upsert new links
-    const toUpsert = linkedNoteIds
+    const toUpsert = allTargetIds
       .filter((id) => !existingMap.has(id))
       .map((targetId) => ({
         user_id: userId,
