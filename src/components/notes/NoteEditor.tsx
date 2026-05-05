@@ -451,7 +451,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     content: (() => {
       // Convert Markdown deterministically to HTML so checklists and other
       // block constructs always render as real TipTap nodes on first load.
-      return contentToEditorHtml(note.content, note);
+      return resolveWikilinks(contentToEditorHtml(note.content, note));
     })(),
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
@@ -477,7 +477,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (user) {
           const doc = e.getJSON();
           const linkedIds = extractWikilinkIds(doc);
-          syncManualLinks(note.id, user.id, linkedIds);
+          const rawTitles = extractRawWikilinkTitles(e);
+          syncManualLinks(note.id, user.id, linkedIds, rawTitles);
           queryClient.invalidateQueries({ queryKey: ["backlinks"] });
         }
       }, 800);
@@ -536,7 +537,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }
     if (!editor) return;
 
-    const editorContent = contentToEditorHtml(note.content, note);
+    const editorContent = resolveWikilinks(contentToEditorHtml(note.content, note));
     const currentHtml = editor.getHTML();
     const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
     const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
@@ -571,7 +572,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           .eq("id", note.id)
           .single();
         if (error || !data) return;
-        const html = contentToEditorHtml((data as any).content || "", note);
+        const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
           editor.commands.setContent(html, { emitUpdate: false });
           lastLocalContentRef.current = (data as any).content || "";
@@ -809,7 +810,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(contentToEditorHtml(sourceText, { ...note, is_external: false }), { emitUpdate: false });
+      editor.commands.setContent(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })), { emitUpdate: false });
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
