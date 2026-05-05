@@ -420,7 +420,7 @@ function serializeInlineChildren(node: TiptapNode): string {
 
 function serializeInlineNode(node: TiptapNode): string {
   if (node.type === "text") return applyMarks(escapeMarkdownText(node.text || ""), node.marks || []);
-  if (node.type === "hardBreak") return "\n";
+  if (node.type === "hardBreak") return "  \n";
   if (node.type === "wikilink") {
     const title = String(node.attrs?.noteTitle || "");
     const display = String(node.attrs?.displayText || "");
