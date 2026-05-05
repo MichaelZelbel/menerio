@@ -31,16 +31,10 @@ export default function SharedNote() {
   useEffect(() => {
     if (!token) return;
 
-    supabase.functions
-      .invoke("get-shared-note", { body: undefined, method: "GET" as any })
-      .then(() => {})
-      .catch(() => {});
-
-    // Use fetch directly since we need GET with query params
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-shared-note?token=${encodeURIComponent(token)}`;
+    const url = `${SUPABASE_URL}/functions/v1/get-shared-note?token=${encodeURIComponent(token)}`;
     fetch(url, {
       headers: {
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        apikey: SUPABASE_PUBLISHABLE_KEY,
       },
     })
       .then(async (res) => {
