@@ -311,17 +311,25 @@ function markdownListToHtml(block: string): string {
     content: string;
   };
 
-  const lines: ListLine[] = block.split("\n").flatMap((line) => {
+  const rawLines = block.split("\n");
+  const lines: ListLine[] = [];
+  for (const line of rawLines) {
     const match = line.match(/^(\s*)(?:(- \[([ xX])\]\s+)|([-*+])\s+|(\d+)\.\s+)(.*)$/);
-    if (!match) return [];
-    return [{
-      indent: match[1].replace(/\t/g, "  ").length,
-      ordered: Boolean(match[5]),
-      task: Boolean(match[2]),
-      checked: String(match[3] || "").toLowerCase() === "x",
-      content: match[6] || "",
-    }];
-  });
+    if (match) {
+      lines.push({
+        indent: match[1].replace(/\t/g, "  ").length,
+        ordered: Boolean(match[5]),
+        task: Boolean(match[2]),
+        checked: String(match[3] || "").toLowerCase() === "x",
+        content: match[6] || "",
+      });
+    } else if (lines.length > 0 && line.trim().length > 0) {
+      // Continuation line for the previous list item — preserve it instead of dropping.
+      // Append as a soft break inside the same item's content.
+      const prev = lines[lines.length - 1];
+      prev.content = `${prev.content}<br>${line.trim()}`;
+    }
+  }
 
   const render = (start: number, indent: number): { html: string; next: number } => {
     const listType = lines[start]?.ordered ? "ol" : "ul";
