@@ -189,6 +189,7 @@ export function ImportMigrate() {
   const currentProgress = progressTotal > 0 ? (progress / progressTotal) * 100 : 0;
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
@@ -324,6 +325,26 @@ export function ImportMigrate() {
         </Tabs>
       </CardContent>
     </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="h-4 w-4 text-primary" />
+          Rebuild wikilink connections
+        </CardTitle>
+        <CardDescription>
+          Scans every note for <code className="bg-background px-1 rounded text-xs">[[Title]]</code> references
+          and adds any missing connections. Safe to re-run.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={runWikilinkBackfill} disabled={backfillLoading}>
+          {backfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Rebuild now
+        </Button>
+      </CardContent>
+    </Card>
+    </div>
   );
 }
 
