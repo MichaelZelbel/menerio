@@ -11,6 +11,11 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
+// Maximum % of existing content that an update may delete before we reject it as drift.
+const MAX_DELETION_RATIO = 0.4;
+// Maximum number of new wikilinks an action may introduce that aren't grounded in the note.
+const MAX_UNGROUNDED_NEW_LINKS = 0;
+
 type WikiAction = {
   op: "create" | "update";
   slug: string;
@@ -30,134 +35,80 @@ type SynthesisResult = {
 
 const WIKI_SYNTHESIS_AGENT_PROMPT = `=== BEGIN WIKI SYNTHESIS AGENT PROMPT ===
 
-You are the Lexicon maintainer for a personal LLM-maintained knowledge base. Your job is to read one new note the user has captured (or updated) and decide how to update the Lexicon — creating new pages, updating existing pages, and maintaining cross-references.
+You are the Lexicon maintainer for a personal knowledge base. You read ONE new note the user just captured or updated, and decide whether and how to update the Lexicon.
 
-# Editorial policy
+# The most important rule: GROUND EVERY CLAIM AND EVERY LINK
 
-Page types you may use, exclusively:
+The Lexicon is failing because past synthesis runs invented relationships and added wikilinks that have nothing to do with the note. You must not do that.
 
-- entity: a named thing — an organization, place, product, project, event, work
+For every sentence you write and every \`[[slug]]\` you add, ask yourself:
+"Is this claim or this link DIRECTLY supported by the text of this note (or, for an update, by content already on the existing page)?"
 
-- concept: an idea, theory, framework, or abstract topic
+If the answer is "no" or "I'm filling in context from world knowledge" — DO NOT WRITE IT.
 
-- source: a summary of a single notable note or external article (use sparingly — most notes don't need their own source page)
+Concretely:
 
-- overview: a high-level synthesis covering a domain, with links to its constituent entities and concepts
+- DO NOT add a wikilink to an entity, person, organization, product, place, or concept just because it is topically related. Only link to things that are explicitly named in the note (or already on the page you are updating).
+- DO NOT add "is integrated with X", "works at Y", "is a member of Z" unless the note says so in plain words.
+- DO NOT add background context, history, or framing that isn't in the note. The Lexicon is a record of what the user has captured, not an encyclopedia.
+- When in doubt, write LESS. An empty actions array is a perfectly good answer.
 
-- synthesis: an analysis or comparison drawing across multiple entities or concepts
+# Page types
 
-- person: a specific named person the user interacts with or writes about
+Use exactly one of: \`entity\`, \`concept\`, \`source\`, \`overview\`, \`synthesis\`, \`person\`, \`group\`.
 
-Conventions:
+# Conventions
 
-- Slugs are lowercase kebab-case, derived from the title. Stable: never rename an existing slug. When updating an existing page, use the slug exactly as it appears in the index.
+- Slugs are lowercase kebab-case. Stable. Never rename an existing slug. For updates, copy the slug exactly from the index.
+- Every page begins with one short paragraph summary, then sections.
+- Use short paragraphs and 2–4 sections like "## Known facts", "## Open questions", "## Related". Keep it readable.
+- Wikilinks use \`[[slug]]\` syntax. Be SPARING. Maximum 5 wikilinks per page action, and only for things explicitly named in the note.
+- For an UPDATE, return the FULL new markdown of the page in \`patch\`. Do not delete or rewrite existing sections unless the note clearly invalidates them. Prefer ADDITIVE updates: append a new bullet under "## Known facts", or add a "## Contradictions" section. Preserve everything else verbatim.
+- If the note contradicts the existing page, do NOT silently overwrite. Add a "## Contradictions" section with date and the conflicting claims.
+- Do not invent facts. If the note is ambiguous, say so on the page rather than picking a confident reading.
+- For every page you create or update, include the note_id in source_links.
 
-- Every page begins with a one-paragraph summary at the top, before any headers.
+# When to do nothing
 
-- Write pages in readable Markdown, not as one long block. Use short paragraphs separated by blank lines. For every non-trivial page, include 2–4 useful sections such as "## What this means", "## Known facts", "## Open questions", "## Related", or a more specific heading. Prefer concise bullets for lists of facts, relationships, or decisions.
-
-- Lexicon links use [[slug]] syntax. Use them generously: every named entity, concept, and person mentioned should be linked, whether or not the target page exists yet. The system tracks unresolved links separately.
-
-- Do not use markdown link syntax for internal pages.
-
-- When updating a page, return the FULL new markdown content in the patch field, not a diff. The system replaces the page body wholesale.
-
-- When the new note contradicts something on an existing page, do not silently overwrite. Add or extend a "## Contradictions" section on that page, with the date and the conflicting claims. The user reviews contradictions in the review list.
-
-- When two pages would say nearly the same thing, prefer one canonical page and link to it from the other.
-
-- Be honest about uncertainty. If the note is ambiguous, say so on the page rather than picking a confident reading.
-
-- Do not invent facts. Only write claims supported by the note you are reading or by content already on existing pages. If you find yourself wanting to add color or context that isn't grounded, stop.
-
-- For every page you create or update, include the note_id in source_links so the user can trace the claim.
+Most notes do NOT need a Lexicon update. Return an empty actions array if:
+- The note is short, vague, a reminder, a shopping list, a passing thought.
+- The note is a transcript or chat log without clear new facts about a named entity.
+- The note only restates things already on existing pages.
+- The note mentions things in passing without saying anything substantive about them.
 
 # Existing Lexicon pages (index)
 
-Here is the current index of Lexicon pages. One per line: slug | title | page_type | summary.
+slug | title | page_type | summary
 
 [EXISTING_PAGES_INDEX_HERE]
-
-# The new note
-
-The new note follows this system prompt as the user-role message. It includes the note_id, the title, and the content as plain text.
-
-# Your job
-
-Read the note. Decide:
-
-1. What named entities, concepts, and people are mentioned? Each is a candidate for a page.
-
-2. For each candidate, does a page already exist (check the index)? If yes, update it to incorporate the new information. If no, create a new page.
-
-3. What cross-references need to be added or strengthened? Add [[slug]] wikilinks generously.
-
-4. Does the note contradict anything on existing pages? If so, add a "## Contradictions" section on the affected page.
-
-5. Should an overview or synthesis page be updated to reflect new entities or themes?
-
-If the note contains nothing Lexicon-worthy (a shopping list, a passing thought, a one-line reminder), return an empty actions array. Not every note becomes a Lexicon update.
 
 # Output
 
 Return ONLY a JSON object, no surrounding text, no markdown code fences:
 
 {
-
   "actions": [
-
     {
-
       "op": "create",
-
       "slug": "kebab-case-slug",
-
       "title": "Title",
-
       "page_type": "entity|concept|source|overview|synthesis|person|group",
-
       "summary": "One-line summary that will appear in the index.",
-
-      "content": "Full markdown content of the new page. Starts with the summary paragraph. Uses [[slug]] for wikilinks.",
-
-      "change_summary": "Short past-tense description for the activity feed: e.g. 'Created from note about Sarah Chen'."
-
+      "content": "Full markdown content. Starts with the summary paragraph. Uses [[slug]] sparingly and only for things named in the note.",
+      "change_summary": "Short past-tense description: e.g. 'Created from note about Sarah Chen'."
     },
-
     {
-
       "op": "update",
-
       "slug": "existing-slug",
-
-      "title": "Updated title (only include if changing)",
-
-      "page_type": "Updated page_type (only include if changing)",
-
       "summary": "Updated summary (only include if changing)",
-
-      "patch": "FULL new markdown content of the page after your edits. Not a diff — the whole page.",
-
+      "patch": "FULL new markdown content of the page after your edits. Mostly the same as the previous content with additive changes. Not a diff — the whole page.",
       "change_summary": "Short past-tense description: e.g. 'Added contradiction note about Sarah's role'."
-
     }
-
   ],
-
   "source_links": [
-
-    {
-
-      "note_id": "uuid-of-the-note-being-ingested",
-
-      "page_slugs": ["slug-of-page-this-note-supports", "another-slug"]
-
-    }
-
+    { "note_id": "uuid-of-the-note", "page_slugs": ["slug-supported-by-note"] }
   ],
-
-  "log_summary": "One-line description of what happened in this ingest, written for the user. Example: 'Created sarah-chen and ml-team-migration; updated platform-migration with contradiction note.'"
-
+  "log_summary": "One-line description of what happened."
 }
 
 If the note has no Lexicon-worthy content:
@@ -253,6 +204,87 @@ function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResu
   return { actions, source_links, log_summary: result.log_summary || "Lexicon ingest completed." };
 }
 
+function extractWikilinks(markdown: string): string[] {
+  const matches = markdown.matchAll(/\[\[([a-z0-9-]+)\]\]/g);
+  return [...new Set([...matches].map((m) => m[1]))];
+}
+
+function slugToWords(slug: string): string {
+  return slug.replace(/-/g, " ").trim();
+}
+
+function normalizeForMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Validate one synthesis action against the note text and existing page state.
+ * Returns either an accepted action (possibly with stripped ungrounded links) or a rejection reason.
+ */
+function validateAction(
+  action: WikiAction,
+  noteText: string,
+  existingContent: string | null,
+): { ok: true; action: WikiAction } | { ok: false; reason: string } {
+  const normalizedNote = normalizeForMatch(noteText + " " + (action.title || ""));
+  const normalizedExisting = normalizeForMatch(existingContent || "");
+  const newContent = action.op === "update" ? (action.patch || action.content || "") : (action.content || "");
+
+  if (!newContent.trim()) return { ok: false, reason: "empty_content" };
+
+  // Drift / overwrite protection on updates.
+  if (action.op === "update" && existingContent && existingContent.length > 200) {
+    const lengthRatio = newContent.length / existingContent.length;
+    if (lengthRatio < (1 - MAX_DELETION_RATIO)) {
+      return { ok: false, reason: "deletes_too_much_content" };
+    }
+  }
+
+  // For create: the page subject (title or slug words) must appear in the note.
+  if (action.op === "create") {
+    const subject = normalizeForMatch(action.title || slugToWords(action.slug));
+    if (subject && !normalizedNote.includes(subject)) {
+      return { ok: false, reason: "subject_not_in_note" };
+    }
+  }
+
+  // Strip wikilinks that aren't grounded in the note OR in the previous page content.
+  const links = extractWikilinks(newContent);
+  let strippedCount = 0;
+  let cleaned = newContent;
+  for (const slug of links) {
+    if (slug === action.slug) continue; // self-link is fine
+    const slugWords = normalizeForMatch(slugToWords(slug));
+    const grounded =
+      normalizedNote.includes(slugWords) ||
+      normalizedExisting.includes(`[[${slug}]]`) ||
+      normalizedExisting.includes(slugWords);
+    if (!grounded) {
+      // Replace the wikilink with plain bracketed text so we don't wreck readability,
+      // but kill the link so we stop creating phantom relationships.
+      const pattern = new RegExp(`\\[\\[${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\]`, "g");
+      cleaned = cleaned.replace(pattern, slugToWords(slug));
+      strippedCount += 1;
+    }
+  }
+
+  if (strippedCount > MAX_UNGROUNDED_NEW_LINKS) {
+    // Keep the cleaned content (links stripped) instead of rejecting outright.
+    if (action.op === "update") {
+      return { ok: true, action: { ...action, patch: cleaned } };
+    }
+    return { ok: true, action: { ...action, content: cleaned } };
+  }
+
+  return { ok: true, action };
+}
+
 async function logWiki(db: any, userId: string, operation: string, details: Record<string, unknown>) {
   const { error } = await db.from("wiki_log").insert({ user_id: userId, operation, details });
   if (error) console.error("wiki_log insert failed", error);
@@ -272,7 +304,7 @@ async function callSynthesis(systemPrompt: string, userContent: string): Promise
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
       ],
-      temperature: 0.2,
+      temperature: 0.1,
       response_format: { type: "json_object" },
     }),
   });
@@ -377,7 +409,7 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     ].join("\n\n");
 
     const { raw } = await callSynthesis(
-      "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts.",
+      "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
       context,
     );
     const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""));
@@ -461,7 +493,7 @@ serve(async (req) => {
 
     const { data: existingPages, error: pagesError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, page_type, summary")
+      .select("id, slug, title, page_type, summary, content")
       .order("page_type", { ascending: true })
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
@@ -469,6 +501,11 @@ serve(async (req) => {
     const index = (existingPages || [])
       .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
       .join("\n") || "No existing pages yet.";
+
+    const existingBySlug = new Map<string, { content: string }>();
+    for (const page of existingPages || []) {
+      existingBySlug.set(page.slug, { content: page.content || "" });
+    }
 
     const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
     const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
@@ -487,6 +524,26 @@ serve(async (req) => {
       return jsonResponse({ error: "Failed to parse wiki synthesis response" }, 500);
     }
 
+    // Grounding validation pass.
+    const validationLog: Array<{ slug: string; outcome: string; reason?: string }> = [];
+    const acceptedActions: WikiAction[] = [];
+    for (const action of parsed.actions) {
+      const existing = existingBySlug.get(action.slug)?.content ?? null;
+      const result = validateAction(action, contentText, existing);
+      if (result.ok) {
+        acceptedActions.push(result.action);
+        validationLog.push({ slug: action.slug, outcome: "accepted" });
+      } else {
+        validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
+      }
+    }
+    parsed.actions = acceptedActions;
+    // Also drop source_links pointing to rejected pages.
+    const acceptedSlugs = new Set(acceptedActions.map((a) => a.slug));
+    parsed.source_links = parsed.source_links
+      .map((link) => ({ ...link, page_slugs: link.page_slugs.filter((slug) => acceptedSlugs.has(slug) || existingBySlug.has(slug)) }))
+      .filter((link) => link.page_slugs.length > 0);
+
     const { data: applyResult, error: applyError } = await db.rpc("wiki_apply_ingest", {
       p_note_id: noteId,
       p_actions: parsed.actions,
@@ -503,13 +560,21 @@ serve(async (req) => {
       note_id: noteId,
       change_type: changeType,
       action_count: parsed.actions.length,
+      validation: validationLog,
       log_summary: parsed.log_summary,
       duration_ms: durationMs,
       apply_result: applyResult,
       group_insights: groupInsightsResult,
     });
 
-    return jsonResponse({ ok: true, summary: parsed.log_summary, action_count: parsed.actions.length, group_insights: groupInsightsResult, duration_ms: durationMs });
+    return jsonResponse({
+      ok: true,
+      summary: parsed.log_summary,
+      action_count: parsed.actions.length,
+      validation: validationLog,
+      group_insights: groupInsightsResult,
+      duration_ms: durationMs,
+    });
   } catch (error) {
     console.error("wiki-ingest failed", error);
     if (db && userId) {
