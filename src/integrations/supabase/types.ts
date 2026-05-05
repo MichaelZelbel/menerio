@@ -2479,6 +2479,7 @@ export type Database = {
           last_synthesized_at: string | null
           metadata: Json
           page_type: string
+          protected_sections: string[]
           slug: string
           source_count: number
           summary: string | null
@@ -2494,6 +2495,7 @@ export type Database = {
           last_synthesized_at?: string | null
           metadata?: Json
           page_type?: string
+          protected_sections?: string[]
           slug: string
           source_count?: number
           summary?: string | null
@@ -2509,6 +2511,7 @@ export type Database = {
           last_synthesized_at?: string | null
           metadata?: Json
           page_type?: string
+          protected_sections?: string[]
           slug?: string
           source_count?: number
           summary?: string | null

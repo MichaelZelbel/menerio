@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
+import { diffChangedSectionSlugs } from "@/lib/wiki-sections";
 
 type WikiPageRow = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevisionRow = Database["public"]["Tables"]["wiki_revisions"]["Row"];
@@ -191,6 +192,10 @@ export default function WikiPage() {
       if (!page || !user) throw new Error("Not authenticated");
       const newContent = latestMarkdownRef.current;
       const newTitle = titleDraft.trim() || page.title;
+      const changedSlugs = diffChangedSectionSlugs(page.content || "", newContent);
+      const previousProtected = (page as unknown as { protected_sections?: string[] }).protected_sections || [];
+      const nextProtected = Array.from(new Set([...previousProtected, ...changedSlugs]));
+
       const { error: revisionError } = await supabase.from("wiki_revisions").insert({
         user_id: user.id,
         wiki_page_id: page.id,
@@ -206,7 +211,7 @@ export default function WikiPage() {
       if (revisionError) throw revisionError;
       const { error: updateError } = await supabase
         .from("wiki_pages")
-        .update({ title: newTitle, content: newContent })
+        .update({ title: newTitle, content: newContent, protected_sections: nextProtected } as never)
         .eq("id", page.id);
       if (updateError) throw updateError;
       const { error: rpcError } = await supabase.rpc("wiki_resync_links", { p_page_id: page.id });

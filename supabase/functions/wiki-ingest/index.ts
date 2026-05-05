@@ -16,6 +16,68 @@ const MAX_DELETION_RATIO = 0.4;
 // Maximum number of new wikilinks an action may introduce that aren't grounded in the note.
 const MAX_UNGROUNDED_NEW_LINKS = 0;
 
+const INTRO_SLUG = "__intro__";
+
+function slugifyHeading(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+
+type WikiSection = { slug: string; heading: string; body: string };
+
+function parseSections(markdown: string): WikiSection[] {
+  const text = (markdown || "").replace(/\r\n/g, "\n");
+  const sections: WikiSection[] = [];
+  let current: WikiSection = { slug: INTRO_SLUG, heading: "", body: "" };
+  const buf: string[] = [];
+  const flush = () => {
+    current.body = buf.join("\n").replace(/\n+$/, "");
+    if (current.slug !== INTRO_SLUG || current.body.trim().length > 0) sections.push(current);
+    buf.length = 0;
+  };
+  for (const line of text.split("\n")) {
+    const m = line.match(/^##\s+(.+?)\s*$/);
+    if (m) {
+      flush();
+      current = { slug: slugifyHeading(m[1].trim()), heading: m[1].trim(), body: "" };
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  return sections;
+}
+
+function mergeWithProtectedSections(current: string, proposed: string, protectedSlugs: string[]): string {
+  const protectedSet = new Set(protectedSlugs);
+  const currentBySlug = new Map(parseSections(current).map((s) => [s.slug, s]));
+  const proposedSections = parseSections(proposed);
+  const out: WikiSection[] = [];
+  const seen = new Set<string>();
+  for (const section of proposedSections) {
+    seen.add(section.slug);
+    if (protectedSet.has(section.slug) && currentBySlug.has(section.slug)) {
+      out.push(currentBySlug.get(section.slug)!);
+    } else {
+      out.push(section);
+    }
+  }
+  for (const slug of protectedSlugs) {
+    if (!seen.has(slug) && currentBySlug.has(slug)) {
+      out.push(currentBySlug.get(slug)!);
+      seen.add(slug);
+    }
+  }
+  const parts: string[] = [];
+  for (const s of out) {
+    if (s.slug === INTRO_SLUG) {
+      if (s.body.trim()) parts.push(s.body.trim());
+    } else {
+      parts.push(`## ${s.heading}\n${s.body}`.trimEnd());
+    }
+  }
+  return parts.join("\n\n").trim() + "\n";
+}
+
 type WikiAction = {
   op: "create" | "update";
   slug: string;
@@ -369,13 +431,14 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
   for (const group of groups.values()) {
     const { data: page, error: pageError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, content, last_synthesized_at")
+      .select("id, slug, title, content, last_synthesized_at, protected_sections")
       .eq("slug", `group-${group.slug}`)
       .eq("page_type", "group")
       .maybeSingle();
     if (pageError) throw pageError;
     if (!page) continue;
     if (page.last_synthesized_at && new Date(page.last_synthesized_at).getTime() > cutoff) continue;
+    if (Array.isArray(page.protected_sections) && page.protected_sections.includes("insights")) continue;
 
     const { data: interactions, error: interactionsError } = await db
       .from("contact_interactions")
@@ -493,7 +556,7 @@ serve(async (req) => {
 
     const { data: existingPages, error: pagesError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, page_type, summary, content")
+      .select("id, slug, title, page_type, summary, content, protected_sections")
       .order("page_type", { ascending: true })
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
@@ -502,9 +565,12 @@ serve(async (req) => {
       .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
       .join("\n") || "No existing pages yet.";
 
-    const existingBySlug = new Map<string, { content: string }>();
+    const existingBySlug = new Map<string, { content: string; protected_sections: string[] }>();
     for (const page of existingPages || []) {
-      existingBySlug.set(page.slug, { content: page.content || "" });
+      existingBySlug.set(page.slug, {
+        content: page.content || "",
+        protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
+      });
     }
 
     const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
@@ -530,12 +596,23 @@ serve(async (req) => {
     for (const action of parsed.actions) {
       const existing = existingBySlug.get(action.slug)?.content ?? null;
       const result = validateAction(action, contentText, existing);
-      if (result.ok) {
-        acceptedActions.push(result.action);
-        validationLog.push({ slug: action.slug, outcome: "accepted" });
-      } else {
+      if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
+        continue;
       }
+
+      // Respect user-protected sections: never overwrite content the user has edited.
+      const meta = existingBySlug.get(action.slug);
+      if (meta && meta.protected_sections.length > 0) {
+        const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
+        const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
+        if ((result.action as any).content !== undefined) (result.action as any).content = merged;
+        if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
+        validationLog.push({ slug: action.slug, outcome: "accepted_merged_protected" });
+      } else {
+        validationLog.push({ slug: action.slug, outcome: "accepted" });
+      }
+      acceptedActions.push(result.action);
     }
     parsed.actions = acceptedActions;
     // Also drop source_links pointing to rejected pages.

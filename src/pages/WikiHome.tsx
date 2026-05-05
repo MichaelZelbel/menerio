@@ -2,28 +2,15 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { BookOpen, FileText, Loader2, Search, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { BookOpen, FileText, Search } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-
-type CleanupCandidate = {
-  id: string;
-  slug: string;
-  title: string;
-  page_type: string;
-  source_count: number;
-  inbound_links: number;
-  reason: string;
-};
 
 type WikiPage = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevision = Database["public"]["Tables"]["wiki_revisions"]["Row"];
@@ -79,57 +66,6 @@ function WikiHomeSkeleton() {
 export default function WikiHome() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [cleanupDeleting, setCleanupDeleting] = useState(false);
-  const [cleanupCandidates, setCleanupCandidates] = useState<CleanupCandidate[]>([]);
-  const [cleanupSelection, setCleanupSelection] = useState<Set<string>>(new Set());
-
-  const openCleanup = async () => {
-    setCleanupOpen(true);
-    setCleanupLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "dry_run" } });
-      if (error) throw error;
-      const list = (data?.candidates || []) as CleanupCandidate[];
-      setCleanupCandidates(list);
-      setCleanupSelection(new Set(list.map((c) => c.id)));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load cleanup candidates");
-      setCleanupOpen(false);
-    } finally {
-      setCleanupLoading(false);
-    }
-  };
-
-  const toggleCandidate = (id: string) => {
-    setCleanupSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const runCleanup = async () => {
-    if (cleanupSelection.size === 0) return;
-    setCleanupDeleting(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("wiki-cleanup", {
-        body: { mode: "delete", page_ids: Array.from(cleanupSelection) },
-      });
-      if (error) throw error;
-      toast.success(`Deleted ${data?.deleted ?? 0} pages`);
-      setCleanupOpen(false);
-      setCleanupCandidates([]);
-      setCleanupSelection(new Set());
-      navigate(0);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Cleanup failed");
-    } finally {
-      setCleanupDeleting(false);
-    }
-  };
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery<WikiPage[]>({
     queryKey: ["wiki-pages"],
@@ -179,92 +115,12 @@ export default function WikiHome() {
     <div className="space-y-6">
       <SEOHead title="Lexicon — Menerio" noIndex />
 
-      <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-bold">Lexicon</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Your AI-generated knowledge lexicon, built automatically from your notes.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={async () => {
-              if (!confirm("Remove all dead [[wikilinks]] (links pointing to non-existent pages) from every Lexicon page?")) return;
-              try {
-                const { data, error } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
-                if (error) throw error;
-                toast.success(`Stripped ${data?.links_removed ?? 0} dead links across ${data?.pages_changed ?? 0} pages`);
-                navigate(0);
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Strip failed");
-              }
-            }}
-          >
-            Strip dead links
-          </Button>
-          <Button variant="outline" onClick={openCleanup}>
-            <Trash2 className="h-4 w-4" /> Cleanup
-          </Button>
-          <Button variant="secondary" onClick={() => navigate("/lexicon/lint")}>Run lint</Button>
-        </div>
+      <div className="border-b border-border pb-5">
+        <h1 className="text-3xl font-display font-bold">Lexicon</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Your AI-generated knowledge lexicon, built automatically from your notes.
+        </p>
       </div>
-
-      <Dialog open={cleanupOpen} onOpenChange={setCleanupOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Lexicon cleanup</DialogTitle>
-            <DialogDescription>
-              These pages look like noise: no source notes, no incoming links, or near-empty content. Deselect any you want to keep, then delete the rest.
-            </DialogDescription>
-          </DialogHeader>
-          {cleanupLoading ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…
-            </div>
-          ) : cleanupCandidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Nothing to clean up. Your Lexicon looks healthy.</p>
-          ) : (
-            <ScrollArea className="max-h-[50vh] pr-3">
-              <div className="space-y-2">
-                {cleanupCandidates.map((candidate) => (
-                  <label
-                    key={candidate.id}
-                    className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 hover:bg-accent/40"
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={cleanupSelection.has(candidate.id)}
-                      onChange={() => toggleCandidate(candidate.id)}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium">{candidate.title}</span>
-                        <Badge variant="outline" className="text-xs">{candidate.page_type}</Badge>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {candidate.reason.replace(/_/g, " ")} · {candidate.source_count} sources · {candidate.inbound_links} backlinks
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </ScrollArea>
-          )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setCleanupOpen(false)} disabled={cleanupDeleting}>Cancel</Button>
-            <Button
-              variant="destructive"
-              onClick={runCleanup}
-              disabled={cleanupDeleting || cleanupSelection.size === 0}
-            >
-              {cleanupDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Delete {cleanupSelection.size}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <div className="relative max-w-xl">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
