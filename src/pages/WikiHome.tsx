@@ -66,57 +66,6 @@ function WikiHomeSkeleton() {
 export default function WikiHome() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [cleanupDeleting, setCleanupDeleting] = useState(false);
-  const [cleanupCandidates, setCleanupCandidates] = useState<CleanupCandidate[]>([]);
-  const [cleanupSelection, setCleanupSelection] = useState<Set<string>>(new Set());
-
-  const openCleanup = async () => {
-    setCleanupOpen(true);
-    setCleanupLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "dry_run" } });
-      if (error) throw error;
-      const list = (data?.candidates || []) as CleanupCandidate[];
-      setCleanupCandidates(list);
-      setCleanupSelection(new Set(list.map((c) => c.id)));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load cleanup candidates");
-      setCleanupOpen(false);
-    } finally {
-      setCleanupLoading(false);
-    }
-  };
-
-  const toggleCandidate = (id: string) => {
-    setCleanupSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const runCleanup = async () => {
-    if (cleanupSelection.size === 0) return;
-    setCleanupDeleting(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("wiki-cleanup", {
-        body: { mode: "delete", page_ids: Array.from(cleanupSelection) },
-      });
-      if (error) throw error;
-      toast.success(`Deleted ${data?.deleted ?? 0} pages`);
-      setCleanupOpen(false);
-      setCleanupCandidates([]);
-      setCleanupSelection(new Set());
-      navigate(0);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Cleanup failed");
-    } finally {
-      setCleanupDeleting(false);
-    }
-  };
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery<WikiPage[]>({
     queryKey: ["wiki-pages"],
