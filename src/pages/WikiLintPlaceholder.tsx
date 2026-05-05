@@ -296,6 +296,11 @@ export default function WikiLintPlaceholder() {
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
                   <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
                 </div>
+              </div>
+            ))}
+          </LintSection>
+
+          <LintSection title="Gaps" count={findings.gaps.length}>
             {findings.gaps.map((item, index) => (
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /><code className="rounded bg-muted px-1.5 py-0.5 text-xs">{item.missing_link}</code></div>
@@ -304,6 +309,11 @@ export default function WikiLintPlaceholder() {
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
                   <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
                 </div>
+              </div>
+            ))}
+          </LintSection>
+
+          <LintSection title="Stale syntheses" count={findings.stale_syntheses.length}>
             {findings.stale_syntheses.map((item, index) => (
               <div key={index} className="rounded-md border border-border p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2"><Badge variant={severityVariant(item.severity)}>{item.severity}</Badge><PageLink slug={item.page} title={pageTitles.get(item.page)} /></div>
@@ -312,7 +322,12 @@ export default function WikiLintPlaceholder() {
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
                   <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
                 </div>
+              </div>
+            ))}
+          </LintSection>
+        </>
       )}
     </div>
   );
 }
+
