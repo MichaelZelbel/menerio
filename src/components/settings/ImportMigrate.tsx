@@ -61,6 +61,23 @@ function splitByParagraphs(text: string): { title: string; content: string }[] {
 export function ImportMigrate() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [backfillLoading, setBackfillLoading] = useState(false);
+
+  const runWikilinkBackfill = async () => {
+    setBackfillLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-wikilinks", { body: {} });
+      if (error) throw error;
+      toast({
+        title: "Wikilink backfill complete",
+        description: `Scanned ${data?.scanned ?? 0} notes, added ${data?.links_added ?? 0} connections${data?.unresolved_count ? `, ${data.unresolved_count} unresolved titles` : ""}.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Backfill failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
 
   // AI Memory import
   const [aiText, setAiText] = useState("");
