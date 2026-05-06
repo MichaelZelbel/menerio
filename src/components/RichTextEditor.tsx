@@ -133,10 +133,34 @@ export function RichTextEditor({
     }
   }, [editor, value]);
 
+  const handleContainerClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const wikiLink = target.closest?.(".wiki-link") as HTMLAnchorElement | null;
+    if (wikiLink) {
+      // Internal Lexicon link: never open a new browser window. Allow modifier
+      // keys / middle-click to behave normally so users can still force a new
+      // tab if they want to.
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const slug = wikiLink.getAttribute("data-slug");
+      if (!slug) return;
+      event.preventDefault();
+      onWikiLinkClick?.(slug, wikiLink);
+      return;
+    }
+    // External links: ensure they open in a new tab with safe rel.
+    const anchor = target.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (anchor && /^https?:\/\//i.test(anchor.getAttribute("href") || "")) {
+      if (!anchor.getAttribute("target")) anchor.setAttribute("target", "_blank");
+      if (!anchor.getAttribute("rel")) anchor.setAttribute("rel", "noreferrer noopener");
+    }
+  };
+
   return (
     <div className={cn("overflow-hidden rounded-md border border-border bg-background", className)}>
       {showToolbar && <EditorToolbar editor={editor} />}
-      <div className="p-4">
+      <div className="p-4" onClickCapture={handleContainerClick}>
         <EditorContent editor={editor} className="tiptap-editor" />
       </div>
     </div>
