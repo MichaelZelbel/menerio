@@ -11,6 +11,7 @@ import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab"
 import { ExportTab } from "@/components/profile/ExportTab";
 import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
+import { SelfRecognitionSection } from "@/components/profile/SelfRecognitionSection";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
