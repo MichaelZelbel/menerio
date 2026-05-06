@@ -1,42 +1,61 @@
-## Was wirklich schiefläuft
 
-In den Edge-Logs sieht man die Anfragen von ChatGPT:
+## Antwort vorab: Kollidieren die URLs zwischen Usern?
 
-```
-POST /functions/v1/open-brain-mcp/?key=mnr_c43a5b43980ef2b40a25339e135fca0ad1d15b2d6c441f75
-→ 401  (has_auth_header: false, auth_scheme: "none")
-```
+**Nein.** Ein kurzer Blick in die DB bestätigt das:
 
-Zwei Probleme treffen gleichzeitig zu:
+- `wiki_pages` hat den Unique-Index `wiki_pages_user_slug_key` auf **(user_id, slug)** — nicht auf `slug` allein.
+- Alle RLS-Policies filtern strikt nach `auth.uid() = user_id` (SELECT/INSERT/UPDATE/DELETE).
 
-1. **ChatGPT schickt den Token als Query-Parameter `?key=...`**, nicht als `Authorization: Bearer ...` Header. Unser MCP-Server liest aktuell nur Header (`authorization`, `x-mcp-token`, `x-api-key`) und ignoriert Query-Parameter komplett → daher `has_auth_header: false`.
+Konsequenzen:
+- Jeder User kann unabhängig eine Seite `paperclip` haben. Kein Konflikt.
+- `menerio.com/lexicon/paperclip` löst per RLS **nur** die Seite des eingeloggten Users auf. Andere User sehen nur ihre eigene oder eine "doesn't exist yet"-Seite.
+- Es gibt **keine Probing-Lücke**: Ein fremder User, der `/lexicon/paperclip` aufruft, erfährt ausschließlich, ob *er selbst* eine solche Seite hat — nie, ob jemand anderes eine hat.
+- Die Seiten sind außerdem nicht öffentlich (kein anonymer Zugriff, `noIndex`), sie tauchen nicht in Suchmaschinen auf.
 
-2. **Der verwendete Token hat das falsche Präfix.** Es ist `mnr_c43a...` (ein Hub-API-Key, 49 Zeichen). Der MCP-Server akzeptiert aber ausschließlich Personal-MCP-Tokens mit Präfix `mnr_mcp_` aus `Settings → MCP Server`. Selbst wenn der Header korrekt wäre, würde die Format-Validierung (`MCP_TOKEN_PATTERN`) den Token sofort ablehnen.
+Fazit: Die jetzige URL-Struktur `/lexicon/<slug>` ist sicher und kollisionsfrei. Es muss nichts an URL oder Schema geändert werden. (Falls du später Public-Sharing willst, würden wir wie bei Notes einen separaten 12-stelligen Token nutzen — aber das ist nicht jetzt nötig.)
 
-Das ist also kein instabiles System — es sind zwei spezifische, kombinierte Fehler. Aber die Fehlermeldung war so generisch ("Missing Authorization header"), dass das im ChatGPT-UI nicht erkennbar war.
+---
 
-## Fix
+## Problem 1: Lexikon-interne Links öffnen in neuem Browser-Fenster
 
-### 1. Query-Parameter als gültige Token-Quelle akzeptieren
-In `supabase/functions/open-brain-mcp/index.ts` die `getAuthHeader`-Hilfsfunktion erweitern: zusätzlich `c.req.query("key")`, `c.req.query("token")` und `c.req.query("access_token")` lesen und als Bearer-Token behandeln. Damit funktionieren MCP-Clients, die Tokens nur via URL anhängen können (ChatGPT Custom Connectors, einige Browser-Tools).
+### Ursache
 
-### 2. Klarere Fehlermeldungen für die zwei häufigsten Fälle
-Im Auth-Pfad:
-- Wenn ein Token mit `mnr_` (aber **nicht** `mnr_mcp_`) ankommt → spezifische Meldung: *"Du hast einen Hub-API-Key verwendet. Der MCP-Server benötigt einen separaten Personal MCP Token. Erstelle ihn unter Settings → MCP Server."*
-- Wenn das Token via Query-Parameter kam, dies im Server-Log vermerken (für Debugging künftiger Fälle).
+In `RichTextEditor.tsx` werden Wikilinks als echte `<a href="/lexicon/...">` ins Editor-DOM gerendert. Es gibt zwar einen `editorProps.handleClick`, der `preventDefault` aufruft und `onWikiLinkClick` triggert, aber im **Read-Only-Modus** (Editor `editable=false`) feuert ProseMirrors `handleClick` nicht zuverlässig — der Browser folgt dann einfach dem `<a href>` und macht einen vollen Page-Reload bzw. (bei Cmd/Ctrl/Middle-Click) einen neuen Tab. Genau das beschreibst du.
 
-### 3. UI-Hinweis in `src/components/settings/MCPConnectionManager.tsx`
-Beim Anzeigen der Connection-URL einen kleinen Hinweis ergänzen:
-> "ChatGPT Custom Connectors hängen den Token oft als `?key=...` an die URL an statt einen Header zu senden — beides wird unterstützt. Wichtig: nur Tokens mit Präfix `mnr_mcp_` funktionieren hier (nicht die Hub-API-Keys aus 'API Keys')."
+Außerdem: externe Links (z.B. YouTube) sollen weiterhin in neuem Tab öffnen — das müssen wir sauber trennen.
 
-Außerdem in den Copy-Button-Varianten eine Option **"URL mit Token"** anbieten (`https://.../open-brain-mcp/?key=<token>`), damit man sie direkt in ChatGPT einfügen kann.
+### Lösung
 
-### 4. Memory aktualisieren
-`mem://integrations/mcp-and-slack-hub` ergänzen: MCP-Server akzeptiert Tokens jetzt sowohl via Header als auch Query-Parameter; nur `mnr_mcp_`-Präfix gültig.
+1. **`RichTextEditor.tsx`** — Click-Handling auf Container-Ebene robust machen, statt nur über ProseMirror:
+   - Im Wrapper (`<EditorContent>` Parent) einen nativen `onClick`-Listener anbringen, der **immer** läuft, egal ob editable.
+   - Logik: 
+     - Wenn `event.target.closest('.wiki-link')` → `preventDefault()`, `onWikiLinkClick(slug)` aufrufen, **niemals** `target=_blank`-Verhalten.
+     - Wenn `event.target.closest('a[href^="http"]')` und kein `.wiki-link` → externer Link, `target="_blank" rel="noreferrer"` setzen / Default-Verhalten lassen.
+   - Beim Rendern in `toEditorHtml`: `wiki-link`-Anker bekommen **kein** `target`. External-Links werden vom `LinkExt` schon mit `target="_blank"` versehen (oder explizit dort konfigurieren).
 
-## Geänderte Dateien
-- `supabase/functions/open-brain-mcp/index.ts` (Query-Param-Auth + bessere Fehlermeldungen)
-- `src/components/settings/MCPConnectionManager.tsx` (Hinweistext + URL-mit-Token-Copy)
-- `mem://integrations/mcp-and-slack-hub` (Update)
+2. **`WikiLinkMark.ts`** — sicherstellen, dass beim Rendern kein `target` Attribut gesetzt wird (bereits ok, nur bestätigen). Optional: `rel="noopener"` weglassen, damit klar ist, dass es interne Links sind.
 
-Keine DB-Migration, keine neuen Secrets.
+3. **`WikiPage.tsx`** — `onWikiLinkClick` bleibt bestehen und ruft `navigate('/lexicon/<slug>')` auf, also SPA-Navigation ohne Reload. Cmd/Ctrl/Middle-Click sollen weiterhin "in neuem Tab öffnen" auf dem internen Link funktionieren — das ist Standard-Browser-Verhalten und gewünscht (User kann bewusst neuen Tab erzwingen). Wir verhindern nur den Default bei normalem Klick.
+
+4. **Linkify in Notes-Editor**: gleiche Container-Click-Logik anwenden, falls Wikilinks im Note-Editor (NoteEditor) ähnlich klickbar sind. Kurzcheck ob `WikilinkExtension.ts` (Notes) das gleiche Verhalten hat — der nutzt schon `extension.options.onNavigate`, ist also ok.
+
+### Zu ändernde Dateien
+
+- `src/components/RichTextEditor.tsx` — Container-Click-Handler hinzufügen, externe vs. interne Links trennen.
+- `src/components/editor/WikiLinkMark.ts` — Bestätigen, dass kein `target` gesetzt wird.
+- (optional) `src/index.css` — `.wiki-link { cursor: pointer; }` falls noch nicht.
+
+---
+
+## Problem 2: URL-Struktur (per User)
+
+Wie oben beantwortet: **keine Änderung nötig**. Wir dokumentieren das nur kurz inline als Kommentar in `WikiPage.tsx` für zukünftige Klarheit, damit niemand versehentlich global-eindeutige Slugs annimmt.
+
+---
+
+## Out of scope
+
+- Public-Sharing von Lexikon-Seiten (würde eigenes Token-Schema erfordern, bei Bedarf separat).
+- Änderung der DB-URLs oder Slug-Generierung.
+
+Soll ich das so umsetzen?
