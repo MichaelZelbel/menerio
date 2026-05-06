@@ -125,6 +125,7 @@ export default function Profile() {
 
           <TabsContent value="profile" className="space-y-3 mt-4">
             <RelationshipsSection contactId={null} contactName="My" />
+            <SelfRecognitionSection />
             <ProfileCompleteness categories={categories} entries={entries} />
             <ProfileSuggestions
               categories={categories}
