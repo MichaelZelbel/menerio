@@ -850,7 +850,7 @@ async function generateProfileSuggestions(
 
     // Filter to valid category slugs and match to contacts
     const nameToContact = new Map(
-      matchedPeople.map((p) => [p.canonical_name.toLowerCase(), p]),
+      matchedPeople.map((p) => [(p.canonical_name || p.name).toLowerCase(), p]),
     );
     // Also map by original extracted name
     for (const p of matchedPeople) {
