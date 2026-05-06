@@ -170,9 +170,20 @@ export function useUpdateNote() {
       return data as unknown as Note;
     },
     onSuccess: (note, variables) => {
-      qc.setQueriesData<Note[]>({ queryKey: ["notes"] }, (current) => {
+      qc.setQueriesData<Note[]>({ queryKey: ["notes"] }, (current, query) => {
         if (!current) return current;
-        return current.map((item) => item.id === note.id ? { ...item, ...note } : item);
+        // Query keys are ["notes", filter, userId]
+        const filter = (query.queryKey?.[1] as string) ?? "all";
+        const exists = current.some((item) => item.id === note.id);
+        const merged = exists
+          ? current.map((item) => (item.id === note.id ? { ...item, ...note } : item))
+          : [...current, note];
+        // Drop notes that no longer belong in this filtered list so the UI updates immediately.
+        return merged.filter((item) => {
+          if (filter === "trash") return item.is_trashed === true;
+          if (filter === "favorites") return item.is_trashed === false && item.is_favorite === true;
+          return item.is_trashed === false; // "all"
+        });
       });
       qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
       if (variables.title !== undefined || variables.content !== undefined) {
