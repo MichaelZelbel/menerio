@@ -15,6 +15,8 @@ const MCP_TOKEN_PREFIX = "mnr_mcp_";
 const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
 const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
+const HUB_KEY_USED_MESSAGE =
+  "You used a Hub API key (prefix `mnr_`). The MCP server needs a separate Personal MCP Token (prefix `mnr_mcp_`). Create one in Menerio → Settings → MCP Server.";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
