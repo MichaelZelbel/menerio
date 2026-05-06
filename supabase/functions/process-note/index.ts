@@ -740,6 +740,7 @@ async function generateProfileSuggestions(
   noteContent: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
 ) {
+  matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
   try {
