@@ -78,6 +78,174 @@ function normalizeSuggestionValue(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/* ── Self-recognition helpers ── */
+type SelfContext = {
+  enabled: boolean;
+  aliases: Set<string>; // lowercased
+  preferredName: string | null;
+};
+
+async function loadSelfContext(userId: string): Promise<SelfContext> {
+  const aliases = new Set<string>();
+  let enabled = true;
+  let preferredName: string | null = null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, self_matching_enabled")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (profile) {
+    enabled = (profile as any).self_matching_enabled !== false;
+    const dn = ((profile as any).display_name || "").trim();
+    if (dn) {
+      preferredName = dn;
+      const first = dn.split(/\s+/)[0];
+      if (first) aliases.add(first.toLowerCase());
+      aliases.add(dn.toLowerCase());
+    }
+  }
+
+  if (!enabled) return { enabled: false, aliases: new Set(), preferredName };
+
+  const { data: rows } = await supabase
+    .from("user_self_aliases")
+    .select("alias, is_active")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+
+  for (const r of (rows || []) as any[]) {
+    const a = String(r.alias || "").trim().toLowerCase();
+    if (a) aliases.add(a);
+  }
+
+  return { enabled: true, aliases, preferredName };
+}
+
+/** Strip possessive 's / German genitive trailing s for matching. */
+function stripPossessive(name: string): string {
+  return name.replace(/['']s$/i, "").replace(/s$/i, (s, _i, full) => full.length > 3 ? "" : s).trim();
+}
+
+function nameMatchesAlias(name: string, aliases: Set<string>): boolean {
+  const lower = name.trim().toLowerCase();
+  if (aliases.has(lower)) return true;
+  const stripped = stripPossessive(lower);
+  return stripped !== lower && aliases.has(stripped);
+}
+
+/** Extract a small context window around the first occurrence of `name` in text. */
+function contextWindow(name: string, text: string, radius = 200): string {
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(name.toLowerCase());
+  if (idx < 0) return "";
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(text.length, idx + name.length + radius);
+  return text.slice(start, end);
+}
+
+const SELF_MARKERS_DE = ["mein", "meine", "meinen", "meiner", "meines", "ich ", "mir ", "mich "];
+const SELF_MARKERS_EN = ["my ", "i ", "me ", "myself", "i'm", "i've", "i'll"];
+const OTHER_MARKERS = [
+  "mein bekannter", "meine bekannte", "mein freund", "meine freundin", "mein kollege", "meine kollegin",
+  "my friend", "my colleague", "my acquaintance", "met ", "traf ", "we met", "wir trafen",
+];
+
+type SelfDecision = { kind: "self" | "contact" | "ambiguous"; contactCandidates: Array<{ id: string; name: string }>; reason: string };
+
+function disambiguateMention(
+  person: string,
+  noteText: string,
+  self: SelfContext,
+  contactCandidates: Array<{ id: string; name: string }>,
+): SelfDecision {
+  const isSelfAlias = self.enabled && nameMatchesAlias(person, self.aliases);
+  if (!isSelfAlias) {
+    return { kind: contactCandidates.length > 0 ? "contact" : "ambiguous", contactCandidates, reason: "not_self_alias" };
+  }
+  if (contactCandidates.length === 0) {
+    return { kind: "self", contactCandidates: [], reason: "self_only" };
+  }
+
+  const ctx = contextWindow(person, noteText).toLowerCase();
+
+  // Full-name presence of any contact candidate near mention → contact wins.
+  for (const c of contactCandidates) {
+    const parts = c.name.toLowerCase().split(/\s+/);
+    if (parts.length >= 2 && ctx.includes(c.name.toLowerCase())) {
+      return { kind: "contact", contactCandidates: [c], reason: "full_name_in_context" };
+    }
+  }
+
+  // Other-person markers nearby → contact
+  if (OTHER_MARKERS.some((m) => ctx.includes(m))) {
+    return { kind: "contact", contactCandidates, reason: "other_marker" };
+  }
+
+  // First-person markers nearby → self
+  if (SELF_MARKERS_DE.some((m) => ctx.includes(m)) || SELF_MARKERS_EN.some((m) => ctx.includes(m))) {
+    return { kind: "self", contactCandidates: [], reason: "self_marker" };
+  }
+
+  return { kind: "ambiguous", contactCandidates, reason: "name_collision" };
+}
+
+async function recallDisambiguation(userId: string, alias: string): Promise<{ target: string; contact_id: string | null } | null> {
+  const { data } = await supabase
+    .from("name_disambiguation_decisions")
+    .select("target, target_contact_id, decision_count, confidence")
+    .eq("user_id", userId)
+    .eq("alias_lower", alias.toLowerCase())
+    .order("decision_count", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  if ((data as any).decision_count >= 2 || (data as any).confidence >= 0.8) {
+    return { target: (data as any).target, contact_id: (data as any).target_contact_id };
+  }
+  return null;
+}
+
+async function recordDisambiguation(
+  userId: string,
+  alias: string,
+  target: "self" | "contact",
+  contactId: string | null,
+  confidence: number,
+) {
+  const lower = alias.toLowerCase();
+  // Look up existing
+  const { data: existing } = await supabase
+    .from("name_disambiguation_decisions")
+    .select("id, decision_count, confidence")
+    .eq("user_id", userId)
+    .eq("alias_lower", lower)
+    .eq("context_kind", "global")
+    .eq("target", target)
+    .eq("target_contact_id", contactId)
+    .maybeSingle();
+  if (existing) {
+    await supabase
+      .from("name_disambiguation_decisions")
+      .update({
+        decision_count: ((existing as any).decision_count || 0) + 1,
+        confidence: Math.min(1, Math.max((existing as any).confidence || 0, confidence)),
+        last_seen_at: new Date().toISOString(),
+      })
+      .eq("id", (existing as any).id);
+  } else {
+    await supabase.from("name_disambiguation_decisions").insert({
+      user_id: userId,
+      alias_lower: lower,
+      context_kind: "global",
+      target,
+      target_contact_id: contactId,
+      confidence,
+    });
+  }
+}
+
 function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
   return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
 }
@@ -570,8 +738,9 @@ async function generateProfileSuggestions(
   noteId: string,
   noteTitle: string,
   noteContent: string,
-  matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }>,
+  matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
 ) {
+  matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
   try {
@@ -681,7 +850,7 @@ async function generateProfileSuggestions(
 
     // Filter to valid category slugs and match to contacts
     const nameToContact = new Map(
-      matchedPeople.map((p) => [p.canonical_name.toLowerCase(), p]),
+      matchedPeople.map((p) => [(p.canonical_name || p.name).toLowerCase(), p]),
     );
     // Also map by original extracted name
     for (const p of matchedPeople) {
@@ -992,10 +1161,13 @@ async function processInBackground(noteId: string, authHeader: string) {
       metadata.topics = merged;
     }
 
-    // Auto-link metadata people to contacts (alias-aware)
+    // Auto-link metadata people to contacts (alias-aware) + self-recognition
     const metadataPeople = Array.isArray(metadata.people) ? metadata.people as string[] : [];
     const contactMap: Record<string, string> = {};
-    const matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }> = [];
+    const matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }> = [];
+    const ambiguousMentions: Array<{ name: string; candidates: Array<{ id: string; name: string }> }> = [];
+    const selfCtx = await loadSelfContext(note.user_id);
+    const noteFullText = `${note.title}\n${note.content}`;
 
     if (metadataPeople.length > 0) {
       const { data: allContacts } = await supabase
@@ -1015,18 +1187,39 @@ async function processInBackground(noteId: string, authHeader: string) {
       }
 
       for (const person of metadataPeople) {
-        // Exact match first
-        const exactMatch = nameToContact.get(person.toLowerCase());
-        if (exactMatch) {
-          matchedPeople.push({ name: person, contact_id: exactMatch.id, canonical_name: exactMatch.name });
-          continue;
-        }
-        // Fuzzy match — treat as matched to existing contact
-        for (const [key, contact] of nameToContact) {
-          if (isFuzzyMatch(person, key)) {
-            matchedPeople.push({ name: person, contact_id: contact.id, canonical_name: contact.name });
-            break;
+        // Collect candidate contacts (exact or fuzzy on first name)
+        const candidates: Array<{ id: string; name: string }> = [];
+        const exact = nameToContact.get(person.toLowerCase());
+        if (exact) candidates.push(exact);
+        if (candidates.length === 0) {
+          for (const [key, contact] of nameToContact) {
+            if (isFuzzyMatch(person, key)) { candidates.push(contact); break; }
           }
+        }
+
+        const recalled = selfCtx.enabled && nameMatchesAlias(person, selfCtx.aliases)
+          ? await recallDisambiguation(note.user_id, person)
+          : null;
+
+        let decision: SelfDecision;
+        if (recalled?.target === "self") {
+          decision = { kind: "self", contactCandidates: [], reason: "recalled_self" };
+        } else if (recalled?.target === "contact" && recalled.contact_id) {
+          const c = candidates.find((x) => x.id === recalled.contact_id) || { id: recalled.contact_id, name: person };
+          decision = { kind: "contact", contactCandidates: [c], reason: "recalled_contact" };
+        } else {
+          decision = disambiguateMention(person, noteFullText, selfCtx, candidates);
+        }
+
+        if (decision.kind === "self") {
+          matchedPeople.push({ name: person, is_self: true, canonical_name: selfCtx.preferredName || person });
+          await recordDisambiguation(note.user_id, person, "self", null, 0.7);
+        } else if (decision.kind === "contact" && decision.contactCandidates.length > 0) {
+          const c = decision.contactCandidates[0];
+          matchedPeople.push({ name: person, contact_id: c.id, canonical_name: c.name });
+          await recordDisambiguation(note.user_id, person, "contact", c.id, 0.7);
+        } else if (decision.kind === "ambiguous") {
+          ambiguousMentions.push({ name: person, candidates: decision.contactCandidates });
         }
       }
       if (matchedPeople.length > 0) {
@@ -1036,6 +1229,33 @@ async function processInBackground(noteId: string, authHeader: string) {
       // Build contact map for action items
       for (const [name, contact] of nameToContact) {
         contactMap[name] = contact.id;
+      }
+    }
+
+    // Surface ambiguous self/contact collisions for user review
+    if (ambiguousMentions.length > 0) {
+      try {
+        const items = ambiguousMentions.map((m) => {
+          const candidateLabel = m.candidates.map((c) => c.name).join(", ") || "another person";
+          return {
+            user_id: note.user_id,
+            source_note_id: noteId,
+            suggestion_type: "name_disambiguation",
+            title: `"${m.name}" in "${note.title}" — is this you or ${candidateLabel}?`,
+            description: `We're not sure if "${m.name}" refers to you (${selfCtx.preferredName || "yourself"}) or ${candidateLabel}.`,
+            payload: { mention: m.name, candidates: m.candidates, preferred_name: selfCtx.preferredName },
+            status: "pending_review",
+            target_entity_type: null,
+            source_title: note.title,
+            extracted_value: m.name,
+            confidence_score: 0.5,
+            is_sensitive: false,
+            suppression_key: buildSuppressionKey("name_disambiguation", null, null, m.name),
+          };
+        });
+        await supabase.from("review_queue").insert(items);
+      } catch (e) {
+        console.error("ambiguous mention insert error:", e);
       }
     }
 

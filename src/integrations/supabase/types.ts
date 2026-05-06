@@ -1591,6 +1591,48 @@ export type Database = {
         }
         Relationships: []
       }
+      name_disambiguation_decisions: {
+        Row: {
+          alias_lower: string
+          confidence: number
+          context_kind: string
+          created_at: string
+          decision_count: number
+          id: string
+          last_seen_at: string
+          target: string
+          target_contact_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alias_lower: string
+          confidence?: number
+          context_kind?: string
+          created_at?: string
+          decision_count?: number
+          id?: string
+          last_seen_at?: string
+          target: string
+          target_contact_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alias_lower?: string
+          confidence?: number
+          context_kind?: string
+          created_at?: string
+          decision_count?: number
+          id?: string
+          last_seen_at?: string
+          target?: string
+          target_contact_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       note_attachments: {
         Row: {
           created_at: string
@@ -2069,6 +2111,7 @@ export type Database = {
           created_at: string
           display_name: string | null
           id: string
+          self_matching_enabled: boolean
           updated_at: string
           website: string | null
         }
@@ -2078,6 +2121,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id: string
+          self_matching_enabled?: boolean
           updated_at?: string
           website?: string | null
         }
@@ -2087,6 +2131,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          self_matching_enabled?: boolean
           updated_at?: string
           website?: string | null
         }
@@ -2301,6 +2346,33 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_self_aliases: {
+        Row: {
+          alias: string
+          created_at: string
+          id: string
+          is_active: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alias: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alias?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
