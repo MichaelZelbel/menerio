@@ -2228,13 +2228,27 @@ app.get("/favicon.png", (c) => {
 
 app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
-function getAuthHeader(c: { req: { header: (name: string) => string | undefined } }) {
-  return (
+function getAuthHeader(c: {
+  req: {
+    header: (name: string) => string | undefined;
+    query: (name: string) => string | undefined;
+  };
+}) {
+  const headerToken =
     c.req.header("authorization") ||
     c.req.header("Authorization") ||
     c.req.header("x-mcp-token") ||
-    c.req.header("x-api-key")
-  );
+    c.req.header("x-api-key");
+  if (headerToken) return headerToken;
+
+  // Some MCP clients (e.g. ChatGPT custom connectors) attach the token
+  // to the URL as a query parameter instead of an Authorization header.
+  const queryToken =
+    c.req.query("key") ||
+    c.req.query("token") ||
+    c.req.query("access_token") ||
+    c.req.query("api_key");
+  return queryToken ? `Bearer ${queryToken}` : undefined;
 }
 
 
