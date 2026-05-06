@@ -569,7 +569,7 @@ async function processIngest(
         raw_response: raw,
         error: parseError instanceof Error ? parseError.message : String(parseError),
       });
-      return jsonResponse({ error: "Failed to parse wiki synthesis response" }, 500);
+      return;
     }
 
     // Grounding validation pass.
