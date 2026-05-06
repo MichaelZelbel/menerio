@@ -526,14 +526,14 @@ async function processIngest(
     if (noteError) throw noteError;
     if (!note) {
       await logWiki(db, userId, "ingest_skipped", { reason: "note_not_found", note_id: noteId });
-      return jsonResponse({ skipped: true, reason: "note_not_found" });
+      return;
     }
 
     const contentText = noteContentToText(note.content);
     const meaningfulText = `${note.title || ""}\n${contentText}`.replace(/\s+/g, " ").trim();
     if (meaningfulText.length < 20) {
       await logWiki(db, userId, "ingest_skipped", { reason: "note_too_short", note_id: noteId });
-      return jsonResponse({ skipped: true, reason: "note_too_short" });
+      return;
     }
 
     const { data: existingPages, error: pagesError } = await db
