@@ -508,32 +508,14 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
   return { updated };
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  const startedAt = Date.now();
-  let db: any = null;
-  let userId: string | null = null;
-  let noteId: string | null = null;
-
+async function processIngest(
+  db: any,
+  userId: string,
+  noteId: string,
+  changeType: string,
+  startedAt: number,
+) {
   try {
-    const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
-
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
-    userId = userData.user.id;
-
-    db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    const body = await req.json().catch(() => ({}));
-    noteId = body.note_id;
-    const changeType = body.change_type;
-    if (!isUuid(noteId) || !["INSERT", "UPDATE"].includes(changeType)) {
-      return jsonResponse({ error: "Invalid request body" }, 400);
-    }
 
     const { data: note, error: noteError } = await db
       .from("notes")
@@ -544,14 +526,14 @@ serve(async (req) => {
     if (noteError) throw noteError;
     if (!note) {
       await logWiki(db, userId, "ingest_skipped", { reason: "note_not_found", note_id: noteId });
-      return jsonResponse({ skipped: true, reason: "note_not_found" });
+      return;
     }
 
     const contentText = noteContentToText(note.content);
     const meaningfulText = `${note.title || ""}\n${contentText}`.replace(/\s+/g, " ").trim();
     if (meaningfulText.length < 20) {
       await logWiki(db, userId, "ingest_skipped", { reason: "note_too_short", note_id: noteId });
-      return jsonResponse({ skipped: true, reason: "note_too_short" });
+      return;
     }
 
     const { data: existingPages, error: pagesError } = await db
@@ -587,7 +569,7 @@ serve(async (req) => {
         raw_response: raw,
         error: parseError instanceof Error ? parseError.message : String(parseError),
       });
-      return jsonResponse({ error: "Failed to parse wiki synthesis response" }, 500);
+      return;
     }
 
     // Grounding validation pass.
@@ -644,16 +626,16 @@ serve(async (req) => {
       group_insights: groupInsightsResult,
     });
 
-    return jsonResponse({
+    return {
       ok: true,
       summary: parsed.log_summary,
       action_count: parsed.actions.length,
       validation: validationLog,
       group_insights: groupInsightsResult,
       duration_ms: durationMs,
-    });
+    };
   } catch (error) {
-    console.error("wiki-ingest failed", error);
+    console.error("wiki-ingest background failed", error);
     if (db && userId) {
       await logWiki(db, userId, "ingest_failed", {
         note_id: noteId,
@@ -661,6 +643,40 @@ serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       }).catch((logError: unknown) => console.error("failed to log wiki ingest failure", logError));
     }
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const startedAt = Date.now();
+
+  try {
+    const token = extractBearer(req);
+    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
+
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { data: userData, error: userError } = await authClient.auth.getUser(token);
+    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
+    const userId = userData.user.id;
+
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const body = await req.json().catch(() => ({}));
+    const noteId = body.note_id;
+    const changeType = body.change_type;
+    if (!isUuid(noteId) || !["INSERT", "UPDATE"].includes(changeType)) {
+      return jsonResponse({ error: "Invalid request body" }, 400);
+    }
+
+    // Run heavy AI synthesis in the background so we don't hit the 150s edge timeout.
+    // @ts-ignore — EdgeRuntime is provided by Supabase Edge Runtime.
+    EdgeRuntime.waitUntil(processIngest(db, userId, noteId, changeType, startedAt));
+
+    return jsonResponse({ accepted: true, note_id: noteId }, 202);
+  } catch (error) {
+    console.error("wiki-ingest dispatch failed", error);
     return jsonResponse({ error: "Lexicon ingest failed" }, 500);
   }
 });
