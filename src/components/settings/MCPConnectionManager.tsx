@@ -616,6 +616,37 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
               </AccordionContent>
             </AccordionItem>
 
+            <AccordionItem value="chatgpt">
+              <AccordionTrigger>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  <span>ChatGPT (Custom Connector)</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="space-y-3">
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                  <li>In ChatGPT, open <strong>Settings → Connectors → New</strong> (requires a Pro / Team / Enterprise plan with Custom Connectors enabled).</li>
+                  <li><strong>Name:</strong> Menerio (or anything you like).</li>
+                  <li>
+                    <strong>MCP Server URL:</strong> paste the URL below. It already includes your token as a <code className="text-xs">?key=…</code> parameter, because ChatGPT does not let you set custom auth headers.
+                  </li>
+                  <li>
+                    <strong>Authentication:</strong> select <strong>No Auth</strong>. The token in the URL handles authentication.
+                  </li>
+                  <li>Tick <em>"I understand and want to continue"</em> and click <strong>Create</strong>.</li>
+                </ol>
+                <div className="relative">
+                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">{`${MCP_URL}/?key=${TOKEN_PLACEHOLDER}`}</pre>
+                  <div className="absolute top-2 right-2">
+                    <CopyButton text={`${MCP_URL}/?key=${TOKEN_PLACEHOLDER}`} id="chatgpt" />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Replace <code className="font-mono">{TOKEN_PLACEHOLDER}</code> with a Personal MCP Token created above. Treat the resulting URL like a password — anyone with it can read and write your Menerio data.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+
             <AccordionItem value="other">
               <AccordionTrigger>
                 <div className="flex items-center gap-2">
