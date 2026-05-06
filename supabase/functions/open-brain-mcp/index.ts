@@ -46,6 +46,9 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
   }
 
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    if (token.startsWith("mnr_")) {
+      return { userId: null, error: { status: 401, message: HUB_KEY_USED_MESSAGE } };
+    }
     return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
 
