@@ -626,16 +626,16 @@ async function processIngest(
       group_insights: groupInsightsResult,
     });
 
-    return jsonResponse({
+    return {
       ok: true,
       summary: parsed.log_summary,
       action_count: parsed.actions.length,
       validation: validationLog,
       group_insights: groupInsightsResult,
       duration_ms: durationMs,
-    });
+    };
   } catch (error) {
-    console.error("wiki-ingest failed", error);
+    console.error("wiki-ingest background failed", error);
     if (db && userId) {
       await logWiki(db, userId, "ingest_failed", {
         note_id: noteId,
@@ -643,6 +643,40 @@ async function processIngest(
         duration_ms: Date.now() - startedAt,
       }).catch((logError: unknown) => console.error("failed to log wiki ingest failure", logError));
     }
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const startedAt = Date.now();
+
+  try {
+    const token = extractBearer(req);
+    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
+
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { data: userData, error: userError } = await authClient.auth.getUser(token);
+    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
+    const userId = userData.user.id;
+
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const body = await req.json().catch(() => ({}));
+    const noteId = body.note_id;
+    const changeType = body.change_type;
+    if (!isUuid(noteId) || !["INSERT", "UPDATE"].includes(changeType)) {
+      return jsonResponse({ error: "Invalid request body" }, 400);
+    }
+
+    // Run heavy AI synthesis in the background so we don't hit the 150s edge timeout.
+    // @ts-ignore — EdgeRuntime is provided by Supabase Edge Runtime.
+    EdgeRuntime.waitUntil(processIngest(db, userId, noteId, changeType, startedAt));
+
+    return jsonResponse({ accepted: true, note_id: noteId }, 202);
+  } catch (error) {
+    console.error("wiki-ingest dispatch failed", error);
     return jsonResponse({ error: "Lexicon ingest failed" }, 500);
   }
 });
