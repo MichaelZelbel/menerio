@@ -15,6 +15,8 @@ const MCP_TOKEN_PREFIX = "mnr_mcp_";
 const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
 const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
+const HUB_KEY_USED_MESSAGE =
+  "You used a Hub API key (prefix `mnr_`). The MCP server needs a separate Personal MCP Token (prefix `mnr_mcp_`). Create one in Menerio → Settings → MCP Server.";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -44,6 +46,9 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
   }
 
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    if (token.startsWith("mnr_")) {
+      return { userId: null, error: { status: 401, message: HUB_KEY_USED_MESSAGE } };
+    }
     return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
 
@@ -2228,13 +2233,27 @@ app.get("/favicon.png", (c) => {
 
 app.options("*", (c) => new Response(null, { status: 204, headers: c.res.headers }));
 
-function getAuthHeader(c: { req: { header: (name: string) => string | undefined } }) {
-  return (
+function getAuthHeader(c: {
+  req: {
+    header: (name: string) => string | undefined;
+    query: (name: string) => string | undefined;
+  };
+}) {
+  const headerToken =
     c.req.header("authorization") ||
     c.req.header("Authorization") ||
     c.req.header("x-mcp-token") ||
-    c.req.header("x-api-key")
-  );
+    c.req.header("x-api-key");
+  if (headerToken) return headerToken;
+
+  // Some MCP clients (e.g. ChatGPT custom connectors) attach the token
+  // to the URL as a query parameter instead of an Authorization header.
+  const queryToken =
+    c.req.query("key") ||
+    c.req.query("token") ||
+    c.req.query("access_token") ||
+    c.req.query("api_key");
+  return queryToken ? `Bearer ${queryToken}` : undefined;
 }
 
 

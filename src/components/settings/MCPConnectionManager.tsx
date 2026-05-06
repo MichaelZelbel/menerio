@@ -397,6 +397,11 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
               </code>
               <CopyButton text={MCP_URL} id="url" />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Most clients (Claude, Cursor, n8n) send the token in an <code className="font-mono">Authorization: Bearer</code> header.
+              ChatGPT custom connectors append it to the URL as <code className="font-mono">?key=…</code> instead — both are supported.
+              Only tokens with prefix <code className="font-mono">mnr_mcp_</code> work here (the keys under "Hub API Keys" are for a different API and will be rejected).
+            </p>
           </div>
 
           {loadingTokens ? (

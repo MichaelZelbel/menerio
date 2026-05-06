@@ -1,69 +1,42 @@
-## Ziel
+## Was wirklich schiefläuft
 
-1. Buttons (`Cleanup`, `Strip dead links`, `Run lint`) aus dem Lexicon-Header entfernen — Wartung läuft im Hintergrund.
-2. Manuell editierte Inhalte innerhalb einer Lexicon-Seite werden von der AI nicht mehr überschrieben. AI darf weiterhin neue Sektionen ergänzen, darf aber bestehende, vom User bearbeitete Sektionen nicht ändern.
+In den Edge-Logs sieht man die Anfragen von ChatGPT:
 
-## Konzept: Sektions-basierter Schutz
+```
+POST /functions/v1/open-brain-mcp/?key=mnr_c43a5b43980ef2b40a25339e135fca0ad1d15b2d6c441f75
+→ 401  (has_auth_header: false, auth_scheme: "none")
+```
 
-Lexicon-Seiten sind Markdown mit `##`-Sektionen. Wir markieren einzelne Sektionen als „user-owned", sobald der User sie bearbeitet. Die AI darf:
-- Neue Sektionen anhängen.
-- Sektionen, die noch nie vom User bearbeitet wurden, weiterhin updaten.
-- User-owned Sektionen niemals modifizieren oder löschen.
+Zwei Probleme treffen gleichzeitig zu:
 
-Falls der User Inhalte außerhalb von Headings ändert (z. B. Intro), wird die gesamte Intro-Region (Text vor erster `##`) als user-owned markiert.
+1. **ChatGPT schickt den Token als Query-Parameter `?key=...`**, nicht als `Authorization: Bearer ...` Header. Unser MCP-Server liest aktuell nur Header (`authorization`, `x-mcp-token`, `x-api-key`) und ignoriert Query-Parameter komplett → daher `has_auth_header: false`.
 
-### Datenmodell
+2. **Der verwendete Token hat das falsche Präfix.** Es ist `mnr_c43a...` (ein Hub-API-Key, 49 Zeichen). Der MCP-Server akzeptiert aber ausschließlich Personal-MCP-Tokens mit Präfix `mnr_mcp_` aus `Settings → MCP Server`. Selbst wenn der Header korrekt wäre, würde die Format-Validierung (`MCP_TOKEN_PATTERN`) den Token sofort ablehnen.
 
-Migration auf `wiki_pages`:
-- `protected_sections text[] default '{}'` — Liste der geschützten Section-Slugs (z. B. `["intro", "known-facts", "open-questions"]`). `intro` ist der spezielle Slug für Inhalt vor der ersten Überschrift.
+Das ist also kein instabiles System — es sind zwei spezifische, kombinierte Fehler. Aber die Fehlermeldung war so generisch ("Missing Authorization header"), dass das im ChatGPT-UI nicht erkennbar war.
 
-### UI: `src/pages/WikiPage.tsx`
+## Fix
 
-Beim Speichern einer manuellen Bearbeitung (`saveMutation`):
-1. Diff zwischen `page.content` (vorher) und `latestMarkdownRef.current` (nachher) auf Sektions-Ebene berechnen (kleines Helper-Modul `src/lib/wiki-sections.ts`: parse `##`-Headings → `{slug, body}[]`).
-2. Alle Sektionen, deren Body sich geändert hat oder die neu hinzugefügt wurden, in `protected_sections` aufnehmen (additiv, also bestehende Schutzmarkierungen bleiben).
-3. `protected_sections` zusammen mit `content` und `title` an `wiki_pages` schreiben.
+### 1. Query-Parameter als gültige Token-Quelle akzeptieren
+In `supabase/functions/open-brain-mcp/index.ts` die `getAuthHeader`-Hilfsfunktion erweitern: zusätzlich `c.req.query("key")`, `c.req.query("token")` und `c.req.query("access_token")` lesen und als Bearer-Token behandeln. Damit funktionieren MCP-Clients, die Tokens nur via URL anhängen können (ChatGPT Custom Connectors, einige Browser-Tools).
 
-Optional kleines visuelles Signal pro Sektion (Lock-Icon nach `##`-Heading), wenn `protected_sections` den Slug enthält — als kleiner Hinweis im View-Mode.
+### 2. Klarere Fehlermeldungen für die zwei häufigsten Fälle
+Im Auth-Pfad:
+- Wenn ein Token mit `mnr_` (aber **nicht** `mnr_mcp_`) ankommt → spezifische Meldung: *"Du hast einen Hub-API-Key verwendet. Der MCP-Server benötigt einen separaten Personal MCP Token. Erstelle ihn unter Settings → MCP Server."*
+- Wenn das Token via Query-Parameter kam, dies im Server-Log vermerken (für Debugging künftiger Fälle).
 
-### Backend: `supabase/functions/wiki-ingest/index.ts`
+### 3. UI-Hinweis in `src/components/settings/MCPConnectionManager.tsx`
+Beim Anzeigen der Connection-URL einen kleinen Hinweis ergänzen:
+> "ChatGPT Custom Connectors hängen den Token oft als `?key=...` an die URL an statt einen Header zu senden — beides wird unterstützt. Wichtig: nur Tokens mit Präfix `mnr_mcp_` funktionieren hier (nicht die Hub-API-Keys aus 'API Keys')."
 
-Vor jedem Update einer existierenden Page:
-1. `protected_sections` der Zielseite laden.
-2. Vom LLM gelieferten neuen Content in Sektionen splitten.
-3. Für jede geschützte Sektion: Body aus dem aktuellen `wiki_pages.content` übernehmen (LLM-Version verwerfen).
-4. Wenn LLM eine geschützte Sektion komplett weglässt → aus altem Content rekonstruieren und behalten.
-5. Neue Sektionen, die LLM hinzufügt und die noch nicht existieren, werden übernommen.
-6. Resultat in `wiki_apply_ingest` speichern (RPC bleibt unverändert; Merging passiert im Edge Function).
+Außerdem in den Copy-Button-Varianten eine Option **"URL mit Token"** anbieten (`https://.../open-brain-mcp/?key=<token>`), damit man sie direkt in ChatGPT einfügen kann.
 
-Gleiche Logik für den Group-Insights-Block (Zeile 369–443): Wenn `## Insights` in `protected_sections` ist → nicht überschreiben.
-
-### Hintergrund-Wartung statt UI-Buttons
-
-- `WikiHome.tsx`: Header reduziert auf Titel + Beschreibung + Suche. Buttons + Cleanup-Dialog entfernen.
-- Neuer pg_cron-Job (täglich 03:00 UTC) ruft `wiki-cleanup` mit `mode: "strip_dead_links"` für jeden User auf.
-  - Dafür neue interne Edge Function `wiki-maintenance-scheduled` (Service-Role, iteriert über User mit Lexicon-Pages, ruft die Strip-Logik auf).
-  - `pg_cron`-Eintrag via Insert (nicht Migration).
-- Routen `/lexicon/lint` und `wiki-cleanup` Function bleiben erhalten (nicht mehr verlinkt; weiter via Direkt-URL erreichbar für Debugging).
+### 4. Memory aktualisieren
+`mem://integrations/mcp-and-slack-hub` ergänzen: MCP-Server akzeptiert Tokens jetzt sowohl via Header als auch Query-Parameter; nur `mnr_mcp_`-Präfix gültig.
 
 ## Geänderte Dateien
+- `supabase/functions/open-brain-mcp/index.ts` (Query-Param-Auth + bessere Fehlermeldungen)
+- `src/components/settings/MCPConnectionManager.tsx` (Hinweistext + URL-mit-Token-Copy)
+- `mem://integrations/mcp-and-slack-hub` (Update)
 
-- DB-Migration: `wiki_pages.protected_sections text[]`
-- `src/lib/wiki-sections.ts` *(neu)* — Markdown-Sektion-Parser + Diff
-- `src/pages/WikiPage.tsx` — Diff bei Save, `protected_sections` updaten, optional Lock-Icon
-- `src/pages/WikiHome.tsx` — Buttons + Dialog entfernen
-- `supabase/functions/wiki-ingest/index.ts` — Sektions-Merge, geschützte Sektionen respektieren
-- `supabase/functions/wiki-maintenance-scheduled/index.ts` *(neu)* — täglicher Strip-dead-links-Run
-- `pg_cron`-Insert für täglichen Run
-
-## Edge-Cases
-
-- User editiert Intro (Text vor erster `##`): wird als `intro` geschützt.
-- User löscht eine Sektion komplett: Sektion bleibt aus `protected_sections` raus → AI darf sie wieder ergänzen, falls sie aus Notizen folgt. (Falls du das anders willst, kann ich „gelöschte Sektionen permanent ausschließen" ergänzen.)
-- User benennt eine Sektion um (`## Foo` → `## Bar`): Schutz für `bar` wird gesetzt; alter Schutz für `foo` bleibt im Array, schadet aber nicht (Sektion existiert nicht mehr).
-
-## Resultat
-
-- Lexicon-Header ist clean — keine Maintenance-Buttons mehr.
-- Was du in einer Lexicon-Seite editierst, bleibt erhalten — AI ergänzt drumherum, ohne deine Änderungen anzufassen.
-- Tote Wikilinks werden nachts automatisch entfernt.
+Keine DB-Migration, keine neuen Secrets.
