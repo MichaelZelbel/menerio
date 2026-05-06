@@ -170,10 +170,21 @@ export function useUpdateNote() {
       return data as unknown as Note;
     },
     onSuccess: (note, variables) => {
-      qc.setQueriesData<Note[]>({ queryKey: ["notes"] }, (current) => {
-        if (!current) return current;
-        return current.map((item) => item.id === note.id ? { ...item, ...note } : item);
-      });
+      const queries = qc.getQueriesData<Note[]>({ queryKey: ["notes"] });
+      for (const [key, current] of queries) {
+        if (!current) continue;
+        const filter = (key?.[1] as string) ?? "all";
+        const exists = current.some((item) => item.id === note.id);
+        const merged = exists
+          ? current.map((item) => (item.id === note.id ? { ...item, ...note } : item))
+          : [...current, note];
+        const next = merged.filter((item) => {
+          if (filter === "trash") return item.is_trashed === true;
+          if (filter === "favorites") return item.is_trashed === false && item.is_favorite === true;
+          return item.is_trashed === false; // "all"
+        });
+        qc.setQueryData<Note[]>(key, next);
+      }
       qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
