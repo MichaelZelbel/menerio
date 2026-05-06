@@ -78,6 +78,174 @@ function normalizeSuggestionValue(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/* ── Self-recognition helpers ── */
+type SelfContext = {
+  enabled: boolean;
+  aliases: Set<string>; // lowercased
+  preferredName: string | null;
+};
+
+async function loadSelfContext(userId: string): Promise<SelfContext> {
+  const aliases = new Set<string>();
+  let enabled = true;
+  let preferredName: string | null = null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, self_matching_enabled")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (profile) {
+    enabled = (profile as any).self_matching_enabled !== false;
+    const dn = ((profile as any).display_name || "").trim();
+    if (dn) {
+      preferredName = dn;
+      const first = dn.split(/\s+/)[0];
+      if (first) aliases.add(first.toLowerCase());
+      aliases.add(dn.toLowerCase());
+    }
+  }
+
+  if (!enabled) return { enabled: false, aliases: new Set(), preferredName };
+
+  const { data: rows } = await supabase
+    .from("user_self_aliases")
+    .select("alias, is_active")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+
+  for (const r of (rows || []) as any[]) {
+    const a = String(r.alias || "").trim().toLowerCase();
+    if (a) aliases.add(a);
+  }
+
+  return { enabled: true, aliases, preferredName };
+}
+
+/** Strip possessive 's / German genitive trailing s for matching. */
+function stripPossessive(name: string): string {
+  return name.replace(/['']s$/i, "").replace(/s$/i, (s, _i, full) => full.length > 3 ? "" : s).trim();
+}
+
+function nameMatchesAlias(name: string, aliases: Set<string>): boolean {
+  const lower = name.trim().toLowerCase();
+  if (aliases.has(lower)) return true;
+  const stripped = stripPossessive(lower);
+  return stripped !== lower && aliases.has(stripped);
+}
+
+/** Extract a small context window around the first occurrence of `name` in text. */
+function contextWindow(name: string, text: string, radius = 200): string {
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(name.toLowerCase());
+  if (idx < 0) return "";
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(text.length, idx + name.length + radius);
+  return text.slice(start, end);
+}
+
+const SELF_MARKERS_DE = ["mein", "meine", "meinen", "meiner", "meines", "ich ", "mir ", "mich "];
+const SELF_MARKERS_EN = ["my ", "i ", "me ", "myself", "i'm", "i've", "i'll"];
+const OTHER_MARKERS = [
+  "mein bekannter", "meine bekannte", "mein freund", "meine freundin", "mein kollege", "meine kollegin",
+  "my friend", "my colleague", "my acquaintance", "met ", "traf ", "we met", "wir trafen",
+];
+
+type SelfDecision = { kind: "self" | "contact" | "ambiguous"; contactCandidates: Array<{ id: string; name: string }>; reason: string };
+
+function disambiguateMention(
+  person: string,
+  noteText: string,
+  self: SelfContext,
+  contactCandidates: Array<{ id: string; name: string }>,
+): SelfDecision {
+  const isSelfAlias = self.enabled && nameMatchesAlias(person, self.aliases);
+  if (!isSelfAlias) {
+    return { kind: contactCandidates.length > 0 ? "contact" : "ambiguous", contactCandidates, reason: "not_self_alias" };
+  }
+  if (contactCandidates.length === 0) {
+    return { kind: "self", contactCandidates: [], reason: "self_only" };
+  }
+
+  const ctx = contextWindow(person, noteText).toLowerCase();
+
+  // Full-name presence of any contact candidate near mention → contact wins.
+  for (const c of contactCandidates) {
+    const parts = c.name.toLowerCase().split(/\s+/);
+    if (parts.length >= 2 && ctx.includes(c.name.toLowerCase())) {
+      return { kind: "contact", contactCandidates: [c], reason: "full_name_in_context" };
+    }
+  }
+
+  // Other-person markers nearby → contact
+  if (OTHER_MARKERS.some((m) => ctx.includes(m))) {
+    return { kind: "contact", contactCandidates, reason: "other_marker" };
+  }
+
+  // First-person markers nearby → self
+  if (SELF_MARKERS_DE.some((m) => ctx.includes(m)) || SELF_MARKERS_EN.some((m) => ctx.includes(m))) {
+    return { kind: "self", contactCandidates: [], reason: "self_marker" };
+  }
+
+  return { kind: "ambiguous", contactCandidates, reason: "name_collision" };
+}
+
+async function recallDisambiguation(userId: string, alias: string): Promise<{ target: string; contact_id: string | null } | null> {
+  const { data } = await supabase
+    .from("name_disambiguation_decisions")
+    .select("target, target_contact_id, decision_count, confidence")
+    .eq("user_id", userId)
+    .eq("alias_lower", alias.toLowerCase())
+    .order("decision_count", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  if ((data as any).decision_count >= 2 || (data as any).confidence >= 0.8) {
+    return { target: (data as any).target, contact_id: (data as any).target_contact_id };
+  }
+  return null;
+}
+
+async function recordDisambiguation(
+  userId: string,
+  alias: string,
+  target: "self" | "contact",
+  contactId: string | null,
+  confidence: number,
+) {
+  const lower = alias.toLowerCase();
+  // Look up existing
+  const { data: existing } = await supabase
+    .from("name_disambiguation_decisions")
+    .select("id, decision_count, confidence")
+    .eq("user_id", userId)
+    .eq("alias_lower", lower)
+    .eq("context_kind", "global")
+    .eq("target", target)
+    .eq("target_contact_id", contactId)
+    .maybeSingle();
+  if (existing) {
+    await supabase
+      .from("name_disambiguation_decisions")
+      .update({
+        decision_count: ((existing as any).decision_count || 0) + 1,
+        confidence: Math.min(1, Math.max((existing as any).confidence || 0, confidence)),
+        last_seen_at: new Date().toISOString(),
+      })
+      .eq("id", (existing as any).id);
+  } else {
+    await supabase.from("name_disambiguation_decisions").insert({
+      user_id: userId,
+      alias_lower: lower,
+      context_kind: "global",
+      target,
+      target_contact_id: contactId,
+      confidence,
+    });
+  }
+}
+
 function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
   return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
 }
