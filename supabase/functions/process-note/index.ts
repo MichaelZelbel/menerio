@@ -738,7 +738,7 @@ async function generateProfileSuggestions(
   noteId: string,
   noteTitle: string,
   noteContent: string,
-  matchedPeople: Array<{ name: string; contact_id: string; canonical_name: string }>,
+  matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
 ) {
   if (matchedPeople.length === 0) return;
 
