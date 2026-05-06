@@ -508,32 +508,14 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
   return { updated };
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  const startedAt = Date.now();
-  let db: any = null;
-  let userId: string | null = null;
-  let noteId: string | null = null;
-
+async function processIngest(
+  db: any,
+  userId: string,
+  noteId: string,
+  changeType: string,
+  startedAt: number,
+) {
   try {
-    const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
-
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
-    userId = userData.user.id;
-
-    db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    const body = await req.json().catch(() => ({}));
-    noteId = body.note_id;
-    const changeType = body.change_type;
-    if (!isUuid(noteId) || !["INSERT", "UPDATE"].includes(changeType)) {
-      return jsonResponse({ error: "Invalid request body" }, 400);
-    }
 
     const { data: note, error: noteError } = await db
       .from("notes")
