@@ -1049,6 +1049,9 @@ export default function Notes() {
             onCreateNoteInFolder={handleCreateInFolder}
             onCreateFolderInFolder={handleCreateFolderInFolder}
             onMoveNote={handleMoveNote}
+            onRenameFolder={handleRenameFolder}
+            onMoveFolder={handleMoveFolder}
+            onDeleteFolder={handleDeleteFolder}
             sortField={sortField}
             sortDirection={sortDirection}
           />
