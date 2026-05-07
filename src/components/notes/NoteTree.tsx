@@ -178,8 +178,13 @@ export function NoteTree({
 
   const handleDrop = (path: string, event: DragEvent) => {
     event.preventDefault();
-    const noteId = event.dataTransfer.getData("text/plain");
     setDragOverPath(null);
+    const folderPath = event.dataTransfer.getData("application/x-folder-path");
+    if (folderPath) {
+      if (onMoveFolder) onMoveFolder(folderPath, path);
+      return;
+    }
+    const noteId = event.dataTransfer.getData("text/plain");
     if (noteId) onMoveNote(noteId, path);
   };
 
