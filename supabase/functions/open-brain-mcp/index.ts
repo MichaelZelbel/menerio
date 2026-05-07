@@ -639,7 +639,7 @@ server.registerTool(
     description:
       "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
     inputSchema: {
-      note_id: z.string().describe("The ID of the note to update"),
+      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_thoughts, list_recent, get_person_notes, or get_connected_notes results."),
       title: z.string().optional(),
       content: z.string().optional().describe("Full Markdown content (replaces existing)"),
       tags: z.array(z.string()).optional(),
