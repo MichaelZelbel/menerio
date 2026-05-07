@@ -630,6 +630,115 @@ server.registerTool(
   }
 );
 
+// Tool: Update Note
+server.registerTool(
+  "update_note",
+  {
+    title: "Update Note",
+    description:
+      "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
+    inputSchema: {
+      note_id: z.string().describe("The ID of the note to update"),
+      title: z.string().optional(),
+      content: z.string().optional().describe("Full Markdown content (replaces existing)"),
+      tags: z.array(z.string()).optional(),
+      folder_path: z.string().optional(),
+      is_favorite: z.boolean().optional(),
+      is_pinned: z.boolean().optional(),
+    },
+  },
+  async ({ note_id, title, content, tags, folder_path, is_favorite, is_pinned }) => {
+    try {
+      const { data: existing, error: fetchErr } = await supabase
+        .from("notes")
+        .select("id, user_id, is_external")
+        .eq("id", note_id)
+        .maybeSingle();
+      if (fetchErr) return jsonTool({ error: fetchErr.message });
+      if (!existing || existing.user_id !== currentUserId) {
+        return jsonTool({ error: "Note not found" });
+      }
+      if (existing.is_external) {
+        return jsonTool({ error: "External (synced) notes cannot be edited directly. Duplicate the note in the app first." });
+      }
+
+      const updates: Record<string, unknown> = {};
+      if (title !== undefined) updates.title = title;
+      if (content !== undefined) updates.content = content;
+      if (tags !== undefined) updates.tags = tags;
+      if (folder_path !== undefined) updates.folder_path = folder_path;
+      if (is_favorite !== undefined) updates.is_favorite = is_favorite;
+      if (is_pinned !== undefined) updates.is_pinned = is_pinned;
+
+      if (Object.keys(updates).length === 0) {
+        return jsonTool({ error: "No fields to update" });
+      }
+
+      const { data, error } = await supabase
+        .from("notes")
+        .update(updates)
+        .eq("id", note_id)
+        .eq("user_id", currentUserId)
+        .select("id, title, tags, folder_path, is_favorite, is_pinned, updated_at")
+        .single();
+      if (error) return jsonTool({ error: error.message });
+      return jsonTool({ ok: true, note: data });
+    } catch (err: unknown) {
+      return jsonTool({ error: (err as Error).message });
+    }
+  }
+);
+
+// Tool: Trash Note (reversible)
+server.registerTool(
+  "trash_note",
+  {
+    title: "Trash Note",
+    description:
+      "Move a note to trash (reversible — the user can restore it from the Trash view). Use this when the user wants to delete or remove a note. Permanent deletion is intentionally NOT available to agents — only the user can hard-delete from the UI. Pass restore: true to bring a trashed note back.",
+    inputSchema: {
+      note_id: z.string().describe("The ID of the note to trash or restore"),
+      restore: z.boolean().optional().default(false).describe("If true, restores the note from trash instead of trashing it"),
+    },
+  },
+  async ({ note_id, restore }) => {
+    try {
+      const { data: existing, error: fetchErr } = await supabase
+        .from("notes")
+        .select("id, user_id, title")
+        .eq("id", note_id)
+        .maybeSingle();
+      if (fetchErr) return jsonTool({ error: fetchErr.message });
+      if (!existing || existing.user_id !== currentUserId) {
+        return jsonTool({ error: "Note not found" });
+      }
+
+      const updates = restore
+        ? { is_trashed: false, trashed_at: null }
+        : { is_trashed: true, trashed_at: new Date().toISOString() };
+
+      const { error } = await supabase
+        .from("notes")
+        .update(updates)
+        .eq("id", note_id)
+        .eq("user_id", currentUserId);
+      if (error) return jsonTool({ error: error.message });
+
+      return jsonTool({
+        ok: true,
+        note_id,
+        title: existing.title,
+        action: restore ? "restored" : "trashed",
+        message: restore
+          ? "Note restored from trash."
+          : "Note moved to trash. The user can restore it from the Trash view.",
+      });
+    } catch (err: unknown) {
+      return jsonTool({ error: (err as Error).message });
+    }
+  }
+);
+
 // Tool 4: Get Stats
 server.registerTool(
   "get_stats",

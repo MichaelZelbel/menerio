@@ -1,27 +1,16 @@
-## Problem
+Add two new tools to `supabase/functions/open-brain-mcp/index.ts`. No DB migration, no new secrets. Hard-delete is intentionally omitted as a safety net — only the user can permanently delete via the UI.
 
-Wenn eine Notiz in den Trash verschoben wird (`is_trashed: true`), bleibt sie in der "All Notes"-Liste sichtbar (mit Trash-Icon, oben einsortiert), bis die Liste neu geladen wird. Das wirkt wie ein Klick-Icon und verwirrt.
+## 1. `update_note`
+- **Input**: `note_id` (required), optional `title`, `content` (Markdown), `tags`, `folder_path`, `is_favorite`, `is_pinned`
+- **Logic**: fetch note → verify `user_id === currentUserId` → reject if `is_external` (with hint to duplicate first) → `UPDATE` only fields that were passed → return updated row
+- **Description for agent**: "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly."
 
-## Ursache
+## 2. `trash_note`
+- **Input**: `note_id` (required), `restore` (boolean, default `false`)
+- **Logic**: owner check → set `is_trashed` + `trashed_at` (or unset both on restore)
+- **Description for agent**: "Move a note to trash (reversible — user can restore from Trash view). Use this when the user wants to delete or remove a note. Permanent deletion is intentionally NOT available to agents — only the user can hard-delete from the UI. Pass `restore: true` to bring a trashed note back."
 
-In `src/hooks/useNotes.ts` (`useUpdateNote.onSuccess`):
-- `setQueriesData` **merged** die aktualisierte Notiz in alle gecachten Listen — auch in `["notes", "all"]` und `["notes", "favorites"]`. Die Notiz wird also mit `is_trashed: true` in den Listen weitergeführt.
-- `invalidateQueries({ refetchType: "inactive" })` refetcht nur inaktive Queries; die gerade sichtbare "All Notes"-Query wird nicht neu geladen.
-
-Die DB-Query selbst filtert korrekt (`.eq("is_trashed", false)` für all/favorites) — nur der lokale Cache hinkt hinterher.
-
-## Lösung
-
-In `useUpdateNote.onSuccess` den Cache-Merge serverseitig konsistent halten:
-
-1. Beim Mergen pro Query-Key prüfen: Wenn der Query-Filter "all" oder "favorites" ist und die aktualisierte Notiz `is_trashed === true` hat → die Notiz **aus dem Array entfernen** statt zu mergen.
-2. Wenn der Filter "trash" ist und `is_trashed === false` (Restore) → ebenfalls entfernen.
-3. Optional spiegelbildlich: bei "favorites" und `is_favorite === false` → entfernen.
-
-Damit verschwindet die Notiz unmittelbar aus "All Notes" beim Move-to-Trash, taucht sofort in "Trash" auf, und beim Wiederherstellen umgekehrt — ohne Refetch-Wartezeit.
-
-Keine UI-Änderungen nötig. Das Trash-Icon im `NoteTree`/`NoteList` bleibt für den Trash-Filter erhalten (dort ist es korrekt als Status-Badge).
-
-## Betroffene Datei
-
-- `src/hooks/useNotes.ts` — `useUpdateNote.onSuccess` Cache-Logik anpassen (Query-Key inspizieren, statt blind zu mergen).
+## Implementation notes
+- Follow existing pattern in the file: `server.registerTool(...)` with Zod schemas, `jsonTool({...})` for return, manual `currentUserId` ownership check (consistent with all other tools).
+- Insert both tools right before the existing `get_stats` tool (~line 633).
+- No changes elsewhere.
