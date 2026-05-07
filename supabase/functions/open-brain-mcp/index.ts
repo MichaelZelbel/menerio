@@ -164,6 +164,7 @@ function formatNote(
     parts.push(`--- ${i + 1} ---`);
   }
   if (t.title) parts.push(`Title: ${t.title}`);
+  if (t.id) parts.push(`ID: ${t.id}`);
   parts.push(`Captured: ${new Date(t.created_at).toLocaleDateString()}`);
   parts.push(`Type: ${m.type || "unknown"}`);
   if (Array.isArray(m.topics) && m.topics.length)
