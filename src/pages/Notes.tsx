@@ -298,7 +298,7 @@ export default function Notes() {
       .select("id, folder_path")
       .or(`folder_path.eq.${oldPath},folder_path.like.${oldPath}/%`);
     if (nFetchErr) throw nFetchErr;
-    const noteRows = ((affectedNotes || []) as Array<{ id: string; folder_path: string }>);
+    const noteRows = ((affectedNotes || []) as unknown as Array<{ id: string; folder_path: string }>);
     for (const n of noteRows) {
       const suffix = n.folder_path === oldPath ? "" : n.folder_path.slice(oldPath.length);
       const { error: upErr } = await supabase
