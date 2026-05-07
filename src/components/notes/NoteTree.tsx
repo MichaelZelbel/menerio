@@ -41,6 +41,9 @@ interface NoteTreeProps {
   onCreateNoteInFolder: (path: string) => void;
   onCreateFolderInFolder: (path: string) => void;
   onMoveNote: (noteId: string, path: string) => void;
+  onRenameFolder?: (path: string) => void;
+  onMoveFolder?: (sourcePath: string, targetParentPath: string) => void;
+  onDeleteFolder?: (path: string) => void;
   sortField?: NoteTreeSortField;
   sortDirection?: NoteTreeSortDirection;
 }
