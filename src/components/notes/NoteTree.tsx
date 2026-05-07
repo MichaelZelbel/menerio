@@ -9,6 +9,7 @@ import {
   FolderOpen,
   FolderPlus,
   Link2,
+  Pencil,
   Pin,
   Star,
   Trash2,
