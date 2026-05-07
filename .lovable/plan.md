@@ -1,16 +1,61 @@
-Add two new tools to `supabase/functions/open-brain-mcp/index.ts`. No DB migration, no new secrets. Hard-delete is intentionally omitted as a safety net — only the user can permanently delete via the UI.
+## Goal
+Im "All Notes"-Tree (NoteTree) sollen Ordner nicht nur erstellt, sondern auch **umbenannt, verschoben (per Drag & Drop oder Kontextmenü) und gelöscht** werden können. Beim Löschen eines Ordners werden alle enthaltenen Notizen (rekursiv) wie im Datei-Manager mit verschoben/gelöscht.
 
-## 1. `update_note`
-- **Input**: `note_id` (required), optional `title`, `content` (Markdown), `tags`, `folder_path`, `is_favorite`, `is_pinned`
-- **Logic**: fetch note → verify `user_id === currentUserId` → reject if `is_external` (with hint to duplicate first) → `UPDATE` only fields that were passed → return updated row
-- **Description for agent**: "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly."
+## UX
 
-## 2. `trash_note`
-- **Input**: `note_id` (required), `restore` (boolean, default `false`)
-- **Logic**: owner check → set `is_trashed` + `trashed_at` (or unset both on restore)
-- **Description for agent**: "Move a note to trash (reversible — user can restore from Trash view). Use this when the user wants to delete or remove a note. Permanent deletion is intentionally NOT available to agents — only the user can hard-delete from the UI. Pass `restore: true` to bring a trashed note back."
+**Folder-Kontextmenü** (rechtsklick auf Ordner in NoteTree) erweitern um:
+- New note here *(bereits vorhanden)*
+- New folder here *(bereits vorhanden)*
+- ── Trennlinie ──
+- **Rename folder…** → Prompt mit aktuellem Namen
+- **Move to ▸** → Submenü mit "Vault root" + Liste aller anderen Ordner (analog zum Move-Submenü bei Notizen, eigener Pfad + Nachfahren ausgeschlossen)
+- **Delete folder…** → Bestätigungsdialog der die Anzahl betroffener Notizen + Unterordner zeigt: *"Delete `Foo/Bar`? This will move 3 notes and 2 subfolders to Trash."*
 
-## Implementation notes
-- Follow existing pattern in the file: `server.registerTool(...)` with Zod schemas, `jsonTool({...})` for return, manual `currentUserId` ownership check (consistent with all other tools).
-- Insert both tools right before the existing `get_stats` tool (~line 633).
-- No changes elsewhere.
+**Drag & Drop** für Ordner:
+- Ordner-Header wird `draggable`. Drop auf anderen Ordner → verschieben (als Kind). Drop auf "Vault root" → in Root verschieben.
+- Self-drop und Drop auf eigene Nachfahren werden ignoriert (sonst Zyklus).
+- Bestehender Note-Drop bleibt unverändert (per `dataTransfer`-Type unterscheiden: `application/x-folder-path` vs `text/plain` für Notizen).
+
+Root-Ordner ("Vault root") kann weder umbenannt, verschoben noch gelöscht werden — diese Menüeinträge erscheinen für Root nicht.
+
+## Datenmodell
+
+Keine Migration nötig. `note_folders` hat bereits `path`, `name`, `parent_path` (alles `text NOT NULL`). Notizen referenzieren Ordner über `notes.folder_path` (text).
+
+## Implementierung
+
+### 1. `src/pages/Notes.tsx` — neue Handler
+Drei neue Callbacks, alle nutzen den authentifizierten Supabase-Client + RLS:
+
+- **`handleRenameFolder(oldPath, newName)`**
+  1. Validieren: `newName` nicht leer, kein `/`.
+  2. `newPath = parent_path ? parent + "/" + newName : newName`
+  3. Rekursiv betroffene `note_folders` ermitteln (`path = oldPath OR path LIKE 'oldPath/%'`), für jeden Eintrag `path` + ggf. `parent_path` + `name` neu schreiben.
+  4. `notes` aktualisieren: `folder_path` ersetzen, wo `folder_path = oldPath OR folder_path LIKE 'oldPath/%'` (String-Replace des Präfixes).
+  5. `refreshFolders()`, `queryClient.invalidateQueries(["notes"])`. Wenn `activeFolderPath` betroffen → auf `newPath` umstellen.
+
+- **`handleMoveFolder(sourcePath, targetParentPath)`**
+  - Guard: `targetParentPath !== sourcePath` und nicht innerhalb sourcePath (`!targetParentPath.startsWith(sourcePath + "/")`).
+  - Berechnet `newPath = targetParentPath ? targetParentPath + "/" + name : name`.
+  - Konfliktcheck: existiert bereits ein Ordner an `newPath` → Fehler-Toast.
+  - Gleiche Präfix-Rewrite-Logik wie Rename (Pfad-Update aller Nachfahren-Folders + zugehöriger Notizen).
+
+- **`handleDeleteFolder(path)`**
+  - `confirm()` mit Anzahl betroffener Notizen (aus `allNotes.filter(n => n.folder_path === path || n.folder_path.startsWith(path + "/"))`).
+  - Notizen: `update({ is_trashed: true, trashed_at: now })` für alle mit passendem `folder_path` (in Trash schieben, nicht hard-delete — konsistent mit dem bestehenden Trash-Pattern und der Memory-Regel "trash über delete").
+  - `note_folders` löschen: `delete().or('path.eq.PATH,path.like.PATH/%')`.
+  - Wenn `activeFolderPath` betroffen → auf `parent_path` zurücksetzen.
+  - Toast: "Folder deleted, N notes moved to Trash."
+
+### 2. `src/components/notes/NoteTree.tsx`
+- Props erweitern: `onRenameFolder`, `onMoveFolder`, `onDeleteFolder`.
+- `FolderRow` ContextMenu erweitern (Rename/Move-Submenü/Delete) — nur für `!isRoot`.
+- `FolderRow` `draggable={!isRoot}`, beim `dragstart` `dataTransfer.setData("application/x-folder-path", node.path)` setzen.
+- In `handleDrop` zuerst auf `application/x-folder-path` prüfen → `onMoveFolder(sourcePath, targetPath)`. Sonst wie bisher: `text/plain` → `onMoveNote`.
+- Move-Submenü für Folder analog zu dem für Notizen aufbauen (mit `flattenFolders`), aber Quelle + Nachfahren ausfiltern.
+
+### 3. NoteTree wird in `Notes.tsx` mit den drei neuen Handlern verdrahtet.
+
+## Offene UX-Details
+- **Konflikt** beim Move/Rename auf bereits existierenden Ordner: einfach Toast-Error, kein Auto-Merge (sicherer).
+- **Trash statt Hard-Delete** für Ordner-Inhalte: passt zur bestehenden Konvention (Notizen werden nie hart aus der UI gelöscht — nur über die Trash-Ansicht). Deckt die Anforderung "Notizen werden auch gelöscht" ab und bleibt rückgängig machbar.
