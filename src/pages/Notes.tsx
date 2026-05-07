@@ -280,7 +280,7 @@ export default function Notes() {
       .select("path")
       .or(`path.eq.${oldPath},path.like.${oldPath}/%`);
     if (fetchErr) throw fetchErr;
-    const rows = ((affected || []) as Array<{ path: string }>);
+    const rows = ((affected || []) as unknown as Array<{ path: string }>);
     for (const row of rows) {
       const suffix = row.path === oldPath ? "" : row.path.slice(oldPath.length);
       const next = newPath + suffix;
