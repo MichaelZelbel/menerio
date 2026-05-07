@@ -272,6 +272,150 @@ export default function Notes() {
     setActiveFolderPath(folderPath);
   }, [updateNote]);
 
+  // Rewrite folder path prefix for note_folders + notes (recursive).
+  const rewriteFolderPrefix = useCallback(async (oldPath: string, newPath: string) => {
+    // 1) Update affected note_folders rows
+    const { data: affected, error: fetchErr } = await supabase
+      .from("note_folders" as any)
+      .select("path")
+      .or(`path.eq.${oldPath},path.like.${oldPath}/%`);
+    if (fetchErr) throw fetchErr;
+    const rows = ((affected || []) as Array<{ path: string }>);
+    for (const row of rows) {
+      const suffix = row.path === oldPath ? "" : row.path.slice(oldPath.length);
+      const next = newPath + suffix;
+      const name = next.split("/").pop() || next;
+      const parent_path = next.includes("/") ? next.split("/").slice(0, -1).join("/") : "";
+      const { error: upErr } = await supabase
+        .from("note_folders" as any)
+        .update({ path: next, name, parent_path })
+        .eq("path", row.path);
+      if (upErr) throw upErr;
+    }
+    // 2) Update affected notes.folder_path
+    const { data: affectedNotes, error: nFetchErr } = await supabase
+      .from("notes" as any)
+      .select("id, folder_path")
+      .or(`folder_path.eq.${oldPath},folder_path.like.${oldPath}/%`);
+    if (nFetchErr) throw nFetchErr;
+    const noteRows = ((affectedNotes || []) as Array<{ id: string; folder_path: string }>);
+    for (const n of noteRows) {
+      const suffix = n.folder_path === oldPath ? "" : n.folder_path.slice(oldPath.length);
+      const { error: upErr } = await supabase
+        .from("notes" as any)
+        .update({ folder_path: newPath + suffix })
+        .eq("id", n.id);
+      if (upErr) throw upErr;
+    }
+  }, []);
+
+  const handleRenameFolder = useCallback(async (oldPath: string) => {
+    if (!oldPath) return;
+    const currentName = oldPath.split("/").pop() || oldPath;
+    const input = window.prompt("Rename folder", currentName);
+    if (!input) return;
+    const newName = input.replace(/\//g, "").trim();
+    if (!newName || newName === currentName) return;
+    const parent = oldPath.includes("/") ? oldPath.split("/").slice(0, -1).join("/") : "";
+    const newPath = parent ? `${parent}/${newName}` : newName;
+    // Conflict check
+    const { data: existing } = await supabase
+      .from("note_folders" as any)
+      .select("path")
+      .eq("path", newPath)
+      .maybeSingle();
+    if (existing) {
+      showToast.error(`A folder "${newPath}" already exists`);
+      return;
+    }
+    try {
+      await rewriteFolderPrefix(oldPath, newPath);
+      await refreshFolders();
+      await queryClient.invalidateQueries({ queryKey: ["notes"] });
+      if (activeFolderPath === oldPath || activeFolderPath?.startsWith(oldPath + "/")) {
+        setActiveFolderPath(newPath + (activeFolderPath.slice(oldPath.length)));
+      }
+      showToast.success("Folder renamed");
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Failed to rename folder");
+    }
+  }, [activeFolderPath, queryClient, refreshFolders, rewriteFolderPrefix]);
+
+  const handleMoveFolder = useCallback(async (sourcePath: string, targetParentPath: string) => {
+    if (!sourcePath) return;
+    if (sourcePath === targetParentPath) return;
+    if (targetParentPath === sourcePath || targetParentPath.startsWith(sourcePath + "/")) {
+      showToast.error("Can't move a folder into itself");
+      return;
+    }
+    const name = sourcePath.split("/").pop() || sourcePath;
+    const newPath = targetParentPath ? `${targetParentPath}/${name}` : name;
+    if (newPath === sourcePath) return;
+    const { data: existing } = await supabase
+      .from("note_folders" as any)
+      .select("path")
+      .eq("path", newPath)
+      .maybeSingle();
+    if (existing) {
+      showToast.error(`A folder "${newPath}" already exists`);
+      return;
+    }
+    try {
+      await rewriteFolderPrefix(sourcePath, newPath);
+      await refreshFolders();
+      await queryClient.invalidateQueries({ queryKey: ["notes"] });
+      if (activeFolderPath === sourcePath || activeFolderPath?.startsWith(sourcePath + "/")) {
+        setActiveFolderPath(newPath + (activeFolderPath.slice(sourcePath.length)));
+      }
+      showToast.success(targetParentPath ? `Moved to ${targetParentPath}` : "Moved to Vault root");
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Failed to move folder");
+    }
+  }, [activeFolderPath, queryClient, refreshFolders, rewriteFolderPrefix]);
+
+  const handleDeleteFolder = useCallback(async (path: string) => {
+    if (!path) return;
+    const affectedNotes = allNotes.filter(
+      (n) => n.folder_path === path || (n.folder_path || "").startsWith(path + "/")
+    );
+    const subfolderCount = folderPaths.filter((p) => p !== path && p.startsWith(path + "/")).length;
+    const parts: string[] = [];
+    if (affectedNotes.length > 0) parts.push(`${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} will be moved to Trash`);
+    if (subfolderCount > 0) parts.push(`${subfolderCount} subfolder${subfolderCount === 1 ? "" : "s"} will be deleted`);
+    const detail = parts.length ? `\n\n${parts.join(". ")}.` : "";
+    const confirmed = window.confirm(`Delete folder "${path}"?${detail}`);
+    if (!confirmed) return;
+    try {
+      if (affectedNotes.length > 0) {
+        const ids = affectedNotes.map((n) => n.id);
+        const { error: nErr } = await supabase
+          .from("notes" as any)
+          .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+          .in("id", ids);
+        if (nErr) throw nErr;
+        if (selectedId && ids.includes(selectedId)) selectNote(null);
+      }
+      const { error: fErr } = await supabase
+        .from("note_folders" as any)
+        .delete()
+        .or(`path.eq.${path},path.like.${path}/%`);
+      if (fErr) throw fErr;
+      await refreshFolders();
+      await queryClient.invalidateQueries({ queryKey: ["notes"] });
+      if (activeFolderPath === path || activeFolderPath?.startsWith(path + "/")) {
+        const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+        setActiveFolderPath(parent || null);
+      }
+      showToast.success(
+        affectedNotes.length > 0
+          ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
+          : "Folder deleted"
+      );
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
+    }
+  }, [activeFolderPath, allNotes, folderPaths, queryClient, refreshFolders, selectedId, selectNote]);
+
   // Handle ?action=create from external "+ New Note" buttons (header, deep links).
   // Use a ref-guard so the effect fires exactly once per occurrence of action=create,
   // regardless of how many times handleCreate's identity changes due to mutation state.
