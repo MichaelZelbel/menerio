@@ -9,6 +9,7 @@ import {
   FolderOpen,
   FolderPlus,
   Link2,
+  Pencil,
   Pin,
   Star,
   Trash2,
@@ -40,6 +41,9 @@ interface NoteTreeProps {
   onCreateNoteInFolder: (path: string) => void;
   onCreateFolderInFolder: (path: string) => void;
   onMoveNote: (noteId: string, path: string) => void;
+  onRenameFolder?: (path: string) => void;
+  onMoveFolder?: (sourcePath: string, targetParentPath: string) => void;
+  onDeleteFolder?: (path: string) => void;
   sortField?: NoteTreeSortField;
   sortDirection?: NoteTreeSortDirection;
 }
@@ -117,6 +121,9 @@ export function NoteTree({
   onCreateNoteInFolder,
   onCreateFolderInFolder,
   onMoveNote,
+  onRenameFolder,
+  onMoveFolder,
+  onDeleteFolder,
   sortField = "updated_at",
   sortDirection = "desc",
 }: NoteTreeProps) {
@@ -171,8 +178,13 @@ export function NoteTree({
 
   const handleDrop = (path: string, event: DragEvent) => {
     event.preventDefault();
-    const noteId = event.dataTransfer.getData("text/plain");
     setDragOverPath(null);
+    const folderPath = event.dataTransfer.getData("application/x-folder-path");
+    if (folderPath) {
+      if (onMoveFolder) onMoveFolder(folderPath, path);
+      return;
+    }
+    const noteId = event.dataTransfer.getData("text/plain");
     if (noteId) onMoveNote(noteId, path);
   };
 
@@ -190,6 +202,9 @@ export function NoteTree({
     const isActive = activeFolderPath === (node.path || "");
     const isRoot = !node.path;
     const count = countNestedNotes(node);
+    const moveTargets = tree.children
+      .flatMap((c) => flattenFolders(c))
+      .filter((n) => n.path !== node.path && !n.path.startsWith(node.path + "/"));
 
     return (
       <div>
@@ -197,6 +212,12 @@ export function NoteTree({
           <ContextMenuTrigger asChild>
             <button
               type="button"
+              draggable={!isRoot}
+              onDragStart={(event) => {
+                if (isRoot) return;
+                event.dataTransfer.setData("application/x-folder-path", node.path);
+                event.dataTransfer.effectAllowed = "move";
+              }}
               onClick={() => {
                 onSelectFolder(node.path);
                 if (!isOpen) toggleFolder(node.path);
@@ -231,13 +252,47 @@ export function NoteTree({
               <span className="text-[10px] text-muted-foreground">{count}</span>
             </button>
           </ContextMenuTrigger>
-          <ContextMenuContent className="w-48">
+          <ContextMenuContent className="w-52">
             <ContextMenuItem onClick={() => onCreateNoteInFolder(node.path)}>
               <FilePlus className="mr-2 h-3.5 w-3.5" /> New note here
             </ContextMenuItem>
             <ContextMenuItem onClick={() => onCreateFolderInFolder(node.path)}>
               <FolderPlus className="mr-2 h-3.5 w-3.5" /> New folder here
             </ContextMenuItem>
+            {!isRoot && (onRenameFolder || onMoveFolder || onDeleteFolder) && (
+              <ContextMenuSeparator />
+            )}
+            {!isRoot && onRenameFolder && (
+              <ContextMenuItem onClick={() => onRenameFolder(node.path)}>
+                <Pencil className="mr-2 h-3.5 w-3.5" /> Rename folder…
+              </ContextMenuItem>
+            )}
+            {!isRoot && onMoveFolder && (
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <Folder className="mr-2 h-3.5 w-3.5" /> Move to
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+                  <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
+                    <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+                  </ContextMenuItem>
+                  {moveTargets.length > 0 && <ContextMenuSeparator />}
+                  {moveTargets.map((t) => (
+                    <ContextMenuItem key={t.path} onClick={() => onMoveFolder(node.path, t.path)}>
+                      <Folder className="mr-2 h-3.5 w-3.5" /> {t.path}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            )}
+            {!isRoot && onDeleteFolder && (
+              <ContextMenuItem
+                onClick={() => onDeleteFolder(node.path)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete folder…
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
         {isOpen && (
