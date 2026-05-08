@@ -114,7 +114,7 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
       messages: [
         {
           role: "system",
-          content: `Extract metadata from the user's captured thought. Return JSON with:
+          content: `Extract metadata from the user's captured note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
@@ -441,194 +441,204 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Tool 1: Semantic Search
+// Helper: hybrid notes search (semantic + ILIKE), reusable by search_notes and search_brain
+async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
+  let semanticResults: any[] = [];
+  let semanticOk = false;
+  try {
+    const qEmb = await getEmbedding(query);
+    const { data, error } = await supabase.rpc("match_notes", {
+      query_embedding: qEmb,
+      match_threshold: threshold,
+      match_count: limit,
+      p_user_id: currentUserId,
+    });
+    if (!error && data) {
+      semanticResults = data;
+      semanticOk = true;
+    }
+  } catch (_embErr) {
+    console.warn("Semantic search failed, using text fallback only:", _embErr);
+  }
+
+  // ILIKE text fallback — escape PostgREST-special chars (commas/parens break .or() syntax)
+  const q = query.replace(/[,()'"\\]/g, " ").replace(/\s+/g, " ").trim();
+  const { data: textResults } = await supabase
+    .from("notes")
+    .select("id, title, content, metadata, tags, created_at")
+    .eq("user_id", currentUserId)
+    .eq("is_trashed", false)
+    .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  const seenIds = new Set<string>();
+  const merged: any[] = [];
+  for (const r of semanticResults) {
+    seenIds.add(r.id);
+    merged.push(r);
+  }
+  for (const r of (textResults || [])) {
+    if (!seenIds.has(r.id)) {
+      seenIds.add(r.id);
+      merged.push({ ...r, similarity: null });
+    }
+  }
+  return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+}
+
+// Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
+async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
+  const q = String(query || "").trim().replace(/[%_]/g, "\\$&").replace(/[,()'"\\]/g, " ");
+  const { data } = await supabase
+    .from("wiki_pages")
+    .select("slug, title, page_type, summary, source_count, updated_at")
+    .eq("user_id", currentUserId)
+    .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
+// Tool 1: Semantic Search (Notes)
+const searchNotesHandler = async ({ query, limit, threshold }: { query: string; limit: number; threshold: number }) => {
+  try {
+    const { rows: limited, mode } = await hybridSearchNotes(query, limit, threshold);
+    if (limited.length === 0) {
+      return { content: [{ type: "text" as const, text: `No notes found matching "${query}". If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
+    }
+    const noteIds = limited.map((t: any) => t.id);
+    const mediaMap = await getMediaForNotes(noteIds);
+    const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
+    return {
+      content: [{ type: "text" as const, text: `Found ${limited.length} note(s) [${mode}]:\n\n${results.join("\n\n")}` }],
+    };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "search_thoughts",
+  "search_notes",
   {
-    title: "Search Thoughts",
+    title: "Search Notes",
     description:
-      "Search captured thoughts by meaning. Use this when the user asks about a topic, person, or idea they've previously captured.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.25),
     },
   },
-  async ({ query, limit, threshold }) => {
-    try {
-      // Run semantic search and ILIKE text search in parallel
-      let semanticResults: any[] = [];
-      let semanticOk = false;
-
-      try {
-        const qEmb = await getEmbedding(query);
-        const { data, error } = await supabase.rpc("match_notes", {
-          query_embedding: qEmb,
-          match_threshold: threshold,
-          match_count: limit,
-          p_user_id: currentUserId,
-        });
-        if (!error && data) {
-          semanticResults = data;
-          semanticOk = true;
-        }
-      } catch (_embErr) {
-        console.warn("Semantic search failed, using text fallback only:", _embErr);
-      }
-
-      // ILIKE text fallback — always run to catch notes without embeddings
-      const q = query.replace(/'/g, "''"); // escape single quotes
-      const { data: textResults } = await supabase
-        .from("notes")
-        .select("id, title, content, metadata, tags, created_at")
-        .eq("user_id", currentUserId)
-        .eq("is_trashed", false)
-        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
-        .order("updated_at", { ascending: false })
-        .limit(limit);
-
-      // Merge: semantic results first, then text results (deduplicated)
-      const seenIds = new Set<string>();
-      const merged: any[] = [];
-
-      for (const r of semanticResults) {
-        seenIds.add(r.id);
-        merged.push(r);
-      }
-      for (const r of (textResults || [])) {
-        if (!seenIds.has(r.id)) {
-          seenIds.add(r.id);
-          merged.push({ ...r, similarity: null });
-        }
-      }
-
-      const limited = merged.slice(0, limit);
-
-      if (limited.length === 0) {
-        return { content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }] };
-      }
-
-      // Enrich with media
-      const noteIds = limited.map((t: any) => t.id);
-      const mediaMap = await getMediaForNotes(noteIds);
-      const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
-
-      const mode = semanticOk ? "semantic+text" : "text_only";
-      return {
-        content: [{ type: "text" as const, text: `Found ${limited.length} thought(s) [${mode}]:\n\n${results.join("\n\n")}` }],
-      };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  searchNotesHandler
 );
 
-// Tool 2: List Recent
+// Tool 2: List Recent Notes
+const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { limit: number; type?: string; topic?: string; person?: string; days?: number }) => {
+  try {
+    let q = supabase
+      .from("notes")
+      .select("id, title, content, metadata, created_at")
+      .eq("is_trashed", false)
+      .eq("user_id", currentUserId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (type) q = q.contains("metadata", { type });
+    if (topic) q = q.contains("metadata", { topics: [topic] });
+    if (person) q = q.contains("metadata", { people: [person] });
+    if (days) {
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      q = q.gte("created_at", since.toISOString());
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    }
+    if (!data || !data.length) {
+      return { content: [{ type: "text" as const, text: "No notes found." }] };
+    }
+
+    const noteIds = data.map((t: any) => t.id);
+    const mediaMap = await getMediaForNotes(noteIds);
+    const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
+    return {
+      content: [{ type: "text" as const, text: `${data.length} recent note(s):\n\n${results.join("\n\n")}` }],
+    };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "list_recent",
+  "list_recent_notes",
   {
-    title: "List Recent Thoughts",
+    title: "List Recent Notes",
     description:
-      "List recently captured thoughts with optional filters by type, topic, person, or time range.",
+      "List recently captured notes with optional filters by type, topic, person, or time range.",
     inputSchema: {
       limit: z.number().optional().default(10),
       type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
-      days: z.number().optional().describe("Only thoughts from the last N days"),
+      days: z.number().optional().describe("Only notes from the last N days"),
     },
   },
-  async ({ limit, type, topic, person, days }) => {
-    try {
-      let q = supabase
-        .from("notes")
-        .select("id, title, content, metadata, created_at")
-        .eq("is_trashed", false)
-        .eq("user_id", currentUserId)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-
-      if (type) q = q.contains("metadata", { type });
-      if (topic) q = q.contains("metadata", { topics: [topic] });
-      if (person) q = q.contains("metadata", { people: [person] });
-      if (days) {
-        const since = new Date();
-        since.setDate(since.getDate() - days);
-        q = q.gte("created_at", since.toISOString());
-      }
-
-      const { data, error } = await q;
-
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      }
-
-      if (!data || !data.length) {
-        return { content: [{ type: "text" as const, text: "No thoughts found." }] };
-      }
-
-      // Enrich with media
-      const noteIds = data.map((t: any) => t.id);
-      const mediaMap = await getMediaForNotes(noteIds);
-      const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
-
-      return {
-        content: [{ type: "text" as const, text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}` }],
-      };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  listRecentNotesHandler
 );
 
-// Tool 3: Capture Thought
+// Tool 3: Capture Note
+const captureNoteHandler = async ({ content }: { content: string }) => {
+  try {
+    const [embedding, metadata] = await Promise.all([
+      getEmbedding(content),
+      extractMetadata(content),
+    ]);
+
+    const firstLine = content.split("\n")[0];
+    const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
+
+    const { error } = await supabase.from("notes").insert({
+      user_id: currentUserId,
+      content,
+      title,
+      embedding,
+      metadata: { ...metadata, source: "mcp" },
+      tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
+    });
+
+    if (error) {
+      return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
+    }
+
+    const meta = metadata as Record<string, unknown>;
+    let confirmation = `Captured as ${meta.type || "note"}`;
+    if (Array.isArray(meta.topics) && meta.topics.length)
+      confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
+    if (Array.isArray(meta.people) && meta.people.length)
+      confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
+    if (Array.isArray(meta.action_items) && meta.action_items.length)
+      confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+
+    return { content: [{ type: "text" as const, text: confirmation }] };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "capture_thought",
+  "capture_note",
   {
-    title: "Capture Thought",
+    title: "Capture Note",
     description:
-      "Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something to their brain directly from any AI client.",
+      "Save a new note to the user's brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something directly from any AI client.",
     inputSchema: {
-      content: z.string().describe("The thought to capture"),
+      content: z.string().describe("The note content to capture (Markdown)"),
     },
   },
-  async ({ content }) => {
-    try {
-      const [embedding, metadata] = await Promise.all([
-        getEmbedding(content),
-        extractMetadata(content),
-      ]);
-
-      const firstLine = content.split("\n")[0];
-      const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-
-      const { error } = await supabase.from("notes").insert({
-        user_id: currentUserId,
-        content,
-        title,
-        embedding,
-        metadata: { ...metadata, source: "mcp" },
-        tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-      });
-
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
-      }
-
-      const meta = metadata as Record<string, unknown>;
-      let confirmation = `Captured as ${meta.type || "thought"}`;
-      if (Array.isArray(meta.topics) && meta.topics.length)
-        confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
-      if (Array.isArray(meta.people) && meta.people.length)
-        confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
-      if (Array.isArray(meta.action_items) && meta.action_items.length)
-        confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
-
-      return { content: [{ type: "text" as const, text: confirmation }] };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  captureNoteHandler
 );
 
 // Tool: Update Note
@@ -639,7 +649,7 @@ server.registerTool(
     description:
       "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
     inputSchema: {
-      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_thoughts, list_recent, get_person_notes, or get_connected_notes results."),
+      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       title: z.string().optional(),
       content: z.string().optional().describe("Full Markdown content (replaces existing)"),
       tags: z.array(z.string()).optional(),
@@ -698,7 +708,7 @@ server.registerTool(
     description:
       "Move a note to trash (reversible — the user can restore it from the Trash view). Use this when the user wants to delete or remove a note. Permanent deletion is intentionally NOT available to agents — only the user can hard-delete from the UI. Pass restore: true to bring a trashed note back.",
     inputSchema: {
-      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_thoughts, list_recent, get_person_notes, or get_connected_notes results."),
+      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       restore: z.boolean().optional().default(false).describe("If true, restores the note from trash instead of trashing it"),
     },
   },
@@ -745,7 +755,7 @@ server.registerTool(
   "get_stats",
   {
     title: "Brain Statistics",
-    description: "Get a summary of all captured thoughts: totals, types, top topics, people, and recent activity.",
+    description: "Get a summary of all captured notes: totals, types, top topics, people, and recent activity.",
     inputSchema: {},
   },
   async () => {
@@ -784,7 +794,7 @@ server.registerTool(
         Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
       const lines: string[] = [
-        `Total thoughts: ${count}`,
+        `Total notes: ${count}`,
         `This week: ${thisWeek}`,
         `Date range: ${
           data?.length
@@ -1797,7 +1807,7 @@ server.registerTool(
   "lexicon_search",
   {
     title: "Search Lexicon",
-    description: "Search Lexicon pages by title, slug, or content. Returns matching pages with summaries.",
+    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once.",
     inputSchema: {
       query: z.string().describe("Case-insensitive substring to search for"),
       limit: z.number().optional().default(10),
@@ -2330,6 +2340,94 @@ server.registerTool("search_all_collections", { title: "Search All Collections",
     });
   });
 });
+
+// ============================================================
+// Unified search across notes + Lexicon (preferred default)
+// ============================================================
+server.registerTool(
+  "search_brain",
+  {
+    title: "Search Brain (Notes + Lexicon)",
+    description:
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page.",
+    inputSchema: {
+      query: z.string().describe("What to search for"),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.25),
+    },
+  },
+  async ({ query, limit, threshold }) => {
+    try {
+      const [{ rows: noteRows, mode }, lexRows] = await Promise.all([
+        hybridSearchNotes(query, limit, threshold),
+        searchLexiconPages(query, limit),
+      ]);
+
+      if (!noteRows.length && !lexRows.length) {
+        return { content: [{ type: "text" as const, text: `No notes or Lexicon pages found matching "${query}".` }] };
+      }
+
+      const noteIds = noteRows.map((t: any) => t.id);
+      const mediaMap = noteIds.length ? await getMediaForNotes(noteIds) : new Map();
+      const noteOut = noteRows.map((t: any, i: number) => `[note] ${formatNote(t, i, t.similarity, mediaMap.get(t.id))}`);
+      const lexOut = lexRows.map((p: any, i: number) =>
+        `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
+        (p.summary ? `\n   ${p.summary}` : "") +
+        (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "")
+      );
+
+      const text =
+        `Found ${noteRows.length} note(s) [${mode}] and ${lexRows.length} Lexicon page(s):\n\n` +
+        [...noteOut, ...lexOut].join("\n\n");
+      return { content: [{ type: "text" as const, text }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ============================================================
+// Backward-compat aliases (deprecated old "thought" naming)
+// ============================================================
+server.registerTool(
+  "search_thoughts",
+  {
+    title: "Search Thoughts (deprecated alias)",
+    description: "Deprecated alias for `search_notes`. Use `search_notes` (or `search_brain` for notes + Lexicon) instead.",
+    inputSchema: {
+      query: z.string(),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.25),
+    },
+  },
+  searchNotesHandler
+);
+
+server.registerTool(
+  "list_recent",
+  {
+    title: "List Recent (deprecated alias)",
+    description: "Deprecated alias for `list_recent_notes`. Use `list_recent_notes` instead.",
+    inputSchema: {
+      limit: z.number().optional().default(10),
+      type: z.string().optional(),
+      topic: z.string().optional(),
+      person: z.string().optional(),
+      days: z.number().optional(),
+    },
+  },
+  listRecentNotesHandler
+);
+
+server.registerTool(
+  "capture_thought",
+  {
+    title: "Capture Thought (deprecated alias)",
+    description: "Deprecated alias for `capture_note`. Use `capture_note` instead.",
+    inputSchema: { content: z.string() },
+  },
+  captureNoteHandler
+);
 
 const app = new Hono();
 

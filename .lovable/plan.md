@@ -1,78 +1,69 @@
-# Bessere Personenerkennung in Notizen
+# Warum „Thoughts" und warum „Friendship Strategy" nicht gefunden wurde
 
-## Was im Screenshot schiefläuft
+## Befund 1 — Woher das Wort „Thoughts" kommt
 
-Beim Verarbeiten einer Notiz mit „Shi Hui" (deine Frau, schon als Kontakt vorhanden) und „George Clooney" (Schauspieler, kein Kontakt) landen unnötig viele Einträge im Review Queue:
+Im MCP-Server (`supabase/functions/open-brain-mcp/index.ts`) sind die Tools, die deine Agenten Hermes/OpenClaw aufrufen, durchgängig in „Thought"-Sprache benannt:
 
-- „Michael" wird als „bist du das?" gefragt — obwohl Michael dein Kontoname ist und keine eindeutige andere Person im Kontext steht.
-- „Xihui" wird als „bist du das?" gefragt — obwohl es einen Kontakt mit genau diesem Namen gibt.
-- „George Clooney" bekommt **zwei** Einträge: einmal „Add to People", einmal „bist du das?".
+| Tool-Name | Title | Description-Auszug |
+|---|---|---|
+| `search_thoughts` | „Search Thoughts" | „Search captured **thoughts** by meaning…" |
+| `list_recent` | „List Recent **Thoughts**" | „List recently captured **thoughts**…" |
+| `capture_thought` | „Capture Thought" | „Save a new **thought** to the Open Brain…" |
+| `get_stats` | — | „…summary of all captured **thoughts**…" |
 
-Beim Lesen von `supabase/functions/process-note/index.ts` (`disambiguateMention`, Zeilen ~155–192, plus Auto-Link-Block ~1164–1260) habe ich drei klare Fehlentscheidungen gefunden, die wir gezielt drehen können — kein neuer LLM-Call nötig.
+Außerdem geben die Antworten Strings wie „Found N **thought(s)**", „No **thoughts** found." zurück. Das ist der gesamte Wortschatz, mit dem die Agenten konfrontiert werden — sie übernehmen ihn 1:1, wenn sie über das Konzept reden. Das hat historische Gründe (Open-Brain-Begrifflichkeit aus der ersten Version), passt aber nicht mehr zum heutigen User-Vokabular „Notes".
 
-## Bug 1 — Unbekannte Namen werden fälschlich als „bist du das?" markiert
+## Befund 2 — „Friendship Strategy" existiert zweimal
 
-In `disambiguateMention`:
+DB-Check ergab:
 
-```ts
-const isSelfAlias = self.enabled && nameMatchesAlias(person, self.aliases);
-if (!isSelfAlias) {
-  return { kind: contactCandidates.length > 0 ? "contact" : "ambiguous", ... };
-}
-```
+- `notes`-Tabelle: Notiz **„Friendship Strategy"** (nicht im Trash)
+- `wiki_pages`-Tabelle: Lexicon-Page **„Friendship Strategy"** (page_type `overview`)
 
-Wenn der Name **kein** Self-Alias ist und es **keinen** Kontaktkandidaten gibt, wird `ambiguous` zurückgegeben → der Auto-Link-Block schreibt einen `name_disambiguation`-Eintrag „is this you or another person?". Das ist die Ursache für den George-Clooney-Eintrag.
+Heißt: die Notiz **gibt es**. `search_thoughts` hat einen ILIKE-Fallback auf `title`/`content` und sollte sie finden. Es gibt aber zwei plausible Erklärungen, warum Hermes leer ausging:
 
-**Fix:** In dem Zweig `kind: "skip"` zurückgeben (oder einfach gar nicht in `ambiguousMentions` aufnehmen). „Bist du das?" darf nur entstehen, wenn der Name tatsächlich einem Self-Alias ähnelt.
+1. **Hermes hat das falsche Tool gewählt.** Wenn er „Friendship Strategy" als Konzept versteht, ruft er `lexicon_search` auf — und kriegt nur die Wiki-Page. Sucht er sie **als Notiz**, ruft er `search_thoughts` — kriegt aber bei der semantischen Suche evtl. einen schwachen Score (Threshold 0.25) und der ILIKE-Fallback scheitert nur, wenn die Anfrage ungewöhnlich formuliert war (z. B. ganzer Satz). Es gibt kein **kombiniertes** Tool, das Notes + Lexicon gemeinsam durchsucht.
+2. **Tool-Descriptions trennen die beiden Welten unsauber.** `search_thoughts` erwähnt Lexicon nicht, `lexicon_search` erwähnt Notes nicht. Der Agent muss raten.
 
-## Bug 2 — Bekannte Kontakte schlagen Self-Alias zu schwach
-
-Wenn „Xihui" sowohl auf einen Kontakt **als auch** auf einen Self-Alias matcht (z. B. weil der User früher mal etwas bestätigt hat oder weil der Vorname des Users zufällig ähnlich klingt), entscheidet der Kontextfenster-Heuristik. Aktuell:
-
-1. Voller Kontaktname im Kontextfenster → Kontakt gewinnt.
-2. Sonst: Self-Marker („my", „mein") → Self.
-3. Sonst: ambiguous.
-
-Das Problem: Schon ein einzelner Kontakt mit **identischem Namen** wie der Mention sollte stark genug sein. „my wife Xihui" enthält außerdem das Self-Token „my", das dann fälschlich Self auslöst.
-
-**Fix:**
-- Wenn ein Kontakt **exakt** denselben Namen trägt wie die Mention (`nameToContact.get(person.toLowerCase())` greift) → Kontakt gewinnt direkt, Self-Check wird übersprungen.
-- `OTHER_MARKERS` um Beziehungsbegriffe erweitern: „my wife/husband/partner/boyfriend/girlfriend/mom/dad/son/daughter", „meine Frau/mein Mann/meine Partnerin/mein Partner/meine Tochter/mein Sohn/meine Mutter/mein Vater" usw. Diese stehen **vor** dem Self-Marker-Check und kippen die Entscheidung sicher auf „contact".
-
-## Bug 3 — „Michael" (= du selbst) sollte nicht ständig erfragt werden
-
-Wenn die Mention exakt deinem `preferredName` / Display-Name entspricht und **kein** Kontakt mit demselben vollen Namen im Kontextfenster steht, ist die Wahrscheinlichkeit für „Self" sehr hoch.
-
-**Fix:** Wenn `person.toLowerCase() === selfCtx.preferredName?.toLowerCase()` und keine Kontaktkandidaten vorhanden sind, direkt `self` annehmen (ohne Review-Eintrag). Falls ein Kontakt denselben Namen trägt, einmalig einen `name_disambiguation`-Eintrag erzeugen — aber sobald der User entscheidet, merkt sich `recordDisambiguation` das (existiert bereits) und fragt nicht erneut.
-
-## Bug 4 — Doppelte Einträge für dieselbe Person
-
-George Clooney bekommt „Add to People" **und** „is this you?". Selbst nach Fix 1 sollten wir defensiv eine Deduplizierung einziehen:
-
-**Fix:** Vor dem Insert in `review_queue` die `suppression_key`s pro Notiz/Person zusammenführen — wenn ein `add_contact` für „George Clooney" entsteht, kein `name_disambiguation` für denselben Namen einfügen.
-
-## Optionale Folge-Verbesserung (separat, wenn gewünscht)
-
-Für richtig knifflige Fälle könnten wir später einen kleinen LLM-Pass über die wirklich verbleibenden ambiguen Mentions schicken (mit `gpt-5-nano` oder `gemini-3-flash`, batched pro Notiz, Tool-Calling für strukturierte Antwort). Das kostet aber Credits — lieber erst die Heuristik fixen und schauen, wie viele Fälle übrigbleiben.
+Edge-Function-Logs zeigen keine Tool-Call-Details (MCP-Server loggt das nicht), daher können wir nicht final beweisen, **welches** Tool Hermes aufgerufen hat — aber beide Erklärungen führen zu derselben Fix-Richtung.
 
 ---
 
-## Technische Zusammenfassung
+## Plan
 
-Datei: `supabase/functions/process-note/index.ts`
+### A. „Notes" statt „Thoughts" durchziehen
 
-1. `disambiguateMention` (Z. 157–192):
-   - Reihenfolge umstellen: **erst** auf exakten Kontakt-Namensmatch prüfen → `contact`.
-   - **Erst danach** `isSelfAlias` prüfen; wenn `false` und keine Kandidaten → neue Variante `kind: "skip"` (statt `ambiguous`).
-   - `OTHER_MARKERS` um Verwandtschafts-/Beziehungsbegriffe (DE + EN) erweitern und vor `SELF_MARKERS` evaluieren.
-   - Self-Match nur dann automatisch akzeptieren, wenn Mention exakt dem `preferredName` entspricht und keine Kandidaten existieren.
+In `supabase/functions/open-brain-mcp/index.ts`:
 
-2. Auto-Link-Block (Z. 1164–1260):
-   - `SelfDecision` um `"skip"` erweitern; `skip` weder in `matchedPeople` noch in `ambiguousMentions` aufnehmen.
-   - Vor dem `review_queue`-Insert für `name_disambiguation` filtern: alle Mentions ausschließen, für die im selben Lauf bereits ein `add_contact` erzeugt wurde.
+1. **Neue Tool-Namen** (semantisch klar):
+   - `search_thoughts` → `search_notes`
+   - `list_recent` → `list_recent_notes` (Title schon „Notes" lassen)
+   - `capture_thought` → `capture_note`
+   - Title/Description bei allen restlichen Tools (`get_stats`, `get_action_items`, etc.) auf „note(s)" umstellen.
+2. **Backward-Compat-Aliase**: Alte Namen (`search_thoughts`, `capture_thought`, `list_recent`) bleiben **zusätzlich** als dünne Delegate-Tools registriert mit Description „Deprecated alias for `search_notes` — use the new name." So brechen bestehende Hermes-/OpenClaw-Konfigurationen nicht.
+3. Antwort-Strings („Found N thought(s)" etc.) auf „note(s)" umstellen.
+4. Auch in `supabase/functions/ingest-thought/index.ts` die User-facing Confirmation-Strings („Captured as *thought*") anpassen — die Datei selbst behalten wir aus Routing-Gründen, aber die Wörter werden „note".
 
-3. Keine Schema- oder DB-Änderungen nötig; `name_disambiguation_decisions` und `recordDisambiguation` bleiben unverändert.
+### B. Suche gezielter machen
+
+1. **`search_notes`-Description erweitern** um den Hinweis, dass es **nur** persönliche Notizen durchsucht und für synthesierte Themen-Pages das Lexicon-Tool verwendet werden soll: „If the user asks about a synthesized topic / strategy / concept and you don't find a note, also call `lexicon_search`."
+2. **`lexicon_search`-Description spiegeln**: „If the user asks about a raw captured idea, prefer `search_notes` first; use Lexicon for synthesized topic pages."
+3. **Optional, empfohlen**: Neues Tool **`search_brain`** ergänzen, das in **einem** Aufruf parallel `match_notes` (semantisch + ILIKE) **und** `wiki_pages` ILIKE durchführt und die Treffer gemerged zurückgibt — gekennzeichnet als `note` oder `lexicon`. Das ist das Tool, das wir der Agent als Default empfehlen („Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a synthesized topic page."). `search_notes`/`lexicon_search` bleiben für gezielte Suchen.
+4. ILIKE-Query in `search_notes` defensiver machen: Komma im `query` escapen (PostgREST `.or()` benutzt Komma als Separator → bricht Suche bei Anfragen wie „Friendship Strategy, my plan").
+
+### C. Verifizieren
+
+1. Edge Function deployen, mit `supabase--curl_edge_functions` einen `tools/list` und einen `tools/call: search_notes {query: "Friendship Strategy"}` mit deinem `mnr_`-Token absetzen → erwarten: 1 Treffer.
+2. Außerdem `search_brain {query: "Friendship Strategy"}` testen → erwarten: 2 Treffer (1 note + 1 lexicon page).
 
 ---
 
-Sag mir, ob ich das so umsetzen soll, oder ob du erst noch z. B. den optionalen LLM-Pass mit reinnehmen willst.
+## Technische Notizen für die Umsetzung
+
+- **Keine DB-Migration nötig.** Reine Edge-Function-Änderung.
+- Aliase per zweitem `server.registerTool(...)` mit identischem Handler — minimaler Boilerplate.
+- `search_brain` kann intern dieselbe Logik wie `search_thoughts` + `lexicon_search` aufrufen (Funktionen extrahieren statt Code duplizieren).
+- Memory-Eintrag `mem://integrations/mcp-and-slack-hub` muss um den neuen Tool-Namen ergänzt werden.
+- Konstante: Welche Tool-Namen ändern sich? → in `docs/ARCHITECTURE.md` (falls dort dokumentiert) nachziehen. Kurz prüfen.
+
+Soll ich so weitermachen?
