@@ -14,7 +14,7 @@ const BRAIN_OWNER_USER_ID = Deno.env.get("BRAIN_OWNER_USER_ID")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's captured thought. Return JSON with:
+const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's captured note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
@@ -127,7 +127,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Build confirmation reply
     const meta = metadata as Record<string, unknown>;
-    let confirmation = `Captured as *${meta.type || "thought"}*`;
+    let confirmation = `Captured as *${meta.type || "note"}*`;
     if (Array.isArray(meta.topics) && meta.topics.length > 0)
       confirmation += ` - ${meta.topics.join(", ")}`;
     if (Array.isArray(meta.people) && meta.people.length > 0)
