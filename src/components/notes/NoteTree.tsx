@@ -218,9 +218,13 @@ export function NoteTree({
                 if (isRoot) return;
                 event.dataTransfer.setData("application/x-folder-path", node.path);
                 event.dataTransfer.effectAllowed = "move";
+                const el = event.currentTarget;
+                // Defer so the browser captures the drag ghost first, then dim source
+                setTimeout(() => el.classList.add("opacity-40"), 0);
                 setDraggingKey(`folder:${node.path}`);
               }}
-              onDragEnd={() => {
+              onDragEnd={(event) => {
+                event.currentTarget.classList.remove("opacity-40");
                 setDraggingKey(null);
                 setDragOverPath(null);
               }}
