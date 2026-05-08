@@ -461,14 +461,16 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     console.warn("Semantic search failed, using text fallback only:", _embErr);
   }
 
-  // ILIKE text fallback — escape PostgREST-special chars (commas/parens break .or() syntax)
-  const q = query.replace(/[,()'"\\]/g, " ").replace(/\s+/g, " ").trim();
+  // ILIKE text fallback — inside .or() filter strings PostgREST/supabase-js use `*` (not `%`)
+  // as the wildcard. Strip commas/parens/quotes that would break the .or() parser, then build
+  // the predicate with `*…*`.
+  const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   const { data: textResults } = await supabase
     .from("notes")
     .select("id, title, content, metadata, tags, created_at")
     .eq("user_id", currentUserId)
     .eq("is_trashed", false)
-    .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+    .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
 
