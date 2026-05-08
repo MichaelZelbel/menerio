@@ -24,7 +24,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Im Trash-Filter haben Notizen ein Context-Menu mit "Restore" und "Delete permanently" (mit AlertDialog).
 - **Files:** `src/components/notes/NoteTree.tsx`, `src/pages/Notes.tsx`
 
-### 4. 🟥 "Saved · Xs ago" Indicator im Editor · S · ★★
+### 4. 🟩 "Saved · Xs ago" Indicator im Editor · S · ★★
 - **Bereich:** Editor
 - **Akzeptanz:** Header zeigt Spinner während Save, danach relativen Zeitstempel ("Saved · 2s ago"). Bei Fehler: rote Pille.
 - **Files:** `src/components/notes/NoteEditor.tsx`

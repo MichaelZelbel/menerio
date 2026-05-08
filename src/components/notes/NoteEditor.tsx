@@ -167,6 +167,51 @@ function editorToMarkdown(editor: { getJSON: () => any }): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
+function formatRelativeSaved(ts: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 5) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const m = Math.floor(diffSec / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+}
+
+interface SaveIndicatorProps {
+  status: "idle" | "saving" | "saved" | "error";
+  lastSavedAt: number | null;
+  tick: number;
+}
+
+function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
+  if (status === "idle" && !lastSavedAt) return null;
+  if (status === "saving") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (status === "error") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] font-medium text-destructive shrink-0 px-1.5 py-0.5 rounded bg-destructive/10">
+        <AlertCircle className="h-3 w-3" />
+        Save failed
+      </span>
+    );
+  }
+  if (lastSavedAt) {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+        <CheckCircle2 className="h-3 w-3 text-success" />
+        Saved · {formatRelativeSaved(lastSavedAt)}
+      </span>
+    );
+  }
+  return null;
+}
+
 function countMarkdownLinks(content: string | null | undefined): number {
   return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
 }
@@ -345,6 +390,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const pendingSaveTitleRef = useRef<string | null>(null);
   const activeNoteIdRef = useRef(note.id);
 
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    if (saveStatus !== "saved" || !lastSavedAt) return;
+    const id = setInterval(() => setSavedTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, [saveStatus, lastSavedAt]);
+  // Reset save status when switching to a different note
+  useEffect(() => {
+    setSaveStatus("idle");
+    setLastSavedAt(null);
+  }, [note.id]);
+
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
     if (ghConn.sync_direction !== "export" && ghConn.sync_direction !== "bidirectional") return;
@@ -487,12 +546,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       lastLocalContentRef.current = md;
       pendingSaveContentRef.current = md;
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      setSaveStatus("saving");
       contentSaveTimer.current = setTimeout(() => {
         updateNote.mutate(
           { id: note.id, content: md },
           {
-            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
-            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
+            onSuccess: () => {
+              if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
+              setSaveStatus("saved");
+              setLastSavedAt(Date.now());
+            },
+            onError: () => {
+              if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
+              setSaveStatus("error");
+            },
           }
         );
         triggerGitHubSync(note.id);
@@ -663,6 +730,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     lastLocalTitleRef.current = val;
     pendingSaveTitleRef.current = val;
     if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+    setSaveStatus("saving");
     titleSaveTimer.current = setTimeout(async () => {
       const duplicate = await checkDuplicateTitle(val);
       if (duplicate) {
@@ -673,8 +741,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       updateNote.mutate(
         { id: note.id, title: val },
         {
-          onSuccess: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
-          onError: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
+          onSuccess: () => {
+            if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+          },
+          onError: () => {
+            if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null;
+            setSaveStatus("error");
+          },
         }
       );
       triggerGitHubSync(note.id);
@@ -1135,6 +1210,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             className="flex-1 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
             disabled={note.is_trashed || note.is_external}
           />
+          {!note.is_trashed && !note.is_external && (
+            <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
+          )}
           {note.entity_type && (
             <Badge variant="secondary" className="text-[10px] shrink-0">
               {note.entity_type}
