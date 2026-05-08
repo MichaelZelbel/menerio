@@ -533,62 +533,60 @@ server.registerTool(
   searchNotesHandler
 );
 
-// Tool 2: List Recent
+// Tool 2: List Recent Notes
+const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { limit: number; type?: string; topic?: string; person?: string; days?: number }) => {
+  try {
+    let q = supabase
+      .from("notes")
+      .select("id, title, content, metadata, created_at")
+      .eq("is_trashed", false)
+      .eq("user_id", currentUserId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (type) q = q.contains("metadata", { type });
+    if (topic) q = q.contains("metadata", { topics: [topic] });
+    if (person) q = q.contains("metadata", { people: [person] });
+    if (days) {
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      q = q.gte("created_at", since.toISOString());
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+    }
+    if (!data || !data.length) {
+      return { content: [{ type: "text" as const, text: "No notes found." }] };
+    }
+
+    const noteIds = data.map((t: any) => t.id);
+    const mediaMap = await getMediaForNotes(noteIds);
+    const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
+    return {
+      content: [{ type: "text" as const, text: `${data.length} recent note(s):\n\n${results.join("\n\n")}` }],
+    };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "list_recent",
+  "list_recent_notes",
   {
-    title: "List Recent Thoughts",
+    title: "List Recent Notes",
     description:
-      "List recently captured thoughts with optional filters by type, topic, person, or time range.",
+      "List recently captured notes with optional filters by type, topic, person, or time range.",
     inputSchema: {
       limit: z.number().optional().default(10),
       type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
-      days: z.number().optional().describe("Only thoughts from the last N days"),
+      days: z.number().optional().describe("Only notes from the last N days"),
     },
   },
-  async ({ limit, type, topic, person, days }) => {
-    try {
-      let q = supabase
-        .from("notes")
-        .select("id, title, content, metadata, created_at")
-        .eq("is_trashed", false)
-        .eq("user_id", currentUserId)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-
-      if (type) q = q.contains("metadata", { type });
-      if (topic) q = q.contains("metadata", { topics: [topic] });
-      if (person) q = q.contains("metadata", { people: [person] });
-      if (days) {
-        const since = new Date();
-        since.setDate(since.getDate() - days);
-        q = q.gte("created_at", since.toISOString());
-      }
-
-      const { data, error } = await q;
-
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      }
-
-      if (!data || !data.length) {
-        return { content: [{ type: "text" as const, text: "No thoughts found." }] };
-      }
-
-      // Enrich with media
-      const noteIds = data.map((t: any) => t.id);
-      const mediaMap = await getMediaForNotes(noteIds);
-      const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
-
-      return {
-        content: [{ type: "text" as const, text: `${data.length} recent thought(s):\n\n${results.join("\n\n")}` }],
-      };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  listRecentNotesHandler
 );
 
 // Tool 3: Capture Thought
