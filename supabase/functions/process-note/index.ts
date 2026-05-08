@@ -1257,7 +1257,7 @@ async function processInBackground(noteId: string, authHeader: string) {
           const c = candidates.find((x) => x.id === recalled.contact_id) || { id: recalled.contact_id, name: person };
           decision = { kind: "contact", contactCandidates: [c], reason: "recalled_contact" };
         } else {
-          decision = disambiguateMention(person, noteFullText, selfCtx, candidates);
+          decision = disambiguateMention(person, noteFullText, selfCtx, candidates, selfCtx.preferredName);
         }
 
         if (decision.kind === "self") {
@@ -1270,6 +1270,7 @@ async function processInBackground(noteId: string, authHeader: string) {
         } else if (decision.kind === "ambiguous") {
           ambiguousMentions.push({ name: person, candidates: decision.contactCandidates });
         }
+        // decision.kind === "skip" → no action; "Add to People" flow handles unknown names.
       }
       if (matchedPeople.length > 0) {
         metadata.matched_people = matchedPeople;
