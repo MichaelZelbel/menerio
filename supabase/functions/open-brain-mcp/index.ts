@@ -1820,12 +1820,13 @@ server.registerTool(
   async ({ query, limit, page_type }) => {
     try {
       const safeLimit = clampNumber(limit, 1, 50, 10);
-      const q = String(query || "").trim().replace(/[%_]/g, "\\$&");
+      // Inside .or() use `*` as ILIKE wildcard, not `%` (PostgREST/supabase-js gotcha).
+      const q = String(query || "").replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
       let request = supabase
         .from("wiki_pages")
         .select("slug, title, page_type, summary, source_count, updated_at")
         .eq("user_id", currentUserId)
-        .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+        .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
         .order("updated_at", { ascending: false })
         .limit(safeLimit);
 
