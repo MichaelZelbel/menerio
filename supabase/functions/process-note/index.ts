@@ -185,7 +185,7 @@ function disambiguateMention(
   noteText: string,
   self: SelfContext,
   contactCandidates: Array<{ id: string; name: string }>,
-  preferredName?: string,
+  preferredName?: string | null,
 ): SelfDecision {
   const personLower = person.toLowerCase();
 
