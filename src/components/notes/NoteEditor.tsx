@@ -345,6 +345,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const pendingSaveTitleRef = useRef<string | null>(null);
   const activeNoteIdRef = useRef(note.id);
 
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    if (saveStatus !== "saved" || !lastSavedAt) return;
+    const id = setInterval(() => setSavedTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, [saveStatus, lastSavedAt]);
+  // Reset save status when switching to a different note
+  useEffect(() => {
+    setSaveStatus("idle");
+    setLastSavedAt(null);
+  }, [note.id]);
+
   const triggerGitHubSync = useCallback((noteId: string) => {
     if (!ghConn?.sync_enabled || !ghConn?.repo_owner || !ghConn?.repo_name) return;
     if (ghConn.sync_direction !== "export" && ghConn.sync_direction !== "bidirectional") return;
