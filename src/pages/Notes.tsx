@@ -143,6 +143,13 @@ export default function Notes() {
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
   const [savedFolders, setSavedFolders] = useState<string[]>([]);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    destructive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
 
   const refreshFolders = useCallback(async () => {
     const { data } = await supabase
