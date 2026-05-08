@@ -1118,6 +1118,8 @@ export default function Notes() {
             onRenameFolder={handleRenameFolder}
             onMoveFolder={handleMoveFolder}
             onDeleteFolder={handleDeleteFolder}
+            onRestoreNote={handleRestoreNote}
+            onDeleteNotePermanently={handleDeleteNotePermanently}
             sortField={sortField}
             sortDirection={sortDirection}
           />
