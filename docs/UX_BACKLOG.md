@@ -14,7 +14,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** `window.confirm` ersetzt durch `AlertDialog`. Zeigt Anzahl betroffener Notizen + Subfolder. Destructive-Variante.
 - **Files:** `src/components/notes/NoteTree.tsx`, `src/pages/Notes.tsx`
 
-### 2. 🟥 Drag & Drop Source-Feedback · S · ★★
+### 2. 🟩 Drag & Drop Source-Feedback · S · ★★
 - **Bereich:** Notes / NoteTree
 - **Akzeptanz:** Gezogene Folder/Note bekommen `opacity-50`, Cursor `grabbing`. Drop-Target hebt sich mit Border ab.
 - **Files:** `src/components/notes/NoteTree.tsx`
