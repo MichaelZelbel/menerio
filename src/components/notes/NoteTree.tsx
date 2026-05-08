@@ -127,6 +127,8 @@ export function NoteTree({
   onRenameFolder,
   onMoveFolder,
   onDeleteFolder,
+  onRestoreNote,
+  onDeleteNotePermanently,
   sortField = "updated_at",
   sortDirection = "desc",
 }: NoteTreeProps) {
