@@ -1146,8 +1146,8 @@ server.registerTool(
     inputSchema: { query: z.string(), limit: z.number().optional().default(20) },
   },
   async ({ query, limit }) => {
-    const escaped = query.replace(/[%_]/g, "");
-    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.%${escaped}%,description.ilike.%${escaped}%`).order("happened_at", { ascending: false }).limit(limit);
+    const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
+    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
   }
