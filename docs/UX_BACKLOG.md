@@ -9,7 +9,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ## P0 — Quick Wins (jetzt)
 
-### 1. 🟥 Folder-Delete Confirm via AlertDialog · S · ★★★
+### 1. 🟩 Folder-Delete Confirm via AlertDialog · S · ★★★
 - **Bereich:** Notes / NoteTree
 - **Akzeptanz:** `window.confirm` ersetzt durch `AlertDialog`. Zeigt Anzahl betroffener Notizen + Subfolder. Destructive-Variante.
 - **Files:** `src/components/notes/NoteTree.tsx`, `src/pages/Notes.tsx`

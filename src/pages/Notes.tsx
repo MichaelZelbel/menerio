@@ -19,6 +19,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -132,6 +143,13 @@ export default function Notes() {
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
   const [savedFolders, setSavedFolders] = useState<string[]>([]);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    destructive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
 
   const refreshFolders = useCallback(async () => {
     const { data } = await supabase
@@ -226,26 +244,31 @@ export default function Notes() {
   const [isTrashingEmpty, setIsTrashingEmpty] = useState(false);
   const handleTrashEmptyNotes = useCallback(async () => {
     if (emptyNotes.length === 0 || isTrashingEmpty) return;
-    const confirmed = window.confirm(
-      `Move ${emptyNotes.length} empty note${emptyNotes.length === 1 ? "" : "s"} to Trash? You can restore them from the Trash filter.`,
-    );
-    if (!confirmed) return;
-    setIsTrashingEmpty(true);
-    try {
-      const ids = emptyNotes.map((n) => n.id);
-      const { error } = await supabase
-        .from("notes")
-        .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-        .in("id", ids);
-      if (error) throw error;
-      if (selectedId && ids.includes(selectedId)) selectNote(null);
-      await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
-    } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
-    } finally {
-      setIsTrashingEmpty(false);
-    }
+    const count = emptyNotes.length;
+    setConfirmState({
+      title: `Move ${count} empty note${count === 1 ? "" : "s"} to Trash?`,
+      description: `These notes have no title and no content. You can restore them from the Trash filter.`,
+      confirmLabel: "Move to Trash",
+      destructive: true,
+      onConfirm: async () => {
+        setIsTrashingEmpty(true);
+        try {
+          const ids = emptyNotes.map((n) => n.id);
+          const { error } = await supabase
+            .from("notes")
+            .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+            .in("id", ids);
+          if (error) throw error;
+          if (selectedId && ids.includes(selectedId)) selectNote(null);
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
+        } catch (err) {
+          showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
+        } finally {
+          setIsTrashingEmpty(false);
+        }
+      },
+    });
   }, [emptyNotes, isTrashingEmpty, selectedId, selectNote, queryClient]);
 
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
@@ -382,38 +405,44 @@ export default function Notes() {
     const parts: string[] = [];
     if (affectedNotes.length > 0) parts.push(`${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} will be moved to Trash`);
     if (subfolderCount > 0) parts.push(`${subfolderCount} subfolder${subfolderCount === 1 ? "" : "s"} will be deleted`);
-    const detail = parts.length ? `\n\n${parts.join(". ")}.` : "";
-    const confirmed = window.confirm(`Delete folder "${path}"?${detail}`);
-    if (!confirmed) return;
-    try {
-      if (affectedNotes.length > 0) {
-        const ids = affectedNotes.map((n) => n.id);
-        const { error: nErr } = await supabase
-          .from("notes" as any)
-          .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-          .in("id", ids);
-        if (nErr) throw nErr;
-        if (selectedId && ids.includes(selectedId)) selectNote(null);
-      }
-      const { error: fErr } = await supabase
-        .from("note_folders" as any)
-        .delete()
-        .or(`path.eq.${path},path.like.${path}/%`);
-      if (fErr) throw fErr;
-      await refreshFolders();
-      await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      if (activeFolderPath === path || activeFolderPath?.startsWith(path + "/")) {
-        const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
-        setActiveFolderPath(parent || null);
-      }
-      showToast.success(
-        affectedNotes.length > 0
-          ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
-          : "Folder deleted"
-      );
-    } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
-    }
+    const detail = parts.length ? ` ${parts.join(". ")}.` : " This folder is empty.";
+    setConfirmState({
+      title: `Delete folder "${path}"?`,
+      description: `${detail} Notes can be restored from the Trash filter.`,
+      confirmLabel: "Delete folder",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          if (affectedNotes.length > 0) {
+            const ids = affectedNotes.map((n) => n.id);
+            const { error: nErr } = await supabase
+              .from("notes" as any)
+              .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+              .in("id", ids);
+            if (nErr) throw nErr;
+            if (selectedId && ids.includes(selectedId)) selectNote(null);
+          }
+          const { error: fErr } = await supabase
+            .from("note_folders" as any)
+            .delete()
+            .or(`path.eq.${path},path.like.${path}/%`);
+          if (fErr) throw fErr;
+          await refreshFolders();
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          if (activeFolderPath === path || activeFolderPath?.startsWith(path + "/")) {
+            const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+            setActiveFolderPath(parent || null);
+          }
+          showToast.success(
+            affectedNotes.length > 0
+              ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
+              : "Folder deleted"
+          );
+        } catch (err) {
+          showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
+        }
+      },
+    });
   }, [activeFolderPath, allNotes, folderPaths, queryClient, refreshFolders, selectedId, selectNote]);
 
   // Handle ?action=create from external "+ New Note" buttons (header, deep links).
@@ -626,6 +655,7 @@ export default function Notes() {
   }, []);
 
   return (
+    <>
     <div className="flex h-[calc(100vh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
@@ -1087,6 +1117,31 @@ export default function Notes() {
         )}
       </div>
     </div>
+    <AlertDialog
+      open={!!confirmState}
+      onOpenChange={(open) => { if (!open) setConfirmState(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirmState?.title}</AlertDialogTitle>
+          <AlertDialogDescription>{confirmState?.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={confirmState?.destructive ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+            onClick={async () => {
+              const action = confirmState?.onConfirm;
+              setConfirmState(null);
+              if (action) await action();
+            }}
+          >
+            {confirmState?.confirmLabel || "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
