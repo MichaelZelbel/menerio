@@ -589,54 +589,56 @@ server.registerTool(
   listRecentNotesHandler
 );
 
-// Tool 3: Capture Thought
+// Tool 3: Capture Note
+const captureNoteHandler = async ({ content }: { content: string }) => {
+  try {
+    const [embedding, metadata] = await Promise.all([
+      getEmbedding(content),
+      extractMetadata(content),
+    ]);
+
+    const firstLine = content.split("\n")[0];
+    const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
+
+    const { error } = await supabase.from("notes").insert({
+      user_id: currentUserId,
+      content,
+      title,
+      embedding,
+      metadata: { ...metadata, source: "mcp" },
+      tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
+    });
+
+    if (error) {
+      return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
+    }
+
+    const meta = metadata as Record<string, unknown>;
+    let confirmation = `Captured as ${meta.type || "note"}`;
+    if (Array.isArray(meta.topics) && meta.topics.length)
+      confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
+    if (Array.isArray(meta.people) && meta.people.length)
+      confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
+    if (Array.isArray(meta.action_items) && meta.action_items.length)
+      confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+
+    return { content: [{ type: "text" as const, text: confirmation }] };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "capture_thought",
+  "capture_note",
   {
-    title: "Capture Thought",
+    title: "Capture Note",
     description:
-      "Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something to their brain directly from any AI client.",
+      "Save a new note to the user's brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something directly from any AI client.",
     inputSchema: {
-      content: z.string().describe("The thought to capture"),
+      content: z.string().describe("The note content to capture (Markdown)"),
     },
   },
-  async ({ content }) => {
-    try {
-      const [embedding, metadata] = await Promise.all([
-        getEmbedding(content),
-        extractMetadata(content),
-      ]);
-
-      const firstLine = content.split("\n")[0];
-      const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-
-      const { error } = await supabase.from("notes").insert({
-        user_id: currentUserId,
-        content,
-        title,
-        embedding,
-        metadata: { ...metadata, source: "mcp" },
-        tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-      });
-
-      if (error) {
-        return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
-      }
-
-      const meta = metadata as Record<string, unknown>;
-      let confirmation = `Captured as ${meta.type || "thought"}`;
-      if (Array.isArray(meta.topics) && meta.topics.length)
-        confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
-      if (Array.isArray(meta.people) && meta.people.length)
-        confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
-      if (Array.isArray(meta.action_items) && meta.action_items.length)
-        confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
-
-      return { content: [{ type: "text" as const, text: confirmation }] };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  captureNoteHandler
 );
 
 // Tool: Update Note
