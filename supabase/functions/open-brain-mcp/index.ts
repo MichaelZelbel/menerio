@@ -461,14 +461,16 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     console.warn("Semantic search failed, using text fallback only:", _embErr);
   }
 
-  // ILIKE text fallback — escape PostgREST-special chars (commas/parens break .or() syntax)
-  const q = query.replace(/[,()'"\\]/g, " ").replace(/\s+/g, " ").trim();
+  // ILIKE text fallback — inside .or() filter strings PostgREST/supabase-js use `*` (not `%`)
+  // as the wildcard. Strip commas/parens/quotes that would break the .or() parser, then build
+  // the predicate with `*…*`.
+  const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   const { data: textResults } = await supabase
     .from("notes")
     .select("id, title, content, metadata, tags, created_at")
     .eq("user_id", currentUserId)
     .eq("is_trashed", false)
-    .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+    .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
 
@@ -489,12 +491,13 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
 async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
-  const q = String(query || "").trim().replace(/[%_]/g, "\\$&").replace(/[,()'"\\]/g, " ");
+  // Inside .or() use `*` as ILIKE wildcard, not `%`. Strip chars that would break the .or() parser.
+  const q = String(query || "").replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   const { data } = await supabase
     .from("wiki_pages")
     .select("slug, title, page_type, summary, source_count, updated_at")
     .eq("user_id", currentUserId)
-    .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+    .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
   return data || [];
@@ -992,7 +995,10 @@ server.registerTool(
         .order("name")
         .limit(limit);
 
-      if (query) q = q.or(`name.ilike.%${query}%,company.ilike.%${query}%`);
+      if (query) {
+        const qq = String(query).replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
+        q = q.or(`name.ilike.*${qq}*,company.ilike.*${qq}*`);
+      }
       if (relationship) q = q.eq("relationship", relationship);
 
       const { data, error } = await q;
@@ -1140,8 +1146,8 @@ server.registerTool(
     inputSchema: { query: z.string(), limit: z.number().optional().default(20) },
   },
   async ({ query, limit }) => {
-    const escaped = query.replace(/[%_]/g, "");
-    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.%${escaped}%,description.ilike.%${escaped}%`).order("happened_at", { ascending: false }).limit(limit);
+    const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
+    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
   }
@@ -1817,12 +1823,13 @@ server.registerTool(
   async ({ query, limit, page_type }) => {
     try {
       const safeLimit = clampNumber(limit, 1, 50, 10);
-      const q = String(query || "").trim().replace(/[%_]/g, "\\$&");
+      // Inside .or() use `*` as ILIKE wildcard, not `%` (PostgREST/supabase-js gotcha).
+      const q = String(query || "").replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
       let request = supabase
         .from("wiki_pages")
         .select("slug, title, page_type, summary, source_count, updated_at")
         .eq("user_id", currentUserId)
-        .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+        .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
         .order("updated_at", { ascending: false })
         .limit(safeLimit);
 
