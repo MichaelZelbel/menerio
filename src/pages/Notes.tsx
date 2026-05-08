@@ -15,7 +15,7 @@ import { NoteTree } from "@/components/notes/NoteTree";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteFilter } from "@/components/notes/NoteSidebar";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
