@@ -167,6 +167,51 @@ function editorToMarkdown(editor: { getJSON: () => any }): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
+function formatRelativeSaved(ts: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 5) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const m = Math.floor(diffSec / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+}
+
+interface SaveIndicatorProps {
+  status: "idle" | "saving" | "saved" | "error";
+  lastSavedAt: number | null;
+  tick: number;
+}
+
+function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
+  if (status === "idle" && !lastSavedAt) return null;
+  if (status === "saving") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (status === "error") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] font-medium text-destructive shrink-0 px-1.5 py-0.5 rounded bg-destructive/10">
+        <AlertCircle className="h-3 w-3" />
+        Save failed
+      </span>
+    );
+  }
+  if (lastSavedAt) {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+        <CheckCircle2 className="h-3 w-3 text-success" />
+        Saved · {formatRelativeSaved(lastSavedAt)}
+      </span>
+    );
+  }
+  return null;
+}
+
 function countMarkdownLinks(content: string | null | undefined): number {
   return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
 }
