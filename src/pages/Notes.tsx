@@ -445,6 +445,42 @@ export default function Notes() {
     });
   }, [activeFolderPath, allNotes, folderPaths, queryClient, refreshFolders, selectedId, selectNote]);
 
+  const handleRestoreNote = useCallback(async (noteId: string) => {
+    try {
+      const { error } = await supabase
+        .from("notes")
+        .update({ is_trashed: false, trashed_at: null })
+        .eq("id", noteId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ["notes"] });
+      showToast.success("Note restored");
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Failed to restore note");
+    }
+  }, [queryClient]);
+
+  const handleDeleteNotePermanently = useCallback((noteId: string) => {
+    const target = allNotes.find((n) => n.id === noteId) || trashNotes.find((n) => n.id === noteId);
+    const title = target?.title?.trim() || "Untitled";
+    setConfirmState({
+      title: `Delete "${title}" permanently?`,
+      description: "This note and its attachments will be removed forever. This action cannot be undone.",
+      confirmLabel: "Delete permanently",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase.from("notes").delete().eq("id", noteId);
+          if (error) throw error;
+          if (selectedId === noteId) selectNote(null);
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          showToast.success("Note deleted permanently");
+        } catch (err) {
+          showToast.error(err instanceof Error ? err.message : "Failed to delete note");
+        }
+      },
+    });
+  }, [allNotes, trashNotes, selectedId, selectNote, queryClient]);
+
   // Handle ?action=create from external "+ New Note" buttons (header, deep links).
   // Use a ref-guard so the effect fires exactly once per occurrence of action=create,
   // regardless of how many times handleCreate's identity changes due to mutation state.
