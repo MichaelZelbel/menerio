@@ -129,6 +129,7 @@ export function NoteTree({
 }: NoteTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   const tree = useMemo(() => {
     const root: FolderNode = { name: "Vault root", path: "", children: [], notes: [] };
@@ -217,6 +218,11 @@ export function NoteTree({
                 if (isRoot) return;
                 event.dataTransfer.setData("application/x-folder-path", node.path);
                 event.dataTransfer.effectAllowed = "move";
+                setDraggingKey(`folder:${node.path}`);
+              }}
+              onDragEnd={() => {
+                setDraggingKey(null);
+                setDragOverPath(null);
               }}
               onClick={() => {
                 onSelectFolder(node.path);
@@ -231,8 +237,10 @@ export function NoteTree({
               onDrop={(event) => handleDrop(node.path, event)}
               className={cn(
                 "flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60",
+                !isRoot && "cursor-grab active:cursor-grabbing",
                 isActive && "bg-accent text-accent-foreground",
-                dragOverPath === node.path && "ring-1 ring-primary"
+                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-1 ring-primary bg-accent/40",
+                draggingKey === `folder:${node.path}` && "opacity-50"
               )}
               style={{ paddingLeft: `${8 + depth * 14}px` }}
             >
@@ -316,6 +324,11 @@ export function NoteTree({
             onDragStart={(event) => {
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
+              setDraggingKey(`note:${note.id}`);
+            }}
+            onDragEnd={() => {
+              setDraggingKey(null);
+              setDragOverPath(null);
             }}
             onClick={(event) => {
               if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) {
@@ -326,7 +339,9 @@ export function NoteTree({
             }}
             className={cn(
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
-              selectedId === note.id && "bg-accent text-accent-foreground"
+              !note.is_external && "cursor-grab active:cursor-grabbing",
+              selectedId === note.id && "bg-accent text-accent-foreground",
+              draggingKey === `note:${note.id}` && "opacity-50"
             )}
             style={{ paddingLeft: `${14 + depth * 14}px` }}
           >
