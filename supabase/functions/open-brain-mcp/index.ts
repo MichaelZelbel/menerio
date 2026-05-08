@@ -2341,6 +2341,94 @@ server.registerTool("search_all_collections", { title: "Search All Collections",
   });
 });
 
+// ============================================================
+// Unified search across notes + Lexicon (preferred default)
+// ============================================================
+server.registerTool(
+  "search_brain",
+  {
+    title: "Search Brain (Notes + Lexicon)",
+    description:
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page.",
+    inputSchema: {
+      query: z.string().describe("What to search for"),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.25),
+    },
+  },
+  async ({ query, limit, threshold }) => {
+    try {
+      const [{ rows: noteRows, mode }, lexRows] = await Promise.all([
+        hybridSearchNotes(query, limit, threshold),
+        searchLexiconPages(query, limit),
+      ]);
+
+      if (!noteRows.length && !lexRows.length) {
+        return { content: [{ type: "text" as const, text: `No notes or Lexicon pages found matching "${query}".` }] };
+      }
+
+      const noteIds = noteRows.map((t: any) => t.id);
+      const mediaMap = noteIds.length ? await getMediaForNotes(noteIds) : new Map();
+      const noteOut = noteRows.map((t: any, i: number) => `[note] ${formatNote(t, i, t.similarity, mediaMap.get(t.id))}`);
+      const lexOut = lexRows.map((p: any, i: number) =>
+        `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
+        (p.summary ? `\n   ${p.summary}` : "") +
+        (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "")
+      );
+
+      const text =
+        `Found ${noteRows.length} note(s) [${mode}] and ${lexRows.length} Lexicon page(s):\n\n` +
+        [...noteOut, ...lexOut].join("\n\n");
+      return { content: [{ type: "text" as const, text }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+// ============================================================
+// Backward-compat aliases (deprecated old "thought" naming)
+// ============================================================
+server.registerTool(
+  "search_thoughts",
+  {
+    title: "Search Thoughts (deprecated alias)",
+    description: "Deprecated alias for `search_notes`. Use `search_notes` (or `search_brain` for notes + Lexicon) instead.",
+    inputSchema: {
+      query: z.string(),
+      limit: z.number().optional().default(10),
+      threshold: z.number().optional().default(0.25),
+    },
+  },
+  searchNotesHandler
+);
+
+server.registerTool(
+  "list_recent",
+  {
+    title: "List Recent (deprecated alias)",
+    description: "Deprecated alias for `list_recent_notes`. Use `list_recent_notes` instead.",
+    inputSchema: {
+      limit: z.number().optional().default(10),
+      type: z.string().optional(),
+      topic: z.string().optional(),
+      person: z.string().optional(),
+      days: z.number().optional(),
+    },
+  },
+  listRecentNotesHandler
+);
+
+server.registerTool(
+  "capture_thought",
+  {
+    title: "Capture Thought (deprecated alias)",
+    description: "Deprecated alias for `capture_note`. Use `capture_note` instead.",
+    inputSchema: { content: z.string() },
+  },
+  captureNoteHandler
+);
+
 const app = new Hono();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
