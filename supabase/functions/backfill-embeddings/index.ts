@@ -5,7 +5,7 @@
 // POST { limit?: number = 25, dry_run?: boolean = false }
 // → { scanned, updated, skipped, failures, balance_remaining }
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
