@@ -11,6 +11,7 @@ import {
   Link2,
   Pencil,
   Pin,
+  RotateCcw,
   Star,
   Trash2,
 } from "lucide-react";
