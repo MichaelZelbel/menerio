@@ -383,16 +383,34 @@ export function NoteTree({
             <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuSub>
-            <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
-            <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-              <ContextMenuItem onClick={() => onMoveNote(note.id, "")}>
-                <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
-              </ContextMenuItem>
-              {folderOptions.length > 0 && <ContextMenuSeparator />}
-              {renderMoveTargets(folderOptions, note.id)}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
+          {note.is_trashed ? (
+            <>
+              {onRestoreNote && (
+                <ContextMenuItem onClick={() => onRestoreNote(note.id)}>
+                  <RotateCcw className="mr-2 h-3.5 w-3.5" /> Restore note
+                </ContextMenuItem>
+              )}
+              {onDeleteNotePermanently && (
+                <ContextMenuItem
+                  onClick={() => onDeleteNotePermanently(note.id)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete permanently…
+                </ContextMenuItem>
+              )}
+            </>
+          ) : (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
+              <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+                <ContextMenuItem onClick={() => onMoveNote(note.id, "")}>
+                  <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+                </ContextMenuItem>
+                {folderOptions.length > 0 && <ContextMenuSeparator />}
+                {renderMoveTargets(folderOptions, note.id)}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );
