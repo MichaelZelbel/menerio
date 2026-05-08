@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 const ModerationPanel = lazy(() => import("@/components/admin/ModerationPanel"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -897,6 +898,45 @@ function UsageLogTable() {
 // ─── System Tab (Placeholder) ───
 
 function SystemTab() {
+  const [missingCount, setMissingCount] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const refreshCount = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { count } = await supabase
+      .from("notes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("is_trashed", false)
+      .is("embedding", null);
+    setMissingCount(count ?? 0);
+  };
+
+  useEffect(() => { refreshCount(); }, []);
+
+  const runBackfill = async () => {
+    setRunning(true);
+    setLastResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-embeddings", {
+        body: { limit: 50 },
+      });
+      if (error) throw error;
+      const r = data as { scanned: number; updated: number; failures: number; balance_remaining?: number | null };
+      setLastResult(`Scanned ${r.scanned}, updated ${r.updated}, failures ${r.failures}.`);
+      toast.success(`Backfilled ${r.updated} note(s)`);
+      await refreshCount();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Backfill failed";
+      setLastResult(msg);
+      toast.error(msg);
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -908,6 +948,35 @@ function SystemTab() {
           <div className="flex items-center justify-center h-32 rounded-lg border border-dashed text-muted-foreground text-sm">
             <ToggleLeft className="h-5 w-5 mr-2" /> Feature flags — coming soon
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Search Index</CardTitle>
+          <CardDescription>
+            Backfill missing embeddings for your own notes so they're discoverable via semantic
+            search and the MCP server. Runs in batches of 50.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="text-sm text-muted-foreground">
+            {missingCount === null
+              ? "Checking…"
+              : missingCount === 0
+                ? "All your notes are indexed."
+                : `${missingCount} note(s) without an embedding.`}
+          </div>
+          <div className="flex gap-3">
+            <Button onClick={runBackfill} disabled={running || missingCount === 0} className="gap-2">
+              <RefreshCw className={`h-4 w-4 ${running ? "animate-spin" : ""}`} />
+              {running ? "Backfilling…" : "Backfill embeddings (50)"}
+            </Button>
+            <Button variant="outline" onClick={refreshCount} disabled={running}>
+              Refresh
+            </Button>
+          </div>
+          {lastResult && <div className="text-xs text-muted-foreground">{lastResult}</div>}
         </CardContent>
       </Card>
 
