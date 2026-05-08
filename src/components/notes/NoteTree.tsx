@@ -334,9 +334,12 @@ export function NoteTree({
             onDragStart={(event) => {
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
+              const el = event.currentTarget;
+              setTimeout(() => el.classList.add("opacity-40"), 0);
               setDraggingKey(`note:${note.id}`);
             }}
-            onDragEnd={() => {
+            onDragEnd={(event) => {
+              event.currentTarget.classList.remove("opacity-40");
               setDraggingKey(null);
               setDragOverPath(null);
             }}
@@ -351,7 +354,7 @@ export function NoteTree({
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
               !note.is_external && "cursor-grab active:cursor-grabbing",
               selectedId === note.id && "bg-accent text-accent-foreground",
-              draggingKey === `note:${note.id}` && "opacity-50"
+              draggingKey === `note:${note.id}` && "opacity-40"
             )}
             style={{ paddingLeft: `${14 + depth * 14}px` }}
           >
