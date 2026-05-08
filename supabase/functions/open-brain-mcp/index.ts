@@ -491,12 +491,13 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
 async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
-  const q = String(query || "").trim().replace(/[%_]/g, "\\$&").replace(/[,()'"\\]/g, " ");
+  // Inside .or() use `*` as ILIKE wildcard, not `%`. Strip chars that would break the .or() parser.
+  const q = String(query || "").replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   const { data } = await supabase
     .from("wiki_pages")
     .select("slug, title, page_type, summary, source_count, updated_at")
     .eq("user_id", currentUserId)
-    .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+    .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
   return data || [];
