@@ -129,6 +129,7 @@ export function NoteTree({
 }: NoteTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   const tree = useMemo(() => {
     const root: FolderNode = { name: "Vault root", path: "", children: [], notes: [] };
