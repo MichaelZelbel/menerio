@@ -114,7 +114,7 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
       messages: [
         {
           role: "system",
-          content: `Extract metadata from the user's captured thought. Return JSON with:
+          content: `Extract metadata from the user's captured note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
 - "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
@@ -649,7 +649,7 @@ server.registerTool(
     description:
       "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
     inputSchema: {
-      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_thoughts, list_recent, get_person_notes, or get_connected_notes results."),
+      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       title: z.string().optional(),
       content: z.string().optional().describe("Full Markdown content (replaces existing)"),
       tags: z.array(z.string()).optional(),
@@ -708,7 +708,7 @@ server.registerTool(
     description:
       "Move a note to trash (reversible — the user can restore it from the Trash view). Use this when the user wants to delete or remove a note. Permanent deletion is intentionally NOT available to agents — only the user can hard-delete from the UI. Pass restore: true to bring a trashed note back.",
     inputSchema: {
-      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_thoughts, list_recent, get_person_notes, or get_connected_notes results."),
+      note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       restore: z.boolean().optional().default(false).describe("If true, restores the note from trash instead of trashing it"),
     },
   },
@@ -755,7 +755,7 @@ server.registerTool(
   "get_stats",
   {
     title: "Brain Statistics",
-    description: "Get a summary of all captured thoughts: totals, types, top topics, people, and recent activity.",
+    description: "Get a summary of all captured notes: totals, types, top topics, people, and recent activity.",
     inputSchema: {},
   },
   async () => {
@@ -794,7 +794,7 @@ server.registerTool(
         Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
       const lines: string[] = [
-        `Total thoughts: ${count}`,
+        `Total notes: ${count}`,
         `This week: ${thisWeek}`,
         `Date range: ${
           data?.length
