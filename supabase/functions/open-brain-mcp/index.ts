@@ -995,7 +995,10 @@ server.registerTool(
         .order("name")
         .limit(limit);
 
-      if (query) q = q.or(`name.ilike.%${query}%,company.ilike.%${query}%`);
+      if (query) {
+        const qq = String(query).replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
+        q = q.or(`name.ilike.*${qq}*,company.ilike.*${qq}*`);
+      }
       if (relationship) q = q.eq("relationship", relationship);
 
       const { data, error } = await q;
