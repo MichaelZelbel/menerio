@@ -218,9 +218,13 @@ export function NoteTree({
                 if (isRoot) return;
                 event.dataTransfer.setData("application/x-folder-path", node.path);
                 event.dataTransfer.effectAllowed = "move";
+                const el = event.currentTarget;
+                // Defer so the browser captures the drag ghost first, then dim source
+                setTimeout(() => el.classList.add("opacity-40"), 0);
                 setDraggingKey(`folder:${node.path}`);
               }}
-              onDragEnd={() => {
+              onDragEnd={(event) => {
+                event.currentTarget.classList.remove("opacity-40");
                 setDraggingKey(null);
                 setDragOverPath(null);
               }}
@@ -231,16 +235,22 @@ export function NoteTree({
               onDoubleClick={() => toggleFolder(node.path)}
               onDragOver={(event) => {
                 event.preventDefault();
-                setDragOverPath(node.path);
+                event.dataTransfer.dropEffect = "move";
+                if (dragOverPath !== node.path) setDragOverPath(node.path);
               }}
-              onDragLeave={() => setDragOverPath(null)}
+              onDragLeave={(event) => {
+                // Ignore leave events when moving onto descendants
+                const next = event.relatedTarget as Node | null;
+                if (next && event.currentTarget.contains(next)) return;
+                setDragOverPath((current) => (current === node.path ? null : current));
+              }}
               onDrop={(event) => handleDrop(node.path, event)}
               className={cn(
                 "flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60",
                 !isRoot && "cursor-grab active:cursor-grabbing",
                 isActive && "bg-accent text-accent-foreground",
-                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-1 ring-primary bg-accent/40",
-                draggingKey === `folder:${node.path}` && "opacity-50"
+                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
+                draggingKey === `folder:${node.path}` && "opacity-40"
               )}
               style={{ paddingLeft: `${8 + depth * 14}px` }}
             >
@@ -324,9 +334,12 @@ export function NoteTree({
             onDragStart={(event) => {
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
+              const el = event.currentTarget;
+              setTimeout(() => el.classList.add("opacity-40"), 0);
               setDraggingKey(`note:${note.id}`);
             }}
-            onDragEnd={() => {
+            onDragEnd={(event) => {
+              event.currentTarget.classList.remove("opacity-40");
               setDraggingKey(null);
               setDragOverPath(null);
             }}
@@ -341,7 +354,7 @@ export function NoteTree({
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
               !note.is_external && "cursor-grab active:cursor-grabbing",
               selectedId === note.id && "bg-accent text-accent-foreground",
-              draggingKey === `note:${note.id}` && "opacity-50"
+              draggingKey === `note:${note.id}` && "opacity-40"
             )}
             style={{ paddingLeft: `${14 + depth * 14}px` }}
           >
