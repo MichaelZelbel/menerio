@@ -441,86 +441,96 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Tool 1: Semantic Search
+// Helper: hybrid notes search (semantic + ILIKE), reusable by search_notes and search_brain
+async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
+  let semanticResults: any[] = [];
+  let semanticOk = false;
+  try {
+    const qEmb = await getEmbedding(query);
+    const { data, error } = await supabase.rpc("match_notes", {
+      query_embedding: qEmb,
+      match_threshold: threshold,
+      match_count: limit,
+      p_user_id: currentUserId,
+    });
+    if (!error && data) {
+      semanticResults = data;
+      semanticOk = true;
+    }
+  } catch (_embErr) {
+    console.warn("Semantic search failed, using text fallback only:", _embErr);
+  }
+
+  // ILIKE text fallback — escape PostgREST-special chars (commas/parens break .or() syntax)
+  const q = query.replace(/[,()'"\\]/g, " ").replace(/\s+/g, " ").trim();
+  const { data: textResults } = await supabase
+    .from("notes")
+    .select("id, title, content, metadata, tags, created_at")
+    .eq("user_id", currentUserId)
+    .eq("is_trashed", false)
+    .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  const seenIds = new Set<string>();
+  const merged: any[] = [];
+  for (const r of semanticResults) {
+    seenIds.add(r.id);
+    merged.push(r);
+  }
+  for (const r of (textResults || [])) {
+    if (!seenIds.has(r.id)) {
+      seenIds.add(r.id);
+      merged.push({ ...r, similarity: null });
+    }
+  }
+  return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+}
+
+// Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
+async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
+  const q = String(query || "").trim().replace(/[%_]/g, "\\$&").replace(/[,()'"\\]/g, " ");
+  const { data } = await supabase
+    .from("wiki_pages")
+    .select("slug, title, page_type, summary, source_count, updated_at")
+    .eq("user_id", currentUserId)
+    .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
+// Tool 1: Semantic Search (Notes)
+const searchNotesHandler = async ({ query, limit, threshold }: { query: string; limit: number; threshold: number }) => {
+  try {
+    const { rows: limited, mode } = await hybridSearchNotes(query, limit, threshold);
+    if (limited.length === 0) {
+      return { content: [{ type: "text" as const, text: `No notes found matching "${query}". If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
+    }
+    const noteIds = limited.map((t: any) => t.id);
+    const mediaMap = await getMediaForNotes(noteIds);
+    const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
+    return {
+      content: [{ type: "text" as const, text: `Found ${limited.length} note(s) [${mode}]:\n\n${results.join("\n\n")}` }],
+    };
+  } catch (err: unknown) {
+    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+  }
+};
+
 server.registerTool(
-  "search_thoughts",
+  "search_notes",
   {
-    title: "Search Thoughts",
+    title: "Search Notes",
     description:
-      "Search captured thoughts by meaning. Use this when the user asks about a topic, person, or idea they've previously captured.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.25),
     },
   },
-  async ({ query, limit, threshold }) => {
-    try {
-      // Run semantic search and ILIKE text search in parallel
-      let semanticResults: any[] = [];
-      let semanticOk = false;
-
-      try {
-        const qEmb = await getEmbedding(query);
-        const { data, error } = await supabase.rpc("match_notes", {
-          query_embedding: qEmb,
-          match_threshold: threshold,
-          match_count: limit,
-          p_user_id: currentUserId,
-        });
-        if (!error && data) {
-          semanticResults = data;
-          semanticOk = true;
-        }
-      } catch (_embErr) {
-        console.warn("Semantic search failed, using text fallback only:", _embErr);
-      }
-
-      // ILIKE text fallback — always run to catch notes without embeddings
-      const q = query.replace(/'/g, "''"); // escape single quotes
-      const { data: textResults } = await supabase
-        .from("notes")
-        .select("id, title, content, metadata, tags, created_at")
-        .eq("user_id", currentUserId)
-        .eq("is_trashed", false)
-        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
-        .order("updated_at", { ascending: false })
-        .limit(limit);
-
-      // Merge: semantic results first, then text results (deduplicated)
-      const seenIds = new Set<string>();
-      const merged: any[] = [];
-
-      for (const r of semanticResults) {
-        seenIds.add(r.id);
-        merged.push(r);
-      }
-      for (const r of (textResults || [])) {
-        if (!seenIds.has(r.id)) {
-          seenIds.add(r.id);
-          merged.push({ ...r, similarity: null });
-        }
-      }
-
-      const limited = merged.slice(0, limit);
-
-      if (limited.length === 0) {
-        return { content: [{ type: "text" as const, text: `No thoughts found matching "${query}".` }] };
-      }
-
-      // Enrich with media
-      const noteIds = limited.map((t: any) => t.id);
-      const mediaMap = await getMediaForNotes(noteIds);
-      const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
-
-      const mode = semanticOk ? "semantic+text" : "text_only";
-      return {
-        content: [{ type: "text" as const, text: `Found ${limited.length} thought(s) [${mode}]:\n\n${results.join("\n\n")}` }],
-      };
-    } catch (err: unknown) {
-      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-    }
-  }
+  searchNotesHandler
 );
 
 // Tool 2: List Recent
