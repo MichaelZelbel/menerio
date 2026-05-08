@@ -405,38 +405,44 @@ export default function Notes() {
     const parts: string[] = [];
     if (affectedNotes.length > 0) parts.push(`${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} will be moved to Trash`);
     if (subfolderCount > 0) parts.push(`${subfolderCount} subfolder${subfolderCount === 1 ? "" : "s"} will be deleted`);
-    const detail = parts.length ? `\n\n${parts.join(". ")}.` : "";
-    const confirmed = window.confirm(`Delete folder "${path}"?${detail}`);
-    if (!confirmed) return;
-    try {
-      if (affectedNotes.length > 0) {
-        const ids = affectedNotes.map((n) => n.id);
-        const { error: nErr } = await supabase
-          .from("notes" as any)
-          .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-          .in("id", ids);
-        if (nErr) throw nErr;
-        if (selectedId && ids.includes(selectedId)) selectNote(null);
-      }
-      const { error: fErr } = await supabase
-        .from("note_folders" as any)
-        .delete()
-        .or(`path.eq.${path},path.like.${path}/%`);
-      if (fErr) throw fErr;
-      await refreshFolders();
-      await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      if (activeFolderPath === path || activeFolderPath?.startsWith(path + "/")) {
-        const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
-        setActiveFolderPath(parent || null);
-      }
-      showToast.success(
-        affectedNotes.length > 0
-          ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
-          : "Folder deleted"
-      );
-    } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
-    }
+    const detail = parts.length ? ` ${parts.join(". ")}.` : " This folder is empty.";
+    setConfirmState({
+      title: `Delete folder "${path}"?`,
+      description: `${detail} Notes can be restored from the Trash filter.`,
+      confirmLabel: "Delete folder",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          if (affectedNotes.length > 0) {
+            const ids = affectedNotes.map((n) => n.id);
+            const { error: nErr } = await supabase
+              .from("notes" as any)
+              .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+              .in("id", ids);
+            if (nErr) throw nErr;
+            if (selectedId && ids.includes(selectedId)) selectNote(null);
+          }
+          const { error: fErr } = await supabase
+            .from("note_folders" as any)
+            .delete()
+            .or(`path.eq.${path},path.like.${path}/%`);
+          if (fErr) throw fErr;
+          await refreshFolders();
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          if (activeFolderPath === path || activeFolderPath?.startsWith(path + "/")) {
+            const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+            setActiveFolderPath(parent || null);
+          }
+          showToast.success(
+            affectedNotes.length > 0
+              ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
+              : "Folder deleted"
+          );
+        } catch (err) {
+          showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
+        }
+      },
+    });
   }, [activeFolderPath, allNotes, folderPaths, queryClient, refreshFolders, selectedId, selectNote]);
 
   // Handle ?action=create from external "+ New Note" buttons (header, deep links).
