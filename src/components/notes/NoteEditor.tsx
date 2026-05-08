@@ -685,6 +685,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     lastLocalTitleRef.current = val;
     pendingSaveTitleRef.current = val;
     if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+    setSaveStatus("saving");
     titleSaveTimer.current = setTimeout(async () => {
       const duplicate = await checkDuplicateTitle(val);
       if (duplicate) {
@@ -695,8 +696,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       updateNote.mutate(
         { id: note.id, title: val },
         {
-          onSuccess: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
-          onError: () => { if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null; },
+          onSuccess: () => {
+            if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+          },
+          onError: () => {
+            if (pendingSaveTitleRef.current === val) pendingSaveTitleRef.current = null;
+            setSaveStatus("error");
+          },
         }
       );
       triggerGitHubSync(note.id);
