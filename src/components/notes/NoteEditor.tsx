@@ -1165,6 +1165,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             className="flex-1 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
             disabled={note.is_trashed || note.is_external}
           />
+          {!note.is_trashed && !note.is_external && (
+            <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
+          )}
           {note.entity_type && (
             <Badge variant="secondary" className="text-[10px] shrink-0">
               {note.entity_type}
