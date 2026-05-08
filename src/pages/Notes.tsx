@@ -1117,6 +1117,31 @@ export default function Notes() {
         )}
       </div>
     </div>
+    <AlertDialog
+      open={!!confirmState}
+      onOpenChange={(open) => { if (!open) setConfirmState(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirmState?.title}</AlertDialogTitle>
+          <AlertDialogDescription>{confirmState?.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={confirmState?.destructive ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+            onClick={async () => {
+              const action = confirmState?.onConfirm;
+              setConfirmState(null);
+              if (action) await action();
+            }}
+          >
+            {confirmState?.confirmLabel || "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
