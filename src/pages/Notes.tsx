@@ -244,26 +244,31 @@ export default function Notes() {
   const [isTrashingEmpty, setIsTrashingEmpty] = useState(false);
   const handleTrashEmptyNotes = useCallback(async () => {
     if (emptyNotes.length === 0 || isTrashingEmpty) return;
-    const confirmed = window.confirm(
-      `Move ${emptyNotes.length} empty note${emptyNotes.length === 1 ? "" : "s"} to Trash? You can restore them from the Trash filter.`,
-    );
-    if (!confirmed) return;
-    setIsTrashingEmpty(true);
-    try {
-      const ids = emptyNotes.map((n) => n.id);
-      const { error } = await supabase
-        .from("notes")
-        .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-        .in("id", ids);
-      if (error) throw error;
-      if (selectedId && ids.includes(selectedId)) selectNote(null);
-      await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
-    } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
-    } finally {
-      setIsTrashingEmpty(false);
-    }
+    const count = emptyNotes.length;
+    setConfirmState({
+      title: `Move ${count} empty note${count === 1 ? "" : "s"} to Trash?`,
+      description: `These notes have no title and no content. You can restore them from the Trash filter.`,
+      confirmLabel: "Move to Trash",
+      destructive: true,
+      onConfirm: async () => {
+        setIsTrashingEmpty(true);
+        try {
+          const ids = emptyNotes.map((n) => n.id);
+          const { error } = await supabase
+            .from("notes")
+            .update({ is_trashed: true, trashed_at: new Date().toISOString() })
+            .in("id", ids);
+          if (error) throw error;
+          if (selectedId && ids.includes(selectedId)) selectNote(null);
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
+        } catch (err) {
+          showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
+        } finally {
+          setIsTrashingEmpty(false);
+        }
+      },
+    });
   }, [emptyNotes, isTrashingEmpty, selectedId, selectNote, queryClient]);
 
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
