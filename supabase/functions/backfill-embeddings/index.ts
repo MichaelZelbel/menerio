@@ -32,17 +32,27 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
-    // Per-request user-scoped client to resolve the caller.
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
-    const userId = userData.user.id;
-
     const body = await req.json().catch(() => ({}));
     const limit = Math.max(1, Math.min(100, Number(body?.limit ?? 25)));
     const dryRun = Boolean(body?.dry_run ?? false);
+
+    // Resolve caller. Two paths:
+    //  1. Normal end-user JWT  → user_id derived from token.
+    //  2. Service-role token   → admin-triggered backfill; must pass target_user_id.
+    let userId: string | null = null;
+    const bearer = authHeader.replace(/^Bearer\s+/i, "");
+    if (bearer === SUPABASE_SERVICE_ROLE_KEY) {
+      const targetUserId = String(body?.target_user_id || "").trim();
+      if (!targetUserId) return json({ error: "target_user_id required for admin trigger" }, 400);
+      userId = targetUserId;
+    } else {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
+      userId = userData.user.id;
+    }
 
     // Service-role client for the actual backfill writes (bypasses RLS).
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
