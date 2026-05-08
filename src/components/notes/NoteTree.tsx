@@ -235,16 +235,22 @@ export function NoteTree({
               onDoubleClick={() => toggleFolder(node.path)}
               onDragOver={(event) => {
                 event.preventDefault();
-                setDragOverPath(node.path);
+                event.dataTransfer.dropEffect = "move";
+                if (dragOverPath !== node.path) setDragOverPath(node.path);
               }}
-              onDragLeave={() => setDragOverPath(null)}
+              onDragLeave={(event) => {
+                // Ignore leave events when moving onto descendants
+                const next = event.relatedTarget as Node | null;
+                if (next && event.currentTarget.contains(next)) return;
+                setDragOverPath((current) => (current === node.path ? null : current));
+              }}
               onDrop={(event) => handleDrop(node.path, event)}
               className={cn(
                 "flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60",
                 !isRoot && "cursor-grab active:cursor-grabbing",
                 isActive && "bg-accent text-accent-foreground",
-                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-1 ring-primary bg-accent/40",
-                draggingKey === `folder:${node.path}` && "opacity-50"
+                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
+                draggingKey === `folder:${node.path}` && "opacity-40"
               )}
               style={{ paddingLeft: `${8 + depth * 14}px` }}
             >
