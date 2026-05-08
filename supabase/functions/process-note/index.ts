@@ -147,24 +147,72 @@ function contextWindow(name: string, text: string, radius = 200): string {
 
 const SELF_MARKERS_DE = ["mein", "meine", "meinen", "meiner", "meines", "ich ", "mir ", "mich "];
 const SELF_MARKERS_EN = ["my ", "i ", "me ", "myself", "i'm", "i've", "i'll"];
+// Relationship/3rd-party markers — these strongly indicate the mention is about another person,
+// even if a 1st-person pronoun ("my") appears right before it.
 const OTHER_MARKERS = [
-  "mein bekannter", "meine bekannte", "mein freund", "meine freundin", "mein kollege", "meine kollegin",
-  "my friend", "my colleague", "my acquaintance", "met ", "traf ", "we met", "wir trafen",
+  // English – relationships
+  "my wife", "my husband", "my partner", "my spouse", "my fiancé", "my fiancée", "my fiance", "my fiancee",
+  "my girlfriend", "my boyfriend", "my ex",
+  "my mother", "my mom", "my mum", "my father", "my dad",
+  "my son", "my daughter", "my child", "my kid",
+  "my brother", "my sister", "my sibling",
+  "my uncle", "my aunt", "my cousin", "my nephew", "my niece",
+  "my grandfather", "my grandmother", "my grandpa", "my grandma",
+  "my friend", "my best friend", "my colleague", "my coworker", "my co-worker", "my acquaintance",
+  "my boss", "my manager", "my client", "my mentor", "my mentee", "my neighbor", "my neighbour",
+  "met ", "we met", "talked to", "spoke with", "called ",
+  // German – relationships
+  "meine frau", "mein mann", "mein partner", "meine partnerin", "mein verlobter", "meine verlobte",
+  "meine freundin", "mein freund", "mein ex", "meine ex",
+  "meine mutter", "meine mama", "mein vater", "mein papa",
+  "mein sohn", "meine tochter", "mein kind",
+  "mein bruder", "meine schwester", "mein geschwister",
+  "mein onkel", "meine tante", "mein cousin", "meine cousine", "mein neffe", "meine nichte",
+  "mein opa", "meine oma", "mein großvater", "meine großmutter",
+  "mein bekannter", "meine bekannte", "mein kollege", "meine kollegin", "mein chef", "meine chefin",
+  "mein nachbar", "meine nachbarin", "mein klient", "meine klientin", "mein mentor", "meine mentorin",
+  "traf ", "wir trafen", "sprach mit", "telefonierte mit",
 ];
 
-type SelfDecision = { kind: "self" | "contact" | "ambiguous"; contactCandidates: Array<{ id: string; name: string }>; reason: string };
+type SelfDecision = {
+  kind: "self" | "contact" | "ambiguous" | "skip";
+  contactCandidates: Array<{ id: string; name: string }>;
+  reason: string;
+};
 
 function disambiguateMention(
   person: string,
   noteText: string,
   self: SelfContext,
   contactCandidates: Array<{ id: string; name: string }>,
+  preferredName?: string,
 ): SelfDecision {
-  const isSelfAlias = self.enabled && nameMatchesAlias(person, self.aliases);
-  if (!isSelfAlias) {
-    return { kind: contactCandidates.length > 0 ? "contact" : "ambiguous", contactCandidates, reason: "not_self_alias" };
+  const personLower = person.toLowerCase();
+
+  // Strongest signal: an exact contact name match (not just fuzzy / first-name) → contact wins.
+  const exactContact = contactCandidates.find((c) => c.name.toLowerCase() === personLower);
+  if (exactContact) {
+    return { kind: "contact", contactCandidates: [exactContact], reason: "exact_contact_name" };
   }
+
+  const isSelfAlias = self.enabled && nameMatchesAlias(person, self.aliases);
+
+  if (!isSelfAlias) {
+    if (contactCandidates.length > 0) {
+      return { kind: "contact", contactCandidates, reason: "not_self_alias" };
+    }
+    // Not a self alias and no contact candidate → leave it for the
+    // "Add to People" flow; do NOT create a "is this you?" review item.
+    return { kind: "skip", contactCandidates: [], reason: "no_self_no_contact" };
+  }
+
+  // From here on, the mention matches a self alias.
   if (contactCandidates.length === 0) {
+    // Only auto-accept "self" when the mention is clearly the user's own preferred name;
+    // weaker aliases without context fall through to "ambiguous" so the user confirms once.
+    if (preferredName && personLower === preferredName.toLowerCase()) {
+      return { kind: "self", contactCandidates: [], reason: "self_preferred_name" };
+    }
     return { kind: "self", contactCandidates: [], reason: "self_only" };
   }
 
@@ -178,7 +226,8 @@ function disambiguateMention(
     }
   }
 
-  // Other-person markers nearby → contact
+  // Other-person markers (relationships, "met …") nearby → contact.
+  // Evaluated BEFORE self-markers so "my wife Xihui" resolves to the contact.
   if (OTHER_MARKERS.some((m) => ctx.includes(m))) {
     return { kind: "contact", contactCandidates, reason: "other_marker" };
   }
