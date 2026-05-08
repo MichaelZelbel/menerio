@@ -1807,7 +1807,7 @@ server.registerTool(
   "lexicon_search",
   {
     title: "Search Lexicon",
-    description: "Search Lexicon pages by title, slug, or content. Returns matching pages with summaries.",
+    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once.",
     inputSchema: {
       query: z.string().describe("Case-insensitive substring to search for"),
       limit: z.number().optional().default(10),
