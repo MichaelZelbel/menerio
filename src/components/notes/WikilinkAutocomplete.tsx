@@ -148,8 +148,7 @@ export function WikilinkAutocomplete({
 
   if (!isOpen || !position) return null;
 
-  const hasCreateOption =
-    query.trim() && !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase());
+
 
   return (
     <div
