@@ -4,6 +4,7 @@ import { DashboardSidebar } from "./DashboardSidebar";
 import { DashboardSearch } from "./DashboardSearch";
 import { GlobalCreateButton } from "./GlobalCreateButton";
 import { GlobalAIChatFAB } from "@/components/chat/GlobalAIChatFAB";
+import { CommandPalette } from "./CommandPalette";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
