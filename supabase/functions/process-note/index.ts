@@ -1330,7 +1330,11 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     // Merge AI-derived metadata onto existing keys so per-source fields like
     // web_clip, source, is_quick_capture, etc. survive enrichment.
-    const mergedMetadata = { ...existingMeta, ...metadata };
+    const mergedMetadata = {
+      ...existingMeta,
+      ...metadata,
+      chunking: { count: chunkInfo.count, truncated: chunkInfo.truncated, failures: chunkInfo.failures, updated_at: new Date().toISOString() },
+    };
 
     // Update the note with embedding, metadata, and optionally a smarter title
     const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
