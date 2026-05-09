@@ -671,7 +671,7 @@ serve(async (req) => {
     }
 
     // Run heavy AI synthesis in the background so we don't hit the 150s edge timeout.
-    // @ts-ignore — EdgeRuntime is provided by Supabase Edge Runtime.
+    // @ts-expect-error — EdgeRuntime is provided by Supabase Edge Runtime.
     EdgeRuntime.waitUntil(processIngest(db, userId, noteId, changeType, startedAt));
 
     return jsonResponse({ accepted: true, note_id: noteId }, 202);

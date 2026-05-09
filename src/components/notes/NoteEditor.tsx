@@ -140,7 +140,7 @@ function extractWikilinkIds(doc: any): string[] {
 function extractRawWikilinkTitles(editor: { getText: () => string }): string[] {
   const text = editor.getText();
   const out = new Set<string>();
-  const re = /\[\[([^\[\]\n]+?)\]\]/g;
+  const re = /\[\[([^[\]\n]+?)\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const t = m[1].trim();

@@ -8,7 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const WIKILINK_REGEX = /\[\[([^\[\]\n]+?)\]\]/g;
+const WIKILINK_REGEX = /\[\[([^[\]\n]+?)\]\]/g;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

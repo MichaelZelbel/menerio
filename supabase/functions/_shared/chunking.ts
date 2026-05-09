@@ -143,7 +143,7 @@ function splitLargeBlock(block: string, maxTokens: number): string[] {
   const final: string[] = [];
   for (const piece of out) {
     if (estimateTokens(piece) <= maxTokens) { final.push(piece); continue; }
-    const sentences = piece.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(\[])/);
+    const sentences = piece.split(/(?<=[.!?])\s+(?=[A-Z0-9"'([])/);
     let curS = "";
     for (const s of sentences) {
       const candidate = curS ? `${curS} ${s}` : s;

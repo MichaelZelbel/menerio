@@ -45,6 +45,7 @@ function sanitizeFilename(name: string): string {
   const base = name.replace(/^.*[\\/]/, "");
   // Replace unsafe chars with hyphens, collapse repeats
   const safe = base
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
     .replace(/\s+/g, " ")
     .replace(/-+/g, "-")

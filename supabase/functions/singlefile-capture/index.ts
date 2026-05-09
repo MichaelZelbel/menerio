@@ -132,6 +132,7 @@ function safeHostname(url: string | undefined | null): string | null {
 function sanitizeFilename(name: string, fallback: string): string {
   const base = (name || "").replace(/^.*[\\/]/, "");
   const safe = base
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
     .replace(/\s+/g, " ")
     .replace(/-+/g, "-")
@@ -147,6 +148,7 @@ function sanitizeFilename(name: string, fallback: string): string {
 function sanitizeImageName(name: string, fallback: string): string {
   const base = (name || "").replace(/^.*[\\/]/, "").trim();
   const safe = base
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");

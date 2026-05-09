@@ -58,6 +58,7 @@ export default function GroupDetail() {
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<GroupStage>(group?.stages ?? []);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.contact_id)), [memberships]);
+  const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
   const { data: sourceNotes = [] } = useQuery<NoteSummary[]>({
     queryKey: ["membership_source_notes", user?.id, selectedMembershipId, sourceNoteIds],
@@ -78,7 +79,6 @@ export default function GroupDetail() {
   if (!group) return <div className="max-w-5xl"><SEOHead title="Group not found — Menerio" noIndex /><Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")}><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button><p className="mt-8 text-sm text-muted-foreground">Group not found.</p></div>;
 
   const form: AboutForm = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color, stages };
-  const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const byStage = (stageId: string) => memberships.filter((membership) => membership.status === stageId);
   const onDragEnd = (event: DragEndEvent) => {
     const membershipId = String(event.active.id);

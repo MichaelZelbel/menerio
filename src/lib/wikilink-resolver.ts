@@ -6,7 +6,7 @@
  * (or pasted markdown) get clickable, ID-bearing wikilinks again.
  */
 
-const WIKILINK_REGEX = /\[\[([^\[\]\n]+?)\]\]/g;
+const WIKILINK_REGEX = /\[\[([^[\]\n]+?)\]\]/g;
 
 export interface ResolvedWikilink {
   noteId: string | null;
@@ -76,6 +76,7 @@ export function resolveWikilinksInHtml(
   });
 
   // Restore masked zones.
+  // eslint-disable-next-line no-control-regex
   masked = masked.replace(/\u0000WL(\d+)\u0000/g, (_m, i) => masks[Number(i)] ?? "");
 
   return masked;
@@ -85,7 +86,7 @@ export function resolveWikilinksInHtml(
 export function extractWikilinkTitles(text: string): string[] {
   if (!text) return [];
   const out = new Set<string>();
-  const re = /\[\[([^\[\]\n]+?)\]\]/g;
+  const re = /\[\[([^[\]\n]+?)\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const t = m[1].trim();

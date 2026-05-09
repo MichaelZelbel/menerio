@@ -1443,7 +1443,7 @@ function ItemNotesPanel({
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {note.content
-                      ? note.content.replace(/[#*_`>\-]+/g, "").slice(0, 80)
+                      ? note.content.replace(/[#*_`>-]+/g, "").slice(0, 80)
                       : "Empty note"}{" "}
                     · {formatDistanceToNow(parseISO(note.updated_at), { addSuffix: true })}
                   </div>
