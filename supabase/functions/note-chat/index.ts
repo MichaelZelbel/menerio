@@ -209,20 +209,28 @@ async function executeTool(
         );
         const embedding = embResult.result.data[0].embedding;
         const embeddingStr = `[${embedding.join(",")}]`;
-        const { data, error } = await db.rpc("match_notes", {
+        const { data, error } = await db.rpc("match_note_chunks", {
           query_embedding: embeddingStr,
           match_threshold: 0.5,
-          match_count: 10,
+          match_count: 30,
           p_user_id: userId,
         });
         if (error) throw error;
-        const results = (data || []).map((n: any) => ({
-          id: n.id,
-          title: n.title,
-          content: n.content?.substring(0, 500),
-          similarity: n.similarity,
-          tags: n.tags,
-        }));
+        // Aggregate chunk hits by note (best-chunk wins).
+        const byNote = new Map<string, any>();
+        for (const c of (data || []) as any[]) {
+          const ex = byNote.get(c.note_id);
+          if (!ex || c.similarity > ex.similarity) {
+            byNote.set(c.note_id, {
+              id: c.note_id,
+              title: c.note_title,
+              content: String(c.content || "").slice(0, 500),
+              similarity: c.similarity,
+              chunk_heading_path: c.heading_path,
+            });
+          }
+        }
+        const results = Array.from(byNote.values()).slice(0, 10);
         return JSON.stringify({ results, count: results.length });
       } catch {
         // Fallback to ILIKE
