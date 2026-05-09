@@ -166,19 +166,24 @@ export function WikilinkAutocomplete({
           className="w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground/60"
         />
       </div>
-      <div className="max-h-52 overflow-y-auto py-1">
+      <div ref={listRef} className="max-h-52 overflow-y-auto py-1" role="listbox">
         {notes.length === 0 && !hasCreateOption && (
           <div className="py-3 text-xs text-center text-muted-foreground">No notes found</div>
         )}
         {notes.map((note, i) => {
           const noteType = (note.metadata as any)?.type;
+          const active = i === selectedIndex;
           return (
             <button
               key={note.id}
+              ref={(el) => { itemRefs.current[i] = el; }}
+              role="option"
+              aria-selected={active}
               className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors ${
-                i === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
               }`}
               onMouseEnter={() => setSelectedIndex(i)}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 onSelect(note.title, note.id);
                 onClose();
@@ -195,10 +200,14 @@ export function WikilinkAutocomplete({
         })}
         {hasCreateOption && (
           <button
+            ref={(el) => { itemRefs.current[notes.length] = el; }}
+            role="option"
+            aria-selected={selectedIndex === notes.length}
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors ${
               selectedIndex === notes.length ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
             }`}
             onMouseEnter={() => setSelectedIndex(notes.length)}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               onCreate?.(query.trim());
               onClose();
