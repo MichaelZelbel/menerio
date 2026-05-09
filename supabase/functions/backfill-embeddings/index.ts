@@ -1,4 +1,4 @@
-// Backfill embeddings for notes that are missing one.
+// Backfill chunk embeddings for notes that are missing one.
 // Per-request user-scoped: uses the caller's JWT to derive user_id, charges the
 // caller's AI credits, and only touches that user's own notes.
 //
@@ -6,7 +6,7 @@
 // → { scanned, updated, skipped, failures, balance_remaining }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
+import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -36,9 +36,6 @@ Deno.serve(async (req) => {
     const limit = Math.max(1, Math.min(100, Number(body?.limit ?? 25)));
     const dryRun = Boolean(body?.dry_run ?? false);
 
-    // Resolve caller. Two paths:
-    //  1. Normal end-user JWT  → user_id derived from token.
-    //  2. Service-role token   → admin-triggered backfill; must pass target_user_id.
     let userId: string | null = null;
     const bearer = authHeader.replace(/^Bearer\s+/i, "");
     if (bearer === SUPABASE_SERVICE_ROLE_KEY) {
@@ -54,12 +51,12 @@ Deno.serve(async (req) => {
       userId = userData.user.id;
     }
 
-    // Service-role client for the actual backfill writes (bypasses RLS).
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Notes that are still missing a note-level embedding OR have no chunks yet.
     const { data: candidates, error: selErr } = await admin
       .from("notes")
-      .select("id, title, content")
+      .select("id, title, content, embedding")
       .eq("user_id", userId)
       .eq("is_trashed", false)
       .is("embedding", null)
@@ -86,40 +83,44 @@ Deno.serve(async (req) => {
     let updated = 0;
     let skipped = 0;
     let failures = 0;
+    let chunks_created = 0;
+    let truncated_notes = 0;
     let balance_remaining: number | null = null;
+    let stop = false;
 
     for (const note of candidates) {
+      if (stop) break;
       const text = `${note.title ?? ""}\n\n${note.content ?? ""}`.trim();
-      if (!text) {
-        skipped += 1;
-        continue;
-      }
+      if (!text) { skipped += 1; continue; }
       try {
-        const { embedding, credits } = await getEmbeddingWithCredits(
-          admin,
-          OPENROUTER_API_KEY,
-          userId,
-          "backfill-embeddings",
-          text.slice(0, 8000), // guard against very large notes
+        const result = await embedAndStoreNoteChunks(
+          admin, OPENROUTER_API_KEY, userId!, note.id, note.title ?? null, text, "backfill-embeddings",
         );
-        balance_remaining = credits?.remaining_credits ?? balance_remaining;
+        balance_remaining = result.remainingCredits ?? balance_remaining;
+        chunks_created += result.chunkCount;
+        if (result.truncated) truncated_notes += 1;
+        failures += result.failures;
 
-        const { error: updErr } = await admin
-          .from("notes")
-          .update({ embedding })
-          .eq("id", note.id)
-          .eq("user_id", userId);
-
-        if (updErr) {
-          console.warn("update failed", note.id, updErr.message);
-          failures += 1;
+        if (result.firstChunkEmbedding) {
+          const { error: updErr } = await admin
+            .from("notes")
+            .update({ embedding: result.firstChunkEmbedding })
+            .eq("id", note.id)
+            .eq("user_id", userId);
+          if (updErr) {
+            console.warn("note embedding update failed", note.id, updErr.message);
+            failures += 1;
+          } else {
+            updated += 1;
+          }
         } else {
-          updated += 1;
+          skipped += 1;
         }
+
+        if (result.insufficientCredits) { stop = true; break; }
       } catch (err) {
-        console.warn("embedding failed", note.id, (err as Error).message);
+        console.warn("backfill failed", note.id, (err as Error).message);
         failures += 1;
-        // If we hit an insufficient-credits error, stop early.
         if (String((err as Error).message).toLowerCase().includes("insufficient")) break;
       }
     }
@@ -129,6 +130,8 @@ Deno.serve(async (req) => {
       updated,
       skipped,
       failures,
+      chunks_created,
+      truncated_notes,
       balance_remaining,
     });
   } catch (err) {
