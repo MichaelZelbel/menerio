@@ -68,19 +68,48 @@ export function WikilinkAutocomplete({
     fetchNotes();
   }, [isOpen, query, user, excludeNoteId]);
 
+  const hasCreateOption = useMemo(
+    () =>
+      !!query.trim() &&
+      !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase()),
+    [query, notes]
+  );
+  const totalItems = notes.length + (hasCreateOption ? 1 : 0);
+
+  // Clamp selectedIndex when results shrink
+  useEffect(() => {
+    if (totalItems === 0) {
+      setSelectedIndex(0);
+    } else if (selectedIndex >= totalItems) {
+      setSelectedIndex(totalItems - 1);
+    }
+  }, [totalItems, selectedIndex]);
+
+  // Scroll active item into view on keyboard nav
+  useEffect(() => {
+    const el = itemRefs.current[selectedIndex];
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const hasCreateOption = query.trim() && !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase());
-      const totalItems = notes.length + (hasCreateOption ? 1 : 0);
-
       if (e.key === "ArrowDown") {
         e.preventDefault();
+        if (totalItems === 0) return;
         setSelectedIndex((i) => (i + 1) % totalItems);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        if (totalItems === 0) return;
         setSelectedIndex((i) => (i - 1 + totalItems) % totalItems);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setSelectedIndex(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        if (totalItems > 0) setSelectedIndex(totalItems - 1);
       } else if (e.key === "Enter") {
         e.preventDefault();
+        if (totalItems === 0) return;
         if (selectedIndex < notes.length) {
           onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
         } else if (hasCreateOption && onCreate) {
@@ -90,9 +119,19 @@ export function WikilinkAutocomplete({
       } else if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+      } else if (e.key === "Tab") {
+        // Confirm with Tab as well (common in autocomplete UIs)
+        if (totalItems === 0) return;
+        e.preventDefault();
+        if (selectedIndex < notes.length) {
+          onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
+        } else if (hasCreateOption && onCreate) {
+          onCreate(query.trim());
+        }
+        onClose();
       }
     },
-    [notes, selectedIndex, query, onSelect, onCreate, onClose]
+    [notes, selectedIndex, query, onSelect, onCreate, onClose, totalItems, hasCreateOption]
   );
 
   // Close on outside click
