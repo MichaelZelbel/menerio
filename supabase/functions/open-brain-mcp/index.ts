@@ -948,12 +948,28 @@ server.registerTool(
           .limit(limit),
         (async () => {
           const emb = await getEmbedding(`notes about ${name}`);
-          return supabase.rpc("match_notes", {
+          const { data, error } = await supabase.rpc("match_note_chunks", {
             query_embedding: emb,
             match_threshold: 0.5,
-            match_count: limit,
+            match_count: limit * 3,
             p_user_id: currentUserId,
           });
+          if (error || !data) return { data: [] as any[], error };
+          // Aggregate to one row per note (best chunk).
+          const byNote = new Map<string, any>();
+          for (const c of data as any[]) {
+            const ex = byNote.get(c.note_id);
+            if (!ex || c.similarity > ex.similarity) {
+              byNote.set(c.note_id, { id: c.note_id, title: c.note_title, similarity: c.similarity });
+            }
+          }
+          const ids = Array.from(byNote.keys()).slice(0, limit);
+          if (ids.length === 0) return { data: [], error: null };
+          const { data: rows } = await supabase
+            .from("notes")
+            .select("id, title, content, metadata, created_at")
+            .in("id", ids);
+          return { data: rows || [], error: null };
         })(),
       ]);
 
