@@ -28,6 +28,7 @@ export function DashboardLayout() {
           </main>
         </div>
         <GlobalAIChatFAB />
+        <CommandPalette />
       </div>
     </SidebarProvider>
   );
