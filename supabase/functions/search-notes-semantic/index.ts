@@ -83,20 +83,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const searchNotes = scope !== "media";
       const searchMedia = scope !== "notes";
 
-      // Run searches in parallel
-      const [noteResults, mediaResults] = await Promise.all([
+      // Run searches in parallel: chunk-level RAG + media analysis
+      const [chunkResults, mediaResults] = await Promise.all([
         searchNotes
-          ? supabase.rpc("match_notes", {
+          ? supabase.rpc("match_note_chunks", {
               query_embedding: embeddingStr,
               match_threshold: threshold,
-              match_count: limit,
+              match_count: Math.max(limit * 3, 30),
               p_user_id: user.id,
             }).then(({ data, error }) => {
               if (error) throw error;
-              return (data || []).map((n: any) => ({
-                ...n,
-                match_source: "note",
-              }));
+              return (data || []) as Array<{
+                chunk_id: string; note_id: string; chunk_index: number;
+                heading_path: string | null; content: string; similarity: number;
+                note_title: string | null; note_created_at: string;
+              }>;
             })
           : Promise.resolve([]),
         searchMedia
@@ -116,7 +117,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ]);
 
       if (scope === "media") {
-        // Return media results directly — each linked to its parent note
         results = (mediaResults as any[]).map((m: any) => ({
           id: m.note_id,
           title: m.note_title,
@@ -134,21 +134,47 @@ Deno.serve(async (req: Request): Promise<Response> => {
           created_at: m.created_at,
         }));
       } else {
-        // Merge and deduplicate by note_id
+        // Aggregate chunk hits by note_id (best chunk wins).
         const noteMap = new Map<string, any>();
-
-        for (const n of noteResults as any[]) {
-          noteMap.set(n.id, { ...n, match_source: "note" });
+        for (const c of chunkResults) {
+          const existing = noteMap.get(c.note_id);
+          if (!existing || c.similarity > existing.similarity) {
+            noteMap.set(c.note_id, {
+              id: c.note_id,
+              title: c.note_title,
+              content: "",
+              metadata: null,
+              tags: [],
+              similarity: c.similarity,
+              match_source: "note",
+              chunk_snippet: c.content.slice(0, 320),
+              chunk_heading_path: c.heading_path,
+              chunk_index: c.chunk_index,
+              created_at: c.note_created_at,
+            });
+          }
         }
 
+        // Hydrate full note rows for chunk hits.
+        const noteIds = Array.from(noteMap.keys());
+        if (noteIds.length > 0) {
+          const { data: noteRows } = await supabase
+            .from("notes")
+            .select("id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+            .in("id", noteIds);
+          for (const row of (noteRows || []) as any[]) {
+            const existing = noteMap.get(row.id);
+            if (existing) noteMap.set(row.id, { ...row, ...existing, content: row.content });
+          }
+        }
+
+        // Merge media hits.
         for (const m of mediaResults as any[]) {
           const noteId = m.note_id;
           const existing = noteMap.get(noteId);
           if (existing) {
-            existing.match_source = "both";
-            if (m.similarity > (existing.similarity || 0)) {
-              existing.similarity = m.similarity;
-            }
+            existing.match_source = existing.match_source === "note" ? "both" : "media";
+            if (m.similarity > (existing.similarity || 0)) existing.similarity = m.similarity;
             existing.media_description = m.description;
             existing.media_storage_path = m.storage_path;
             existing.media_type = m.media_type;
@@ -173,12 +199,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           }
         }
 
-        // Always run ILIKE to catch notes without embeddings
+        // Always run ILIKE to catch notes without chunks/embeddings yet.
         const textResults = await ilikeFallback(user.id, query, limit);
         for (const t of textResults) {
-          if (!noteMap.has(t.id)) {
-            noteMap.set(t.id, t);
-          }
+          if (!noteMap.has(t.id)) noteMap.set(t.id, t);
         }
 
         results = Array.from(noteMap.values())
