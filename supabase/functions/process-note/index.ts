@@ -1170,32 +1170,42 @@ async function processInBackground(noteId: string, authHeader: string) {
       return;
     }
 
-    // Generate embedding and extract metadata in parallel (each deducts tokens)
+    // Extract metadata first (single chat call). Embeddings are produced via
+    // chunking below so long notes are not silently truncated.
     let embedding: number[] | null = null;
     let metadata: Record<string, unknown> = {};
-    let lastCredits: any = null;
+    let chunkInfo: { count: number; truncated: boolean; failures: number } = {
+      count: 0, truncated: false, failures: 0,
+    };
 
     try {
-      const [embResult, chatResult] = await Promise.all([
-        getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, note.user_id, "process-note", fullText),
-        chatWithCredits(
-          supabase, OPENROUTER_API_KEY, note.user_id, "process-note",
-          [
-            { role: "system", content: METADATA_SYSTEM_PROMPT },
-            { role: "user", content: fullText },
-          ],
-          { response_format: { type: "json_object" } }
-        ),
-      ]);
-
-      embedding = embResult.embedding;
-      lastCredits = chatResult.credits;
+      const chatResult = await chatWithCredits(
+        supabase, OPENROUTER_API_KEY, note.user_id, "process-note",
+        [
+          { role: "system", content: METADATA_SYSTEM_PROMPT },
+          { role: "user", content: fullText.slice(0, 24000) },
+        ],
+        { response_format: { type: "json_object" } }
+      );
 
       try {
         metadata = JSON.parse(chatResult.result.choices[0].message.content);
       } catch {
         metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }
+
+      // Smart-chunk the note and embed each chunk. The note-level embedding is
+      // taken from the first chunk so existing note-level vector search keeps
+      // working, while the per-chunk embeddings power the new RAG retrieval.
+      const chunkResult = await embedAndStoreNoteChunks(
+        supabase, OPENROUTER_API_KEY, note.user_id, noteId, note.title, fullText, "process-note",
+      );
+      embedding = chunkResult.firstChunkEmbedding;
+      chunkInfo = {
+        count: chunkResult.chunkCount,
+        truncated: chunkResult.truncated,
+        failures: chunkResult.failures,
+      };
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during processing of note ${noteId}`);
