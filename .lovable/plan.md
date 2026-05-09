@@ -1,69 +1,104 @@
-# Warum „Thoughts" und warum „Friendship Strategy" nicht gefunden wurde
 
-## Befund 1 — Woher das Wort „Thoughts" kommt
+# Smart Chunking für die RAG-Pipeline
 
-Im MCP-Server (`supabase/functions/open-brain-mcp/index.ts`) sind die Tools, die deine Agenten Hermes/OpenClaw aufrufen, durchgängig in „Thought"-Sprache benannt:
+## Problem heute
+Jede Notiz bekommt **genau ein** Embedding aus den ersten ~8.000 Zeichen (`text.slice(0,8000)` in `backfill-embeddings`, ähnlich in `process-note`). Folgen:
+- Lange Notizen (Yumei DM 447k, N8N-Skill 70k) verlieren den Großteil ihres Inhalts für die semantische Suche.
+- Ein einziges Embedding mittelt sehr unterschiedliche Themen zu einem unscharfen Vektor → schlechte Treffer (z. B. "Friendship Strategy" geht in einer langen Notiz unter).
+- Treffer können nicht auf eine Stelle in der Notiz zeigen.
 
-| Tool-Name | Title | Description-Auszug |
+## Ziel
+Notizen werden vor dem Embedding in semantisch sinnvolle Chunks zerlegt. Die Suche findet den **besten Chunk**, gibt aber weiterhin die Notiz als Ergebnis zurück (mit Snippet/Anker). Bestehende `notes.embedding`-Spalte bleibt als "Note-Level"-Vektor für schnelle Grobfilter erhalten.
+
+## Architektur
+
+```text
+note (markdown) ──► smartChunk() ──► chunks[]
+                                      │
+                                      ▼
+                          embed(chunk) for each chunk
+                                      │
+                                      ▼
+                       INSERT INTO note_chunks (note_id, idx, content, embedding, ...)
+
+Suche:
+  query ─► embed ─► top-k über note_chunks (HNSW) ─► group by note_id ─► rank
+```
+
+## Smart-Chunking-Strategie (Markdown-bewusst)
+
+Da Notizen Obsidian-Markdown sind:
+
+1. **Splitten an Markdown-Boundaries** (in dieser Reihenfolge):
+   - H1/H2/H3 Headings (`#`, `##`, `###`)
+   - Horizontal rules (`---`)
+   - Leere Zeilen zwischen Absätzen
+   - Listenblöcke bleiben zusammen
+   - Codeblocks (```` ``` ````) und Tabellen werden **nie** mittendrin geteilt
+2. **Ziel-Chunk-Größe**: ~800 Tokens (~3.200 Zeichen), **max** 1.200 Tokens, **min** 200 Tokens.
+3. **Merge kleine Nachbarn**: Ist ein Section-Block < 200 Tokens, an den vorherigen Chunk anhängen, solange max nicht überschritten wird.
+4. **Split zu große Blöcke**: Section > 1.200 Tokens → an Absatzgrenzen (`\n\n`), notfalls an Satzgrenzen splitten.
+5. **Overlap**: 1–2 Sätze (~80 Tokens) am Anfang jedes Chunks aus dem vorigen Chunk übernehmen → Kontextkontinuität.
+6. **Heading-Pfad als Präfix**: Jeder Chunk wird beim Embedden mit seinem Heading-Pfad angereichert, z. B. `# Friendship Strategy > ## Core Principles\n\n…`. Verbessert semantische Treffer drastisch.
+7. **Notiz-Titel** wird ebenfalls vorangestellt.
+8. **Leere/triviale Chunks** (< 20 Zeichen ohne Wörter) verworfen.
+
+## Datenbank
+
+Neue Tabelle `note_chunks`:
+
+| Spalte | Typ | Notiz |
 |---|---|---|
-| `search_thoughts` | „Search Thoughts" | „Search captured **thoughts** by meaning…" |
-| `list_recent` | „List Recent **Thoughts**" | „List recently captured **thoughts**…" |
-| `capture_thought` | „Capture Thought" | „Save a new **thought** to the Open Brain…" |
-| `get_stats` | — | „…summary of all captured **thoughts**…" |
+| `id` | uuid PK | |
+| `note_id` | uuid FK → notes(id) on delete cascade | |
+| `user_id` | uuid | für RLS |
+| `chunk_index` | int | Reihenfolge in der Notiz |
+| `heading_path` | text | z. B. "Strategy > Core" |
+| `content` | text | reiner Chunk-Text (ohne Präfix) |
+| `token_count` | int | geschätzt |
+| `embedding` | vector(1536) | text-embedding-3-small |
+| `created_at` | timestamptz | |
 
-Außerdem geben die Antworten Strings wie „Found N **thought(s)**", „No **thoughts** found." zurück. Das ist der gesamte Wortschatz, mit dem die Agenten konfrontiert werden — sie übernehmen ihn 1:1, wenn sie über das Konzept reden. Das hat historische Gründe (Open-Brain-Begrifflichkeit aus der ersten Version), passt aber nicht mehr zum heutigen User-Vokabular „Notes".
+Indexe: `(note_id, chunk_index)`, HNSW auf `embedding` (wie bei `notes.embedding`), `user_id`.
 
-## Befund 2 — „Friendship Strategy" existiert zweimal
+RLS: User darf nur eigene Chunks lesen (`user_id = auth.uid()`); Service-Role schreibt.
 
-DB-Check ergab:
+Neue RPC `match_note_chunks(query_embedding vector, match_user uuid, match_count int, similarity_threshold float)` → liefert `(note_id, chunk_id, chunk_index, content, heading_path, similarity)`. Anschließend in TS auf `note_id` aggregieren (max similarity), Top-N Notes zurückgeben.
 
-- `notes`-Tabelle: Notiz **„Friendship Strategy"** (nicht im Trash)
-- `wiki_pages`-Tabelle: Lexicon-Page **„Friendship Strategy"** (page_type `overview`)
+`notes.embedding` bleibt: weiter aus Title + erstem Chunk berechnet, dient als Fallback und für `compute-connections`/Graph (kann später ebenfalls auf Chunk-Avg umgestellt werden).
 
-Heißt: die Notiz **gibt es**. `search_thoughts` hat einen ILIKE-Fallback auf `title`/`content` und sollte sie finden. Es gibt aber zwei plausible Erklärungen, warum Hermes leer ausging:
+## Code-Änderungen
 
-1. **Hermes hat das falsche Tool gewählt.** Wenn er „Friendship Strategy" als Konzept versteht, ruft er `lexicon_search` auf — und kriegt nur die Wiki-Page. Sucht er sie **als Notiz**, ruft er `search_thoughts` — kriegt aber bei der semantischen Suche evtl. einen schwachen Score (Threshold 0.25) und der ILIKE-Fallback scheitert nur, wenn die Anfrage ungewöhnlich formuliert war (z. B. ganzer Satz). Es gibt kein **kombiniertes** Tool, das Notes + Lexicon gemeinsam durchsucht.
-2. **Tool-Descriptions trennen die beiden Welten unsauber.** `search_thoughts` erwähnt Lexicon nicht, `lexicon_search` erwähnt Notes nicht. Der Agent muss raten.
+1. **Neuer Shared-Helper** `supabase/functions/_shared/chunking.ts`:
+   - `smartChunkMarkdown(text, { targetTokens, maxTokens, minTokens, overlapSentences }): Chunk[]`
+   - `Chunk = { content, headingPath, tokenCount, index }`
+   - Token-Schätzung: `Math.ceil(chars/4)` (gut genug für Budgeting).
+2. **`process-note`**:
+   - Nach Metadata-Extraktion: chunks erzeugen, je Chunk ein Embedding via `getEmbeddingWithCredits`, in `note_chunks` upserten (vorher alte Chunks der Note löschen).
+   - Note-Level-Embedding weiter setzen, aber aus `title + firstChunk.content`.
+   - Fortschritt + Fehlerstatus in `metadata.chunking = { count, last_error, updated_at }`.
+3. **`backfill-embeddings`**:
+   - Statt nur `notes.embedding` setzt es Chunks **und** Note-Level-Embedding.
+   - Limit-Parameter zählt jetzt Notizen, nicht Chunks; UI-Text in `Admin.tsx` anpassen.
+   - Pro Notiz Hard-Cap (z. B. 50 Chunks), bei Überschreitung warnen und in `metadata.chunking.truncated = true` markieren.
+4. **Such-Pfade umstellen** auf `match_note_chunks` mit anschließender Aggregation:
+   - `search-notes-semantic`
+   - `open-brain-mcp` (`search_notes`, `search_brain`, `search_thoughts`)
+   - `note-chat` / `conversation-chat` Kontext-Retrieval
+   - Ergebnis-Snippet = Treffer-Chunk (kürzt UI-seitig auf 240 Zeichen + `heading_path` als Sublabel).
+5. **Credit-Schutz**: Vor dem Chunk-Loop `checkBalance` mit geschätzten Credits (`chunks.length * embeddingCost`) prüfen; bei zu wenig Credits nur erste N Chunks embedden und Rest auf "deferred" setzen (passt zur bestehenden Defer-Logik aus dem vorigen Plan).
+6. **Connection-Recompute**: `compute-connections` bleibt erstmal note-level; Issue/Note für Folge-Iteration anlegen (Chunk-zu-Chunk-Connections sind out-of-scope).
 
-Edge-Function-Logs zeigen keine Tool-Call-Details (MCP-Server loggt das nicht), daher können wir nicht final beweisen, **welches** Tool Hermes aufgerufen hat — aber beide Erklärungen führen zu derselben Fix-Richtung.
+## Migration / Rollout
 
----
+1. Migration: `note_chunks` + RLS + HNSW-Index + `match_note_chunks`-RPC anlegen.
+2. Code-Deploy mit Feature-Flag `CHUNKING_ENABLED` (env). Zunächst nur in `backfill-embeddings` aktiv, damit wir an einem Stapel testen.
+3. Admin-Backfill-Button auf neuer Logik laufen lassen, "Friendship Strategy" und 30 betroffene Notizen verifizieren (Chunk-Count > 0, Suche findet Treffer).
+4. Flag in `process-note` aktivieren → ab da entstehen Chunks beim Capture.
+5. Such-Edge-Functions auf `match_note_chunks` umstellen (parallele Phase: erst neben, dann statt note-level Suche).
+6. Cleanup: alte `slice(0,8000)`-Stellen entfernen.
 
-## Plan
-
-### A. „Notes" statt „Thoughts" durchziehen
-
-In `supabase/functions/open-brain-mcp/index.ts`:
-
-1. **Neue Tool-Namen** (semantisch klar):
-   - `search_thoughts` → `search_notes`
-   - `list_recent` → `list_recent_notes` (Title schon „Notes" lassen)
-   - `capture_thought` → `capture_note`
-   - Title/Description bei allen restlichen Tools (`get_stats`, `get_action_items`, etc.) auf „note(s)" umstellen.
-2. **Backward-Compat-Aliase**: Alte Namen (`search_thoughts`, `capture_thought`, `list_recent`) bleiben **zusätzlich** als dünne Delegate-Tools registriert mit Description „Deprecated alias for `search_notes` — use the new name." So brechen bestehende Hermes-/OpenClaw-Konfigurationen nicht.
-3. Antwort-Strings („Found N thought(s)" etc.) auf „note(s)" umstellen.
-4. Auch in `supabase/functions/ingest-thought/index.ts` die User-facing Confirmation-Strings („Captured as *thought*") anpassen — die Datei selbst behalten wir aus Routing-Gründen, aber die Wörter werden „note".
-
-### B. Suche gezielter machen
-
-1. **`search_notes`-Description erweitern** um den Hinweis, dass es **nur** persönliche Notizen durchsucht und für synthesierte Themen-Pages das Lexicon-Tool verwendet werden soll: „If the user asks about a synthesized topic / strategy / concept and you don't find a note, also call `lexicon_search`."
-2. **`lexicon_search`-Description spiegeln**: „If the user asks about a raw captured idea, prefer `search_notes` first; use Lexicon for synthesized topic pages."
-3. **Optional, empfohlen**: Neues Tool **`search_brain`** ergänzen, das in **einem** Aufruf parallel `match_notes` (semantisch + ILIKE) **und** `wiki_pages` ILIKE durchführt und die Treffer gemerged zurückgibt — gekennzeichnet als `note` oder `lexicon`. Das ist das Tool, das wir der Agent als Default empfehlen („Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a synthesized topic page."). `search_notes`/`lexicon_search` bleiben für gezielte Suchen.
-4. ILIKE-Query in `search_notes` defensiver machen: Komma im `query` escapen (PostgREST `.or()` benutzt Komma als Separator → bricht Suche bei Anfragen wie „Friendship Strategy, my plan").
-
-### C. Verifizieren
-
-1. Edge Function deployen, mit `supabase--curl_edge_functions` einen `tools/list` und einen `tools/call: search_notes {query: "Friendship Strategy"}` mit deinem `mnr_`-Token absetzen → erwarten: 1 Treffer.
-2. Außerdem `search_brain {query: "Friendship Strategy"}` testen → erwarten: 2 Treffer (1 note + 1 lexicon page).
-
----
-
-## Technische Notizen für die Umsetzung
-
-- **Keine DB-Migration nötig.** Reine Edge-Function-Änderung.
-- Aliase per zweitem `server.registerTool(...)` mit identischem Handler — minimaler Boilerplate.
-- `search_brain` kann intern dieselbe Logik wie `search_thoughts` + `lexicon_search` aufrufen (Funktionen extrahieren statt Code duplizieren).
-- Memory-Eintrag `mem://integrations/mcp-and-slack-hub` muss um den neuen Tool-Namen ergänzt werden.
-- Konstante: Welche Tool-Namen ändern sich? → in `docs/ARCHITECTURE.md` (falls dort dokumentiert) nachziehen. Kurz prüfen.
-
-Soll ich so weitermachen?
+## Out of Scope (separat besprechen)
+- Chunk-Embeddings für Lexicon/Wiki-Pages (gleiches Schema, andere Tabelle).
+- Re-Ranker (z. B. cross-encoder) über Top-K Chunks.
+- Chunk-Anker im Editor (Scroll-zu-Snippet).

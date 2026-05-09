@@ -1681,6 +1681,50 @@ export type Database = {
         }
         Relationships: []
       }
+      note_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          embedding: string | null
+          heading_path: string | null
+          id: string
+          note_id: string
+          token_count: number
+          user_id: string
+        }
+        Insert: {
+          chunk_index: number
+          content: string
+          created_at?: string
+          embedding?: string | null
+          heading_path?: string | null
+          id?: string
+          note_id: string
+          token_count?: number
+          user_id: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          heading_path?: string | null
+          id?: string
+          note_id?: string
+          token_count?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_chunks_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       note_connections: {
         Row: {
           connection_type: string
@@ -2766,6 +2810,24 @@ export type Database = {
           similarity: number
           storage_path: string
           topics: string[]
+        }[]
+      }
+      match_note_chunks: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_user_id?: string
+          query_embedding: string
+        }
+        Returns: {
+          chunk_id: string
+          chunk_index: number
+          content: string
+          heading_path: string
+          note_created_at: string
+          note_id: string
+          note_title: string
+          similarity: number
         }[]
       }
       match_notes: {

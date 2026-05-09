@@ -924,9 +924,9 @@ function SystemTab() {
         body: { limit: 50 },
       });
       if (error) throw error;
-      const r = data as { scanned: number; updated: number; failures: number; balance_remaining?: number | null };
-      setLastResult(`Scanned ${r.scanned}, updated ${r.updated}, failures ${r.failures}.`);
-      toast.success(`Backfilled ${r.updated} note(s)`);
+      const r = data as { scanned: number; updated: number; failures: number; chunks_created?: number; truncated_notes?: number; balance_remaining?: number | null };
+      setLastResult(`Scanned ${r.scanned}, updated ${r.updated}, chunks ${r.chunks_created ?? 0}, failures ${r.failures}${r.truncated_notes ? `, truncated ${r.truncated_notes}` : ""}.`);
+      toast.success(`Backfilled ${r.updated} note(s) with ${r.chunks_created ?? 0} chunk(s)`);
       await refreshCount();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Backfill failed";
@@ -955,8 +955,9 @@ function SystemTab() {
         <CardHeader>
           <CardTitle>Search Index</CardTitle>
           <CardDescription>
-            Backfill missing embeddings for your own notes so they're discoverable via semantic
-            search and the MCP server. Runs in batches of 50.
+            Re-index notes with the smart-chunking RAG pipeline: each note is split into
+            heading-aware chunks, embedded individually, and stored in note_chunks. Runs in
+            batches of 50.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
