@@ -33,7 +33,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ## P1 — High Impact (nächste Welle)
 
-### 5. 🟥 Command Palette (⌘K) · M · ★★★
+### 5. 🟩 Command Palette (⌘K) · M · ★★★
 - **Bereich:** Globale Navigation
 - **Akzeptanz:** ⌘K öffnet `CommandDialog`. Aktionen: Go to note (Fuzzy), Create note/contact/group, Open settings, Toggle theme. Unterscheidet sich von ⌘⇧K (AI-Chat).
 - **Files:** `src/components/layout/CommandPalette.tsx` (neu), `DashboardLayout.tsx`
