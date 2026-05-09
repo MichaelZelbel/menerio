@@ -43,10 +43,10 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** ↑/↓ wählt, Enter/Tab bestätigt, Esc schließt, Home/End springt. Hover und Tastaturauswahl synchronisiert. Aktives Item scrollt in den Sichtbereich.
 - **Files:** `src/components/notes/WikilinkAutocomplete.tsx`
 
-### 7. 🟥 Synced-Note Header-Hinweis · S · ★★
+### 7. 🟩 Synced-Note Header-Hinweis · S · ★★
 - **Bereich:** Editor (External Notes)
-- **Akzeptanz:** Banner "Synced from GitHub — duplicate to edit" mit Button "Duplicate".
-- **Files:** `src/components/notes/ExternalNotePanel.tsx`, `NoteEditor.tsx`
+- **Akzeptanz:** Banner "Synced from {source} — duplicate to edit" mit primärem Duplicate-Button und Erklärungstext.
+- **Files:** `src/components/notes/NoteEditor.tsx`
 
 ### 8. 🟥 Integration Overview in Settings · M · ★★
 - **Bereich:** Settings

@@ -1131,17 +1131,22 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         />
       )}
 
-      {/* Read-only action bar for external notes */}
+      {/* Synced-note banner: explains read-only state and offers an immediate path to edit. */}
       {!note.is_trashed && note.is_external && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/50">
-          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">
-            Read-only · Synced from <span className="font-medium text-foreground">{note.source_app || "external app"}</span>
-          </span>
-          <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-start gap-3 px-3 py-2.5 border-b border-border bg-accent/30">
+          <Lock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-foreground">
+              Synced from <span className="font-medium">{note.source_app || "external app"}</span> — duplicate to edit
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Changes here would be overwritten on the next sync. Create a local copy to make edits in Menerio.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             {note.source_url && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="h-7 text-xs gap-1.5"
                 onClick={() => window.open(note.source_url!, "_blank")}
@@ -1151,7 +1156,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               </Button>
             )}
             <Button
-              variant="outline"
+              variant="default"
               size="sm"
               className="h-7 text-xs gap-1.5"
               onClick={async () => {
@@ -1169,7 +1174,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               }}
             >
               <Copy className="h-3.5 w-3.5" />
-              Duplicate to Menerio
+              Duplicate to edit
             </Button>
           </div>
         </div>
