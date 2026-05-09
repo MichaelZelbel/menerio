@@ -955,8 +955,9 @@ function SystemTab() {
         <CardHeader>
           <CardTitle>Search Index</CardTitle>
           <CardDescription>
-            Backfill missing embeddings for your own notes so they're discoverable via semantic
-            search and the MCP server. Runs in batches of 50.
+            Re-index notes with the smart-chunking RAG pipeline: each note is split into
+            heading-aware chunks, embedded individually, and stored in note_chunks. Runs in
+            batches of 50.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
