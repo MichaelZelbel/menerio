@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,8 @@ export function WikilinkAutocomplete({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -66,19 +68,48 @@ export function WikilinkAutocomplete({
     fetchNotes();
   }, [isOpen, query, user, excludeNoteId]);
 
+  const hasCreateOption = useMemo(
+    () =>
+      !!query.trim() &&
+      !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase()),
+    [query, notes]
+  );
+  const totalItems = notes.length + (hasCreateOption ? 1 : 0);
+
+  // Clamp selectedIndex when results shrink
+  useEffect(() => {
+    if (totalItems === 0) {
+      setSelectedIndex(0);
+    } else if (selectedIndex >= totalItems) {
+      setSelectedIndex(totalItems - 1);
+    }
+  }, [totalItems, selectedIndex]);
+
+  // Scroll active item into view on keyboard nav
+  useEffect(() => {
+    const el = itemRefs.current[selectedIndex];
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const hasCreateOption = query.trim() && !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase());
-      const totalItems = notes.length + (hasCreateOption ? 1 : 0);
-
       if (e.key === "ArrowDown") {
         e.preventDefault();
+        if (totalItems === 0) return;
         setSelectedIndex((i) => (i + 1) % totalItems);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        if (totalItems === 0) return;
         setSelectedIndex((i) => (i - 1 + totalItems) % totalItems);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setSelectedIndex(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        if (totalItems > 0) setSelectedIndex(totalItems - 1);
       } else if (e.key === "Enter") {
         e.preventDefault();
+        if (totalItems === 0) return;
         if (selectedIndex < notes.length) {
           onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
         } else if (hasCreateOption && onCreate) {
@@ -88,9 +119,19 @@ export function WikilinkAutocomplete({
       } else if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+      } else if (e.key === "Tab") {
+        // Confirm with Tab as well (common in autocomplete UIs)
+        if (totalItems === 0) return;
+        e.preventDefault();
+        if (selectedIndex < notes.length) {
+          onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
+        } else if (hasCreateOption && onCreate) {
+          onCreate(query.trim());
+        }
+        onClose();
       }
     },
-    [notes, selectedIndex, query, onSelect, onCreate, onClose]
+    [notes, selectedIndex, query, onSelect, onCreate, onClose, totalItems, hasCreateOption]
   );
 
   // Close on outside click
@@ -107,8 +148,7 @@ export function WikilinkAutocomplete({
 
   if (!isOpen || !position) return null;
 
-  const hasCreateOption =
-    query.trim() && !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase());
+
 
   return (
     <div
@@ -126,19 +166,24 @@ export function WikilinkAutocomplete({
           className="w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground/60"
         />
       </div>
-      <div className="max-h-52 overflow-y-auto py-1">
+      <div ref={listRef} className="max-h-52 overflow-y-auto py-1" role="listbox">
         {notes.length === 0 && !hasCreateOption && (
           <div className="py-3 text-xs text-center text-muted-foreground">No notes found</div>
         )}
         {notes.map((note, i) => {
           const noteType = (note.metadata as any)?.type;
+          const active = i === selectedIndex;
           return (
             <button
               key={note.id}
+              ref={(el) => { itemRefs.current[i] = el; }}
+              role="option"
+              aria-selected={active}
               className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors ${
-                i === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
               }`}
               onMouseEnter={() => setSelectedIndex(i)}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 onSelect(note.title, note.id);
                 onClose();
@@ -155,10 +200,14 @@ export function WikilinkAutocomplete({
         })}
         {hasCreateOption && (
           <button
+            ref={(el) => { itemRefs.current[notes.length] = el; }}
+            role="option"
+            aria-selected={selectedIndex === notes.length}
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors ${
               selectedIndex === notes.length ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
             }`}
             onMouseEnter={() => setSelectedIndex(notes.length)}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               onCreate?.(query.trim());
               onClose();

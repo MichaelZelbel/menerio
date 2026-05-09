@@ -38,9 +38,9 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** ⌘K öffnet `CommandDialog`. Aktionen: Go to note (Fuzzy), Create note/contact/group, Open settings, Toggle theme. Unterscheidet sich von ⌘⇧K (AI-Chat).
 - **Files:** `src/components/layout/CommandPalette.tsx` (neu), `DashboardLayout.tsx`
 
-### 6. 🟥 WikilinkAutocomplete Tastatur-Navigation · S · ★★★
+### 6. 🟩 WikilinkAutocomplete Tastatur-Navigation · S · ★★★
 - **Bereich:** Editor
-- **Akzeptanz:** ↑/↓ wählt, Enter bestätigt, Esc schließt. Hover und Tastaturauswahl synchronisiert.
+- **Akzeptanz:** ↑/↓ wählt, Enter/Tab bestätigt, Esc schließt, Home/End springt. Hover und Tastaturauswahl synchronisiert. Aktives Item scrollt in den Sichtbereich.
 - **Files:** `src/components/notes/WikilinkAutocomplete.tsx`
 
 ### 7. 🟥 Synced-Note Header-Hinweis · S · ★★
