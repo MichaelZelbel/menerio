@@ -441,20 +441,46 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Helper: hybrid notes search (semantic + ILIKE), reusable by search_notes and search_brain
+// Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
 async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
   let semanticResults: any[] = [];
   let semanticOk = false;
   try {
     const qEmb = await getEmbedding(query);
-    const { data, error } = await supabase.rpc("match_notes", {
+    const { data, error } = await supabase.rpc("match_note_chunks", {
       query_embedding: qEmb,
       match_threshold: threshold,
-      match_count: limit,
+      match_count: Math.max(limit * 3, 30),
       p_user_id: currentUserId,
     });
     if (!error && data) {
-      semanticResults = data;
+      // Aggregate chunks by note_id (best chunk wins) and hydrate.
+      const byNote = new Map<string, any>();
+      for (const c of data as any[]) {
+        const ex = byNote.get(c.note_id);
+        if (!ex || c.similarity > ex.similarity) {
+          byNote.set(c.note_id, {
+            id: c.note_id,
+            title: c.note_title,
+            similarity: c.similarity,
+            chunk_snippet: String(c.content || "").slice(0, 320),
+            chunk_heading_path: c.heading_path,
+            created_at: c.note_created_at,
+          });
+        }
+      }
+      const ids = Array.from(byNote.keys());
+      if (ids.length > 0) {
+        const { data: rows } = await supabase
+          .from("notes")
+          .select("id, title, content, metadata, tags, created_at")
+          .in("id", ids);
+        for (const r of (rows || []) as any[]) {
+          const ex = byNote.get(r.id);
+          if (ex) byNote.set(r.id, { ...r, ...ex, content: r.content });
+        }
+      }
+      semanticResults = Array.from(byNote.values()).sort((a, b) => b.similarity - a.similarity);
       semanticOk = true;
     }
   } catch (_embErr) {
