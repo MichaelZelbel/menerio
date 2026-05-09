@@ -924,9 +924,9 @@ function SystemTab() {
         body: { limit: 50 },
       });
       if (error) throw error;
-      const r = data as { scanned: number; updated: number; failures: number; balance_remaining?: number | null };
-      setLastResult(`Scanned ${r.scanned}, updated ${r.updated}, failures ${r.failures}.`);
-      toast.success(`Backfilled ${r.updated} note(s)`);
+      const r = data as { scanned: number; updated: number; failures: number; chunks_created?: number; truncated_notes?: number; balance_remaining?: number | null };
+      setLastResult(`Scanned ${r.scanned}, updated ${r.updated}, chunks ${r.chunks_created ?? 0}, failures ${r.failures}${r.truncated_notes ? `, truncated ${r.truncated_notes}` : ""}.`);
+      toast.success(`Backfilled ${r.updated} note(s) with ${r.chunks_created ?? 0} chunk(s)`);
       await refreshCount();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Backfill failed";
