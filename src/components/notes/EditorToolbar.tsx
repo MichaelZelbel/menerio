@@ -298,6 +298,19 @@ export function EditorToolbar({ editor, quickActions, noteActions, onInsertWikil
           </ToolbarButton>
         )}
 
+        {/* Link to another note (wikilink) */}
+        {onInsertWikilink && (
+          <ToolbarButton
+            onClick={() => {
+              editor.chain().focus().run();
+              onInsertWikilink();
+            }}
+            title="Link to note (or type [[)"
+          >
+            <FileText className="h-3.5 w-3.5" />
+          </ToolbarButton>
+        )}
+
         {/* Table */}
         <ToolbarButton
           onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
