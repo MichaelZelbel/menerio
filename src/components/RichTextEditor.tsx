@@ -164,7 +164,11 @@ export function RichTextEditor({
     } catch {
       return;
     }
-    if (url.origin === window.location.origin) {
+    const isInternalHost =
+      url.host === window.location.host ||
+      INTERNAL_APP_HOSTS.includes(url.host) ||
+      url.host.endsWith(".lovable.app");
+    if (isInternalHost) {
       // Internal link: stay in the same window, prefer SPA navigation.
       anchor.removeAttribute("target");
       if (event.defaultPrevented) return;
