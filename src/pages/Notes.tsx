@@ -89,20 +89,24 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
-type SortField = "updated_at" | "created_at" | "title";
+type SortField = "updated_at" | "created_at" | "title" | "manual";
 type SortDirection = "asc" | "desc";
 
 const sortLabels: Record<SortField, string> = {
   updated_at: "Last Edited",
   created_at: "Date Created",
   title: "Title",
+  manual: "Manual",
 };
 
 const defaultDirections: Record<SortField, SortDirection> = {
   updated_at: "desc",
   created_at: "desc",
   title: "asc",
+  manual: "desc",
 };
+
+const SORT_STORAGE_KEY = "menerio:notelist:sort";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
