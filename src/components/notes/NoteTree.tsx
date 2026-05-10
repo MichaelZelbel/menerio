@@ -31,6 +31,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useBulkSelect } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
+import { CaptureEmptyState } from "./CaptureEmptyState";
 
 export type NoteTreeSortField = "updated_at" | "created_at" | "title";
 export type NoteTreeSortDirection = "asc" | "desc";
