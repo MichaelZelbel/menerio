@@ -802,7 +802,7 @@ export default function Notes() {
                 <DropdownMenuItem
                   key={field}
                   onClick={() => {
-                    if (sortField === field) {
+                    if (sortField === field && field !== "manual") {
                       setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
                     } else {
                       setSortField(field);
@@ -811,7 +811,7 @@ export default function Notes() {
                   }}
                   className="gap-2"
                 >
-                  {sortField === field ? (
+                  {sortField === field && field !== "manual" ? (
                     sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                   ) : (
                     <span className="w-3" />
