@@ -1,6 +1,6 @@
-import { memo, useRef, useMemo, useCallback, useState, useEffect } from "react";
+import { memo, useRef, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Note, SemanticSearchResult, useUpdateNote } from "@/hooks/useNotes";
+import { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
 import {
   Star,
@@ -9,22 +9,13 @@ import {
   Link2,
   Image,
   FileText as FileTextIcon,
-  Check,
-  X,
-  FolderInput,
-  Tag as TagIcon,
 } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { getNotePreviewText } from "@/lib/note-content";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useBulkSelect } from "./useBulkSelect";
+import { BulkActionBar } from "./BulkActionBar";
 
 interface NoteListProps {
   notes: (Note | SemanticSearchResult)[];
@@ -71,9 +62,7 @@ const NoteRow = memo(function NoteRow({
   const previewText = useMemo(() => getNotePreviewText(note.content), [note.content]);
 
   const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      onClick(e, note.id);
-    },
+    (e: React.MouseEvent) => onClick(e, note.id),
     [note.id, onClick]
   );
 
@@ -102,7 +91,9 @@ const NoteRow = memo(function NoteRow({
         <div className="pt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={isMultiSelected}
-            onCheckedChange={() => onClick({ metaKey: true } as React.MouseEvent, note.id)}
+            onCheckedChange={() =>
+              onClick({ metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as React.MouseEvent, note.id)
+            }
             aria-label="Select note"
           />
         </div>
@@ -169,120 +160,21 @@ export const NoteList = memo(function NoteList({
   showSimilarity,
 }: NoteListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const updateNote = useUpdateNote();
 
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
-  const lastClickedRef = useRef<string | null>(null);
-  const [movePath, setMovePath] = useState("");
-  const [tagInput, setTagInput] = useState("");
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [tagOpen, setTagOpen] = useState(false);
-
-  // Drop selections that no longer exist (e.g. after delete).
-  useEffect(() => {
-    if (multiSelected.size === 0) return;
-    const ids = new Set(notes.map((n) => n.id));
-    let changed = false;
-    const next = new Set<string>();
-    multiSelected.forEach((id) => {
-      if (ids.has(id)) next.add(id);
-      else changed = true;
-    });
-    if (changed) setMultiSelected(next);
-  }, [notes, multiSelected]);
-
-  const noteIndex = useMemo(() => {
-    const map = new Map<string, number>();
-    notes.forEach((n, i) => map.set(n.id, i));
-    return map;
-  }, [notes]);
+  const orderedIds = useMemo(() => notes.map((n) => n.id), [notes]);
+  const bulk = useBulkSelect(orderedIds);
 
   const handleRowClick = useCallback(
     (e: React.MouseEvent, id: string) => {
-      const isMod = e.metaKey || e.ctrlKey;
-      const isShift = e.shiftKey;
-
-      if (isMod) {
-        e.preventDefault();
-        setMultiSelected((prev) => {
-          const next = new Set(prev);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
-          return next;
-        });
-        lastClickedRef.current = id;
-        return;
-      }
-
-      if (isShift && lastClickedRef.current && lastClickedRef.current !== id) {
-        e.preventDefault();
-        const a = noteIndex.get(lastClickedRef.current);
-        const b = noteIndex.get(id);
-        if (a !== undefined && b !== undefined) {
-          const [start, end] = a < b ? [a, b] : [b, a];
-          setMultiSelected((prev) => {
-            const next = new Set(prev);
-            for (let i = start; i <= end; i++) next.add(notes[i].id);
-            return next;
-          });
-        }
-        return;
-      }
-
-      // Plain click — clear multi-selection and navigate.
-      if (multiSelected.size > 0) {
-        setMultiSelected(new Set());
-      }
+      const consumed = bulk.handleClick(e, id);
+      if (consumed) return;
       if (e.button === 0) {
         e.preventDefault();
         onSelect(id);
       }
-      lastClickedRef.current = id;
     },
-    [multiSelected.size, noteIndex, notes, onSelect]
+    [bulk, onSelect]
   );
-
-  const clearSelection = useCallback(() => setMultiSelected(new Set()), []);
-
-  const selectedIds = useMemo(() => Array.from(multiSelected), [multiSelected]);
-
-  const handleBulkMove = useCallback(async () => {
-    const folder = movePath.trim().replace(/^\/+|\/+$/g, "");
-    await Promise.all(
-      selectedIds.map((id) => updateNote.mutateAsync({ id, folder_path: folder }))
-    );
-    showToast.success(`Moved ${selectedIds.length} note${selectedIds.length === 1 ? "" : "s"}`);
-    setMovePath("");
-    setMoveOpen(false);
-    clearSelection();
-  }, [movePath, selectedIds, updateNote, clearSelection]);
-
-  const handleBulkTag = useCallback(async () => {
-    const tag = tagInput.trim().replace(/^#/, "");
-    if (!tag) return;
-    await Promise.all(
-      selectedIds.map((id) => {
-        const n = notes.find((x) => x.id === id);
-        const current = (n?.tags || []) as string[];
-        if (current.includes(tag)) return Promise.resolve();
-        return updateNote.mutateAsync({ id, tags: [...current, tag] });
-      })
-    );
-    showToast.success(`Tagged ${selectedIds.length} note${selectedIds.length === 1 ? "" : "s"}`);
-    setTagInput("");
-    setTagOpen(false);
-    clearSelection();
-  }, [tagInput, selectedIds, notes, updateNote, clearSelection]);
-
-  const handleBulkTrash = useCallback(async () => {
-    await Promise.all(
-      selectedIds.map((id) =>
-        updateNote.mutateAsync({ id, is_trashed: true, trashed_at: new Date().toISOString() })
-      )
-    );
-    showToast.success(`Moved ${selectedIds.length} to Trash`);
-    clearSelection();
-  }, [selectedIds, updateNote, clearSelection]);
 
   const rowVirtualizer = useVirtualizer({
     count: notes.length,
@@ -301,7 +193,8 @@ export const NoteList = memo(function NoteList({
   }
 
   const items = rowVirtualizer.getVirtualItems();
-  const multiActive = multiSelected.size > 0;
+  const multiActive = bulk.size > 0;
+  const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -331,7 +224,7 @@ export const NoteList = memo(function NoteList({
                 <NoteRow
                   note={note}
                   isSelected={selectedId === note.id}
-                  isMultiSelected={multiSelected.has(note.id)}
+                  isMultiSelected={bulk.isSelected(note.id)}
                   multiActive={multiActive}
                   showSimilarity={showSimilarity}
                   onClick={handleRowClick}
@@ -343,85 +236,7 @@ export const NoteList = memo(function NoteList({
       </div>
 
       {multiActive && (
-        <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur px-3 py-2 flex items-center gap-2">
-          <span className="text-xs text-muted-foreground mr-1">
-            {multiSelected.size} selected
-          </span>
-
-          <Popover open={moveOpen} onOpenChange={setMoveOpen}>
-            <PopoverTrigger asChild>
-              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs">
-                <FolderInput className="h-3.5 w-3.5" /> Move
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 p-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Move to folder (empty = Vault root)
-              </p>
-              <Input
-                value={movePath}
-                onChange={(e) => setMovePath(e.target.value)}
-                placeholder="e.g. work/inbox"
-                className="h-8 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleBulkMove();
-                }}
-              />
-              <Button size="sm" className="w-full h-7 text-xs" onClick={handleBulkMove}>
-                <Check className="h-3.5 w-3.5 mr-1" /> Move {selectedIds.length}
-              </Button>
-            </PopoverContent>
-          </Popover>
-
-          <Popover open={tagOpen} onOpenChange={setTagOpen}>
-            <PopoverTrigger asChild>
-              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs">
-                <TagIcon className="h-3.5 w-3.5" /> Tag
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 p-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Add tag to selected</p>
-              <Input
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                placeholder="tag-name"
-                className="h-8 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleBulkTag();
-                }}
-              />
-              <Button
-                size="sm"
-                className="w-full h-7 text-xs"
-                onClick={handleBulkTag}
-                disabled={!tagInput.trim()}
-              >
-                <Check className="h-3.5 w-3.5 mr-1" /> Tag {selectedIds.length}
-              </Button>
-            </PopoverContent>
-          </Popover>
-
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
-            onClick={handleBulkTrash}
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Trash
-          </Button>
-
-          <div className="ml-auto">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={clearSelection}
-              title="Clear selection"
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
+        <BulkActionBar selectedIds={selectedIds} notes={notes} onClear={bulk.clear} />
       )}
     </div>
   );
