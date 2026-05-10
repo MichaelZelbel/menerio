@@ -16,6 +16,7 @@ import { getNotePreviewText } from "@/lib/note-content";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useBulkSelect } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
+import { CaptureEmptyState } from "./CaptureEmptyState";
 
 interface NoteListProps {
   notes: (Note | SemanticSearchResult)[];
@@ -23,6 +24,8 @@ interface NoteListProps {
   onSelect: (id: string) => void;
   showSimilarity?: boolean;
   onTopicClick?: (topic: string) => void;
+  onCreateNote?: () => void;
+  emptyVariant?: "default" | "search";
 }
 
 function getSimilarityColor(score: number): string {
