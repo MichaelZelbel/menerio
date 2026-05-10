@@ -52,6 +52,7 @@ import {
   Merge,
   SplitSquareHorizontal,
   TableProperties,
+  FileText,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -61,6 +62,8 @@ interface EditorToolbarProps {
   quickActions?: React.ReactNode;
   /** Overflow / "more" menu rendered at the far right (typically a DropdownMenu trigger). */
   noteActions?: React.ReactNode;
+  /** Triggered when the user clicks the "Link to note" button. Opens the wikilink autocomplete at the cursor. */
+  onInsertWikilink?: () => void;
 }
 
 const TEXT_COLORS = [
@@ -103,7 +106,7 @@ function ToolbarButton({
   );
 }
 
-export function EditorToolbar({ editor, quickActions, noteActions }: EditorToolbarProps) {
+export function EditorToolbar({ editor, quickActions, noteActions, onInsertWikilink }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
 
@@ -292,6 +295,19 @@ export function EditorToolbar({ editor, quickActions, noteActions }: EditorToolb
         {editor.isActive("link") && (
           <ToolbarButton onClick={() => editor.chain().focus().unsetLink().run()} title="Remove link">
             <Unlink className="h-3.5 w-3.5" />
+          </ToolbarButton>
+        )}
+
+        {/* Link to another note (wikilink) */}
+        {onInsertWikilink && (
+          <ToolbarButton
+            onClick={() => {
+              editor.chain().focus().run();
+              onInsertWikilink();
+            }}
+            title="Link to note (or type [[)"
+          >
+            <FileText className="h-3.5 w-3.5" />
           </ToolbarButton>
         )}
 
