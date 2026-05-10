@@ -606,11 +606,13 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
-    // Sort: pinned first, then by selected field/direction
+    // Sort: pinned first, then by selected field/direction (skip for "manual")
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
       const bPinned = "is_pinned" in b && b.is_pinned ? 1 : 0;
       if (aPinned !== bPinned) return bPinned - aPinned;
+
+      if (sortField === "manual") return 0;
 
       const dir = sortDirection === "asc" ? 1 : -1;
       if (sortField === "title") {
