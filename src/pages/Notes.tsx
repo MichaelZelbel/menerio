@@ -977,16 +977,27 @@ export default function Notes() {
           >
             <Search className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={handleCreate}
-            disabled={createNote.isPending}
-            title="New note"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                disabled={createNote.isPending}
+                title="New"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={handleCreate} disabled={createNote.isPending}>
+                <FileText className="h-4 w-4 mr-2" /> New Note
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleCreateFolderInFolder("")}>
+                <FolderPlus className="h-4 w-4 mr-2" /> New Folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Search bar */}
