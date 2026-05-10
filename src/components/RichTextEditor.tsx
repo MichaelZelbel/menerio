@@ -52,6 +52,7 @@ export function RichTextEditor({
   onChange,
   onEditorReady,
   onWikiLinkClick,
+  onInternalNavigate,
 }: RichTextEditorProps) {
   const toWikiSlug = (value: string) =>
     value
