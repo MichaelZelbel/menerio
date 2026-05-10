@@ -184,6 +184,8 @@ export const NoteList = memo(function NoteList({
     getItemKey: (index) => notes[index]?.id ?? index,
   });
 
+  const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
+
   if (notes.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-6 text-center">
@@ -194,7 +196,6 @@ export const NoteList = memo(function NoteList({
 
   const items = rowVirtualizer.getVirtualItems();
   const multiActive = bulk.size > 0;
-  const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
