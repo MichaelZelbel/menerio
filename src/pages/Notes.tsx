@@ -89,20 +89,24 @@ const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] 
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
-type SortField = "updated_at" | "created_at" | "title";
+type SortField = "updated_at" | "created_at" | "title" | "manual";
 type SortDirection = "asc" | "desc";
 
 const sortLabels: Record<SortField, string> = {
   updated_at: "Last Edited",
   created_at: "Date Created",
   title: "Title",
+  manual: "Manual",
 };
 
 const defaultDirections: Record<SortField, SortDirection> = {
   updated_at: "desc",
   created_at: "desc",
   title: "asc",
+  manual: "desc",
 };
+
+const SORT_STORAGE_KEY = "menerio:notelist:sort";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -132,8 +136,32 @@ export default function Notes() {
   const [activeFolderPath, setActiveFolderPath] = useState<string | null>("");
   const [newFolderPath, setNewFolderPath] = useState("");
   
-  const [sortField, setSortField] = useState<SortField>("updated_at");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [sortField, setSortField] = useState<SortField>(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.field && parsed.field in defaultDirections) return parsed.field as SortField;
+      }
+    } catch { /* ignore */ }
+    return "updated_at";
+  });
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.direction === "asc" || parsed?.direction === "desc") return parsed.direction;
+      }
+    } catch { /* ignore */ }
+    return "desc";
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, direction: sortDirection }));
+    } catch { /* ignore */ }
+  }, [sortField, sortDirection]);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
@@ -578,11 +606,13 @@ export default function Notes() {
         return meta?.type === metaTypeFilter;
       });
     }
-    // Sort: pinned first, then by selected field/direction
+    // Sort: pinned first, then by selected field/direction (skip for "manual")
     const sorted = [...notes].sort((a, b) => {
       const aPinned = "is_pinned" in a && a.is_pinned ? 1 : 0;
       const bPinned = "is_pinned" in b && b.is_pinned ? 1 : 0;
       if (aPinned !== bPinned) return bPinned - aPinned;
+
+      if (sortField === "manual") return 0;
 
       const dir = sortDirection === "asc" ? 1 : -1;
       if (sortField === "title") {
@@ -754,11 +784,17 @@ export default function Notes() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8"
+                size="sm"
+                className="h-8 gap-1.5 px-2 text-xs"
                 title="Sort notes"
               >
-                <ArrowUpDown className="h-4 w-4" />
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{sortLabels[sortField]}</span>
+                {sortField !== "manual" && (
+                  sortDirection === "asc"
+                    ? <ArrowUp className="h-3 w-3" />
+                    : <ArrowDown className="h-3 w-3" />
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44">
@@ -766,7 +802,7 @@ export default function Notes() {
                 <DropdownMenuItem
                   key={field}
                   onClick={() => {
-                    if (sortField === field) {
+                    if (sortField === field && field !== "manual") {
                       setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
                     } else {
                       setSortField(field);
@@ -775,7 +811,7 @@ export default function Notes() {
                   }}
                   className="gap-2"
                 >
-                  {sortField === field ? (
+                  {sortField === field && field !== "manual" ? (
                     sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                   ) : (
                     <span className="w-3" />
@@ -1120,7 +1156,7 @@ export default function Notes() {
             onDeleteFolder={handleDeleteFolder}
             onRestoreNote={handleRestoreNote}
             onDeleteNotePermanently={handleDeleteNotePermanently}
-            sortField={sortField}
+            sortField={sortField === "manual" ? "updated_at" : sortField}
             sortDirection={sortDirection}
           />
         )}
