@@ -465,8 +465,13 @@ export function NoteTree({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-2">
-      <FolderRow node={tree} depth={0} />
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-y-auto p-2">
+        <FolderRow node={tree} depth={0} />
+      </div>
+      {multiActive && (
+        <BulkActionBar selectedIds={selectedIds} notes={notes} onClear={bulk.clear} />
+      )}
     </div>
   );
 }
