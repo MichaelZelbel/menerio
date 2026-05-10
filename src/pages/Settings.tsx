@@ -38,6 +38,7 @@ import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
+import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -75,8 +76,15 @@ export default function Settings() {
   const { toast } = useToast();
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const defaultTab = searchParams.get("tab") || "account";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "account");
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", value);
+    setSearchParams(next, { replace: true });
+  };
 
   // Profile state
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
@@ -218,9 +226,10 @@ export default function Settings() {
         <p className="text-sm text-muted-foreground mt-1">Manage your account and preferences</p>
       </div>
 
-      <Tabs defaultValue={defaultTab} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
+          <TabsTrigger value="hub" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Integrations</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
           <TabsTrigger value="ai-suggestions" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> AI Suggestions</TabsTrigger>
@@ -330,6 +339,11 @@ export default function Settings() {
               </form>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Integrations Hub ── */}
+        <TabsContent value="hub">
+          <IntegrationsOverview onOpenTab={handleTabChange} />
         </TabsContent>
 
         {/* ── Import Tab ── */}

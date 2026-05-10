@@ -48,7 +48,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Banner "Synced from {source} — duplicate to edit" mit primärem Duplicate-Button und Erklärungstext.
 - **Files:** `src/components/notes/NoteEditor.tsx`
 
-### 8. 🟥 Integration Overview in Settings · M · ★★
+### 8. 🟩 Integration Overview in Settings · M · ★★
 - **Bereich:** Settings
 - **Akzeptanz:** Übersichtsseite "Connected: X · Available: Y" oben in Integrations-Tab. Ein-Klick zur Detail-Section.
 - **Files:** `src/components/settings/IntegrationsOverview.tsx` (neu), `src/pages/Settings.tsx`
