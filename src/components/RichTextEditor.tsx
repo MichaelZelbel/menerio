@@ -36,6 +36,7 @@ interface RichTextEditorProps {
   onChange?: (markdown: string, editor: Editor) => void;
   onEditorReady?: (editor: Editor | null) => void;
   onWikiLinkClick?: (slug: string, element: HTMLElement) => void;
+  onInternalNavigate?: (path: string) => void;
 }
 
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
