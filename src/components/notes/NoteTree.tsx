@@ -31,6 +31,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useBulkSelect } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
+import { CaptureEmptyState } from "./CaptureEmptyState";
 
 export type NoteTreeSortField = "updated_at" | "created_at" | "title";
 export type NoteTreeSortDirection = "asc" | "desc";
@@ -458,8 +459,8 @@ export function NoteTree({
 
   if (notes.length === 0 && folderPaths.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center">
-        <p className="text-sm text-muted-foreground">No notes yet. Create one to get started.</p>
+      <div className="flex-1 overflow-y-auto">
+        <CaptureEmptyState onCreateNote={() => onCreateNoteInFolder("")} variant="compact" />
       </div>
     );
   }

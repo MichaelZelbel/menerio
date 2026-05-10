@@ -1139,6 +1139,8 @@ export default function Notes() {
             onSelect={selectNote}
             showSimilarity={searchMode && showingSemanticResults}
             onTopicClick={(topic) => setTopicFilter(topicFilter === topic ? null : topic)}
+            onCreateNote={handleCreate}
+            emptyVariant="search"
           />
         ) : (
           <NoteTree

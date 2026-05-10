@@ -13,6 +13,7 @@ import { TodaysConnections } from "@/components/dashboard/TodaysConnections";
 import { DiscoveryFeed } from "@/components/dashboard/DiscoveryFeed";
 import { OrphanNotesDetector } from "@/components/graph/OrphanNotesDetector";
 import { BridgeNotesHighlighter } from "@/components/graph/GraphAnalytics";
+import { CaptureEmptyState } from "@/components/notes/CaptureEmptyState";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -174,17 +175,8 @@ const Dashboard = () => {
           {/* Quick start */}
           {!hasNotes && (
             <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                  <Brain className="h-8 w-8 text-primary" />
-                </div>
-                <h3 className="text-lg font-semibold font-display mb-2">Start building your brain</h3>
-                <p className="text-sm text-muted-foreground max-w-sm mb-6">
-                  Create your first note and let AI embed and classify it automatically.
-                </p>
-                <Button onClick={() => navigate("/dashboard/notes")} className="gap-2">
-                  <Plus className="h-4 w-4" /> Create Your First Note
-                </Button>
+              <CardContent className="py-8">
+                <CaptureEmptyState onCreateNote={() => navigate("/dashboard/notes?action=new")} />
               </CardContent>
             </Card>
           )}
