@@ -136,8 +136,32 @@ export default function Notes() {
   const [activeFolderPath, setActiveFolderPath] = useState<string | null>("");
   const [newFolderPath, setNewFolderPath] = useState("");
   
-  const [sortField, setSortField] = useState<SortField>("updated_at");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [sortField, setSortField] = useState<SortField>(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.field && parsed.field in defaultDirections) return parsed.field as SortField;
+      }
+    } catch { /* ignore */ }
+    return "updated_at";
+  });
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.direction === "asc" || parsed?.direction === "desc") return parsed.direction;
+      }
+    } catch { /* ignore */ }
+    return "desc";
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, direction: sortDirection }));
+    } catch { /* ignore */ }
+  }, [sortField, sortDirection]);
 
   const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
