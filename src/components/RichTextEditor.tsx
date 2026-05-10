@@ -36,6 +36,7 @@ interface RichTextEditorProps {
   onChange?: (markdown: string, editor: Editor) => void;
   onEditorReady?: (editor: Editor | null) => void;
   onWikiLinkClick?: (slug: string, element: HTMLElement) => void;
+  onInternalNavigate?: (path: string) => void;
 }
 
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
@@ -51,6 +52,7 @@ export function RichTextEditor({
   onChange,
   onEditorReady,
   onWikiLinkClick,
+  onInternalNavigate,
 }: RichTextEditorProps) {
   const toWikiSlug = (value: string) =>
     value
@@ -149,9 +151,34 @@ export function RichTextEditor({
       onWikiLinkClick?.(slug, wikiLink);
       return;
     }
-    // External links: ensure they open in a new tab with safe rel.
+    // Generic anchor: distinguish same-origin (internal) vs cross-origin (external).
     const anchor = target.closest?.("a[href]") as HTMLAnchorElement | null;
-    if (anchor && /^https?:\/\//i.test(anchor.getAttribute("href") || "")) {
+    if (!anchor) return;
+    const href = anchor.getAttribute("href") || "";
+    if (!href || href.startsWith("#")) return;
+    // Skip non-http(s) schemes (mailto:, tel:, data:, attachment-link with href="#", etc.)
+    if (!/^(https?:)?\/\//i.test(href) && !href.startsWith("/")) return;
+    let url: URL;
+    try {
+      url = new URL(href, window.location.href);
+    } catch {
+      return;
+    }
+    if (url.origin === window.location.origin) {
+      // Internal link: stay in the same window, prefer SPA navigation.
+      anchor.removeAttribute("target");
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      const path = url.pathname + url.search + url.hash;
+      if (onInternalNavigate) {
+        onInternalNavigate(path);
+      } else {
+        window.location.assign(path);
+      }
+    } else {
+      // External link: open in a new tab with safe rel.
       if (!anchor.getAttribute("target")) anchor.setAttribute("target", "_blank");
       if (!anchor.getAttribute("rel")) anchor.setAttribute("rel", "noreferrer noopener");
     }

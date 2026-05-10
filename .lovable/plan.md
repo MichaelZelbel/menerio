@@ -1,26 +1,42 @@
-## Aktuelle Situation
+## Problem
 
-Heute gibt es nur **eine** Möglichkeit, im Editor eine andere Notiz zu verlinken: Du tippst `[[` und das `WikilinkAutocomplete`-Dropdown öffnet sich, in dem du suchen, auswählen oder eine neue Notiz anlegen kannst. Einen sichtbaren Button in der Toolbar gibt es bisher nicht — viele Nutzer entdecken die Funktion deshalb nie.
+Im Lexikon (`WikiPage.tsx` → `RichTextEditor`) öffnen einige Links derzeit ein neues Browserfenster, obwohl sie auf interne Ziele zeigen. Ursache liegt in `RichTextEditor.tsx`, Funktion `handleContainerClick`:
 
-Der Autocomplete-Mechanismus selbst ist bereits vollständig vorhanden (`WikilinkAutocomplete`, `WikilinkExtension`, Position-Tracking, `insertWikilinkSafely`, "Notiz anlegen"-Pfad). Es fehlt nur ein UI-Auslöser.
+```ts
+if (anchor && /^https?:\/\//i.test(anchor.getAttribute("href") || "")) {
+  if (!anchor.getAttribute("target")) anchor.setAttribute("target", "_blank");
+  ...
+}
+```
 
-## Vorschlag
+Diese Logik prüft nur, ob die URL mit `http(s)://` beginnt — sie unterscheidet nicht zwischen externer und gleicher Origin. Folgen daraus:
+- Ein als voll-qualifizierte URL gespeicherter Link wie `https://menerio.com/lexicon/foo` oder `https://menerio.com/dashboard/notes/...` bekommt `target="_blank"` und öffnet ein neues Fenster.
+- Wikilinks (`.wiki-link` mit `href="/lexicon/..."`) funktionieren bereits korrekt über `onWikiLinkClick`.
+- Relative Links (`/lexicon/foo`) bekommen kein `_blank`, lösen aber einen vollen Page-Reload aus statt SPA-Navigation.
 
-Einen **"Notiz verlinken"**-Button in die Editor-Toolbar (`EditorToolbar.tsx`) aufnehmen, direkt neben dem bestehenden Link-Button (für externe URLs). Klick öffnet exakt dasselbe `WikilinkAutocomplete`-Popover, das auch beim Tippen von `[[` erscheint — an der aktuellen Cursor-Position.
+## Lösung
 
-### Verhalten
-- **Icon:** `FileText` oder `Link2` von lucide-react, mit Tooltip "Notiz verlinken (oder `[[` tippen)".
-- **Klick:** Öffnet das bestehende `WikilinkAutocomplete` an der Cursor-Position.
-- **Dropdown:** Suche tippen → Notiz auswählen (Enter/Klick) → Wikilink wird an Cursor eingefügt. Wenn keine passende Notiz existiert, gibt es weiterhin den "Create: …"-Eintrag.
-- **Esc / Klick außerhalb:** schließt das Popover, ohne etwas einzufügen.
-- Nichts ändert sich am Tipp-Trigger `[[` und am bestehenden Speicher-/Resolve-Verhalten.
+In `RichTextEditor.tsx` die Klick-Behandlung von Anker-Tags so ändern, dass:
 
-### Technische Umsetzung
-- `EditorToolbar` bekommt eine neue optionale Prop `onInsertWikilink?: () => void`.
-- Wenn gesetzt, wird der neue Button gerendert (sonst unsichtbar — relevant für andere Editor-Instanzen wie `RichTextEditor`).
-- `NoteEditor.tsx` reicht eine Funktion durch, die intern denselben Pfad wie `onOpenAutocomplete` der `WikilinkExtension` benutzt: aktuelle Caret-Position bestimmen, `setWikilinkPos` + `wikilinkInsertPos.current` setzen, `setWikilinkOpen(true)`.
-- Keine Änderungen an Datenmodell, Edge Functions oder Markdown-Konvertierung.
+1. **Same-Origin-Erkennung:** Anker-Href via `new URL(href, window.location.href)` parsen. Wenn `url.origin === window.location.origin` → als intern behandeln. Sonst → extern.
+2. **Externe Links:** `target="_blank"` + `rel="noreferrer noopener"` setzen (wie bisher), Default-Verhalten zulassen.
+3. **Interne Links:** `target` entfernen, `event.preventDefault()`, dann via neuem optionalen Callback `onInternalNavigate(path)` an den Aufrufer melden. Modifier-Tasten/Mittelklick respektieren (kein preventDefault), damit "in neuem Tab öffnen" weiterhin manuell möglich bleibt.
+4. **Fallback:** Wenn kein `onInternalNavigate` übergeben wird, einfach `window.location.assign(url.pathname + url.search + url.hash)` ausführen — das erzeugt zumindest keine neue Tab-/Fensteröffnung.
+
+In `WikiPage.tsx` den `RichTextEditor` mit dem neuen Prop versorgen:
+```tsx
+onInternalNavigate={(path) => navigate(path)}
+```
+
+So nutzen interne Lexikon-Links (`/lexicon/...`), Notizen-Links (`/dashboard/notes/...`) und alle anderen App-Routen die SPA-Navigation und bleiben im selben Fenster.
+
+### Technische Details
+
+- **Datei:** `src/components/RichTextEditor.tsx` — Props-Interface erweitern um `onInternalNavigate?: (path: string) => void`. Funktion `handleContainerClick` umschreiben.
+- **Datei:** `src/pages/WikiPage.tsx` — `onInternalNavigate={(path) => navigate(path)}` an `<RichTextEditor>` übergeben.
+- **Hash-Links** (`#section`) werden als intern behandelt, lösen aber kein Routing aus — Browser-Default für Anchor-Scroll greift.
+- **Mailto/Tel/etc.:** Werden nicht angefasst (nur `http(s):` URLs werden umgeschrieben), Default-Browserverhalten gilt.
 
 ### Out of Scope
-- Kein neues separates Dialog-/Modal-UI — wir verwenden bewusst das vorhandene Autocomplete für ein konsistentes Erlebnis.
-- Keine Änderung am Verhalten externer Links (Link-Button bleibt für URLs).
+
+- Note-Editor (`NoteEditor.tsx` nutzt einen anderen Pfad mit `WikilinkExtension`, dort ist das Verhalten bereits korrekt). Falls dort dieselbe Korrektur sinnvoll ist, kann sie analog nachgezogen werden — aktuell beschwert sich der Bericht aber nur über das Lexikon.

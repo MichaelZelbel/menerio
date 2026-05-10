@@ -349,6 +349,7 @@ export default function WikiPage() {
               className={editMode ? undefined : "wiki-article-editor border-0 bg-transparent"}
               onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
               onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/lexicon/${encodeURIComponent(targetSlug)}`); }}
+              onInternalNavigate={(path) => navigate(path)}
             />
           </div>
 
