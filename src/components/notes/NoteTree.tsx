@@ -164,6 +164,24 @@ export function NoteTree({
     return root;
   }, [folderPaths, notes, sortField, sortDirection]);
 
+  // Flat list of visible note ids (DFS, respecting expanded folders) — used
+  // for shift+click range selection.
+  const visibleNoteIds = useMemo(() => {
+    const out: string[] = [];
+    const walk = (node: FolderNode) => {
+      const key = node.path || "__root__";
+      if (!expanded.has(key)) return;
+      node.children.forEach(walk);
+      node.notes.forEach((n) => out.push(n.id));
+    };
+    walk(tree);
+    return out;
+  }, [tree, expanded]);
+
+  const bulk = useBulkSelect(visibleNoteIds);
+  const multiActive = bulk.size > 0;
+  const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
+
   useEffect(() => {
     setExpanded((current) => {
       const next = new Set(current);
