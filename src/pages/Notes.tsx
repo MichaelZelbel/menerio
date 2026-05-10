@@ -1124,7 +1124,7 @@ export default function Notes() {
             onDeleteFolder={handleDeleteFolder}
             onRestoreNote={handleRestoreNote}
             onDeleteNotePermanently={handleDeleteNotePermanently}
-            sortField={sortField}
+            sortField={sortField === "manual" ? "updated_at" : sortField}
             sortDirection={sortDirection}
           />
         )}
