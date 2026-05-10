@@ -67,7 +67,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Shift+Click Multi-Select, Action-Bar unten (Move, Trash, Add to Folder, Tag).
 - **Files:** `NoteList.tsx`, `Notes.tsx`
 
-### 11. 🟥 Empty-States mit Capture-Beispielen · S · ★★
+### 11. 🟩 Empty-States mit Capture-Beispielen · S · ★★
 - **Bereich:** Notes / Dashboard
 - **Akzeptanz:** Statt "No notes yet" → CTA-Karten (Telegram, Web Clipper, MCP, Quick Capture).
 - **Files:** `NoteList.tsx`, `Dashboard.tsx`
