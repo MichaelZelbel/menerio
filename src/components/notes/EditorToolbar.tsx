@@ -52,6 +52,7 @@ import {
   Merge,
   SplitSquareHorizontal,
   TableProperties,
+  FileText,
 } from "lucide-react";
 import { useState } from "react";
 
