@@ -61,6 +61,8 @@ interface EditorToolbarProps {
   quickActions?: React.ReactNode;
   /** Overflow / "more" menu rendered at the far right (typically a DropdownMenu trigger). */
   noteActions?: React.ReactNode;
+  /** Triggered when the user clicks the "Link to note" button. Opens the wikilink autocomplete at the cursor. */
+  onInsertWikilink?: () => void;
 }
 
 const TEXT_COLORS = [
