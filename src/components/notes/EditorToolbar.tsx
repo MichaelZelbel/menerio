@@ -105,7 +105,7 @@ function ToolbarButton({
   );
 }
 
-export function EditorToolbar({ editor, quickActions, noteActions }: EditorToolbarProps) {
+export function EditorToolbar({ editor, quickActions, noteActions, onInsertWikilink }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
 
