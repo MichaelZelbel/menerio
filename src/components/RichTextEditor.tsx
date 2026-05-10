@@ -39,6 +39,8 @@ interface RichTextEditorProps {
   onInternalNavigate?: (path: string) => void;
 }
 
+const INTERNAL_APP_HOSTS = ["menerio.com", "www.menerio.com", "menerio.lovable.app"];
+
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
@@ -164,7 +166,11 @@ export function RichTextEditor({
     } catch {
       return;
     }
-    if (url.origin === window.location.origin) {
+    const isInternalHost =
+      url.host === window.location.host ||
+      INTERNAL_APP_HOSTS.includes(url.host) ||
+      url.host.endsWith(".lovable.app");
+    if (isInternalHost) {
       // Internal link: stay in the same window, prefer SPA navigation.
       anchor.removeAttribute("target");
       if (event.defaultPrevented) return;
