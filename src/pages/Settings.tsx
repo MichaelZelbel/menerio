@@ -341,6 +341,11 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        {/* ── Integrations Hub ── */}
+        <TabsContent value="hub">
+          <IntegrationsOverview onOpenTab={handleTabChange} />
+        </TabsContent>
+
         {/* ── Import Tab ── */}
         <TabsContent value="import">
           <ImportMigrate />
