@@ -28,6 +28,9 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useBulkSelect } from "./useBulkSelect";
+import { BulkActionBar } from "./BulkActionBar";
 
 export type NoteTreeSortField = "updated_at" | "created_at" | "title";
 export type NoteTreeSortDirection = "asc" | "desc";
@@ -160,6 +163,24 @@ export function NoteTree({
     sortFolder(root, sortField, sortDirection);
     return root;
   }, [folderPaths, notes, sortField, sortDirection]);
+
+  // Flat list of visible note ids (DFS, respecting expanded folders) — used
+  // for shift+click range selection.
+  const visibleNoteIds = useMemo(() => {
+    const out: string[] = [];
+    const walk = (node: FolderNode) => {
+      const key = node.path || "__root__";
+      if (!expanded.has(key)) return;
+      node.children.forEach(walk);
+      node.notes.forEach((n) => out.push(n.id));
+    };
+    walk(tree);
+    return out;
+  }, [tree, expanded]);
+
+  const bulk = useBulkSelect(visibleNoteIds);
+  const multiActive = bulk.size > 0;
+  const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
 
   useEffect(() => {
     setExpanded((current) => {
@@ -330,12 +351,13 @@ export function NoteTree({
 
   const NoteRow = ({ note, depth }: { note: Note | SemanticSearchResult; depth: number }) => {
     const folderOptions = tree.children.flatMap((node) => flattenFolders(node));
+    const isMultiSelected = bulk.isSelected(note.id);
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <a
             href={`/dashboard/notes/${note.id}`}
-            draggable={!note.is_external}
+            draggable={!note.is_external && !multiActive}
             onDragStart={(event) => {
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
@@ -349,7 +371,9 @@ export function NoteTree({
               setDragOverPath(null);
             }}
             onClick={(event) => {
-              if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) {
+              const consumed = bulk.handleClick(event, note.id);
+              if (consumed) return;
+              if (event.button === 0) {
                 event.preventDefault();
                 onSelectFolder(normalizePath(note.folder_path));
                 onSelectNote(note.id);
@@ -357,12 +381,28 @@ export function NoteTree({
             }}
             className={cn(
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
-              !note.is_external && "cursor-grab active:cursor-grabbing",
-              selectedId === note.id && "bg-accent text-accent-foreground",
+              !note.is_external && !multiActive && "cursor-grab active:cursor-grabbing",
+              selectedId === note.id && !multiActive && "bg-accent text-accent-foreground",
+              isMultiSelected && "bg-primary/10 hover:bg-primary/15",
               draggingKey === `note:${note.id}` && "opacity-40"
             )}
             style={{ paddingLeft: `${14 + depth * 14}px` }}
           >
+            {multiActive && (
+              <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isMultiSelected}
+                  onCheckedChange={() =>
+                    bulk.handleClick(
+                      { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as React.MouseEvent,
+                      note.id,
+                    )
+                  }
+                  aria-label="Select note"
+                  className="h-3.5 w-3.5"
+                />
+              </span>
+            )}
             <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{note.title || "Untitled"}</span>
             <span className="hidden text-[10px] text-muted-foreground group-hover:inline">
@@ -425,8 +465,13 @@ export function NoteTree({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-2">
-      <FolderRow node={tree} depth={0} />
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-y-auto p-2">
+        <FolderRow node={tree} depth={0} />
+      </div>
+      {multiActive && (
+        <BulkActionBar selectedIds={selectedIds} notes={notes} onClear={bulk.clear} />
+      )}
     </div>
   );
 }
