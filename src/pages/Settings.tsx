@@ -226,9 +226,10 @@ export default function Settings() {
         <p className="text-sm text-muted-foreground mt-1">Manage your account and preferences</p>
       </div>
 
-      <Tabs defaultValue={defaultTab} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
+          <TabsTrigger value="hub" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Integrations</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
           <TabsTrigger value="ai-suggestions" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> AI Suggestions</TabsTrigger>
