@@ -28,6 +28,9 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useBulkSelect } from "./useBulkSelect";
+import { BulkActionBar } from "./BulkActionBar";
 
 export type NoteTreeSortField = "updated_at" | "created_at" | "title";
 export type NoteTreeSortDirection = "asc" | "desc";
