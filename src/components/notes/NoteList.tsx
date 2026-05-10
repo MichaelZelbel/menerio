@@ -161,6 +161,8 @@ export const NoteList = memo(function NoteList({
   selectedId,
   onSelect,
   showSimilarity,
+  onCreateNote,
+  emptyVariant = "default",
 }: NoteListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
