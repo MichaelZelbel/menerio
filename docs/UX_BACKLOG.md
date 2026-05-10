@@ -72,7 +72,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Statt "No notes yet" → CTA-Karten (Telegram, Web Clipper, MCP, Quick Capture).
 - **Files:** `NoteList.tsx`, `Dashboard.tsx`
 
-### 12. 🟥 Folder erstellen aus Sidebar-Header · S · ★
+### 12. 🟩 Folder erstellen aus Sidebar-Header · S · ★
 - **Bereich:** Notes / NoteTree
 - **Akzeptanz:** `+`-Button neben "All Notes" mit Dropdown (New Note / New Folder).
 - **Files:** `NoteTree.tsx`
