@@ -1013,6 +1013,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {!note.is_trashed && !sourceMode && !note.is_external && (
         <EditorToolbar
           editor={editor}
+          onInsertWikilink={() => {
+            const pos = editor?.state.selection.from ?? 0;
+            handleOpenAutocomplete(pos);
+          }}
           quickActions={
             <>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleFavorite} title={note.is_favorite ? "Remove from favorites" : "Add to favorites"}>
