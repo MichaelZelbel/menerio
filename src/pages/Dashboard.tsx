@@ -13,6 +13,7 @@ import { TodaysConnections } from "@/components/dashboard/TodaysConnections";
 import { DiscoveryFeed } from "@/components/dashboard/DiscoveryFeed";
 import { OrphanNotesDetector } from "@/components/graph/OrphanNotesDetector";
 import { BridgeNotesHighlighter } from "@/components/graph/GraphAnalytics";
+import { CaptureEmptyState } from "@/components/notes/CaptureEmptyState";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
