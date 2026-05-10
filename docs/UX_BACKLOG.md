@@ -62,7 +62,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ## P2 — Polish & Discovery
 
-### 10. 🟥 Bulk-Actions in NoteList · M · ★★
+### 10. 🟩 Bulk-Actions in NoteList · M · ★★
 - **Bereich:** Notes
 - **Akzeptanz:** Shift+Click Multi-Select, Action-Bar unten (Move, Trash, Add to Folder, Tag).
 - **Files:** `NoteList.tsx`, `Notes.tsx`
