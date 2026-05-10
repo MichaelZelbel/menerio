@@ -38,6 +38,7 @@ import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
+import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
