@@ -784,11 +784,17 @@ export default function Notes() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8"
+                size="sm"
+                className="h-8 gap-1.5 px-2 text-xs"
                 title="Sort notes"
               >
-                <ArrowUpDown className="h-4 w-4" />
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{sortLabels[sortField]}</span>
+                {sortField !== "manual" && (
+                  sortDirection === "asc"
+                    ? <ArrowUp className="h-3 w-3" />
+                    : <ArrowDown className="h-3 w-3" />
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44">
