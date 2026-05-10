@@ -192,9 +192,16 @@ export const NoteList = memo(function NoteList({
   const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
 
   if (notes.length === 0) {
+    if (emptyVariant === "search") {
+      return (
+        <div className="flex-1 flex items-center justify-center p-6 text-center">
+          <p className="text-sm text-muted-foreground">No notes match your search.</p>
+        </div>
+      );
+    }
     return (
-      <div className="flex-1 flex items-center justify-center p-6 text-center">
-        <p className="text-sm text-muted-foreground">No notes yet. Create one to get started.</p>
+      <div className="flex-1 overflow-y-auto">
+        <CaptureEmptyState onCreateNote={onCreateNote} variant="compact" />
       </div>
     );
   }
