@@ -53,7 +53,7 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Übersichtsseite "Connected: X · Available: Y" oben in Integrations-Tab. Ein-Klick zur Detail-Section.
 - **Files:** `src/components/settings/IntegrationsOverview.tsx` (neu), `src/pages/Settings.tsx`
 
-### 9. 🟥 Sort/Filter Toggle in NoteList sichtbar · S · ★★
+### 9. 🟩 Sort/Filter Toggle in NoteList sichtbar · S · ★★
 - **Bereich:** Notes
 - **Akzeptanz:** Dropdown im NoteList-Header (Updated/Created/Title/Manual). Persist in localStorage.
 - **Files:** `src/components/notes/NoteList.tsx`
