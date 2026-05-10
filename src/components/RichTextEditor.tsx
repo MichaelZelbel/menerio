@@ -40,16 +40,6 @@ interface RichTextEditorProps {
 }
 
 const INTERNAL_APP_HOSTS = ["menerio.com", "www.menerio.com", "menerio.lovable.app"];
-  value: string;
-  editable?: boolean;
-  placeholder?: string;
-  showToolbar?: boolean;
-  className?: string;
-  onChange?: (markdown: string, editor: Editor) => void;
-  onEditorReady?: (editor: Editor | null) => void;
-  onWikiLinkClick?: (slug: string, element: HTMLElement) => void;
-  onInternalNavigate?: (path: string) => void;
-}
 
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
