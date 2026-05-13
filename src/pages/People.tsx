@@ -73,6 +73,7 @@ export default function People() {
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
