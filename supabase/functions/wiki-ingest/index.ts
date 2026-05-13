@@ -610,8 +610,8 @@ async function processIngest(
     const validationLog: Array<{ slug: string; outcome: string; reason?: string }> = [];
     const acceptedActions: WikiAction[] = [];
     for (const action of parsed.actions) {
-      const existing = existingBySlug.get(action.slug)?.content ?? null;
-      const result = validateAction(action, contentText, existing);
+      const existingMeta = existingBySlug.get(action.slug);
+      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null);
       if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
         continue;
