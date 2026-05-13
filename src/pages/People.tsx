@@ -289,7 +289,16 @@ export default function People() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
                       <User className="h-5 w-5 text-primary" />
                     </div>
-                    {selectedPerson.name}
+                    {isEditing ? (
+                      <Input
+                        value={editingName ?? ""}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        placeholder="Name"
+                        className="h-9 text-xl font-semibold"
+                      />
+                    ) : (
+                      selectedPerson.name
+                    )}
                   </CardTitle>
 
                   {/* Aliases */}
