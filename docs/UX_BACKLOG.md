@@ -82,10 +82,10 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Pro Duplikat eigener Inline-Banner mit Merge / Dismiss. Dismiss persistiert pro Paar in localStorage. Merge öffnet MergePersonDialog mit vorausgewähltem Ziel.
 - **Files:** `src/components/people/DuplicateHints.tsx`, `People.tsx`, `MergePersonDialog.tsx`
 
-### 14. 🟥 ProfileSuggestions Re-Trigger an neue Notizen koppeln · M · ★★
+### 14. 🟩 ProfileSuggestions Re-Trigger an neue Notizen koppeln · M · ★★
 - **Bereich:** Profile
-- **Akzeptanz:** Statt 24h-Cooldown: Button aktiv sobald N neue Notizen seit letztem Run.
-- **Files:** `ProfileSuggestions.tsx`, ggf. RPC
+- **Akzeptanz:** Statt 24h-Cooldown: Button aktiv sobald 5 neue Notizen seit letztem Run. Zeigt Countdown ("3 more notes until next analysis") und neue-Notes-Zahl im aktiven Button.
+- **Files:** `ProfileSuggestions.tsx`
 
 ---
 
