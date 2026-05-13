@@ -95,8 +95,8 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Status:** Zurückgerollt. Radix-ContextMenu-Typeahead fängt einzelne Buchstaben ab (z. B. „M" highlightet nur „Move to" statt zu verschieben), eigene `onKeyDown`-Handler griffen daher inkonsistent. Hints waren irreführend → entfernt. Falls neu angegangen: globale Shortcuts auf der ausgewählten Notiz/Folder im Tree statt im offenen Menü.
 - **Files:** `src/components/notes/NoteTree.tsx`
 
-### 16. 🟥 Toast-Konsolidierung · S · ★
-- **Akzeptanz:** Bei >2 Toasts gleicher Art → "3 notes moved" statt 3 Toasts.
+### 16. 🟩 Toast-Konsolidierung · S · ★
+- **Akzeptanz:** Bei >2 Toasts gleicher Art → "3 notes moved" statt 3 Toasts. `showToast.batched.{success,error,info,warning}(key, formatter)` aggregiert pro Key innerhalb 800ms-Fenster und aktualisiert denselben Sonner-Toast in place. Eingesetzt für Move-Note, Restore-Note, Permanent-Delete-Note.
 
 ### 17. 🟥 NoteTree Mobile-Padding · S · ★★
 - **Akzeptanz:** Auf <640px depth × 8px statt 14px. Horizontal scroll vermeiden.

@@ -318,7 +318,14 @@ export default function Notes() {
   const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
     updateNote.mutate(
       { id: noteId, folder_path: folderPath },
-      { onSuccess: () => showToast.success(folderPath ? `Moved to ${folderPath}` : "Moved to Vault root") }
+      {
+        onSuccess: () => {
+          const target = folderPath || "Vault root";
+          showToast.batched.success(`note:move:${target}`, (n) =>
+            n === 1 ? `Moved to ${target}` : `${n} notes moved to ${target}`,
+          );
+        },
+      },
     );
     setActiveFolderPath(folderPath);
   }, [updateNote]);
@@ -481,7 +488,9 @@ export default function Notes() {
         .eq("id", noteId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      showToast.success("Note restored");
+      showToast.batched.success("note:restore", (n) =>
+        n === 1 ? "Note restored" : `${n} notes restored`,
+      );
     } catch (err) {
       showToast.error(err instanceof Error ? err.message : "Failed to restore note");
     }
@@ -501,7 +510,9 @@ export default function Notes() {
           if (error) throw error;
           if (selectedId === noteId) selectNote(null);
           await queryClient.invalidateQueries({ queryKey: ["notes"] });
-          showToast.success("Note deleted permanently");
+          showToast.batched.success("note:delete-permanent", (n) =>
+            n === 1 ? "Note deleted permanently" : `${n} notes deleted permanently`,
+          );
         } catch (err) {
           showToast.error(err instanceof Error ? err.message : "Failed to delete note");
         }

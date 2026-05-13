@@ -206,7 +206,9 @@ export function useDeleteNote() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notes"] });
-      showToast.success("Note permanently deleted");
+      showToast.batched.success("note:delete-permanent", (n) =>
+        n === 1 ? "Note permanently deleted" : `${n} notes permanently deleted`,
+      );
     },
     onError: () => {
       showToast.error("Failed to delete note");
