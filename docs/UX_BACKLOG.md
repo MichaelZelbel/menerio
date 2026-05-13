@@ -91,8 +91,9 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ## P3 — A11y & Mobile
 
-### 15. 🟥 Tastatur-Shortcuts in Context-Menüs · S · ★
-- **Akzeptanz:** Rename = R, Move = M, Delete = ⌘⌫. ShortcutHints im Menü.
+### 15. 🟩 Tastatur-Shortcuts in Context-Menüs · S · ★
+- **Akzeptanz:** Folder-Menü: N=New note, ⇧N=New folder, R=Rename, M=Move, ⌫=Delete. Note-Menü: ⌘C=Copy link, M=Move; im Trash R=Restore, ⌘⌫=Delete permanently. ContextMenuShortcut-Hints sichtbar.
+- **Files:** `src/components/notes/NoteTree.tsx`
 
 ### 16. 🟥 Toast-Konsolidierung · S · ★
 - **Akzeptanz:** Bei >2 Toasts gleicher Art → "3 notes moved" statt 3 Toasts.
