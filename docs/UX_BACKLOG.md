@@ -77,10 +77,10 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** `+`-Button neben "All Notes" mit Dropdown (New Note / New Folder).
 - **Files:** `NoteTree.tsx`
 
-### 13. 🟥 Duplicate-Hint Banner auf Person-Profil · S · ★★
+### 13. 🟩 Duplicate-Hint Banner auf Person-Profil · S · ★★
 - **Bereich:** People
-- **Akzeptanz:** Inline-Banner statt versteckter Tab-Anzeige. "Possible duplicate: X — Merge / Dismiss".
-- **Files:** `src/components/people/DuplicateHints.tsx`, `People.tsx`
+- **Akzeptanz:** Pro Duplikat eigener Inline-Banner mit Merge / Dismiss. Dismiss persistiert pro Paar in localStorage. Merge öffnet MergePersonDialog mit vorausgewähltem Ziel.
+- **Files:** `src/components/people/DuplicateHints.tsx`, `People.tsx`, `MergePersonDialog.tsx`
 
 ### 14. 🟥 ProfileSuggestions Re-Trigger an neue Notizen koppeln · M · ★★
 - **Bereich:** Profile

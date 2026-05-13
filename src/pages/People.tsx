@@ -68,6 +68,7 @@ export default function People() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergePrefillId, setMergePrefillId] = useState<string | null>(null);
   // Inline editing state for detail view
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
@@ -339,7 +340,10 @@ export default function People() {
           <DuplicateHints
             person={selectedPerson}
             allPeople={people}
-            onMergeSuggested={() => setMergeOpen(true)}
+            onMerge={(targetId) => {
+              setMergePrefillId(targetId);
+              setMergeOpen(true);
+            }}
           />
 
           <Card>
@@ -416,11 +420,16 @@ export default function People() {
 
       <MergePersonDialog
         open={mergeOpen}
-        onOpenChange={setMergeOpen}
+        onOpenChange={(open) => {
+          setMergeOpen(open);
+          if (!open) setMergePrefillId(null);
+        }}
         sourcePerson={selectedPerson}
         allPeople={people}
+        prefillTargetId={mergePrefillId}
         onMergeComplete={() => {
           setMergeOpen(false);
+          setMergePrefillId(null);
           setSelectedPersonId(null);
         }}
       />

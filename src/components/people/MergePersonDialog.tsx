@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -37,6 +37,7 @@ interface MergePersonDialogProps {
   sourcePerson: Person;
   allPeople: Person[];
   onMergeComplete: () => void;
+  prefillTargetId?: string | null;
 }
 
 export function MergePersonDialog({
@@ -45,6 +46,7 @@ export function MergePersonDialog({
   sourcePerson,
   allPeople,
   onMergeComplete,
+  prefillTargetId,
 }: MergePersonDialogProps) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -52,6 +54,14 @@ export function MergePersonDialog({
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [mergeIntoSelf, setMergeIntoSelf] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    if (open && prefillTargetId) {
+      setSelectedTarget(prefillTargetId);
+      setMergeIntoSelf(false);
+      setConfirmOpen(true);
+    }
+  }, [open, prefillTargetId]);
 
   const candidates = allPeople
     .filter((p) => p.id !== sourcePerson.id)
