@@ -137,6 +137,9 @@ export function NoteTree({
   sortField = "updated_at",
   sortDirection = "desc",
 }: NoteTreeProps) {
+  const isMobile = useIsMobile();
+  const depthStep = isMobile ? 8 : 14;
+  const noteBasePad = isMobile ? 8 : 14;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
