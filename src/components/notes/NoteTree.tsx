@@ -23,6 +23,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -297,12 +298,33 @@ export function NoteTree({
               <span className="text-[10px] text-muted-foreground">{count}</span>
             </button>
           </ContextMenuTrigger>
-          <ContextMenuContent className="w-52">
+          <ContextMenuContent
+            className="w-52"
+            onKeyDown={(event) => {
+              if (event.defaultPrevented) return;
+              const key = event.key.toLowerCase();
+              if (key === "n" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                event.preventDefault();
+                onCreateNoteInFolder(node.path);
+              } else if (key === "n" && event.shiftKey) {
+                event.preventDefault();
+                onCreateFolderInFolder(node.path);
+              } else if (!isRoot && key === "r" && onRenameFolder) {
+                event.preventDefault();
+                onRenameFolder(node.path);
+              } else if (!isRoot && (event.key === "Backspace" || event.key === "Delete") && onDeleteFolder) {
+                event.preventDefault();
+                onDeleteFolder(node.path);
+              }
+            }}
+          >
             <ContextMenuItem onClick={() => onCreateNoteInFolder(node.path)}>
               <FilePlus className="mr-2 h-3.5 w-3.5" /> New note here
+              <ContextMenuShortcut>N</ContextMenuShortcut>
             </ContextMenuItem>
             <ContextMenuItem onClick={() => onCreateFolderInFolder(node.path)}>
               <FolderPlus className="mr-2 h-3.5 w-3.5" /> New folder here
+              <ContextMenuShortcut>⇧N</ContextMenuShortcut>
             </ContextMenuItem>
             {!isRoot && (onRenameFolder || onMoveFolder || onDeleteFolder) && (
               <ContextMenuSeparator />
@@ -310,12 +332,14 @@ export function NoteTree({
             {!isRoot && onRenameFolder && (
               <ContextMenuItem onClick={() => onRenameFolder(node.path)}>
                 <Pencil className="mr-2 h-3.5 w-3.5" /> Rename folder…
+                <ContextMenuShortcut>R</ContextMenuShortcut>
               </ContextMenuItem>
             )}
             {!isRoot && onMoveFolder && (
               <ContextMenuSub>
                 <ContextMenuSubTrigger>
                   <Folder className="mr-2 h-3.5 w-3.5" /> Move to
+                  <ContextMenuShortcut>M</ContextMenuShortcut>
                 </ContextMenuSubTrigger>
                 <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
                   <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
@@ -336,6 +360,7 @@ export function NoteTree({
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete folder…
+                <ContextMenuShortcut>⌫</ContextMenuShortcut>
               </ContextMenuItem>
             )}
           </ContextMenuContent>
@@ -414,7 +439,30 @@ export function NoteTree({
             {note.is_trashed && <Trash2 className="h-3 w-3 shrink-0 text-destructive" />}
           </a>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-56">
+        <ContextMenuContent
+          className="w-56"
+          onKeyDown={(event) => {
+            if (event.defaultPrevented) return;
+            const key = event.key.toLowerCase();
+            const isMod = event.metaKey || event.ctrlKey;
+            if (key === "c" && isMod) {
+              event.preventDefault();
+              navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`);
+              showToast.copied();
+            } else if (note.is_trashed && key === "r" && onRestoreNote) {
+              event.preventDefault();
+              onRestoreNote(note.id);
+            } else if (
+              note.is_trashed &&
+              isMod &&
+              (event.key === "Backspace" || event.key === "Delete") &&
+              onDeleteNotePermanently
+            ) {
+              event.preventDefault();
+              onDeleteNotePermanently(note.id);
+            }
+          }}
+        >
           <ContextMenuItem
             onClick={() => {
               navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`);
@@ -422,6 +470,7 @@ export function NoteTree({
             }}
           >
             <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
+            <ContextMenuShortcut>⌘C</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
           {note.is_trashed ? (
@@ -429,6 +478,7 @@ export function NoteTree({
               {onRestoreNote && (
                 <ContextMenuItem onClick={() => onRestoreNote(note.id)}>
                   <RotateCcw className="mr-2 h-3.5 w-3.5" /> Restore note
+                  <ContextMenuShortcut>R</ContextMenuShortcut>
                 </ContextMenuItem>
               )}
               {onDeleteNotePermanently && (
@@ -437,12 +487,16 @@ export function NoteTree({
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete permanently…
+                  <ContextMenuShortcut>⌘⌫</ContextMenuShortcut>
                 </ContextMenuItem>
               )}
             </>
           ) : (
             <ContextMenuSub>
-              <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
+              <ContextMenuSubTrigger>
+                Move to
+                <ContextMenuShortcut>M</ContextMenuShortcut>
+              </ContextMenuSubTrigger>
               <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
                 <ContextMenuItem onClick={() => onMoveNote(note.id, "")}>
                   <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
