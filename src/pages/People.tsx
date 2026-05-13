@@ -345,7 +345,7 @@ export default function People() {
                     </>
                   ) : (
                     <>
-                      <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); }}>
+                      <Button variant="ghost" size="sm" onClick={cancelEditing}>
                         Cancel
                       </Button>
                       <Button size="sm" onClick={saveChanges} disabled={updatePerson.isPending}>
