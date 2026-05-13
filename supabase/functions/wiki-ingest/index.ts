@@ -560,9 +560,6 @@ async function processIngest(
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
 
-    const index = (existingPages || [])
-      .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
-      .join("\n") || "No existing pages yet.";
 
     const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
     for (const page of existingPages || []) {
