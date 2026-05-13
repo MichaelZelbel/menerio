@@ -1,44 +1,22 @@
+# Person Display-Name editierbar machen
+
 ## Problem
-
-Der vorherige Fix in `RichTextEditor.tsx` prüft nur `url.origin === window.location.origin`. Lexikon-Inhalte enthalten aber häufig voll-qualifizierte URLs auf `https://menerio.com/...` oder `https://www.menerio.com/...`. Wenn die Seite aktuell auf einer anderen Origin läuft — z. B. `id-preview--…lovable.app` (Editor-Preview) oder `menerio.lovable.app` — schlägt der Vergleich fehl. Der Link wird als „extern" eingestuft, bekommt `target="_blank"` und öffnet ein neues Fenster.
-
-Das deckt sich mit der Beobachtung des Users: Im Lexicon öffnen interne Links weiterhin ein neues Fenster.
+Beim Mergen werden Namens-Suffixe wie "(Follow-up)" übernommen. Aktuell kann man im Person-Profil nur Aliases und Notes bearbeiten, **nicht den Namen selbst**.
 
 ## Lösung
+Den Namen in den bestehenden Edit-Modus auf der Person-Detailseite (`src/pages/People.tsx`, Overview-Tab) integrieren.
 
-Die Internal-Detection in `RichTextEditor.tsx` erweitern: Eine URL gilt als intern, wenn ihre Origin entweder gleich der aktuellen Origin ist **oder** einer bekannten App-Domain entspricht.
+### Änderungen in `src/pages/People.tsx`
+1. Neuen State `editingName: string | null` hinzufügen.
+2. `startEditing(person)` setzt zusätzlich `setEditingName(person.name)`.
+3. Cancel/Save resetten/speichern auch den Namen.
+4. In der `CardHeader` (Zeile 271–276): Wenn `isEditing`, statt `{selectedPerson.name}` ein `<Input>` rendern (mit Icon davor wie bisher), sonst den Text wie gehabt.
+5. `saveChanges` ruft `updatePerson.mutate({ id, name: editingName.trim(), aliases, notes })` — leerer Name wird abgelehnt (Toast).
 
-### Bekannte App-Hosts
+### Validierung
+- Name darf nicht leer sein (trim).
+- Keine Schema-Änderungen nötig — `contacts.name` ist bereits ein editierbares Feld und `updatePerson` Mutation existiert bereits.
 
-Konstante `INTERNAL_APP_HOSTS` einführen mit:
-- `menerio.com`
-- `www.menerio.com`
-- `menerio.lovable.app`
-- jeder Host, der auf `.lovable.app` endet (deckt Preview-Subdomains ab)
-
-### Geänderte Logik (in `handleContainerClick`)
-
-```ts
-const isInternalHost = (host: string) =>
-  host === window.location.host ||
-  INTERNAL_APP_HOSTS.includes(host) ||
-  host.endsWith(".lovable.app");
-
-if (isInternalHost(url.host)) {
-  // wie bisher: target entfernen, preventDefault, onInternalNavigate(path)
-} else {
-  // wie bisher: target=_blank, rel
-}
-```
-
-Damit werden alle Links auf `menerio.com`, `www.menerio.com` und alle `*.lovable.app`-Hosts unabhängig von der aktuellen Origin als intern behandelt. Pfad und Query bleiben erhalten und werden via `navigate(path)` durch React Router aufgelöst.
-
-### Datei
-
-- `src/components/RichTextEditor.tsx` — Konstante hinzufügen, `handleContainerClick` anpassen.
-
-### Out of Scope
-
-- `WikiPage.tsx` braucht keine Änderung — `onInternalNavigate` ist bereits verdrahtet.
-- `WikiLinkMark` ist nicht betroffen (Wikilinks gehen weiterhin über `onWikiLinkClick`).
-- Andere Editor-Aufrufer (`NoteEditor`) bleiben unangetastet.
+## Out of scope
+- Automatisches Bereinigen von Suffixen während des Merge (separate Diskussion wert, falls gewünscht).
+- Namens-Bearbeitung in der Listenansicht (Inline).

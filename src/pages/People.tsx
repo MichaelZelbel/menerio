@@ -73,6 +73,7 @@ export default function People() {
   const [editingAliases, setEditingAliases] = useState<string[] | null>(null);
   const [newAlias, setNewAlias] = useState("");
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
   const [activePersonTab, setActivePersonTab] = useState("overview");
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -209,6 +210,7 @@ export default function People() {
   const startEditing = (person: Person) => {
     setEditingAliases([...(person.aliases || [])]);
     setEditingNotes(person.notes || "");
+    setEditingName(person.name);
     setNewAlias("");
   };
 
@@ -224,16 +226,31 @@ export default function People() {
     setEditingAliases(editingAliases.filter((a) => a !== alias));
   };
 
+  const cancelEditing = () => {
+    setEditingAliases(null);
+    setEditingNotes(null);
+    setEditingName(null);
+  };
+
   const saveChanges = () => {
     if (!selectedPerson) return;
     const updates: any = {};
     if (editingAliases !== null) updates.aliases = editingAliases;
     if (editingNotes !== null) updates.notes = editingNotes || null;
+    if (editingName !== null) {
+      const trimmed = editingName.trim();
+      if (!trimmed) {
+        showToast.error("Name cannot be empty");
+        return;
+      }
+      updates.name = trimmed;
+    }
     updatePerson.mutate(updates, {
       onSuccess: () => {
         showToast.success("Saved");
         setEditingAliases(null);
         setEditingNotes(null);
+        setEditingName(null);
       },
     });
   };
@@ -248,7 +265,7 @@ export default function People() {
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setActivePersonTab("overview"); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); cancelEditing(); setActivePersonTab("overview"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
@@ -272,7 +289,16 @@ export default function People() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
                       <User className="h-5 w-5 text-primary" />
                     </div>
-                    {selectedPerson.name}
+                    {isEditing ? (
+                      <Input
+                        value={editingName ?? ""}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        placeholder="Name"
+                        className="h-9 text-xl font-semibold"
+                      />
+                    ) : (
+                      selectedPerson.name
+                    )}
                   </CardTitle>
 
                   {/* Aliases */}
@@ -319,7 +345,7 @@ export default function People() {
                     </>
                   ) : (
                     <>
-                      <Button variant="ghost" size="sm" onClick={() => { setEditingAliases(null); setEditingNotes(null); }}>
+                      <Button variant="ghost" size="sm" onClick={cancelEditing}>
                         Cancel
                       </Button>
                       <Button size="sm" onClick={saveChanges} disabled={updatePerson.isPending}>
