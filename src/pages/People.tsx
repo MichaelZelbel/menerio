@@ -265,7 +265,7 @@ export default function People() {
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); setEditingAliases(null); setEditingNotes(null); setActivePersonTab("overview"); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); cancelEditing(); setActivePersonTab("overview"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
