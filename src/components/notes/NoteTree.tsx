@@ -297,33 +297,12 @@ export function NoteTree({
               <span className="text-[10px] text-muted-foreground">{count}</span>
             </button>
           </ContextMenuTrigger>
-          <ContextMenuContent
-            className="w-52"
-            onKeyDown={(event) => {
-              if (event.defaultPrevented) return;
-              const key = event.key.toLowerCase();
-              if (key === "n" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
-                event.preventDefault();
-                onCreateNoteInFolder(node.path);
-              } else if (key === "n" && event.shiftKey) {
-                event.preventDefault();
-                onCreateFolderInFolder(node.path);
-              } else if (!isRoot && key === "r" && onRenameFolder) {
-                event.preventDefault();
-                onRenameFolder(node.path);
-              } else if (!isRoot && (event.key === "Backspace" || event.key === "Delete") && onDeleteFolder) {
-                event.preventDefault();
-                onDeleteFolder(node.path);
-              }
-            }}
-          >
+          <ContextMenuContent className="w-52">
             <ContextMenuItem onClick={() => onCreateNoteInFolder(node.path)}>
               <FilePlus className="mr-2 h-3.5 w-3.5" /> New note here
-              <ContextMenuShortcut>N</ContextMenuShortcut>
             </ContextMenuItem>
             <ContextMenuItem onClick={() => onCreateFolderInFolder(node.path)}>
               <FolderPlus className="mr-2 h-3.5 w-3.5" /> New folder here
-              <ContextMenuShortcut>⇧N</ContextMenuShortcut>
             </ContextMenuItem>
             {!isRoot && (onRenameFolder || onMoveFolder || onDeleteFolder) && (
               <ContextMenuSeparator />
@@ -331,14 +310,12 @@ export function NoteTree({
             {!isRoot && onRenameFolder && (
               <ContextMenuItem onClick={() => onRenameFolder(node.path)}>
                 <Pencil className="mr-2 h-3.5 w-3.5" /> Rename folder…
-                <ContextMenuShortcut>R</ContextMenuShortcut>
               </ContextMenuItem>
             )}
             {!isRoot && onMoveFolder && (
               <ContextMenuSub>
                 <ContextMenuSubTrigger>
                   <Folder className="mr-2 h-3.5 w-3.5" /> Move to
-                  <ContextMenuShortcut>M</ContextMenuShortcut>
                 </ContextMenuSubTrigger>
                 <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
                   <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
@@ -359,7 +336,6 @@ export function NoteTree({
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete folder…
-                <ContextMenuShortcut>⌫</ContextMenuShortcut>
               </ContextMenuItem>
             )}
           </ContextMenuContent>
