@@ -91,8 +91,8 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ## P3 — A11y & Mobile
 
-### 15. 🟩 Tastatur-Shortcuts in Context-Menüs · S · ★
-- **Akzeptanz:** Folder-Menü: N=New note, ⇧N=New folder, R=Rename, M=Move, ⌫=Delete. Note-Menü: ⌘C=Copy link, M=Move; im Trash R=Restore, ⌘⌫=Delete permanently. ContextMenuShortcut-Hints sichtbar.
+### 15. ↩️ Tastatur-Shortcuts in Context-Menüs · S · ★ — REVERTED
+- **Status:** Zurückgerollt. Radix-ContextMenu-Typeahead fängt einzelne Buchstaben ab (z. B. „M" highlightet nur „Move to" statt zu verschieben), eigene `onKeyDown`-Handler griffen daher inkonsistent. Hints waren irreführend → entfernt. Falls neu angegangen: globale Shortcuts auf der ausgewählten Notiz/Folder im Tree statt im offenen Menü.
 - **Files:** `src/components/notes/NoteTree.tsx`
 
 ### 16. 🟥 Toast-Konsolidierung · S · ★
