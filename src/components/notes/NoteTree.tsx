@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
 import {
@@ -136,6 +137,9 @@ export function NoteTree({
   sortField = "updated_at",
   sortDirection = "desc",
 }: NoteTreeProps) {
+  const isMobile = useIsMobile();
+  const depthStep = isMobile ? 8 : 14;
+  const noteBasePad = isMobile ? 8 : 14;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -279,7 +283,7 @@ export function NoteTree({
                 dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
                 draggingKey === `folder:${node.path}` && "opacity-40"
               )}
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
+              style={{ paddingLeft: `${8 + depth * depthStep}px` }}
             >
               <span
                 role="button"
@@ -387,7 +391,7 @@ export function NoteTree({
               isMultiSelected && "bg-primary/10 hover:bg-primary/15",
               draggingKey === `note:${note.id}` && "opacity-40"
             )}
-            style={{ paddingLeft: `${14 + depth * 14}px` }}
+            style={{ paddingLeft: `${noteBasePad + depth * depthStep}px` }}
           >
             {multiActive && (
               <span className="shrink-0" onClick={(e) => e.stopPropagation()}>

@@ -98,8 +98,9 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 ### 16. 🟩 Toast-Konsolidierung · S · ★
 - **Akzeptanz:** Bei >2 Toasts gleicher Art → "3 notes moved" statt 3 Toasts. `showToast.batched.{success,error,info,warning}(key, formatter)` aggregiert pro Key innerhalb 800ms-Fenster und aktualisiert denselben Sonner-Toast in place. Eingesetzt für Move-Note, Restore-Note, Permanent-Delete-Note.
 
-### 17. 🟥 NoteTree Mobile-Padding · S · ★★
-- **Akzeptanz:** Auf <640px depth × 8px statt 14px. Horizontal scroll vermeiden.
+### 17. 🟩 NoteTree Mobile-Padding · S · ★★
+- **Akzeptanz:** Auf <640px depth × 8px statt 14px (auch Note-Basis-Padding 8px statt 14px). `useIsMobile`-Hook gated den Step. Horizontal scroll vermieden.
+- **Files:** `src/components/notes/NoteTree.tsx`
 
 ### 18. ⬜ Low-Balance Banner persistent · S · ★
 - **Akzeptanz:** Bei <10% Credits dauerhafter Banner im Header (nicht nur Toast). Link zu Billing.
