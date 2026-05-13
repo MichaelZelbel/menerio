@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Note, SemanticSearchResult } from "@/hooks/useNotes";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
 import {
