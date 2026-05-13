@@ -564,13 +564,33 @@ async function processIngest(
       .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
       .join("\n") || "No existing pages yet.";
 
-    const existingBySlug = new Map<string, { content: string; protected_sections: string[] }>();
+    const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
     for (const page of existingPages || []) {
       existingBySlug.set(page.slug, {
+        title: page.title || page.slug,
+        page_type: page.page_type || "concept",
         content: page.content || "",
         protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
       });
     }
+
+    // Pre-filter the index: only show pages whose title or slug-words appear in the note,
+    // plus all overview/synthesis pages (which legitimately span multiple notes).
+    // This prevents the model from "shopping" topically-related pages and twisting them
+    // to fit a different subject.
+    const normalizedNoteForIndex = normalizeForMatch(`${note.title || ""} ${contentText}`);
+    const relevantPages = (existingPages || []).filter((page: any) => {
+      if (page.page_type === "overview" || page.page_type === "synthesis") return true;
+      const titleMatch = page.title ? normalizedNoteForIndex.includes(normalizeForMatch(page.title)) : false;
+      const slugMatch = normalizedNoteForIndex.includes(normalizeForMatch(slugToWords(page.slug)));
+      return titleMatch || slugMatch;
+    });
+
+    const index = relevantPages.length > 0
+      ? relevantPages
+          .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
+          .join("\n")
+      : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
     const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
     const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
