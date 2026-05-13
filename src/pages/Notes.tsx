@@ -318,7 +318,14 @@ export default function Notes() {
   const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
     updateNote.mutate(
       { id: noteId, folder_path: folderPath },
-      { onSuccess: () => showToast.success(folderPath ? `Moved to ${folderPath}` : "Moved to Vault root") }
+      {
+        onSuccess: () => {
+          const target = folderPath || "Vault root";
+          showToast.batched.success(`note:move:${target}`, (n) =>
+            n === 1 ? `Moved to ${target}` : `${n} notes moved to ${target}`,
+          );
+        },
+      },
     );
     setActiveFolderPath(folderPath);
   }, [updateNote]);
