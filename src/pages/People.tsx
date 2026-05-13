@@ -210,6 +210,7 @@ export default function People() {
   const startEditing = (person: Person) => {
     setEditingAliases([...(person.aliases || [])]);
     setEditingNotes(person.notes || "");
+    setEditingName(person.name);
     setNewAlias("");
   };
 
@@ -225,16 +226,31 @@ export default function People() {
     setEditingAliases(editingAliases.filter((a) => a !== alias));
   };
 
+  const cancelEditing = () => {
+    setEditingAliases(null);
+    setEditingNotes(null);
+    setEditingName(null);
+  };
+
   const saveChanges = () => {
     if (!selectedPerson) return;
     const updates: any = {};
     if (editingAliases !== null) updates.aliases = editingAliases;
     if (editingNotes !== null) updates.notes = editingNotes || null;
+    if (editingName !== null) {
+      const trimmed = editingName.trim();
+      if (!trimmed) {
+        showToast.error("Name cannot be empty");
+        return;
+      }
+      updates.name = trimmed;
+    }
     updatePerson.mutate(updates, {
       onSuccess: () => {
         showToast.success("Saved");
         setEditingAliases(null);
         setEditingNotes(null);
+        setEditingName(null);
       },
     });
   };
