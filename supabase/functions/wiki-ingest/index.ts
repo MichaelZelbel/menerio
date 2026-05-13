@@ -108,6 +108,10 @@ For every sentence you write and every \`[[slug]]\` you add, ask yourself:
 
 If the answer is "no" or "I'm filling in context from world knowledge" — DO NOT WRITE IT.
 
+# Never update a page about a different subject
+
+An \`update\` is only allowed if the page's exact subject (its title, or the words in its slug) is named in the note. Do not update a page just because the note's topic is in the same category. Two different AI agents, two different companies, two different products, two different people with similar roles are SEPARATE pages — even if they do similar things. If the note describes a new entity that doesn't have a page yet, prefer \`create\` (or do nothing) over twisting an existing page to fit. When in doubt, return empty actions.
+
 Concretely:
 
 - DO NOT add a wikilink to an entity, person, organization, product, place, or concept just because it is topically related. Only link to things that are explicitly named in the note (or already on the page you are updating).
