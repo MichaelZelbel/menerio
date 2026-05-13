@@ -391,7 +391,7 @@ export function NoteTree({
               isMultiSelected && "bg-primary/10 hover:bg-primary/15",
               draggingKey === `note:${note.id}` && "opacity-40"
             )}
-            style={{ paddingLeft: `${14 + depth * 14}px` }}
+            style={{ paddingLeft: `${noteBasePad + depth * depthStep}px` }}
           >
             {multiActive && (
               <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
