@@ -25,7 +25,8 @@ interface ProfileSuggestionsProps {
 
 const STORAGE_KEY = "menerio-dismissed-profile-suggestions";
 const LAST_RUN_KEY = "menerio-profile-suggestions-last-run";
-const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LAST_RUN_NOTE_COUNT_KEY = "menerio-profile-suggestions-last-run-note-count";
+const NEW_NOTES_THRESHOLD = 5;
 
 function getDismissed(): string[] {
   try {
@@ -47,6 +48,10 @@ function getLastRun(): number {
   return parseInt(localStorage.getItem(LAST_RUN_KEY) || "0", 10);
 }
 
+function getLastRunNoteCount(): number {
+  return parseInt(localStorage.getItem(LAST_RUN_NOTE_COUNT_KEY) || "0", 10);
+}
+
 const CONFIDENCE_COLORS: Record<string, string> = {
   high: "bg-green-500",
   medium: "bg-yellow-500",
@@ -58,6 +63,7 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
   const [loading, setLoading] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>(getDismissed());
   const [lastRun, setLastRun] = useState(getLastRun());
+  const [lastRunNoteCount, setLastRunNoteCount] = useState(getLastRunNoteCount());
   const [showNudge, setShowNudge] = useState(false);
 
   // Show nudge if sparse profile + many notes
@@ -69,12 +75,14 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
     }
   }, [entryCount, noteCount, suggestions.length, loading]);
 
-  const canRunAgain = Date.now() - lastRun > COOLDOWN_MS;
+  const newNotesSinceRun = Math.max(0, noteCount - lastRunNoteCount);
+  const hasEverRun = lastRun > 0;
+  const canRunAgain = !hasEverRun || newNotesSinceRun >= NEW_NOTES_THRESHOLD;
   const timeSinceRun = lastRun ? formatTimeAgo(lastRun) : null;
 
   async function runAnalysis() {
     if (!canRunAgain && suggestions.length > 0) {
-      showToast.error(`Please wait — last analyzed ${timeSinceRun}`);
+      showToast.error(`Add at least ${NEW_NOTES_THRESHOLD} new notes before re-analyzing`);
       return;
     }
     setLoading(true);
@@ -98,7 +106,9 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
       setSuggestions(filtered);
       const now = Date.now();
       localStorage.setItem(LAST_RUN_KEY, String(now));
+      localStorage.setItem(LAST_RUN_NOTE_COUNT_KEY, String(noteCount));
       setLastRun(now);
+      setLastRunNoteCount(noteCount);
 
       if (filtered.length === 0) {
         showToast.info("No new suggestions found.");
@@ -200,22 +210,26 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
           variant="outline"
           className="w-full"
           onClick={runAnalysis}
-          disabled={loading || (!canRunAgain && lastRun > 0)}
+          disabled={loading || !canRunAgain}
         >
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               Analyzing your notes for profile suggestions…
             </>
-          ) : !canRunAgain && lastRun > 0 ? (
+          ) : !canRunAgain ? (
             <>
               <Clock className="h-4 w-4 mr-2" />
-              Suggestions available again tomorrow
+              {newNotesSinceRun === 0
+                ? `Add new notes to refresh suggestions`
+                : `${NEW_NOTES_THRESHOLD - newNotesSinceRun} more note${NEW_NOTES_THRESHOLD - newNotesSinceRun === 1 ? "" : "s"} until next analysis`}
             </>
           ) : (
             <>
               <Sparkles className="h-4 w-4 mr-2" />
-              Suggest entries from my notes
+              {hasEverRun
+                ? `Re-analyze (${newNotesSinceRun} new note${newNotesSinceRun === 1 ? "" : "s"})`
+                : "Suggest entries from my notes"}
             </>
           )}
         </Button>
