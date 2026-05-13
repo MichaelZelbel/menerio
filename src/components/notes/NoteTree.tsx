@@ -283,7 +283,7 @@ export function NoteTree({
                 dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
                 draggingKey === `folder:${node.path}` && "opacity-40"
               )}
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
+              style={{ paddingLeft: `${8 + depth * depthStep}px` }}
             >
               <span
                 role="button"
