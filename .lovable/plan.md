@@ -1,22 +1,28 @@
-# Person Display-Name editierbar machen
+# Tastatur-Hints aus Notes-Tree entfernen
 
-## Problem
-Beim Mergen werden Namens-Suffixe wie "(Follow-up)" übernommen. Aktuell kann man im Person-Profil nur Aliases und Notes bearbeiten, **nicht den Namen selbst**.
+Die Shortcut-Hints im Folder- und Note-Kontextmenü entfernen, weil sie nicht zuverlässig funktionieren und mit Radix' eingebautem Typeahead kollidieren (z. B. „M" highlightet nur den „Move to"-Eintrag, statt zu verschieben).
 
-## Lösung
-Den Namen in den bestehenden Edit-Modus auf der Person-Detailseite (`src/pages/People.tsx`, Overview-Tab) integrieren.
+## Änderungen in `src/components/notes/NoteTree.tsx`
 
-### Änderungen in `src/pages/People.tsx`
-1. Neuen State `editingName: string | null` hinzufügen.
-2. `startEditing(person)` setzt zusätzlich `setEditingName(person.name)`.
-3. Cancel/Save resetten/speichern auch den Namen.
-4. In der `CardHeader` (Zeile 271–276): Wenn `isEditing`, statt `{selectedPerson.name}` ein `<Input>` rendern (mit Icon davor wie bisher), sonst den Text wie gehabt.
-5. `saveChanges` ruft `updatePerson.mutate({ id, name: editingName.trim(), aliases, notes })` — leerer Name wird abgelehnt (Toast).
+1. **Folder-Kontextmenü**
+   - `onKeyDown`-Handler am `ContextMenuContent` entfernen.
+   - Alle `<ContextMenuShortcut>`-Elemente entfernen (`N`, `⇧N`, `R`, `M`, `⌫`).
 
-### Validierung
-- Name darf nicht leer sein (trim).
-- Keine Schema-Änderungen nötig — `contacts.name` ist bereits ein editierbares Feld und `updatePerson` Mutation existiert bereits.
+2. **Note-Kontextmenü**
+   - `onKeyDown`-Handler am `ContextMenuContent` entfernen.
+   - Alle `<ContextMenuShortcut>`-Elemente entfernen (`⌘C`, `R`, `⌘⌫`, `M`).
 
-## Out of scope
-- Automatisches Bereinigen von Suffixen während des Merge (separate Diskussion wert, falls gewünscht).
-- Namens-Bearbeitung in der Listenansicht (Inline).
+3. **Imports**
+   - `ContextMenuShortcut` aus dem Import-Block entfernen, da nicht mehr verwendet.
+
+4. **Backlog**
+   - In `docs/UX_BACKLOG.md` Item 15 von „done" auf „reverted" markieren mit kurzer Notiz, warum (Typeahead-Konflikt, halb-funktionale Handler).
+
+## Was unverändert bleibt
+- Klick-Bedienung des Kontextmenüs (Rechtsklick → Eintrag wählen) bleibt voll funktional.
+- Radix-Typeahead bleibt aktiv (das ist Standard und nicht abschaltbar ohne Eingriff in die Library) — aber ohne irreführende Hints fällt es kaum noch auf.
+- Globale App-Shortcuts (z. B. `⌘⇧K` für AI-Chat) bleiben unberührt.
+
+## Verifikation
+- Build prüfen.
+- Im Preview Rechtsklick auf Notiz und Folder testen: keine Shortcut-Symbole mehr sichtbar, Klick-Aktionen funktionieren weiter.
