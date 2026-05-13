@@ -297,6 +297,7 @@ function validateAction(
   action: WikiAction,
   noteText: string,
   existingContent: string | null,
+  existingTitle: string | null,
 ): { ok: true; action: WikiAction } | { ok: false; reason: string } {
   const normalizedNote = normalizeForMatch(noteText + " " + (action.title || ""));
   const normalizedExisting = normalizeForMatch(existingContent || "");
@@ -317,6 +318,18 @@ function validateAction(
     const subject = normalizeForMatch(action.title || slugToWords(action.slug));
     if (subject && !normalizedNote.includes(subject)) {
       return { ok: false, reason: "subject_not_in_note" };
+    }
+  }
+
+  // For update: the existing page's subject (title OR slug words) must be named in the note.
+  // This blocks the model from re-using a topically-similar page for a different subject.
+  if (action.op === "update") {
+    const titleSubject = normalizeForMatch(existingTitle || "");
+    const slugSubject = normalizeForMatch(slugToWords(action.slug));
+    const titleMatches = titleSubject && normalizedNote.includes(titleSubject);
+    const slugMatches = slugSubject && normalizedNote.includes(slugSubject);
+    if (!titleMatches && !slugMatches) {
+      return { ok: false, reason: "update_subject_not_in_note" };
     }
   }
 
