@@ -9,7 +9,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_MODEL = "openai/gpt-4o-mini";
+const OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
 // Maximum % of existing content that an update may delete before we reject it as drift.
 const MAX_DELETION_RATIO = 0.4;
@@ -107,6 +107,10 @@ For every sentence you write and every \`[[slug]]\` you add, ask yourself:
 "Is this claim or this link DIRECTLY supported by the text of this note (or, for an update, by content already on the existing page)?"
 
 If the answer is "no" or "I'm filling in context from world knowledge" — DO NOT WRITE IT.
+
+# Never update a page about a different subject
+
+An \`update\` is only allowed if the page's exact subject (its title, or the words in its slug) is named in the note. Do not update a page just because the note's topic is in the same category. Two different AI agents, two different companies, two different products, two different people with similar roles are SEPARATE pages — even if they do similar things. If the note describes a new entity that doesn't have a page yet, prefer \`create\` (or do nothing) over twisting an existing page to fit. When in doubt, return empty actions.
 
 Concretely:
 
@@ -293,6 +297,7 @@ function validateAction(
   action: WikiAction,
   noteText: string,
   existingContent: string | null,
+  existingTitle: string | null,
 ): { ok: true; action: WikiAction } | { ok: false; reason: string } {
   const normalizedNote = normalizeForMatch(noteText + " " + (action.title || ""));
   const normalizedExisting = normalizeForMatch(existingContent || "");
@@ -313,6 +318,18 @@ function validateAction(
     const subject = normalizeForMatch(action.title || slugToWords(action.slug));
     if (subject && !normalizedNote.includes(subject)) {
       return { ok: false, reason: "subject_not_in_note" };
+    }
+  }
+
+  // For update: the existing page's subject (title OR slug words) must be named in the note.
+  // This blocks the model from re-using a topically-similar page for a different subject.
+  if (action.op === "update") {
+    const titleSubject = normalizeForMatch(existingTitle || "");
+    const slugSubject = normalizeForMatch(slugToWords(action.slug));
+    const titleMatches = titleSubject && normalizedNote.includes(titleSubject);
+    const slugMatches = slugSubject && normalizedNote.includes(slugSubject);
+    if (!titleMatches && !slugMatches) {
+      return { ok: false, reason: "update_subject_not_in_note" };
     }
   }
 
@@ -543,17 +560,34 @@ async function processIngest(
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
 
-    const index = (existingPages || [])
-      .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
-      .join("\n") || "No existing pages yet.";
 
-    const existingBySlug = new Map<string, { content: string; protected_sections: string[] }>();
+    const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
     for (const page of existingPages || []) {
       existingBySlug.set(page.slug, {
+        title: page.title || page.slug,
+        page_type: page.page_type || "concept",
         content: page.content || "",
         protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
       });
     }
+
+    // Pre-filter the index: only show pages whose title or slug-words appear in the note,
+    // plus all overview/synthesis pages (which legitimately span multiple notes).
+    // This prevents the model from "shopping" topically-related pages and twisting them
+    // to fit a different subject.
+    const normalizedNoteForIndex = normalizeForMatch(`${note.title || ""} ${contentText}`);
+    const relevantPages = (existingPages || []).filter((page: any) => {
+      if (page.page_type === "overview" || page.page_type === "synthesis") return true;
+      const titleMatch = page.title ? normalizedNoteForIndex.includes(normalizeForMatch(page.title)) : false;
+      const slugMatch = normalizedNoteForIndex.includes(normalizeForMatch(slugToWords(page.slug)));
+      return titleMatch || slugMatch;
+    });
+
+    const index = relevantPages.length > 0
+      ? relevantPages
+          .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
+          .join("\n")
+      : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
     const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
     const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
@@ -576,8 +610,8 @@ async function processIngest(
     const validationLog: Array<{ slug: string; outcome: string; reason?: string }> = [];
     const acceptedActions: WikiAction[] = [];
     for (const action of parsed.actions) {
-      const existing = existingBySlug.get(action.slug)?.content ?? null;
-      const result = validateAction(action, contentText, existing);
+      const existingMeta = existingBySlug.get(action.slug);
+      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null);
       if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
         continue;
