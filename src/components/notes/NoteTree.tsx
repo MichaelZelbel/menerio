@@ -233,14 +233,6 @@ export function NoteTree({
     if (noteId) onMoveNote(noteId, path);
   };
 
-  const renderMoveTargets = (nodes: FolderNode[], noteId: string) =>
-    nodes.map((node) => (
-      <ContextMenuItem key={node.path} onClick={() => onMoveNote(noteId, node.path)}>
-        <Folder className="mr-2 h-3.5 w-3.5" />
-        {node.path}
-      </ContextMenuItem>
-    ));
-
   const FolderRow = ({ node, depth }: { node: FolderNode; depth: number }) => {
     const key = node.path || "__root__";
     const isOpen = expanded.has(key);
