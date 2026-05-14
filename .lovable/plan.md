@@ -1,36 +1,66 @@
-## Goal
+## Problem
 
-Make moving notes in the Notes Tree work consistently for:
-- Querino-synced (external) notes — currently silently undraggable.
-- Multi-selected notes — currently entire tree becomes undraggable, and drop only handles a single id.
+Profile extraction is producing nonsensical, conflicting facts (e.g. four different "Job title" values for Nate Jones) from Querino-synced prompt notes where Nate appears only as the author/byline. Three concrete weaknesses cause this:
 
-## Changes — `src/components/notes/NoteTree.tsx`
+1. **Prompt is too permissive.** `PROFILE_EXTRACTION_PROMPT` does not distinguish "person *mentioned as author/source/byline* of the note" from "person *being described* by the note". On a prompt-library note, the LLM treats the prompt's stated role as Nate's job title.
+2. **Source is ignored.** External / web-clip notes (Querino, GitHub, SingleFile, etc.) are third-party content, not first-person observations — they should be excluded from biographical extraction.
+3. **No singleton-label dedupe.** A contact can accumulate many parallel Job title / Current city / Company values in the queue because dedupe keys on `(contact, label, value)` instead of `(contact, label)` for single-value labels.
 
-### 1. Allow dragging external notes
-Remove the `!note.is_external` guard on the note row.
-- `draggable={!multiActive || isMultiSelected}` instead of `draggable={!note.is_external && !multiActive}`
-- Drop the matching cursor-class condition so the grab cursor shows for synced notes too.
+## Changes — `supabase/functions/process-note/index.ts`
 
-Rationale: `receive-note` already preserves `folder_path` on UPDATE (per recent change), so a manual move on a Querino note is durable.
+### 1. Tighten the extraction prompt
 
-### 2. Support bulk drag-and-drop
-- Make a row draggable when it is part of the active selection (so the user can grab any of the selected rows to move all of them).
-- On `onDragStart` of a multi-selected row, write the full id list as a JSON payload, e.g. `event.dataTransfer.setData("application/x-note-ids", JSON.stringify(selectedIds))`, in addition to the existing single `text/plain` id (kept for backward compatibility / single-row drag).
-- Extend `handleDrop` to read `application/x-note-ids` first; if present, call `onMoveNote` for each id (the existing handler accepts `(noteId, path)` and `useUpdateNote` is mutation-safe to call in a loop). Fall back to the single-id path otherwise.
+Rewrite `PROFILE_EXTRACTION_PROMPT` to explicitly forbid extracting facts when the person appears as:
+- author / byline / source / "via X" / link metadata
+- subject of a third-party article, prompt, podcast, video, etc.
+- a generic mention without first-person attribution
 
-### 3. Multi-select context menu Move
-When the right-clicked note is part of the current selection (`bulk.isSelected(note.id)` and `bulk.size > 1`), the "Move to" submenu should move the entire selection, not just one row. Implementation: in the submenu's `onClick` handlers, if the selection contains the note, iterate over `selectedIds` calling `onMoveNote`; otherwise keep the single-id behavior.
+Add a short contrast example in the prompt:
+- ✓ "Nate works as a knowledge architect at Acme." → `{contact: Nate, label: Job title, value: knowledge architect at Acme}`
+- ✗ "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones." → no facts (Nate is the author, the role belongs to the prompt).
 
-### 4. Visual feedback for no-op moves (optional, small)
-`handleMoveNote` in `src/pages/Notes.tsx` currently always shows a "Moved to …" toast even when the source folder equals the target. Skip the mutation if `note.folder_path === folderPath` to avoid the misleading "moved" feedback that the user just experienced. (Trivial guard, no behavior change for real moves.)
+Also require: extract a `Job title`, `Company`, `Current city`, etc. only when the note text contains a clear "X is/was/works as Y" or "X's role is Y" construction. Otherwise return no fact for that label.
 
-## Out of scope
-- No DB / RLS changes — current policies already permit the update.
-- No changes to `BulkActionBar` UI — the existing folder text input continues to work and will benefit from issue #1 transparently.
-- No changes to GitHub/Querino sync logic.
+### 2. Skip profile extraction for non-personal sources
+
+Inside `runProfileExtraction` (called from `generateReviewItems`), short-circuit when the note is from a source that is structurally not first-person observation:
+- `is_external = true`
+- `source_app ∈ {querino, github, singlefile, slack-public-channel, web-clip}` (configurable allowlist)
+- metadata `type` indicates `prompt`, `template`, `article`, `documentation`
+
+Personal sources (`telegram-capture`, `discord-capture`, manual notes, voice notes, conversation chat) continue to extract.
+
+Log a single line `[profile-extract] skipping note <id>: source=<source_app> not first-person` so behaviour is observable.
+
+### 3. Singleton-label dedupe
+
+Define a small set of `SINGLETON_PROFILE_LABELS` (case-insensitive): `job title`, `current job title`, `role`, `company`, `current company`, `employer`, `current city`, `location`, `birthday`, `pronouns`, `nationality`, `partner`, `spouse`.
+
+When building suggestions:
+- Extend `entrySet` and `queueSet` to also store `contact_id|label` (no value) for these labels.
+- Skip a new fact if a pending/accepted suggestion (or existing entry) already exists for the same `(contact, label)`. The user can edit the existing suggestion or delete the entry to make room for a new one.
+
+This caps Nate's profile to a single pending Job title at any time.
+
+### 4. Soft cap on facts per (note, contact)
+
+Add a hard limit of `MAX_FACTS_PER_CONTACT_PER_NOTE = 3` to the post-parse filter, sorted by category importance (identity → professional → location → others) so a single chatty note can't flood the queue.
+
+## Cleanup of existing bad suggestions (one-off)
+
+Add a small script-style migration (or admin tool — out of this plan if user prefers) that:
+- Marks all pending `add_profile_entry` items where `payload.contact_id = Nate's id` and `payload.label` ∈ singleton labels as `dismissed` with reason `"superseded — duplicate"`, keeping only the highest-confidence one.
+
+For now we just delete them via a one-off SQL action the user can trigger after the fix lands; the new dedupe will then prevent re-creation. The user can also just hit "Never Again" / "Roll Back" in the UI on what's there.
 
 ## Verification
-- Drag a Querino prompt onto another folder → row moves, persists across reload, and the next Querino sync does not snap it back (receive-note preserves folder_path on UPDATE).
-- Cmd/Ctrl-click 3 prompts, drag one of them onto a folder → all three move.
-- Right-click within a selection → "Move to" moves all selected notes.
-- Right-click on a row in its current folder and pick the same folder → no toast, no DB write.
+
+- Re-run process-note on one of the four Querino prompts (`0d981bdd-…`) → log shows `skipping note … source=querino not first-person`, no new `add_profile_entry` rows.
+- Manually create a note "Nate Jones is a knowledge architect at Acme." → still produces one Job title suggestion.
+- Trigger the same fact twice → second insert is suppressed by `(contact, label)` dedupe.
+
+## Out of scope
+
+- Changing `metadata.people` extraction itself (that's `extract-event` / quick-capture logic — Nate legitimately appears in the text).
+- UI changes to the Review Queue.
+- Backfill / mass-clean of the existing nonsense suggestions beyond a one-off SQL purge after deploy.

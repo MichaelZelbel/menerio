@@ -580,7 +580,7 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
+const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note.
 
 Return a JSON object with two keys:
 1. "facts": an array of profile fact objects, each with:
@@ -593,15 +593,47 @@ Return a JSON object with two keys:
    - "person_a": name of the first person
    - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
    - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
-   - "label_b_to_a": what person_b is to person_a (e.g. "employer", "brother", "friend", "mentee")
+   - "label_b_to_a": what person_b is to person_a
+
+CRITICAL — DO NOT EXTRACT FACTS WHEN:
+- The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
+- The person is the subject of a third-party article, prompt template, course, product description, or job posting. The role described in the content belongs to the content, NOT to the person.
+- The note is a prompt library, template, documentation, code snippet, or generic reference rather than a first-person observation about the person.
+- A fact would be inferred only from indirect mentions, quotes, or generic context.
+
+Only extract a Job title / Company / Current city / etc. when the note text contains an EXPLICIT first-person-style statement: "X is a Y", "X works as Y at Z", "X lives in Y", "X's role is Y", "I met X who is a Y". Vague mentions, authorship, and topic descriptions do NOT qualify.
+
+Examples:
+- ✓ "Nate works as a knowledge architect at Acme." → {contact_name: "Nate", category_slug: "professional", label: "Job title", value: "knowledge architect at Acme"}
+- ✗ "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
+- ✗ "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
-- Only extract facts/relationships clearly stated or strongly implied in the note
+- Only extract facts/relationships clearly stated about the person themselves
 - Do NOT invent or assume
-- Skip vague or uncertain information
-- Return empty arrays if nothing found
-- Keep labels concise
-- For relationships, use standard labels when possible: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
+- Skip vague, third-party, or authorship-only mentions
+- Return empty arrays if nothing qualifies
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
+
+// Labels that should only ever have ONE pending suggestion / entry per contact at a time.
+const SINGLETON_PROFILE_LABELS = new Set([
+  "job title", "current job title", "role", "title",
+  "company", "current company", "employer",
+  "current city", "city", "location",
+  "birthday", "date of birth", "dob",
+  "pronouns", "nationality",
+  "partner", "spouse",
+]);
+
+// Sources that are structurally NOT first-person observation. Profile extraction
+// should be skipped for these to avoid mining biographical "facts" out of
+// third-party content (prompt libraries, web clips, public repos, etc.).
+const NON_BIOGRAPHICAL_SOURCES = new Set([
+  "querino", "github", "singlefile", "web-clip", "webclip",
+  "slack-public-channel",
+]);
+
+const MAX_FACTS_PER_CONTACT_PER_NOTE = 3;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
@@ -789,9 +821,19 @@ async function generateProfileSuggestions(
   noteTitle: string,
   noteContent: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
+  context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown> },
 ) {
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
+
+  // Skip extraction for non-biographical sources (prompt libraries, web clips, etc.)
+  const sourceApp = (context?.source_app || "").toLowerCase();
+  const metaType = String((context?.metadata as any)?.type || "").toLowerCase();
+  const nonBiographicalType = ["prompt", "template", "article", "documentation", "doc", "code", "snippet"].includes(metaType);
+  if (NON_BIOGRAPHICAL_SOURCES.has(sourceApp) || nonBiographicalType) {
+    console.log(`[profile-extract] skipping note ${noteId}: source=${sourceApp || "none"} type=${metaType || "none"} not first-person`);
+    return;
+  }
 
   try {
       const preferences = await getSuggestionPreferences(userId);
@@ -953,6 +995,12 @@ async function generateProfileSuggestions(
     const entrySet = new Set(
       (existingEntries || []).map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}|${e.value.toLowerCase()}`),
     );
+    // Singleton-label set: (contact_id, label) — used to enforce one-value-per-label.
+    const singletonEntrySet = new Set(
+      (existingEntries || [])
+        .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
+        .map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}`),
+    );
 
     // Check existing review_queue for duplicate profile suggestions
     const { data: existingQueueItems } = await supabase
@@ -967,15 +1015,43 @@ async function generateProfileSuggestions(
         `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}|${(q.payload.value || "").toLowerCase()}`
       ),
     );
+    // Singleton-label set for pending queue items.
+    const singletonQueueSet = new Set(
+      (existingQueueItems || [])
+        .filter((q: any) =>
+          SINGLETON_PROFILE_LABELS.has((q.payload.label || "").toLowerCase()) &&
+          ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
+        )
+        .map((q: any) => `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}`),
+    );
 
     const suggestions: ReviewSuggestion[] = [];
+    const perContactCount = new Map<string, number>();
 
     for (const fact of validFacts) {
       const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
-      const dedupKey = `${contact.contact_id}|${fact.label.toLowerCase()}|${fact.value.toLowerCase()}`;
+      const labelLower = fact.label.toLowerCase();
+      const dedupKey = `${contact.contact_id}|${labelLower}|${fact.value.toLowerCase()}`;
+      const singletonKey = `${contact.contact_id}|${labelLower}`;
 
       // Skip if entry already exists or already in queue
       if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
+
+      // Singleton-label dedupe: only one Job title / Current city / etc. at a time.
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) {
+        if (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey)) {
+          console.log(`[profile-extract] skipping fact: singleton label "${fact.label}" already pending/known for ${contact.canonical_name}`);
+          continue;
+        }
+      }
+
+      // Per-(contact, note) cap to prevent flooding.
+      const count = perContactCount.get(contact.contact_id) || 0;
+      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) {
+        console.log(`[profile-extract] cap reached for ${contact.canonical_name} on note ${noteId}, dropping further facts`);
+        continue;
+      }
+      perContactCount.set(contact.contact_id, count + 1);
 
       // Find category ID if categories are seeded
       const catRow = (existingCategories || []).find(
@@ -1007,6 +1083,7 @@ async function generateProfileSuggestions(
 
       // Track to avoid duplicates within same batch
       queueSet.add(dedupKey);
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
     }
 
     if (suggestions.length > 0) {
@@ -1135,7 +1212,7 @@ async function processInBackground(noteId: string, authHeader: string) {
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata")
+      .select("id, title, content, user_id, metadata, source_app, is_external")
       .eq("id", noteId)
       .single();
 
@@ -1356,7 +1433,11 @@ async function processInBackground(noteId: string, authHeader: string) {
     await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
     // Generate profile suggestions for matched people (one extra LLM call)
-    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);
+    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople, {
+      source_app: (note as any).source_app,
+      is_external: (note as any).is_external,
+      metadata: mergedMetadata,
+    });
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
