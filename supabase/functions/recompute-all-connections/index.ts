@@ -38,6 +38,12 @@ async function getEmbedding(text: string): Promise<number[]> {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // Restricted to cron / admin tooling that supplies the service role key.
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!SUPABASE_SERVICE_ROLE_KEY || authHeader !== `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
   try {
     // This runs as a scheduled job, no auth needed — but only callable by cron
     const body = await req.json().catch(() => ({}));
