@@ -205,7 +205,7 @@ export function TelegramIntegration() {
     );
   }
 
-  const isConnected = connection?.is_active && connection?.bot_token;
+  const isConnected = !!connection?.is_active;
   const isPaired = connection?.is_paired;
 
   return (
