@@ -995,6 +995,12 @@ async function generateProfileSuggestions(
     const entrySet = new Set(
       (existingEntries || []).map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}|${e.value.toLowerCase()}`),
     );
+    // Singleton-label set: (contact_id, label) — used to enforce one-value-per-label.
+    const singletonEntrySet = new Set(
+      (existingEntries || [])
+        .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
+        .map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}`),
+    );
 
     // Check existing review_queue for duplicate profile suggestions
     const { data: existingQueueItems } = await supabase
@@ -1009,15 +1015,43 @@ async function generateProfileSuggestions(
         `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}|${(q.payload.value || "").toLowerCase()}`
       ),
     );
+    // Singleton-label set for pending queue items.
+    const singletonQueueSet = new Set(
+      (existingQueueItems || [])
+        .filter((q: any) =>
+          SINGLETON_PROFILE_LABELS.has((q.payload.label || "").toLowerCase()) &&
+          ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
+        )
+        .map((q: any) => `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}`),
+    );
 
     const suggestions: ReviewSuggestion[] = [];
+    const perContactCount = new Map<string, number>();
 
     for (const fact of validFacts) {
       const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
-      const dedupKey = `${contact.contact_id}|${fact.label.toLowerCase()}|${fact.value.toLowerCase()}`;
+      const labelLower = fact.label.toLowerCase();
+      const dedupKey = `${contact.contact_id}|${labelLower}|${fact.value.toLowerCase()}`;
+      const singletonKey = `${contact.contact_id}|${labelLower}`;
 
       // Skip if entry already exists or already in queue
       if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
+
+      // Singleton-label dedupe: only one Job title / Current city / etc. at a time.
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) {
+        if (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey)) {
+          console.log(`[profile-extract] skipping fact: singleton label "${fact.label}" already pending/known for ${contact.canonical_name}`);
+          continue;
+        }
+      }
+
+      // Per-(contact, note) cap to prevent flooding.
+      const count = perContactCount.get(contact.contact_id) || 0;
+      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) {
+        console.log(`[profile-extract] cap reached for ${contact.canonical_name} on note ${noteId}, dropping further facts`);
+        continue;
+      }
+      perContactCount.set(contact.contact_id, count + 1);
 
       // Find category ID if categories are seeded
       const catRow = (existingCategories || []).find(
@@ -1049,6 +1083,7 @@ async function generateProfileSuggestions(
 
       // Track to avoid duplicates within same batch
       queueSet.add(dedupKey);
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
     }
 
     if (suggestions.length > 0) {
