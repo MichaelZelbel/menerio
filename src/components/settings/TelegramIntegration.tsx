@@ -283,7 +283,7 @@ export function TelegramIntegration() {
             type="password"
             value={botToken}
             onChange={(e) => setBotToken(e.target.value)}
-            placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+            placeholder={connection ? "•••••••• (leave blank to keep saved token)" : "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"}
             className="font-mono text-sm"
           />
         </div>
