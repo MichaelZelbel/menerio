@@ -316,19 +316,26 @@ export default function Notes() {
   }, [createFolderAtPath]);
 
   const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
+    const normalizedTarget = (folderPath || "").replace(/^\/+|\/+$/g, "");
+    const current = allNotes.find((n) => n.id === noteId);
+    const currentFolder = (current?.folder_path || "").replace(/^\/+|\/+$/g, "");
+    if (current && currentFolder === normalizedTarget) {
+      setActiveFolderPath(normalizedTarget);
+      return;
+    }
     updateNote.mutate(
-      { id: noteId, folder_path: folderPath },
+      { id: noteId, folder_path: normalizedTarget },
       {
         onSuccess: () => {
-          const target = folderPath || "Vault root";
+          const target = normalizedTarget || "Vault root";
           showToast.batched.success(`note:move:${target}`, (n) =>
             n === 1 ? `Moved to ${target}` : `${n} notes moved to ${target}`,
           );
         },
       },
     );
-    setActiveFolderPath(folderPath);
-  }, [updateNote]);
+    setActiveFolderPath(normalizedTarget);
+  }, [allNotes, updateNote]);
 
   // Rewrite folder path prefix for note_folders + notes (recursive).
   const rewriteFolderPrefix = useCallback(async (oldPath: string, newPath: string) => {

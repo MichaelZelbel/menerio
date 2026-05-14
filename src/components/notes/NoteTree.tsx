@@ -216,17 +216,22 @@ export function NoteTree({
       if (onMoveFolder) onMoveFolder(folderPath, path);
       return;
     }
+    const idsPayload = event.dataTransfer.getData("application/x-note-ids");
+    if (idsPayload) {
+      try {
+        const ids = JSON.parse(idsPayload) as string[];
+        if (Array.isArray(ids) && ids.length > 0) {
+          ids.forEach((id) => onMoveNote(id, path));
+          bulk.clear();
+          return;
+        }
+      } catch {
+        // fall through to single id
+      }
+    }
     const noteId = event.dataTransfer.getData("text/plain");
     if (noteId) onMoveNote(noteId, path);
   };
-
-  const renderMoveTargets = (nodes: FolderNode[], noteId: string) =>
-    nodes.map((node) => (
-      <ContextMenuItem key={node.path} onClick={() => onMoveNote(noteId, node.path)}>
-        <Folder className="mr-2 h-3.5 w-3.5" />
-        {node.path}
-      </ContextMenuItem>
-    ));
 
   const FolderRow = ({ node, depth }: { node: FolderNode; depth: number }) => {
     const key = node.path || "__root__";
@@ -357,13 +362,28 @@ export function NoteTree({
   const NoteRow = ({ note, depth }: { note: Note | SemanticSearchResult; depth: number }) => {
     const folderOptions = tree.children.flatMap((node) => flattenFolders(node));
     const isMultiSelected = bulk.isSelected(note.id);
+    const canDrag = !multiActive || isMultiSelected;
+    const applyMove = (path: string) => {
+      if (multiActive && isMultiSelected && selectedIds.length > 1) {
+        selectedIds.forEach((id) => onMoveNote(id, path));
+        bulk.clear();
+      } else {
+        onMoveNote(note.id, path);
+      }
+    };
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <a
             href={`/dashboard/notes/${note.id}`}
-            draggable={!note.is_external && !multiActive}
+            draggable={canDrag}
             onDragStart={(event) => {
+              if (multiActive && isMultiSelected && selectedIds.length > 1) {
+                event.dataTransfer.setData(
+                  "application/x-note-ids",
+                  JSON.stringify(selectedIds),
+                );
+              }
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
               const el = event.currentTarget;
@@ -386,7 +406,7 @@ export function NoteTree({
             }}
             className={cn(
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
-              !note.is_external && !multiActive && "cursor-grab active:cursor-grabbing",
+              canDrag && "cursor-grab active:cursor-grabbing",
               selectedId === note.id && !multiActive && "bg-accent text-accent-foreground",
               isMultiSelected && "bg-primary/10 hover:bg-primary/15",
               draggingKey === `note:${note.id}` && "opacity-40"
@@ -447,14 +467,21 @@ export function NoteTree({
           ) : (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
-                Move to
+                {multiActive && isMultiSelected && selectedIds.length > 1
+                  ? `Move ${selectedIds.length} notes to`
+                  : "Move to"}
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-                <ContextMenuItem onClick={() => onMoveNote(note.id, "")}>
+                <ContextMenuItem onClick={() => applyMove("")}>
                   <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
                 </ContextMenuItem>
                 {folderOptions.length > 0 && <ContextMenuSeparator />}
-                {renderMoveTargets(folderOptions, note.id)}
+                {folderOptions.map((node) => (
+                  <ContextMenuItem key={node.path} onClick={() => applyMove(node.path)}>
+                    <Folder className="mr-2 h-3.5 w-3.5" />
+                    {node.path}
+                  </ContextMenuItem>
+                ))}
               </ContextMenuSubContent>
             </ContextMenuSub>
           )}
