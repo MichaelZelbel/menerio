@@ -821,9 +821,19 @@ async function generateProfileSuggestions(
   noteTitle: string,
   noteContent: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
+  context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown> },
 ) {
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
+
+  // Skip extraction for non-biographical sources (prompt libraries, web clips, etc.)
+  const sourceApp = (context?.source_app || "").toLowerCase();
+  const metaType = String((context?.metadata as any)?.type || "").toLowerCase();
+  const nonBiographicalType = ["prompt", "template", "article", "documentation", "doc", "code", "snippet"].includes(metaType);
+  if (NON_BIOGRAPHICAL_SOURCES.has(sourceApp) || nonBiographicalType) {
+    console.log(`[profile-extract] skipping note ${noteId}: source=${sourceApp || "none"} type=${metaType || "none"} not first-person`);
+    return;
+  }
 
   try {
       const preferences = await getSuggestionPreferences(userId);
