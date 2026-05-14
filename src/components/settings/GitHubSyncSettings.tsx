@@ -121,28 +121,35 @@ export function GitHubSyncSettings() {
   };
 
   const handleTest = async () => {
-    const ghToken = token || connection?.github_token;
     const owner = repoOwner || connection?.repo_owner;
     const repo = repoName || connection?.repo_name;
-    if (!ghToken || !owner || !repo) {
+    const hasStored = !!connection;
+    if ((!token && !hasStored) || !owner || !repo) {
       showToast.error("Fill in token and repository first");
       return;
     }
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-        headers: { Authorization: `token ${ghToken}` },
+      const { data, error } = await supabase.functions.invoke("github-proxy", {
+        body: {
+          action: "test_connection",
+          ...(token ? { token } : {}),
+          repo_owner: owner,
+          repo_name: repo,
+        },
       });
-      if (res.ok) {
+      if (error) throw error;
+      const status = (data as any)?.status;
+      if (status === "success") {
         setTestResult("success");
         showToast.success("Connection successful!");
-      } else if (res.status === 404) {
+      } else if (status === "missing") {
         setTestResult("missing");
         showToast.success("Repository does not exist yet. Menerio will create it on first export or sync.");
       } else {
         setTestResult("error");
-        showToast.error(`Failed: ${res.status} ${res.statusText}`);
+        showToast.error(`Failed: ${(data as any)?.code ?? ""} ${(data as any)?.message ?? ""}`.trim());
       }
     } catch {
       setTestResult("error");
