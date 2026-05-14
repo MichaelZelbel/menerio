@@ -475,14 +475,21 @@ export function NoteTree({
           ) : (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
-                Move to
+                {multiActive && isMultiSelected && selectedIds.length > 1
+                  ? `Move ${selectedIds.length} notes to`
+                  : "Move to"}
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-                <ContextMenuItem onClick={() => onMoveNote(note.id, "")}>
+                <ContextMenuItem onClick={() => applyMove("")}>
                   <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
                 </ContextMenuItem>
                 {folderOptions.length > 0 && <ContextMenuSeparator />}
-                {renderMoveTargets(folderOptions, note.id)}
+                {folderOptions.map((node) => (
+                  <ContextMenuItem key={node.path} onClick={() => applyMove(node.path)}>
+                    <Folder className="mr-2 h-3.5 w-3.5" />
+                    {node.path}
+                  </ContextMenuItem>
+                ))}
               </ContextMenuSubContent>
             </ContextMenuSub>
           )}
