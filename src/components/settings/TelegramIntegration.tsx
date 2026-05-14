@@ -113,13 +113,14 @@ export function TelegramIntegration() {
       // Reload connection
       const { data: updated } = await supabase
         .from("telegram_connections" as any)
-        .select("*")
+        .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
         .eq("user_id", user.id)
         .single();
 
       if (updated) {
         setConnection(updated as unknown as TelegramConnection);
       }
+      setBotToken("");
 
       if (webhookResult?.ok) {
         showToast.success("Telegram bot connected! Webhook registered.");
