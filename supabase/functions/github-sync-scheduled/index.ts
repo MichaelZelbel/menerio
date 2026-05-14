@@ -25,19 +25,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    // This can be called by cron (no auth) or by a user
+    // Identify the user when called with a user JWT; service-role calls process all connections.
     let userId: string | null = null;
-    const authHeader = req.headers.get("Authorization");
-
-    if (authHeader?.startsWith("Bearer ")) {
+    if (!isServiceRole && authHeader.startsWith("Bearer ")) {
       const userClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } },
       });
       const token = authHeader.replace("Bearer ", "");
       const { data: claimsData } = await userClient.auth.getClaims(token);
-      if (claimsData?.claims) {
-        userId = claimsData.claims.sub as string;
+      if (!claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      userId = claimsData.claims.sub as string;
     }
 
     // Get connections to sync
