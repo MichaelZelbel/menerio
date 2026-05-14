@@ -133,6 +133,21 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
     setSuggestionApplied(true);
   };
 
+  const friendlyAiError = (code?: string, message?: string): { title: string; description?: string } => {
+    switch (code) {
+      case "AI_NO_DRAFT":
+        return { title: "Kein Vorschlag möglich", description: "Die AI konnte aus dieser Beschreibung keinen Vorschlag bilden. Bitte etwas konkreter formulieren oder kürzen." };
+      case "AI_REFUSED":
+        return { title: "Text abgelehnt", description: "Die AI hat den Text abgelehnt (vermutlich Safety-Filter). Bitte umformulieren." };
+      case "AI_TRUNCATED":
+        return { title: "Beschreibung zu lang", description: "Die Beschreibung ist zu lang für einen Vorschlag. Bitte kürzen." };
+      case "PROVIDER_ERROR":
+        return { title: "AI-Provider-Fehler", description: message || "Der AI-Provider hat einen Fehler zurückgegeben." };
+      default:
+        return { title: "AI error", description: message || "AI request failed" };
+    }
+  };
+
   const handleAiSuggest = async () => {
     if (!description.trim() || !session) return;
     if (!checkCredits()) return;
@@ -144,21 +159,39 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         body: { messages: [{ role: "user", content: description.trim() }], today, people: people.map((p) => ({ name: p.name })) },
       });
       if (error) {
-        if (error.message?.includes("402")) {
+        // Try to read structured error body from FunctionsHttpError
+        let body: any = null;
+        try {
+          const ctx: any = (error as any).context;
+          if (ctx && typeof ctx.json === "function") body = await ctx.json();
+          else if (ctx && typeof ctx.text === "function") {
+            const t = await ctx.text();
+            try { body = JSON.parse(t); } catch { body = { error: t }; }
+          }
+        } catch { /* ignore */ }
+        if (body?.code === "INSUFFICIENT_CREDITS" || error.message?.includes("402")) {
           toast({ title: "Out of AI credits", variant: "destructive" });
           return;
         }
-        throw error;
+        const f = friendlyAiError(body?.code, body?.error || error.message);
+        toast({ title: f.title, description: f.description, variant: "destructive" });
+        return;
       }
       if ((data as any)?.code === "INSUFFICIENT_CREDITS") {
         toast({ title: "Out of AI credits", variant: "destructive" });
+        return;
+      }
+      if ((data as any)?.code) {
+        const f = friendlyAiError((data as any).code, (data as any).error);
+        toast({ title: f.title, description: f.description, variant: "destructive" });
         return;
       }
       if ((data as any)?.error) throw new Error((data as any).error);
       applyDraft((data as any).draft as MomentDraft);
       triggerCreditsRefresh();
     } catch (err: any) {
-      toast({ title: "AI error", description: err?.message || "AI request failed", variant: "destructive" });
+      const f = friendlyAiError(undefined, err?.message);
+      toast({ title: f.title, description: f.description, variant: "destructive" });
     } finally {
       setAiLoading(false);
     }
