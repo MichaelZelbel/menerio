@@ -370,13 +370,28 @@ export function NoteTree({
   const NoteRow = ({ note, depth }: { note: Note | SemanticSearchResult; depth: number }) => {
     const folderOptions = tree.children.flatMap((node) => flattenFolders(node));
     const isMultiSelected = bulk.isSelected(note.id);
+    const canDrag = !multiActive || isMultiSelected;
+    const applyMove = (path: string) => {
+      if (multiActive && isMultiSelected && selectedIds.length > 1) {
+        selectedIds.forEach((id) => onMoveNote(id, path));
+        bulk.clear();
+      } else {
+        onMoveNote(note.id, path);
+      }
+    };
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <a
             href={`/dashboard/notes/${note.id}`}
-            draggable={!note.is_external && !multiActive}
+            draggable={canDrag}
             onDragStart={(event) => {
+              if (multiActive && isMultiSelected && selectedIds.length > 1) {
+                event.dataTransfer.setData(
+                  "application/x-note-ids",
+                  JSON.stringify(selectedIds),
+                );
+              }
               event.dataTransfer.setData("text/plain", note.id);
               event.dataTransfer.effectAllowed = "move";
               const el = event.currentTarget;
@@ -399,7 +414,7 @@ export function NoteTree({
             }}
             className={cn(
               "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
-              !note.is_external && !multiActive && "cursor-grab active:cursor-grabbing",
+              canDrag && "cursor-grab active:cursor-grabbing",
               selectedId === note.id && !multiActive && "bg-accent text-accent-foreground",
               isMultiSelected && "bg-primary/10 hover:bg-primary/15",
               draggingKey === `note:${note.id}` && "opacity-40"
