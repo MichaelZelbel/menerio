@@ -93,13 +93,10 @@ export function GitHubSyncSettings() {
         if (!token) { showToast.error("Token is required"); setSaving(false); return; }
         let username = "";
         try {
-          const res = await fetch("https://api.github.com/user", {
-            headers: { Authorization: `token ${token}` },
+          const { data: vd } = await supabase.functions.invoke("github-proxy", {
+            body: { action: "validate_token", token },
           });
-          if (res.ok) {
-            const data = await res.json();
-            username = data.login;
-          }
+          username = (vd as any)?.login || "";
         } catch { /* ignore */ }
 
         await supabase.from("github_connections" as any).insert({
