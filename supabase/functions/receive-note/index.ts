@@ -77,6 +77,7 @@ Deno.serve(async (req: Request) => {
       content,
     } = body;
     const externalBody = typeof noteBody === "string" ? noteBody : content;
+    const folderPathFromPayload = typeof body.folder_path === "string" ? body.folder_path : null;
 
     if (!source_id || typeof source_id !== "string") {
       return json({ error: "source_id is required (string)" }, 400);
@@ -113,7 +114,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (existing) {
-      // UPDATE
+      // UPDATE — never overwrite folder_path on update (user may have moved the note)
       const { error: updateErr } = await supabase
         .from("notes")
         .update(noteData)
@@ -127,10 +128,15 @@ Deno.serve(async (req: Request) => {
       triggerProcessNote(existing.id);
       return json({ action: "updated", note_id: existing.id }, 200);
     } else {
-      // INSERT
+      // INSERT — auto-place into a folder named after the source app, unless payload overrides
+      const defaultFolder = appName.charAt(0).toUpperCase() + appName.slice(1);
+      const insertData = {
+        ...noteData,
+        folder_path: folderPathFromPayload ?? defaultFolder,
+      };
       const { data: inserted, error: insertErr } = await supabase
         .from("notes")
-        .insert(noteData)
+        .insert(insertData)
         .select("id")
         .single();
 
