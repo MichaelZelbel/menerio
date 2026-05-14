@@ -37,7 +37,7 @@ export function useGitHubConnection() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("github_connections" as any)
-        .select("*")
+        .select("id, user_id, github_username, repo_owner, repo_name, branch, vault_path, sync_enabled, sync_direction, last_sync_at, created_at, updated_at")
         .eq("user_id", user!.id)
         .maybeSingle();
       if (error) throw error;
