@@ -11,8 +11,19 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceClient = createClient(supabaseUrl, SERVICE_ROLE_KEY);
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    // Auth: either a user JWT (manual sync from app) OR the service role key (cron).
+    const authHeader = req.headers.get("Authorization") || "";
+    const isServiceRole = authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+    if (!isServiceRole && !authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // This can be called by cron (no auth) or by a user
     let userId: string | null = null;
