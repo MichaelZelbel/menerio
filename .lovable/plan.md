@@ -1,70 +1,50 @@
-# Lexicon-Synthese: Verwechslung gleicher Kategorien verhindern
+# Fix: Moments → "Suggest with AI" returns non-200
 
-## Was passiert ist
+## What's actually happening
 
-Du hast eine Notiz zu einem **OpenClaw**-Agenten erfasst. Die Synthese hat daraufhin den **Hermes**-Eintrag aktualisiert und dort „Craig ist der OpenClaw-Agent des Users" hinzugefügt.
+The "Suggest" button in the Add Moment dialog calls the `draft-event` Edge Function. The user's "non-200" toast comes from this branch in `supabase/functions/draft-event/index.ts`:
 
-Das ist kein Zufallsfehler, sondern eine systematische Lücke in `supabase/functions/wiki-ingest/index.ts`:
+```ts
+const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+if (!toolCall || toolCall.function.name !== "draft_moment")
+  return json({ error: "AI did not return a valid moment draft" }, 500);
+```
 
-1. **Subject-Grounding nur bei `create`, nicht bei `update`.** Beim Erstellen einer Seite prüfen wir, ob der Titel/Slug der Seite tatsächlich in der Notiz vorkommt (`subject_not_in_note`). Bei Updates fehlt diese Prüfung komplett — das Modell darf jede beliebige existierende Seite umschreiben, auch wenn deren Subject in der Notiz nie genannt wird.
-2. **Der komplette Page-Index wird dem Modell als „Menü" präsentiert.** Alle Lexikon-Seiten (Slug, Titel, Typ, Summary) gehen ungefiltert in den System-Prompt. Sieht das Modell „hermes (entity) — AI agent" und liest dann eine Notiz über einen anderen AI-Agent, ist die Versuchung groß, dort „update" zu machen statt nichts.
-3. **Schwaches Modell (gpt-4o-mini) bei einer Aufgabe, die Disambiguierung verlangt.** Bei zwei verschiedenen Systemen derselben Kategorie (beide „AI agents") fehlt dem Modell der Reasoning-Headroom.
-4. **Prompt warnt vor erfundenen Fakten, aber nicht explizit vor Themenverwechslung.** „Don't add background context" ist da, aber keine Regel à la „update only pages whose subject is named in the note".
+i.e. OpenRouter returned 200 but the model returned plain text instead of the forced `draft_moment` tool call, so we manufacture a 500. Two contributing factors:
 
-## Änderungen
+1. **Model**: `google/gemini-3-flash-preview` is used. Gemini preview models on OpenRouter handle `tool_choice: { type: "function", ... }` inconsistently — for longer / "sensitive-feeling" descriptions they often respond with content text or trigger safety filters and skip tool calls. Recent successful invocations also log `[llm-credits] No usage data from provider` — confirms the provider response is unstable.
+2. **Error surface**: the frontend (`AddEventDialog.handleAiSuggest`) shows a generic `"AI request failed"` toast and never reveals the server-side `error` message. Even when the function returns a precise reason, the user sees the cryptic line.
 
-### 1. `validateAction` — Subject-Check auch für Updates
+## Fix plan (frontend + edge function only, no business-logic changes)
 
-In `supabase/functions/wiki-ingest/index.ts`:
+### 1. `supabase/functions/draft-event/index.ts`
 
-- `validateAction` zusätzlich für `op === "update"` prüfen lassen, dass das Subject der Seite (Titel der existierenden Seite **oder** Slug-Words) in der Notiz vorkommt.
-- Dazu Signatur erweitern: zweite Quelle für den Titel der existierenden Seite mitgeben (aus `existingBySlug`-Map). Heute kennen wir bei Updates nur `slug` aus der Action — wir lesen den echten Titel aus den existierenden Pages dazu.
-- Wenn weder Titel noch Slug-Words in der Notiz vorkommen → `reason: "update_subject_not_in_note"`, Action verworfen, in `validation`-Log sichtbar.
+- **Switch model** to the same one we just standardized on for wiki-ingest: `google/gemini-2.5-flash` (stable, supports tool calls, temp 0.2). Keep the `tool_choice` forcing for `draft_moment`.
+- **Robust extraction fallback**: if `tool_calls` is missing, try to parse JSON from `message.content` (strip ```json fences / find first `{...}` block) and validate it against the same schema fields. Only error out if both paths fail.
+- **Truncation / refusal detection**: if `finish_reason === "length"` or content matches refusal phrases ("I cannot", "I'm unable", "as a language model"…), return a clear 422 with `code: "AI_REFUSED"` or `code: "AI_TRUNCATED"` and an explanation pointing at the description length.
+- **Better error payloads**: when OpenRouter is non-2xx, forward `status` + first 300 chars of provider message in the JSON body (`code: "PROVIDER_ERROR"`). When the model returns nothing usable, return 422 with `code: "AI_NO_DRAFT"` and include `finish_reason` + a short snippet of what the model said, so the user knows whether to shorten / rephrase.
+- Log `description.length`, `finish_reason`, and whether the tool_call path or JSON-fallback path was used (so future debugging is one query away).
 
-Das hätte den Hermes-Vorfall direkt geblockt: „hermes" steht nicht in einer OpenClaw-Notiz.
+### 2. `src/components/timeline/AddEventDialog.tsx`
 
-### 2. Page-Index vorfiltern statt komplett dumpen
+In `handleAiSuggest`:
 
-In `processIngest`, beim Bauen von `index`:
+- Show the server-provided `error`/`code` in the toast instead of a generic message. Map known codes to friendly German strings:
+  - `AI_NO_DRAFT` → "Die AI konnte aus dieser Beschreibung keinen Vorschlag bilden. Bitte etwas konkreter formulieren oder kürzen."
+  - `AI_REFUSED` → "Die AI hat den Text abgelehnt (vermutlich Safety-Filter). Bitte umformulieren."
+  - `AI_TRUNCATED` → "Die Beschreibung ist zu lang für einen Vorschlag. Bitte kürzen."
+  - `PROVIDER_ERROR` → "AI-Provider-Fehler: <message>"
+  - default → existing fallback
+- When `supabase.functions.invoke` throws with the FunctionsHttpError-style "non-2xx", attempt to read the structured body (it is exposed via `error.context?.json()` / `error.context?.text()` on supabase-js v2) and use the `error`/`code` from that payload before falling back to `err.message`.
 
-- Statt alle Pages auflisten: nur die Pages aufnehmen, deren **Titel oder Slug-Words** als Substring in der normalisierten Notiz vorkommen (gleiches `normalizeForMatch` wie schon vorhanden).
-- Zusätzlich eine kleine, fest definierte Tail-Liste behalten: Seiten vom Typ `overview` und `synthesis` immer sichtbar, weil das die einzigen sind, die legitimerweise notiz-übergreifend wachsen.
-- Wenn nach Filterung 0 Pages übrigbleiben, schicken wir „No matching existing pages." — das Modell soll dann nur `create` oder leere `actions` produzieren.
+### 3. Verify
 
-Das nimmt dem Modell die Verwechslungs-Versuchung an der Wurzel.
+- After deploy: call `draft-event` via `supabase--curl_edge_functions` with a normal description and an artificially long / weird one, check we now get a clean 200 in normal case and a labeled 422 in the failure case instead of an opaque 500.
+- Check `supabase--edge_function_logs draft-event` to confirm the new diagnostic log lines appear.
 
-### 3. Prompt schärfen
+## Files touched
 
-`WIKI_SYNTHESIS_AGENT_PROMPT` bekommt einen neuen Block direkt nach „GROUND EVERY CLAIM AND EVERY LINK":
+- `supabase/functions/draft-event/index.ts` (model swap, JSON fallback, structured errors, logging)
+- `src/components/timeline/AddEventDialog.tsx` (decode server error, friendly toast strings)
 
-> # Never update a page about a different subject
->
-> An `update` is only allowed if the page's exact subject (its title) is named in the note. Do not update a page just because the note's topic is in the same category. Two different AI agents, two different companies, two different people with similar roles are SEPARATE pages. If the note describes a new entity that doesn't have a page yet, prefer `create` (or do nothing) over twisting an existing page to fit.
-
-Klein, aber explizit auf genau diesen Failure-Mode.
-
-### 4. Synthese-Modell hochziehen
-
-`OPENROUTER_MODEL` von `openai/gpt-4o-mini` auf `google/gemini-2.5-flash` umstellen (stärker bei Disambiguierung, ähnlicher Preis-Range). Temperatur bleibt bei 0.1.
-
-Das ist eine 1-Zeilen-Änderung und betrifft nur die Lexikon-Synthese, nicht den Rest des Systems.
-
-### 5. Logging
-
-`validationLog`-Einträge mit dem neuen `reason: "update_subject_not_in_note"` sind automatisch im `wiki_log` sichtbar — keine zusätzliche Arbeit nötig, du kannst künftig im Admin/Postgres checken, wie oft das anschlägt.
-
-## Was wir nicht ändern
-
-- Keine Änderung an `wiki_apply_ingest` (RPC), `wiki_revisions`, `wiki_pages`-Schema oder Frontend-Review-Queue. Das hier ist rein Synthese-seitig.
-- Kein Group-Insights-Pfad angefasst (`synthesizeGroupInsights`) — der hat das Problem nicht, weil dort die Page bereits an Group/Personen gebunden ist.
-- Bestehende Lexikon-Einträge werden nicht migriert; den Hermes-Eintrag musst du einmalig in der Review-Queue „Roll Back" oder manuell bereinigen.
-
-## Verifikation
-
-- Build prüfen.
-- Edge-Function Logs (`wiki-ingest`) nach Deploy: bei einer Test-Notiz zu einem komplett neuen Subject sollte `validation` keine fremden Slugs als „accepted" zeigen.
-- Eine zweite OpenClaw-Notiz erfassen → Hermes-Eintrag darf nicht mehr touched werden; stattdessen entweder Create für `openclaw` oder leere actions.
-
-## Optional, nicht in diesem Plan
-
-- Eigene Aliases-Tabelle (z. B. „Hermes ≠ OpenClaw" als hartes Disambiguation-Signal) wäre Overkill für jetzt. Erst wieder anschauen, wenn das Problem nach den 4 Fixes oben weiter auftritt.
+No DB changes. No changes to Moments storage / participants logic.
