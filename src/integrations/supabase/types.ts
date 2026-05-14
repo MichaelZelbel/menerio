@@ -416,7 +416,6 @@ export type Database = {
       }
       connected_apps: {
         Row: {
-          api_key: string
           app_name: string
           connection_status: string
           created_at: string | null
@@ -431,7 +430,6 @@ export type Database = {
           webhook_url: string | null
         }
         Insert: {
-          api_key: string
           app_name: string
           connection_status?: string
           created_at?: string | null
@@ -446,7 +444,6 @@ export type Database = {
           webhook_url?: string | null
         }
         Update: {
-          api_key?: string
           app_name?: string
           connection_status?: string
           created_at?: string | null
