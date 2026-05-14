@@ -56,7 +56,7 @@ interface ConnectedApp {
   user_id: string;
   app_name: string;
   display_name: string;
-  api_key: string;
+  key_prefix: string | null;
   webhook_url: string | null;
   is_active: boolean;
   connection_status: "pending" | "active" | "revoked";
