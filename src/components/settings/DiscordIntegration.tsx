@@ -272,9 +272,14 @@ export function DiscordIntegration() {
               type="password"
               value={botToken}
               onChange={(e) => setBotToken(e.target.value)}
-              placeholder="MTIzNDU2Nzg5..."
+              placeholder={connection ? "•••••••• (leave blank to keep saved token)" : "MTIzNDU2Nzg5..."}
               className="font-mono text-sm"
             />
+            {connection && (
+              <p className="text-[11px] text-muted-foreground">
+                The saved token is hidden for security. Paste a new token only when you want to rotate it.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
