@@ -580,7 +580,7 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-const PROFILE_EXTRACTION_PROMPT = `You are analyzing a note that mentions specific people. For each person listed, extract any profile-worthy facts from the note content.
+const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note.
 
 Return a JSON object with two keys:
 1. "facts": an array of profile fact objects, each with:
@@ -593,15 +593,47 @@ Return a JSON object with two keys:
    - "person_a": name of the first person
    - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
    - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
-   - "label_b_to_a": what person_b is to person_a (e.g. "employer", "brother", "friend", "mentee")
+   - "label_b_to_a": what person_b is to person_a
+
+CRITICAL — DO NOT EXTRACT FACTS WHEN:
+- The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
+- The person is the subject of a third-party article, prompt template, course, product description, or job posting. The role described in the content belongs to the content, NOT to the person.
+- The note is a prompt library, template, documentation, code snippet, or generic reference rather than a first-person observation about the person.
+- A fact would be inferred only from indirect mentions, quotes, or generic context.
+
+Only extract a Job title / Company / Current city / etc. when the note text contains an EXPLICIT first-person-style statement: "X is a Y", "X works as Y at Z", "X lives in Y", "X's role is Y", "I met X who is a Y". Vague mentions, authorship, and topic descriptions do NOT qualify.
+
+Examples:
+- ✓ "Nate works as a knowledge architect at Acme." → {contact_name: "Nate", category_slug: "professional", label: "Job title", value: "knowledge architect at Acme"}
+- ✗ "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
+- ✗ "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
-- Only extract facts/relationships clearly stated or strongly implied in the note
+- Only extract facts/relationships clearly stated about the person themselves
 - Do NOT invent or assume
-- Skip vague or uncertain information
-- Return empty arrays if nothing found
-- Keep labels concise
-- For relationships, use standard labels when possible: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
+- Skip vague, third-party, or authorship-only mentions
+- Return empty arrays if nothing qualifies
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
+
+// Labels that should only ever have ONE pending suggestion / entry per contact at a time.
+const SINGLETON_PROFILE_LABELS = new Set([
+  "job title", "current job title", "role", "title",
+  "company", "current company", "employer",
+  "current city", "city", "location",
+  "birthday", "date of birth", "dob",
+  "pronouns", "nationality",
+  "partner", "spouse",
+]);
+
+// Sources that are structurally NOT first-person observation. Profile extraction
+// should be skipped for these to avoid mining biographical "facts" out of
+// third-party content (prompt libraries, web clips, public repos, etc.).
+const NON_BIOGRAPHICAL_SOURCES = new Set([
+  "querino", "github", "singlefile", "web-clip", "webclip",
+  "slack-public-channel",
+]);
+
+const MAX_FACTS_PER_CONTACT_PER_NOTE = 3;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
