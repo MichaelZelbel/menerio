@@ -21,8 +21,16 @@ const HUB_KEY_USED_MESSAGE =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Per-request user ID — set before each MCP request is handled
-let currentUserId = "";
+// Per-request user ID — stored in AsyncLocalStorage so concurrent requests
+// can never observe each other's authenticated identity.
+const requestContext = new AsyncLocalStorage<{ userId: string }>();
+function getCurrentUserId(): string {
+  const store = requestContext.getStore();
+  if (!store?.userId) {
+    throw new Error("MCP request context missing — tool invoked outside an authenticated request scope");
+  }
+  return store.userId;
+}
 
 async function sha256Hex(value: string) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
