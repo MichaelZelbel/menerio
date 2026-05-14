@@ -1,46 +1,26 @@
-## Befund
+## Ziel
 
-Der verlinkte GitHub Actions Run `25865141910` schlägt nicht beim Deployment selbst fehl, sondern im CI-Workflow `CI`, Schritt `npm run lint`.
+Notizen, die von Querino (oder anderen verbundenen Apps) via `receive-note` angelegt werden, sollen automatisch in einem nach der App benannten Ordner landen — z. B. `Querino/` — statt im Root des Notizbuchs.
 
-Konkret lässt sich der Fehler lokal reproduzieren:
+## Vorgehen
 
-```text
-supabase/functions/draft-event/index.ts
-84:79  error  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
-```
+**1. `supabase/functions/receive-note/index.ts` anpassen**
 
-Ursache: Bei der letzten Reparatur der `suggest-title`/`draft-event`-Fehlerbehandlung wurde eine Regex zur Entfernung von Steuerzeichen eingefügt:
+- Beim INSERT einer neuen externen Notiz: `folder_path` automatisch auf den App-Namen mit Großbuchstaben setzen (z. B. `Querino`), falls die Push-Payload keinen `folder_path` mitgeschickt hat.
+- Hilfsfunktion: `app_name` → Title Case (`querino` → `Querino`).
+- Wenn die externe App in der Payload explizit ein `folder_path` mitschickt, dieses respektieren (Override-Möglichkeit).
+- Beim UPDATE bestehender Notizen: `folder_path` **nicht** überschreiben — der User kann die Notiz manuell verschoben haben und das soll erhalten bleiben.
 
-```ts
-.replace(/[\x00-\x1F\x7F]/g, " ")
-```
+**2. Bestehende Querino-Notizen (optional, separat)**
 
-ESLint verbietet solche Control-Character-Ranges standardmäßig (`no-control-regex`). Deshalb beendet GitHub Actions den Lauf nach `npm run lint`; `npm test` und `npm run build` werden danach übersprungen.
+- Diese Migration betrifft nur **neue** Notizen. Falls gewünscht, könnten wir in einem zweiten Schritt ein einmaliges Backfill-Script anbieten, das alle existierenden Notizen mit `source_app = 'querino'` und `folder_path = ''` (oder `/`) in den `Querino`-Ordner verschiebt. Das mache ich nur, wenn du es ausdrücklich willst.
 
-Warum es „andauernd“ wiederkommt:
+**3. GitHub-Sync-Auswirkung**
 
-- Lovable/Preview kann funktionieren, obwohl GitHub CI scheitert, weil CI zusätzlich `npm run lint` ausführt.
-- Der Workflow behandelt Warnungen toleranter, aber echte ESLint-Errors blockieren weiterhin.
-- Einige Fixes wurden funktional korrekt umgesetzt, aber nicht gegen den GitHub-CI-Lint-Schritt validiert.
-- Zusätzlich liegen aktuell noch zwei Security-Scan-Findings vor, die nicht denselben CI-Fehler verursachen, aber weitere Folgearbeiten betreffen: GitHub Token im Browser und MCP `currentUserId` Race.
+- Da `folder_path` von der GitHub-Sync-Logik genutzt wird, landen Querino-Notizen im Vault dann ebenfalls in einem `Querino/`-Unterordner. Das passt zur Obsidian-Konvention und ist konsistent.
 
-## Plan
+## Was nicht geändert wird
 
-1. **Aktuellen CI-Blocker beheben**
-   - In `supabase/functions/draft-event/index.ts` die Control-Character-Regex so umschreiben, dass ESLint `no-control-regex` nicht mehr anschlägt.
-   - Funktional bleibt das Ziel gleich: ungültige Steuerzeichen vor dem JSON-Parse-Fallback entschärfen.
-
-2. **CI-Stabilität lokal prüfen**
-   - `npm run lint -- --quiet` ausführen, um echte Errors zu prüfen.
-   - Bei Bedarf die direkt dadurch sichtbaren Folgefehler beheben.
-   - Keine breiten Refactors, nur CI-blockierende Fehler.
-
-3. **GitHub-spezifische Sicherheitsfindings separat einplanen**
-   - Danach die zwei Security-Findings angehen:
-     - GitHub PAT nicht mehr im Browser auslesen/verwenden; Version-History und File-at-Commit über Edge Function proxyen.
-     - MCP `currentUserId` aus dem Modulzustand entfernen und request-scoped durchreichen.
-   - Diese beiden Punkte sind echte Sicherheits-/Architekturthemen und sollten nicht mit dem kleinen Lint-Fix vermischt werden.
-
-## Erwartetes Ergebnis
-
-Der nächste GitHub Actions Lauf sollte mindestens über `npm run lint` hinauskommen. Falls danach Tests oder Build scheitern, sind das separate CI-Stufen, die dann anhand ihrer konkreten Logs behoben werden.
+- Keine DB-Migration nötig (`folder_path` existiert bereits).
+- Keine Änderung an `link-note` (legt keine Notizen an).
+- Keine Änderung am Frontend.

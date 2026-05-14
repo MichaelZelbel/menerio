@@ -77,6 +77,7 @@ Deno.serve(async (req: Request) => {
       content,
     } = body;
     const externalBody = typeof noteBody === "string" ? noteBody : content;
+    const folderPathFromPayload = typeof body.folder_path === "string" ? body.folder_path : null;
 
     if (!source_id || typeof source_id !== "string") {
       return json({ error: "source_id is required (string)" }, 400);
