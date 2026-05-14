@@ -110,7 +110,6 @@ export function AppIntegrations() {
         app_name: known.id,
         display_name: known.name,
         webhook_url: webhookUrl,
-        api_key: keyPrefix,
         key_prefix: keyPrefix,
         key_hash: await sha256Hex(apiKey),
       });
