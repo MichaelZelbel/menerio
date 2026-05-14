@@ -331,7 +331,7 @@ export function DiscordIntegration() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button onClick={handleSave} disabled={saving || !botToken.trim() || !applicationId.trim() || !publicKey.trim() || !guildId.trim()} size="sm">
+          <Button onClick={handleSave} disabled={saving || (!connection && !botToken.trim()) || !applicationId.trim() || !publicKey.trim() || !guildId.trim()} size="sm">
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Save
           </Button>
