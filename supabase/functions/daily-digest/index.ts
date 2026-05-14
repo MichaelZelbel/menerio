@@ -256,6 +256,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Restricted to trusted server callers (cron / admin tooling) with the service role key.
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!SUPABASE_SERVICE_ROLE_KEY || authHeader !== `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
   try {
     // Can be triggered by cron or manually by a specific user
     let targetUserId: string | null = null;

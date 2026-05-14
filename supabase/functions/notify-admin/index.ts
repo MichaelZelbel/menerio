@@ -66,9 +66,9 @@ function buildEmailHtml(event: EventType, req: NotifyRequest): string {
           ${config.emoji} <strong>${config.description}</strong>
         </p>
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;padding:4px;">
-          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">Email</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${req.userEmail}</td></tr>
-          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">User ID</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${req.userId || "N/A"}</td></tr>
-          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">Display Name</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${req.displayName || "N/A"}</td></tr>
+          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">Email</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${escapeHtml(req.userEmail)}</td></tr>
+          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">User ID</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${escapeHtml(req.userId || "N/A")}</td></tr>
+          <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;border-bottom:1px solid #e4e4e7;">Display Name</td><td style="padding:12px 16px;color:#18181b;font-size:14px;border-bottom:1px solid #e4e4e7;">${escapeHtml(req.displayName || "N/A")}</td></tr>
           <tr><td style="padding:12px 16px;color:#71717a;font-size:13px;">Timestamp</td><td style="padding:12px 16px;color:#18181b;font-size:14px;">${timestamp}</td></tr>
         </table>
       </td>
@@ -83,9 +83,29 @@ function buildEmailHtml(event: EventType, req: NotifyRequest): string {
 </html>`;
 }
 
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Only trusted server-side callers (DB triggers, other edge functions) may invoke this.
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!SERVICE_ROLE_KEY || authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {

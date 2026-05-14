@@ -11,22 +11,35 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceClient = createClient(supabaseUrl, SERVICE_ROLE_KEY);
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // This can be called by cron (no auth) or by a user
-    let userId: string | null = null;
-    const authHeader = req.headers.get("Authorization");
+    // Auth: either a user JWT (manual sync from app) OR the service role key (cron).
+    const authHeader = req.headers.get("Authorization") || "";
+    const isServiceRole = authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+    if (!isServiceRole && !authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (authHeader?.startsWith("Bearer ")) {
+    // Identify the user when called with a user JWT; service-role calls process all connections.
+    let userId: string | null = null;
+    if (!isServiceRole && authHeader.startsWith("Bearer ")) {
       const userClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } },
       });
       const token = authHeader.replace("Bearer ", "");
       const { data: claimsData } = await userClient.auth.getClaims(token);
-      if (claimsData?.claims) {
-        userId = claimsData.claims.sub as string;
+      if (!claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      userId = claimsData.claims.sub as string;
     }
 
     // Get connections to sync
