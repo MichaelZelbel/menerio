@@ -5,7 +5,6 @@ import { useAuth } from "@/contexts/AuthContext";
 export interface GitHubConnection {
   id: string;
   user_id: string;
-  github_token: string;
   github_username: string | null;
   repo_owner: string | null;
   repo_name: string | null;
