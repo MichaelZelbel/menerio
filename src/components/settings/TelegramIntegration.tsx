@@ -50,13 +50,12 @@ export function TelegramIntegration() {
     (async () => {
       const { data } = await supabase
         .from("telegram_connections" as any)
-        .select("*")
+        .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
         .eq("user_id", user.id)
         .single();
       if (data) {
         const conn = data as unknown as TelegramConnection;
         setConnection(conn);
-        setBotToken(conn.bot_token);
       }
       setLoading(false);
     })();
