@@ -56,7 +56,7 @@ interface ConnectedApp {
   user_id: string;
   app_name: string;
   display_name: string;
-  api_key: string;
+  key_prefix: string | null;
   webhook_url: string | null;
   is_active: boolean;
   connection_status: "pending" | "active" | "revoked";
@@ -110,7 +110,6 @@ export function AppIntegrations() {
         app_name: known.id,
         display_name: known.name,
         webhook_url: webhookUrl,
-        api_key: keyPrefix,
         key_prefix: keyPrefix,
         key_hash: await sha256Hex(apiKey),
       });

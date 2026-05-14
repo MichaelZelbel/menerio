@@ -81,7 +81,6 @@ export function SlackIntegration() {
             user_id: user.id,
             app_name: "slack",
             display_name: "Slack",
-            api_key: keyPrefix,
             key_prefix: keyPrefix,
             key_hash: await sha256Hex(apiKey),
             permissions,

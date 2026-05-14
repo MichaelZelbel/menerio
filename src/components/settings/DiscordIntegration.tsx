@@ -21,7 +21,6 @@ interface DiscordConnection {
   user_id: string;
   discord_guild_id: string;
   discord_channel_id: string | null;
-  bot_token: string;
   application_id: string;
   public_key: string;
   is_active: boolean;
@@ -49,13 +48,12 @@ export function DiscordIntegration() {
     (async () => {
       const { data } = await supabase
         .from("discord_connections" as any)
-        .select("*")
+        .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
         .eq("user_id", user.id)
         .single();
       if (data) {
         const conn = data as unknown as DiscordConnection;
         setConnection(conn);
-        setBotToken(conn.bot_token);
         setApplicationId(conn.application_id);
         setPublicKey(conn.public_key);
         setGuildId(conn.discord_guild_id);
@@ -66,36 +64,40 @@ export function DiscordIntegration() {
   }, [user]);
 
   const handleSave = async () => {
-    if (!user || !botToken.trim() || !applicationId.trim() || !publicKey.trim() || !guildId.trim()) return;
+    // bot_token is only required on first save; on update users can leave it blank to keep the existing token.
+    const isNew = !connection;
+    if (!user || !applicationId.trim() || !publicKey.trim() || !guildId.trim()) return;
+    if (isNew && !botToken.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        bot_token: botToken.trim(),
+      const basePayload: Record<string, unknown> = {
         application_id: applicationId.trim(),
         public_key: publicKey.trim(),
         discord_guild_id: guildId.trim(),
         discord_channel_id: channelId.trim() || null,
         is_active: true,
       };
+      if (botToken.trim()) basePayload.bot_token = botToken.trim();
 
       if (connection) {
         await supabase
           .from("discord_connections" as any)
-          .update(payload)
+          .update(basePayload)
           .eq("id", connection.id);
       } else {
         await supabase
           .from("discord_connections" as any)
-          .insert({ ...payload, user_id: user.id });
+          .insert({ ...basePayload, user_id: user.id });
       }
 
-      // Reload
+      // Reload (no bot_token in select — server hides it from clients)
       const { data: updated } = await supabase
         .from("discord_connections" as any)
-        .select("*")
+        .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
         .eq("user_id", user.id)
         .single();
       if (updated) setConnection(updated as unknown as DiscordConnection);
+      setBotToken("");
 
       showToast.success("Discord connection saved");
     } catch (err: any) {
@@ -270,9 +272,14 @@ export function DiscordIntegration() {
               type="password"
               value={botToken}
               onChange={(e) => setBotToken(e.target.value)}
-              placeholder="MTIzNDU2Nzg5..."
+              placeholder={connection ? "•••••••• (leave blank to keep saved token)" : "MTIzNDU2Nzg5..."}
               className="font-mono text-sm"
             />
+            {connection && (
+              <p className="text-[11px] text-muted-foreground">
+                The saved token is hidden for security. Paste a new token only when you want to rotate it.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -324,7 +331,7 @@ export function DiscordIntegration() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button onClick={handleSave} disabled={saving || !botToken.trim() || !applicationId.trim() || !publicKey.trim() || !guildId.trim()} size="sm">
+          <Button onClick={handleSave} disabled={saving || (!connection && !botToken.trim()) || !applicationId.trim() || !publicKey.trim() || !guildId.trim()} size="sm">
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Save
           </Button>

@@ -29,8 +29,6 @@ interface TelegramConnection {
   id: string;
   user_id: string;
   telegram_chat_id: number | null;
-  bot_token: string;
-  webhook_secret: string;
   pairing_code: string | null;
   is_active: boolean;
   is_paired: boolean;
@@ -52,13 +50,12 @@ export function TelegramIntegration() {
     (async () => {
       const { data } = await supabase
         .from("telegram_connections" as any)
-        .select("*")
+        .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
         .eq("user_id", user.id)
         .single();
       if (data) {
         const conn = data as unknown as TelegramConnection;
         setConnection(conn);
-        setBotToken(conn.bot_token);
       }
       setLoading(false);
     })();
@@ -116,13 +113,14 @@ export function TelegramIntegration() {
       // Reload connection
       const { data: updated } = await supabase
         .from("telegram_connections" as any)
-        .select("*")
+        .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
         .eq("user_id", user.id)
         .single();
 
       if (updated) {
         setConnection(updated as unknown as TelegramConnection);
       }
+      setBotToken("");
 
       if (webhookResult?.ok) {
         showToast.success("Telegram bot connected! Webhook registered.");
@@ -207,7 +205,7 @@ export function TelegramIntegration() {
     );
   }
 
-  const isConnected = connection?.is_active && connection?.bot_token;
+  const isConnected = !!connection?.is_active;
   const isPaired = connection?.is_paired;
 
   return (
@@ -285,7 +283,7 @@ export function TelegramIntegration() {
             type="password"
             value={botToken}
             onChange={(e) => setBotToken(e.target.value)}
-            placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+            placeholder={connection ? "•••••••• (leave blank to keep saved token)" : "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"}
             className="font-mono text-sm"
           />
         </div>
