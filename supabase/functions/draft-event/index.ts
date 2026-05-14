@@ -81,7 +81,15 @@ function tryExtractJson(text: string): Record<string, unknown> | null {
   } catch {
     try {
       // light repair
-      cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]").replace(/[\x00-\x1F\x7F]/g, " ");
+      cleaned = cleaned
+        .replace(/,\s*}/g, "}")
+        .replace(/,\s*]/g, "]")
+        .split("")
+        .map((char) => {
+          const code = char.charCodeAt(0);
+          return code <= 31 || code === 127 ? " " : char;
+        })
+        .join("");
       return JSON.parse(cleaned);
     } catch {
       return null;

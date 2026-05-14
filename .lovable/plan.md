@@ -1,50 +1,46 @@
-# Fix: Moments → "Suggest with AI" returns non-200
+## Befund
 
-## What's actually happening
+Der verlinkte GitHub Actions Run `25865141910` schlägt nicht beim Deployment selbst fehl, sondern im CI-Workflow `CI`, Schritt `npm run lint`.
 
-The "Suggest" button in the Add Moment dialog calls the `draft-event` Edge Function. The user's "non-200" toast comes from this branch in `supabase/functions/draft-event/index.ts`:
+Konkret lässt sich der Fehler lokal reproduzieren:
 
-```ts
-const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
-if (!toolCall || toolCall.function.name !== "draft_moment")
-  return json({ error: "AI did not return a valid moment draft" }, 500);
+```text
+supabase/functions/draft-event/index.ts
+84:79  error  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
 ```
 
-i.e. OpenRouter returned 200 but the model returned plain text instead of the forced `draft_moment` tool call, so we manufacture a 500. Two contributing factors:
+Ursache: Bei der letzten Reparatur der `suggest-title`/`draft-event`-Fehlerbehandlung wurde eine Regex zur Entfernung von Steuerzeichen eingefügt:
 
-1. **Model**: `google/gemini-3-flash-preview` is used. Gemini preview models on OpenRouter handle `tool_choice: { type: "function", ... }` inconsistently — for longer / "sensitive-feeling" descriptions they often respond with content text or trigger safety filters and skip tool calls. Recent successful invocations also log `[llm-credits] No usage data from provider` — confirms the provider response is unstable.
-2. **Error surface**: the frontend (`AddEventDialog.handleAiSuggest`) shows a generic `"AI request failed"` toast and never reveals the server-side `error` message. Even when the function returns a precise reason, the user sees the cryptic line.
+```ts
+.replace(/[\x00-\x1F\x7F]/g, " ")
+```
 
-## Fix plan (frontend + edge function only, no business-logic changes)
+ESLint verbietet solche Control-Character-Ranges standardmäßig (`no-control-regex`). Deshalb beendet GitHub Actions den Lauf nach `npm run lint`; `npm test` und `npm run build` werden danach übersprungen.
 
-### 1. `supabase/functions/draft-event/index.ts`
+Warum es „andauernd“ wiederkommt:
 
-- **Switch model** to the same one we just standardized on for wiki-ingest: `google/gemini-2.5-flash` (stable, supports tool calls, temp 0.2). Keep the `tool_choice` forcing for `draft_moment`.
-- **Robust extraction fallback**: if `tool_calls` is missing, try to parse JSON from `message.content` (strip ```json fences / find first `{...}` block) and validate it against the same schema fields. Only error out if both paths fail.
-- **Truncation / refusal detection**: if `finish_reason === "length"` or content matches refusal phrases ("I cannot", "I'm unable", "as a language model"…), return a clear 422 with `code: "AI_REFUSED"` or `code: "AI_TRUNCATED"` and an explanation pointing at the description length.
-- **Better error payloads**: when OpenRouter is non-2xx, forward `status` + first 300 chars of provider message in the JSON body (`code: "PROVIDER_ERROR"`). When the model returns nothing usable, return 422 with `code: "AI_NO_DRAFT"` and include `finish_reason` + a short snippet of what the model said, so the user knows whether to shorten / rephrase.
-- Log `description.length`, `finish_reason`, and whether the tool_call path or JSON-fallback path was used (so future debugging is one query away).
+- Lovable/Preview kann funktionieren, obwohl GitHub CI scheitert, weil CI zusätzlich `npm run lint` ausführt.
+- Der Workflow behandelt Warnungen toleranter, aber echte ESLint-Errors blockieren weiterhin.
+- Einige Fixes wurden funktional korrekt umgesetzt, aber nicht gegen den GitHub-CI-Lint-Schritt validiert.
+- Zusätzlich liegen aktuell noch zwei Security-Scan-Findings vor, die nicht denselben CI-Fehler verursachen, aber weitere Folgearbeiten betreffen: GitHub Token im Browser und MCP `currentUserId` Race.
 
-### 2. `src/components/timeline/AddEventDialog.tsx`
+## Plan
 
-In `handleAiSuggest`:
+1. **Aktuellen CI-Blocker beheben**
+   - In `supabase/functions/draft-event/index.ts` die Control-Character-Regex so umschreiben, dass ESLint `no-control-regex` nicht mehr anschlägt.
+   - Funktional bleibt das Ziel gleich: ungültige Steuerzeichen vor dem JSON-Parse-Fallback entschärfen.
 
-- Show the server-provided `error`/`code` in the toast instead of a generic message. Map known codes to friendly German strings:
-  - `AI_NO_DRAFT` → "Die AI konnte aus dieser Beschreibung keinen Vorschlag bilden. Bitte etwas konkreter formulieren oder kürzen."
-  - `AI_REFUSED` → "Die AI hat den Text abgelehnt (vermutlich Safety-Filter). Bitte umformulieren."
-  - `AI_TRUNCATED` → "Die Beschreibung ist zu lang für einen Vorschlag. Bitte kürzen."
-  - `PROVIDER_ERROR` → "AI-Provider-Fehler: <message>"
-  - default → existing fallback
-- When `supabase.functions.invoke` throws with the FunctionsHttpError-style "non-2xx", attempt to read the structured body (it is exposed via `error.context?.json()` / `error.context?.text()` on supabase-js v2) and use the `error`/`code` from that payload before falling back to `err.message`.
+2. **CI-Stabilität lokal prüfen**
+   - `npm run lint -- --quiet` ausführen, um echte Errors zu prüfen.
+   - Bei Bedarf die direkt dadurch sichtbaren Folgefehler beheben.
+   - Keine breiten Refactors, nur CI-blockierende Fehler.
 
-### 3. Verify
+3. **GitHub-spezifische Sicherheitsfindings separat einplanen**
+   - Danach die zwei Security-Findings angehen:
+     - GitHub PAT nicht mehr im Browser auslesen/verwenden; Version-History und File-at-Commit über Edge Function proxyen.
+     - MCP `currentUserId` aus dem Modulzustand entfernen und request-scoped durchreichen.
+   - Diese beiden Punkte sind echte Sicherheits-/Architekturthemen und sollten nicht mit dem kleinen Lint-Fix vermischt werden.
 
-- After deploy: call `draft-event` via `supabase--curl_edge_functions` with a normal description and an artificially long / weird one, check we now get a clean 200 in normal case and a labeled 422 in the failure case instead of an opaque 500.
-- Check `supabase--edge_function_logs draft-event` to confirm the new diagnostic log lines appear.
+## Erwartetes Ergebnis
 
-## Files touched
-
-- `supabase/functions/draft-event/index.ts` (model swap, JSON fallback, structured errors, logging)
-- `src/components/timeline/AddEventDialog.tsx` (decode server error, friendly toast strings)
-
-No DB changes. No changes to Moments storage / participants logic.
+Der nächste GitHub Actions Lauf sollte mindestens über `npm run lint` hinauskommen. Falls danach Tests oder Build scheitern, sind das separate CI-Stufen, die dann anhand ihrer konkreten Logs behoben werden.
