@@ -216,6 +216,19 @@ export function NoteTree({
       if (onMoveFolder) onMoveFolder(folderPath, path);
       return;
     }
+    const idsPayload = event.dataTransfer.getData("application/x-note-ids");
+    if (idsPayload) {
+      try {
+        const ids = JSON.parse(idsPayload) as string[];
+        if (Array.isArray(ids) && ids.length > 0) {
+          ids.forEach((id) => onMoveNote(id, path));
+          bulk.clear();
+          return;
+        }
+      } catch {
+        // fall through to single id
+      }
+    }
     const noteId = event.dataTransfer.getData("text/plain");
     if (noteId) onMoveNote(noteId, path);
   };
