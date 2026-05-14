@@ -102,8 +102,9 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 - **Akzeptanz:** Auf <640px depth × 8px statt 14px (auch Note-Basis-Padding 8px statt 14px). `useIsMobile`-Hook gated den Step. Horizontal scroll vermieden.
 - **Files:** `src/components/notes/NoteTree.tsx`
 
-### 18. ⬜ Low-Balance Banner persistent · S · ★
-- **Akzeptanz:** Bei <10% Credits dauerhafter Banner im Header (nicht nur Toast). Link zu Billing.
+### 18. 🟩 Low-Balance Banner persistent · S · ★
+- **Akzeptanz:** Bei <10% Credits dauerhafter Banner im Dashboard-Header (amber, dismissbar pro Period). Bei 0 Credits roter Banner ohne Dismiss. Link zu `/dashboard/settings?tab=billing`.
+- **Files:** `src/components/layout/LowBalanceBanner.tsx`, `src/components/layout/DashboardLayout.tsx`
 
 ---
 
