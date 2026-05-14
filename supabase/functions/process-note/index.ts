@@ -1356,7 +1356,11 @@ async function processInBackground(noteId: string, authHeader: string) {
     await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
     // Generate profile suggestions for matched people (one extra LLM call)
-    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople);
+    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople, {
+      source_app: (note as any).source_app,
+      is_external: (note as any).is_external,
+      metadata: mergedMetadata,
+    });
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
