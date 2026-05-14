@@ -2560,12 +2560,12 @@ app.all("*", async (c) => {
     return c.json({ error: auth.error.message }, auth.error.status as 401);
   }
 
-  getCurrentUserId() = auth.userId!;
-  addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
-
-  const transport = new StreamableHTTPTransport();
-  await server.connect(transport);
-  return transport.handleRequest(c);
+  return await requestContext.run({ userId: auth.userId! }, async () => {
+    addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
+    const transport = new StreamableHTTPTransport();
+    await server.connect(transport);
+    return await transport.handleRequest(c);
+  });
 });
 
 Deno.serve(app.fetch);
