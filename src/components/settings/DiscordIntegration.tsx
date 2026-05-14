@@ -21,7 +21,6 @@ interface DiscordConnection {
   user_id: string;
   discord_guild_id: string;
   discord_channel_id: string | null;
-  bot_token: string;
   application_id: string;
   public_key: string;
   is_active: boolean;
