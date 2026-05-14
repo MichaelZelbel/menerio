@@ -48,13 +48,12 @@ export function DiscordIntegration() {
     (async () => {
       const { data } = await supabase
         .from("discord_connections" as any)
-        .select("*")
+        .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
         .eq("user_id", user.id)
         .single();
       if (data) {
         const conn = data as unknown as DiscordConnection;
         setConnection(conn);
-        setBotToken(conn.bot_token);
         setApplicationId(conn.application_id);
         setPublicKey(conn.public_key);
         setGuildId(conn.discord_guild_id);
@@ -65,36 +64,40 @@ export function DiscordIntegration() {
   }, [user]);
 
   const handleSave = async () => {
-    if (!user || !botToken.trim() || !applicationId.trim() || !publicKey.trim() || !guildId.trim()) return;
+    // bot_token is only required on first save; on update users can leave it blank to keep the existing token.
+    const isNew = !connection;
+    if (!user || !applicationId.trim() || !publicKey.trim() || !guildId.trim()) return;
+    if (isNew && !botToken.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        bot_token: botToken.trim(),
+      const basePayload: Record<string, unknown> = {
         application_id: applicationId.trim(),
         public_key: publicKey.trim(),
         discord_guild_id: guildId.trim(),
         discord_channel_id: channelId.trim() || null,
         is_active: true,
       };
+      if (botToken.trim()) basePayload.bot_token = botToken.trim();
 
       if (connection) {
         await supabase
           .from("discord_connections" as any)
-          .update(payload)
+          .update(basePayload)
           .eq("id", connection.id);
       } else {
         await supabase
           .from("discord_connections" as any)
-          .insert({ ...payload, user_id: user.id });
+          .insert({ ...basePayload, user_id: user.id });
       }
 
-      // Reload
+      // Reload (no bot_token in select — server hides it from clients)
       const { data: updated } = await supabase
         .from("discord_connections" as any)
-        .select("*")
+        .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
         .eq("user_id", user.id)
         .single();
       if (updated) setConnection(updated as unknown as DiscordConnection);
+      setBotToken("");
 
       showToast.success("Discord connection saved");
     } catch (err: any) {
