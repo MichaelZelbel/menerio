@@ -29,8 +29,6 @@ interface TelegramConnection {
   id: string;
   user_id: string;
   telegram_chat_id: number | null;
-  bot_token: string;
-  webhook_secret: string;
   pairing_code: string | null;
   is_active: boolean;
   is_paired: boolean;
