@@ -134,10 +134,9 @@ Deno.serve(async (req: Request) => {
         ...noteData,
         folder_path: folderPathFromPayload ?? defaultFolder,
       };
-      // INSERT
       const { data: inserted, error: insertErr } = await supabase
         .from("notes")
-        .insert(noteData)
+        .insert(insertData)
         .select("id")
         .single();
 
