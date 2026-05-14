@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
@@ -20,8 +21,16 @@ const HUB_KEY_USED_MESSAGE =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Per-request user ID — set before each MCP request is handled
-let currentUserId = "";
+// Per-request user ID — stored in AsyncLocalStorage so concurrent requests
+// can never observe each other's authenticated identity.
+const requestContext = new AsyncLocalStorage<{ userId: string }>();
+function getCurrentUserId(): string {
+  const store = requestContext.getStore();
+  if (!store?.userId) {
+    throw new Error("MCP request context missing — tool invoked outside an authenticated request scope");
+  }
+  return store.userId;
+}
 
 async function sha256Hex(value: string) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -231,7 +240,7 @@ function summarizeOutput(output: unknown) {
 
 async function logMcpToolCall(toolName: string, input: Record<string, unknown>, output: unknown, success: boolean) {
   await supabase.from("mcp_call_logs").insert({
-    user_id: currentUserId,
+    user_id: getCurrentUserId(),
     tool_name: toolName,
     input,
     output_summary: summarizeOutput(output),
@@ -244,7 +253,7 @@ async function enforceMcpToolLimit(toolName: string, input: Record<string, unkno
   const { count, error } = await supabase
     .from("mcp_call_logs")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", currentUserId)
+    .eq("user_id", getCurrentUserId())
     .eq("tool_name", toolName)
     .gte("created_at", since);
   if (error) throw new Error(`Could not check MCP usage: ${error.message}`);
@@ -270,14 +279,14 @@ async function withLoggedCollectionTool(toolName: string, input: Record<string, 
 
 async function collectionItemCounts(collectionIds: string[]) {
   const pairs = await Promise.all(collectionIds.map(async (id) => {
-    const { count } = await supabase.from("collection_items").select("id", { count: "exact", head: true }).eq("user_id", currentUserId).eq("collection_id", id);
+    const { count } = await supabase.from("collection_items").select("id", { count: "exact", head: true }).eq("user_id", getCurrentUserId()).eq("collection_id", id);
     return [id, count || 0] as const;
   }));
   return new Map(pairs);
 }
 
 async function getCollectionBySlug(slug: string) {
-  const { data, error } = await supabase.from("collections").select("*").eq("user_id", currentUserId).eq("slug", slug).maybeSingle();
+  const { data, error } = await supabase.from("collections").select("*").eq("user_id", getCurrentUserId()).eq("slug", slug).maybeSingle();
   if (error) throw new Error(`Could not load collection: ${error.message}`);
   if (!data) throw new Error(`Collection not found: ${slug}`);
   return data as any;
@@ -295,11 +304,11 @@ function validateCollectionData(collection: any, data: Record<string, unknown>) 
 }
 
 async function recentlyUsedCollectionsForDescription(limit = 8) {
-  const { data: collections, error } = await supabase.from("collections").select("id, slug, name, icon, agent_instructions, updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false });
+  const { data: collections, error } = await supabase.from("collections").select("id, slug, name, icon, agent_instructions, updated_at").eq("user_id", getCurrentUserId()).order("updated_at", { ascending: false });
   if (error || !collections?.length) return [];
   if (collections.length <= limit) return collections as any[];
 
-  const { data: items } = await supabase.from("collection_items").select("collection_id, updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false }).limit(200);
+  const { data: items } = await supabase.from("collection_items").select("collection_id, updated_at").eq("user_id", getCurrentUserId()).order("updated_at", { ascending: false }).limit(200);
   const collectionById = new Map((collections as any[]).map((collection) => [collection.id, collection]));
   const ordered: any[] = [];
   const seen = new Set<string>();
@@ -329,7 +338,7 @@ async function buildAddCollectionItemDescription() {
 }
 
 async function resolveGroup(idOrSlug: string) {
-  const query = supabase.from("contact_groups").select("*").eq("user_id", currentUserId).eq("is_trashed", false);
+  const query = supabase.from("contact_groups").select("*").eq("user_id", getCurrentUserId()).eq("is_trashed", false);
   const { data, error } = isUuid(idOrSlug) ? await query.eq("id", idOrSlug).maybeSingle() : await query.eq("slug", idOrSlug).maybeSingle();
   if (error) throw new Error(`Could not load group: ${error.message}`);
   if (!data) throw new Error("Group not found");
@@ -338,12 +347,12 @@ async function resolveGroup(idOrSlug: string) {
 
 async function resolveContact(params: { contact_id?: string; contact_name?: string }) {
   if (params.contact_id) {
-    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", currentUserId).eq("id", params.contact_id).is("merged_into", null).maybeSingle();
+    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", getCurrentUserId()).eq("id", params.contact_id).is("merged_into", null).maybeSingle();
     if (error) throw new Error(`Could not load person: ${error.message}`);
     if (data) return data as any;
   }
   if (params.contact_name) {
-    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", currentUserId).ilike("name", `%${params.contact_name}%`).is("merged_into", null).limit(1);
+    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", getCurrentUserId()).ilike("name", `%${params.contact_name}%`).is("merged_into", null).limit(1);
     if (error) throw new Error(`Could not load person: ${error.message}`);
     if (data?.[0]) return data[0] as any;
   }
@@ -355,14 +364,14 @@ function buildGroupMemberSuppressionKey(groupId: string, contactId: string) {
 }
 
 async function getSuggestionPreferences() {
-  const { data } = await supabase.from("ai_suggestion_preferences").select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive").eq("user_id", currentUserId).maybeSingle();
+  const { data } = await supabase.from("ai_suggestion_preferences").select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive").eq("user_id", getCurrentUserId()).maybeSingle();
   return { mode: data?.suggestion_mode || "auto", sensitivity: data?.suggestion_sensitivity || "balanced", autoAddSensitive: data?.auto_add_sensitive === true };
 }
 
 async function filterSuppressedGroupMemberRows(rows: any[]) {
   const keys = rows.map((row) => row.suppression_key).filter(Boolean);
   if (!keys.length) return rows;
-  const { data } = await supabase.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", currentUserId).in("suppression_key", keys);
+  const { data } = await supabase.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", getCurrentUserId()).in("suppression_key", keys);
   const blocked = new Set((data || []).map((row: any) => row.suppression_key));
   return rows.filter((row) => !blocked.has(row.suppression_key));
 }
@@ -376,9 +385,9 @@ async function prepareGroupMemberSuggestion(row: any, preferences: { mode: strin
 
   const { group_id, contact_id } = row.payload || {};
   if (!group_id || !contact_id) return { ...row, status: "pending_review" };
-  const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", group_id).eq("contact_id", contact_id).is("archived_at", null).maybeSingle();
+  const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", getCurrentUserId()).eq("group_id", group_id).eq("contact_id", contact_id).is("archived_at", null).maybeSingle();
   if (existing?.id) return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: existing.id, applied_at: new Date().toISOString() };
-  const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id, contact_id, status: row.payload?.default_status || null, reason: row.description || null }).select("id").single();
+  const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: getCurrentUserId(), group_id, contact_id, status: row.payload?.default_status || null, reason: row.description || null }).select("id").single();
   if (error || !data) return { ...row, status: "pending_review" };
   return { ...row, status: "auto_applied_unreviewed", target_entity_type: "contact_group_membership", target_entity_id: data.id, applied_at: new Date().toISOString(), is_sensitive: row.is_sensitive ?? sensitiveTerms.some((term) => String(row.description || "").toLowerCase().includes(term)) };
 }
@@ -391,20 +400,20 @@ function extractWikiSlugs(content: string) {
 
 async function resyncWikiLinksForCurrentUser(pageId: string, content: string) {
   const targetSlugs = extractWikiSlugs(content);
-  await supabase.from("wiki_links").delete().eq("user_id", currentUserId).eq("source_page_id", pageId);
+  await supabase.from("wiki_links").delete().eq("user_id", getCurrentUserId()).eq("source_page_id", pageId);
 
   if (!targetSlugs.length) return;
 
   const { data: targets, error } = await supabase
     .from("wiki_pages")
     .select("id, slug")
-    .eq("user_id", currentUserId)
+    .eq("user_id", getCurrentUserId())
     .in("slug", targetSlugs);
   if (error) throw new Error(`Could not resolve wiki links: ${error.message}`);
 
   const targetBySlug = new Map((targets || []).map((page: any) => [page.slug, page.id]));
   const rows = targetSlugs.map((slug) => ({
-    user_id: currentUserId,
+    user_id: getCurrentUserId(),
     source_page_id: pageId,
     target_slug: slug,
     target_page_id: targetBySlug.get(slug) || null,
@@ -420,7 +429,7 @@ async function resolveOrCreateContactsByName(names: string[]) {
     const { data: existing } = await supabase
       .from("contacts")
       .select("id, name, relationship")
-      .eq("user_id", currentUserId)
+      .eq("user_id", getCurrentUserId())
       .is("merged_into", null)
       .ilike("name", name)
       .limit(1);
@@ -428,7 +437,7 @@ async function resolveOrCreateContactsByName(names: string[]) {
       contacts.push(existing[0]);
       continue;
     }
-    const { data, error } = await supabase.from("contacts").insert({ user_id: currentUserId, name }).select("id, name, relationship").single();
+    const { data, error } = await supabase.from("contacts").insert({ user_id: getCurrentUserId(), name }).select("id, name, relationship").single();
     if (error) throw new Error(`Could not create person '${name}': ${error.message}`);
     contacts.push(data);
   }
@@ -451,7 +460,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       query_embedding: qEmb,
       match_threshold: threshold,
       match_count: Math.max(limit * 3, 30),
-      p_user_id: currentUserId,
+      p_user_id: getCurrentUserId(),
     });
     if (!error && data) {
       // Aggregate chunks by note_id (best chunk wins) and hydrate.
@@ -494,7 +503,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const { data: textResults } = await supabase
     .from("notes")
     .select("id, title, content, metadata, tags, created_at")
-    .eq("user_id", currentUserId)
+    .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
@@ -522,7 +531,7 @@ async function searchLexiconPages(query: string, limit: number): Promise<any[]> 
   const { data } = await supabase
     .from("wiki_pages")
     .select("slug, title, page_type, summary, source_count, updated_at")
-    .eq("user_id", currentUserId)
+    .eq("user_id", getCurrentUserId())
     .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
@@ -569,7 +578,7 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
       .from("notes")
       .select("id, title, content, metadata, created_at")
       .eq("is_trashed", false)
-      .eq("user_id", currentUserId)
+      .eq("user_id", getCurrentUserId())
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -630,7 +639,7 @@ const captureNoteHandler = async ({ content }: { content: string }) => {
     const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
     const { error } = await supabase.from("notes").insert({
-      user_id: currentUserId,
+      user_id: getCurrentUserId(),
       content,
       title,
       embedding,
@@ -695,7 +704,7 @@ server.registerTool(
         .eq("id", note_id)
         .maybeSingle();
       if (fetchErr) return jsonTool({ error: fetchErr.message });
-      if (!existing || existing.user_id !== currentUserId) {
+      if (!existing || existing.user_id !== getCurrentUserId()) {
         return jsonTool({ error: "Note not found" });
       }
       if (existing.is_external) {
@@ -718,7 +727,7 @@ server.registerTool(
         .from("notes")
         .update(updates)
         .eq("id", note_id)
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .select("id, title, tags, folder_path, is_favorite, is_pinned, updated_at")
         .single();
       if (error) return jsonTool({ error: error.message });
@@ -749,7 +758,7 @@ server.registerTool(
         .eq("id", note_id)
         .maybeSingle();
       if (fetchErr) return jsonTool({ error: fetchErr.message });
-      if (!existing || existing.user_id !== currentUserId) {
+      if (!existing || existing.user_id !== getCurrentUserId()) {
         return jsonTool({ error: "Note not found" });
       }
 
@@ -761,7 +770,7 @@ server.registerTool(
         .from("notes")
         .update(updates)
         .eq("id", note_id)
-        .eq("user_id", currentUserId);
+        .eq("user_id", getCurrentUserId());
       if (error) return jsonTool({ error: error.message });
 
       return jsonTool({
@@ -793,13 +802,13 @@ server.registerTool(
         .from("notes")
         .select("*", { count: "exact", head: true })
         .eq("is_trashed", false)
-        .eq("user_id", currentUserId);
+        .eq("user_id", getCurrentUserId());
 
       const { data } = await supabase
         .from("notes")
         .select("metadata, created_at")
         .eq("is_trashed", false)
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .order("created_at", { ascending: false });
 
       const types: Record<string, number> = {};
@@ -872,7 +881,7 @@ server.registerTool(
       let q = supabase
         .from("action_items")
         .select("id, content, status, priority, due_date, created_at, updated_at, source_note_id, contact_id")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .order("created_at", { ascending: false });
 
       if (status) {
@@ -942,7 +951,7 @@ server.registerTool(
           .from("notes")
           .select("id, title, content, metadata, created_at")
           .eq("is_trashed", false)
-          .eq("user_id", currentUserId)
+          .eq("user_id", getCurrentUserId())
           .contains("metadata", { people: [name] })
           .order("created_at", { ascending: false })
           .limit(limit),
@@ -952,7 +961,7 @@ server.registerTool(
             query_embedding: emb,
             match_threshold: 0.5,
             match_count: limit * 3,
-            p_user_id: currentUserId,
+            p_user_id: getCurrentUserId(),
           });
           if (error || !data) return { data: [] as any[], error };
           // Aggregate to one row per note (best chunk).
@@ -1033,7 +1042,7 @@ server.registerTool(
       let q = supabase
         .from("contacts")
         .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .order("name")
         .limit(limit);
 
@@ -1082,7 +1091,7 @@ server.registerTool(
       const { data: contacts } = await supabase
         .from("contacts")
         .select("*")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .ilike("name", `%${name}%`)
         .limit(1);
 
@@ -1126,7 +1135,7 @@ server.registerTool(
       const { data: notes } = await supabase
         .from("notes")
         .select("title, content, created_at")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
         .order("created_at", { ascending: false })
@@ -1154,7 +1163,7 @@ server.registerTool(
     inputSchema: { limit: z.number().optional().default(100) },
   },
   async ({ limit }) => {
-    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", currentUserId).is("merged_into", null).order("name").limit(limit);
+    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
     if (error) return jsonTool({ error: error.message });
     return jsonTool(data);
   }
@@ -1168,9 +1177,9 @@ server.registerTool(
     inputSchema: { person_name: z.string().optional(), limit: z.number().optional().default(50) },
   },
   async ({ person_name, limit }) => {
-    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).order("happened_at", { ascending: false }).limit(limit);
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).order("happened_at", { ascending: false }).limit(limit);
     if (person_name) {
-      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", currentUserId).ilike("name", `%${person_name}%`).is("merged_into", null);
+      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId()).ilike("name", `%${person_name}%`).is("merged_into", null);
       if (!matches?.length) return jsonTool({ message: "No people matching that name." });
       q = q.in("person_id", matches.map((p: any) => p.id));
     }
@@ -1189,7 +1198,7 @@ server.registerTool(
   },
   async ({ query, limit }) => {
     const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
-    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", currentUserId).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
   }
@@ -1200,7 +1209,7 @@ async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
   const contacts = await resolveOrCreateContactsByName(participantNames);
   const primary = input.person_name ? contacts.find((c) => c.name.toLowerCase() === String(input.person_name).toLowerCase()) : contacts[0];
   const payload = {
-    user_id: currentUserId,
+    user_id: getCurrentUserId(),
     title: String(input.title || "").trim(),
     description: input.description ? String(input.description).trim() : null,
     happened_at: input.happened_at,
@@ -1240,11 +1249,11 @@ const rawMomentSchema = {
 };
 
 async function draftMomentFromDescription(description: string, params: any) {
-  const { data: contacts } = await supabase.from("contacts").select("name").eq("user_id", currentUserId).is("merged_into", null).order("name");
+  const { data: contacts } = await supabase.from("contacts").select("name").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name");
   const peopleContext = contacts?.length ? `\n\nKnown people in the user's timeline: ${contacts.map((p: any) => p.name).join(", ")}` : "";
   const hints = [params.happened_at && `Date hint: ${params.happened_at}`, params.title_hint && `Title hint: ${params.title_hint}`, params.category_hint && `Category hint: ${params.category_hint}`, params.status_hint && `Status hint: ${params.status_hint}`, params.person_name && `Primary person hint: ${params.person_name}`, params.participant_names?.length && `Participant hints: ${params.participant_names.join(", ")}`].filter(Boolean).join("\n");
   const content = hints ? `${description}\n\nUse these caller-provided hints where appropriate:\n${hints}` : description;
-  const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "mcp-create-moment", "chat/completions", {
+  const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "mcp-create-moment", "chat/completions", {
     model: "google/gemini-3-flash-preview",
     messages: [{ role: "system", content: `Extract a structured Menerio timeline Moment. Return only via the draft_moment tool. Today's date: ${new Date().toISOString().slice(0, 10)}${peopleContext}` }, { role: "user", content }],
     tools: [{ type: "function", function: { name: "draft_moment", description: "Return a structured timeline moment draft.", parameters: { type: "object", properties: { happened_at: { type: "string" }, happened_end: { type: "string" }, title: { type: "string" }, status: { type: "string", enum: ALLOWED_MOMENT_STATUSES }, impact_level: { type: "integer", minimum: 1, maximum: 4 }, confidence_date: { type: "integer", minimum: 0, maximum: 10 }, confidence_truth: { type: "integer", minimum: 0, maximum: 10 }, participants: { type: "array", items: { type: "string" } } }, required: ["happened_at", "title", "status", "impact_level", "confidence_date", "confidence_truth"], additionalProperties: false } } }],
@@ -1292,7 +1301,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", currentUserId)
+          .eq("user_id", getCurrentUserId())
           .ilike("title", `%${note}%`)
           .limit(1);
         if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
@@ -1302,7 +1311,7 @@ server.registerTool(
       const { data: connections } = await supabase
         .from("note_connections")
         .select("*")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .or(`source_note_id.eq.${noteId},target_note_id.eq.${noteId}`)
         .order("strength", { ascending: false })
         .limit(limit);
@@ -1354,7 +1363,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", currentUserId)
+          .eq("user_id", getCurrentUserId())
           .ilike("title", `%${query}%`)
           .limit(1);
         return data?.[0]?.id || null;
@@ -1368,7 +1377,7 @@ server.registerTool(
       const { data: allConns } = await supabase
         .from("note_connections")
         .select("source_note_id, target_note_id, connection_type, strength")
-        .eq("user_id", currentUserId);
+        .eq("user_id", getCurrentUserId());
 
       if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
@@ -1450,7 +1459,7 @@ server.registerTool(
       const { data: allConns } = await supabase
         .from("note_connections")
         .select("source_note_id, target_note_id")
-        .eq("user_id", currentUserId);
+        .eq("user_id", getCurrentUserId());
 
       if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
@@ -1554,7 +1563,7 @@ server.registerTool(
       const { data: contacts } = await supabase
         .from("contacts")
         .select("id, name")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .ilike("name", `%${contact_name}%`)
         .limit(1);
 
@@ -1568,7 +1577,7 @@ server.registerTool(
 
       const { error: intError } = await supabase.from("contact_interactions").insert({
         contact_id: contact.id,
-        user_id: currentUserId,
+        user_id: getCurrentUserId(),
         type,
         summary: summary || null,
         action_items: action_items || [],
@@ -1611,7 +1620,7 @@ server.registerTool(
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: limit,
-        p_user_id: currentUserId,
+        p_user_id: getCurrentUserId(),
       });
 
       if (error) {
@@ -1666,7 +1675,7 @@ server.registerTool(
         const { data } = await supabase
           .from("notes")
           .select("id")
-          .eq("user_id", currentUserId)
+          .eq("user_id", getCurrentUserId())
           .ilike("title", `%${note}%`)
           .limit(1);
         if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
@@ -1677,7 +1686,7 @@ server.registerTool(
         .from("media_analysis")
         .select("storage_path, media_type, page_number, original_filename, description, extracted_text, topics, analysis_status, raw_analysis")
         .eq("note_id", noteId)
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .order("created_at", { ascending: true });
 
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -1727,7 +1736,7 @@ server.registerTool(
       let catQuery = supabase
         .from("profile_categories")
         .select("id, name, slug, visibility_scope, sort_order")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .neq("visibility_scope", "private")
         .order("sort_order");
 
@@ -1757,7 +1766,7 @@ server.registerTool(
       const { data: entries } = await supabase
         .from("profile_entries")
         .select("category_id, label, value, linked_note_id, sort_order")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .in("category_id", catIds)
         .order("sort_order");
 
@@ -1827,7 +1836,7 @@ server.registerTool(
         const instQuery = supabase
           .from("agent_instructions")
           .select("instruction, applies_to")
-          .eq("user_id", currentUserId)
+          .eq("user_id", getCurrentUserId())
           .eq("is_active", true)
           .order("sort_order");
 
@@ -1870,7 +1879,7 @@ server.registerTool(
       let request = supabase
         .from("wiki_pages")
         .select("slug, title, page_type, summary, source_count, updated_at")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
         .order("updated_at", { ascending: false })
         .limit(safeLimit);
@@ -1897,7 +1906,7 @@ server.registerTool(
       const { data: page, error } = await supabase
         .from("wiki_pages")
         .select("id, slug, title, page_type, summary, content, source_count, created_at, updated_at")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("slug", slug)
         .maybeSingle();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -1906,21 +1915,21 @@ server.registerTool(
       const { data: sourceRows } = await supabase
         .from("wiki_page_sources")
         .select("note_id")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("wiki_page_id", page.id);
       const noteIds = (sourceRows || []).map((row: any) => row.note_id).filter(Boolean);
       const { data: sourceNotes } = noteIds.length
-        ? await supabase.from("notes").select("id, title, created_at, updated_at").eq("user_id", currentUserId).in("id", noteIds)
+        ? await supabase.from("notes").select("id, title, created_at, updated_at").eq("user_id", getCurrentUserId()).in("id", noteIds)
         : { data: [] };
 
       const { data: backlinks } = await supabase
         .from("wiki_links")
         .select("source_page_id")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("target_page_id", page.id);
       const backlinkIds = [...new Set((backlinks || []).map((link: any) => link.source_page_id).filter(Boolean))];
       const { data: backlinkPages } = backlinkIds.length
-        ? await supabase.from("wiki_pages").select("slug, title, page_type, summary").eq("user_id", currentUserId).in("id", backlinkIds)
+        ? await supabase.from("wiki_pages").select("slug, title, page_type, summary").eq("user_id", getCurrentUserId()).in("id", backlinkIds)
         : { data: [] };
 
       return jsonTool({ ...page, source_notes: sourceNotes || [], backlinks: backlinkPages || [] });
@@ -1947,13 +1956,13 @@ server.registerTool(
     try {
       const { data: page, error } = await supabase
         .from("wiki_pages")
-        .insert({ user_id: currentUserId, slug, title, page_type, content, summary: summary || null })
+        .insert({ user_id: getCurrentUserId(), slug, title, page_type, content, summary: summary || null })
         .select("id, slug, title, page_type, summary, content, created_at, updated_at")
         .single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
 
       const { error: revisionError } = await supabase.from("wiki_revisions").insert({
-        user_id: currentUserId,
+        user_id: getCurrentUserId(),
         wiki_page_id: page.id,
         page_slug: slug,
         page_title: title,
@@ -1992,7 +2001,7 @@ server.registerTool(
       const { data: existing, error: fetchError } = await supabase
         .from("wiki_pages")
         .select("id, slug, title, page_type, summary, content")
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("slug", slug)
         .maybeSingle();
       if (fetchError) return { content: [{ type: "text" as const, text: `Error: ${fetchError.message}` }], isError: true };
@@ -2008,14 +2017,14 @@ server.registerTool(
       const { data: updated, error: updateError } = await supabase
         .from("wiki_pages")
         .update(updates)
-        .eq("user_id", currentUserId)
+        .eq("user_id", getCurrentUserId())
         .eq("id", existing.id)
         .select("id, slug, title, page_type, summary, content, updated_at")
         .single();
       if (updateError) return { content: [{ type: "text" as const, text: `Error: ${updateError.message}` }], isError: true };
 
       const { error: revisionError } = await supabase.from("wiki_revisions").insert({
-        user_id: currentUserId,
+        user_id: getCurrentUserId(),
         wiki_page_id: existing.id,
         page_slug: updated.slug,
         page_title: updated.title,
@@ -2050,7 +2059,7 @@ server.registerTool(
         headers: {
           Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
           "Content-Type": "application/json",
-          "x-menerio-user-id": currentUserId,
+          "x-menerio-user-id": getCurrentUserId(),
         },
         body: JSON.stringify({}),
       });
@@ -2066,10 +2075,10 @@ server.registerTool(
 server.registerTool("list_groups", { title: "List Groups", description: "List the user's active Groups with membership counts and goals.", inputSchema: { limit: z.number().optional().default(50) } }, async ({ limit }) => {
   try {
     const safeLimit = clampNumber(limit, 1, 100, 50);
-    const { data: groups, error } = await supabase.from("contact_groups").select("id, name, slug, type, purpose, template, color, icon, stages, success_criteria, updated_at").eq("user_id", currentUserId).eq("is_trashed", false).order("updated_at", { ascending: false }).limit(safeLimit);
+    const { data: groups, error } = await supabase.from("contact_groups").select("id, name, slug, type, purpose, template, color, icon, stages, success_criteria, updated_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("updated_at", { ascending: false }).limit(safeLimit);
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     const ids = (groups || []).map((group: any) => group.id);
-    const { data: memberships } = ids.length ? await supabase.from("contact_group_memberships").select("group_id").eq("user_id", currentUserId).in("group_id", ids).is("archived_at", null) : { data: [] };
+    const { data: memberships } = ids.length ? await supabase.from("contact_group_memberships").select("group_id").eq("user_id", getCurrentUserId()).in("group_id", ids).is("archived_at", null) : { data: [] };
     const counts = new Map<string, number>();
     for (const membership of memberships || []) counts.set((membership as any).group_id, (counts.get((membership as any).group_id) || 0) + 1);
     return jsonTool({ groups: (groups || []).map((group: any) => ({ ...group, member_count: counts.get(group.id) || 0 })) });
@@ -2082,15 +2091,15 @@ server.registerTool("get_group", { title: "Get Group", description: "Get a Group
   try {
     const group = await resolveGroup(id_or_slug);
     const [{ data: memberships }, { data: interactions }, { data: actions }, { data: briefings }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("*, contacts:contact_id(id, name, company, role, email, tags)").eq("user_id", currentUserId).eq("group_id", group.id).is("archived_at", null).order("position"),
-      supabase.from("contact_interactions").select("id, interaction_date, type, summary, note_id, contact_id, action_items").eq("user_id", currentUserId).eq("group_id", group.id).order("interaction_date", { ascending: false }).limit(10),
-      supabase.from("action_items").select("id, content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("status", "open").eq("metadata->>group_id", group.id).order("created_at", { ascending: false }).limit(20),
-      supabase.from("group_briefings").select("briefing_markdown, generated_at, period_days").eq("user_id", currentUserId).eq("group_id", group.id).order("generated_at", { ascending: false }).limit(1),
+      supabase.from("contact_group_memberships").select("*, contacts:contact_id(id, name, company, role, email, tags)").eq("user_id", getCurrentUserId()).eq("group_id", group.id).is("archived_at", null).order("position"),
+      supabase.from("contact_interactions").select("id, interaction_date, type, summary, note_id, contact_id, action_items").eq("user_id", getCurrentUserId()).eq("group_id", group.id).order("interaction_date", { ascending: false }).limit(10),
+      supabase.from("action_items").select("id, content, status, priority, due_date, contact_id, metadata").eq("user_id", getCurrentUserId()).eq("status", "open").eq("metadata->>group_id", group.id).order("created_at", { ascending: false }).limit(20),
+      supabase.from("group_briefings").select("briefing_markdown, generated_at, period_days").eq("user_id", getCurrentUserId()).eq("group_id", group.id).order("generated_at", { ascending: false }).limit(1),
     ]);
     let notes: any[] = [];
     if (include_notes) {
       const names = (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean).slice(0, 20);
-      const { data } = names.length ? await supabase.from("notes").select("id, title, content, created_at, metadata").eq("user_id", currentUserId).eq("is_trashed", false).contains("metadata", { people: names }).order("created_at", { ascending: false }).limit(10) : { data: [] };
+      const { data } = names.length ? await supabase.from("notes").select("id, title, content, created_at, metadata").eq("user_id", getCurrentUserId()).eq("is_trashed", false).contains("metadata", { people: names }).order("created_at", { ascending: false }).limit(10) : { data: [] };
       notes = data || [];
     }
     return jsonTool({ group, members: memberships || [], recent_interactions: interactions || [], open_next_steps: actions || [], latest_briefing: briefings?.[0] || null, related_notes: notes });
@@ -2104,13 +2113,13 @@ server.registerTool("create_group", { title: "Create Group", description: "Creat
     const baseSlug = slugify(name);
     let slug = baseSlug;
     for (let i = 2; i < 20; i++) {
-      const { data } = await supabase.from("contact_groups").select("id").eq("user_id", currentUserId).eq("slug", slug).maybeSingle();
+      const { data } = await supabase.from("contact_groups").select("id").eq("user_id", getCurrentUserId()).eq("slug", slug).maybeSingle();
       if (!data) break;
       slug = `${baseSlug}-${i}`;
     }
-    const { data: group, error } = await supabase.from("contact_groups").insert({ user_id: currentUserId, name: name.trim(), slug, purpose: purpose || null, description: description || null, type: type || "other", template: template || null, stages: stages || [], success_criteria: success_criteria || [], color: color || null, icon: icon || null }).select("*").single();
+    const { data: group, error } = await supabase.from("contact_groups").insert({ user_id: getCurrentUserId(), name: name.trim(), slug, purpose: purpose || null, description: description || null, type: type || "other", template: template || null, stages: stages || [], success_criteria: success_criteria || [], color: color || null, icon: icon || null }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-    await supabase.from("wiki_pages").insert({ user_id: currentUserId, slug: `group-${group.slug}`, page_type: "group", title: group.name, summary: group.purpose, metadata: { group_id: group.id }, content: `# ${group.name}\n\n## Purpose\n${group.purpose || ""}\n\n## Members\n_Synced automatically from contact_group_memberships._\n\n## Insights\n_Synthesized from notes mentioning members._\n` });
+    await supabase.from("wiki_pages").insert({ user_id: getCurrentUserId(), slug: `group-${group.slug}`, page_type: "group", title: group.name, summary: group.purpose, metadata: { group_id: group.id }, content: `# ${group.name}\n\n## Purpose\n${group.purpose || ""}\n\n## Members\n_Synced automatically from contact_group_memberships._\n\n## Insights\n_Synthesized from notes mentioning members._\n` });
     return jsonTool({ ok: true, group });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -2121,9 +2130,9 @@ server.registerTool("add_group_member", { title: "Add Group Member", description
   try {
     const group = await resolveGroup(group_id_or_slug);
     const contact = await resolveContact({ contact_id, contact_name });
-    const { data: existing } = await supabase.from("contact_group_memberships").select("*").eq("user_id", currentUserId).eq("group_id", group.id).eq("contact_id", contact.id).is("archived_at", null).maybeSingle();
+    const { data: existing } = await supabase.from("contact_group_memberships").select("*").eq("user_id", getCurrentUserId()).eq("group_id", group.id).eq("contact_id", contact.id).is("archived_at", null).maybeSingle();
     if (existing) return jsonTool({ ok: true, changed: false, membership: existing });
-    const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: group.id, contact_id: contact.id, status: status || null, priority: priority || "normal", reason: reason || null, notes: notes || null }).select("*").single();
+    const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: getCurrentUserId(), group_id: group.id, contact_id: contact.id, status: status || null, priority: priority || "normal", reason: reason || null, notes: notes || null }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, changed: true, membership: data, group: { id: group.id, name: group.name }, person: { id: contact.id, name: contact.name } });
   } catch (err: unknown) {
@@ -2142,7 +2151,7 @@ server.registerTool("update_group_membership", { title: "Update Group Membership
     if (attributes !== undefined) updates.attributes = attributes;
     if (archived !== undefined) updates.archived_at = archived ? new Date().toISOString() : null;
     if (status !== undefined) updates.last_movement_at = new Date().toISOString();
-    const { data, error } = await supabase.from("contact_group_memberships").update(updates).eq("user_id", currentUserId).eq("id", membership_id).select("*").single();
+    const { data, error } = await supabase.from("contact_group_memberships").update(updates).eq("user_id", getCurrentUserId()).eq("id", membership_id).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, membership: data });
   } catch (err: unknown) {
@@ -2155,9 +2164,9 @@ server.registerTool("log_group_interaction", { title: "Log Group Interaction", d
     const group = await resolveGroup(group_id_or_slug);
     const contact = await resolveContact({ contact_id, contact_name });
     const date = interaction_date || new Date().toISOString().slice(0, 10);
-    const { data, error } = await supabase.from("contact_interactions").insert({ user_id: currentUserId, group_id: group.id, contact_id: contact.id, type, summary: summary || null, action_items: action_items || [], note_id: note_id || null, interaction_date: date }).select("*").single();
+    const { data, error } = await supabase.from("contact_interactions").insert({ user_id: getCurrentUserId(), group_id: group.id, contact_id: contact.id, type, summary: summary || null, action_items: action_items || [], note_id: note_id || null, interaction_date: date }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-    await supabase.from("contacts").update({ last_contact_date: date }).eq("user_id", currentUserId).eq("id", contact.id);
+    await supabase.from("contacts").update({ last_contact_date: date }).eq("user_id", getCurrentUserId()).eq("id", contact.id);
     return jsonTool({ ok: true, interaction: data, group: { id: group.id, name: group.name }, person: { id: contact.id, name: contact.name } });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -2166,10 +2175,10 @@ server.registerTool("log_group_interaction", { title: "Log Group Interaction", d
 
 server.registerTool("create_group_next_step", { title: "Create Group Next Step", description: "Create an open next-step action for a Group membership.", inputSchema: { membership_id: z.string(), content: z.string(), priority: z.string().optional().default("normal"), due_date: z.string().optional() } }, async ({ membership_id, content, priority, due_date }) => {
   try {
-    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, contact_id").eq("user_id", currentUserId).eq("id", membership_id).maybeSingle();
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("id, group_id, contact_id").eq("user_id", getCurrentUserId()).eq("id", membership_id).maybeSingle();
     if (membershipError) throw new Error(membershipError.message);
     if (!membership) throw new Error("Membership not found");
-    const { data, error } = await supabase.from("action_items").insert({ user_id: currentUserId, contact_id: (membership as any).contact_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, contact_id: (membership as any).contact_id } }).select("*").single();
+    const { data, error } = await supabase.from("action_items").insert({ user_id: getCurrentUserId(), contact_id: (membership as any).contact_id, content, priority: priority || "normal", due_date: due_date || null, status: "open", metadata: { group_membership_id: membership_id, group_id: (membership as any).group_id, contact_id: (membership as any).contact_id } }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ ok: true, action_item: data });
   } catch (err: unknown) {
@@ -2179,14 +2188,14 @@ server.registerTool("create_group_next_step", { title: "Create Group Next Step",
 
 server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step", description: "Use AI to suggest one concrete next step for a Group membership without saving it.", inputSchema: { membership_id: z.string() } }, async ({ membership_id }) => {
   try {
-    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("*, contact_groups:group_id(*), contacts:contact_id(*)").eq("id", membership_id).eq("user_id", currentUserId).maybeSingle();
+    const { data: membership, error: membershipError } = await supabase.from("contact_group_memberships").select("*, contact_groups:group_id(*), contacts:contact_id(*)").eq("id", membership_id).eq("user_id", getCurrentUserId()).maybeSingle();
     if (membershipError) throw new Error(membershipError.message);
     if (!membership) throw new Error("Membership not found");
     const [{ data: interactions }, { data: notes }] = await Promise.all([
-      supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", currentUserId).eq("contact_id", (membership as any).contact_id).order("interaction_date", { ascending: false }).limit(5),
-      supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", currentUserId).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
+      supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", getCurrentUserId()).eq("contact_id", (membership as any).contact_id).order("interaction_date", { ascending: false }).limit(5),
+      supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", getCurrentUserId()).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_next_step", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_next_step", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
     const parsed = JSON.parse(result?.choices?.[0]?.message?.content || "{}");
     return jsonTool({ title: String(parsed.title || "Follow up"), due_date_offset_days: Number(parsed.due_date_offset_days || 3), priority: ["low", "normal", "high", "urgent"].includes(parsed.priority) ? parsed.priority : "normal", reasoning: String(parsed.reasoning || ""), credits });
   } catch (err: unknown) {
@@ -2200,14 +2209,14 @@ server.registerTool("generate_group_briefing", { title: "Generate Group Briefing
     const days = Math.min(90, Math.max(1, Number(period_days) || 7));
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     const [{ data: memberships }, { data: interactions }, { data: actions }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("*, contacts:contact_id(name, company, role)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null).order("last_movement_at", { ascending: true }),
-      supabase.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", currentUserId).eq("group_id", group.id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
-      supabase.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", currentUserId).eq("metadata->>group_id", group.id).order("created_at", { ascending: false }),
+      supabase.from("contact_group_memberships").select("*, contacts:contact_id(name, company, role)").eq("group_id", group.id).eq("user_id", getCurrentUserId()).is("archived_at", null).order("last_movement_at", { ascending: true }),
+      supabase.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", getCurrentUserId()).eq("group_id", group.id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
+      supabase.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", getCurrentUserId()).eq("metadata->>group_id", group.id).order("created_at", { ascending: false }),
     ]);
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_briefing", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.25, messages: [{ role: "system", content: "Generate a concise weekly group briefing in Markdown with these exact sections: ## Movement, ## Stale Members, ## Top Priorities for Next Week, ## Goals Progress. Ground every claim in provided data." }, { role: "user", content: JSON.stringify({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], action_items: actions || [] }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_briefing", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.25, messages: [{ role: "system", content: "Generate a concise weekly group briefing in Markdown with these exact sections: ## Movement, ## Stale Members, ## Top Priorities for Next Week, ## Goals Progress. Ground every claim in provided data." }, { role: "user", content: JSON.stringify({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], action_items: actions || [] }) }] });
     const briefing = String(result?.choices?.[0]?.message?.content || "").trim();
     const generatedAt = new Date().toISOString();
-    const { error } = await supabase.from("group_briefings").insert({ user_id: currentUserId, group_id: group.id, period_days: days, briefing_markdown: briefing, generated_at: generatedAt });
+    const { error } = await supabase.from("group_briefings").insert({ user_id: getCurrentUserId(), group_id: group.id, period_days: days, briefing_markdown: briefing, generated_at: generatedAt });
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     return jsonTool({ briefing_markdown: briefing, generated_at: generatedAt, credits });
   } catch (err: unknown) {
@@ -2219,15 +2228,15 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
   try {
     const group = await resolveGroup(group_id_or_slug);
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
-      supabase.from("contact_group_memberships").select("contact_id, contacts:contact_id(name)").eq("group_id", group.id).eq("user_id", currentUserId).is("archived_at", null),
-      supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", currentUserId).is("merged_into", null).order("name"),
-      supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
+      supabase.from("contact_group_memberships").select("contact_id, contacts:contact_id(name)").eq("group_id", group.id).eq("user_id", getCurrentUserId()).is("archived_at", null),
+      supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name"),
+      supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
     ]);
-    const structuredImport = await importGroupMembersFromNotes(supabase, currentUserId, group, notes || []);
+    const structuredImport = await importGroupMembersFromNotes(supabase, getCurrentUserId(), group, notes || []);
     if (structuredImport) return jsonTool({ ok: true, mode: "structured_import", ...structuredImport });
     const existingIds = new Set((memberships || []).map((m: any) => m.contact_id));
     const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, currentUserId, "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
     const suggestions = Array.isArray(result?.choices?.[0]?.message?.content) ? [] : JSON.parse(result?.choices?.[0]?.message?.content || "{}").suggestions || [];
     const candidateIds = new Set(candidates.map((contact: any) => contact.id));
     const defaultStatus = Array.isArray(group.stages) ? group.stages[0]?.id : null;
@@ -2235,7 +2244,7 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
       const reasoning = suggestion.reasoning || "";
       const contactId = String(suggestion.contact_id);
       const sensitive = ["health", "medical", "diagnosis", "therapy", "politics", "religion", "financial", "salary", "private", "confidential"].some((term) => `${group.name} ${group.description || ""} ${reasoning}`.toLowerCase().includes(term));
-      return { user_id: currentUserId, suggestion_type: "group_member_suggestion", title: `Add ${suggestion.contact_name || "contact"} to ${group.name}`, description: reasoning || null, confidence_score: Number(suggestion.confidence), is_sensitive: sensitive, target_entity_type: "contact_group", target_entity_id: group.id, payload: { group_id: group.id, contact_id: contactId, contact_name: suggestion.contact_name || null, group_name: group.name, reasoning, default_status: defaultStatus }, suppression_key: buildGroupMemberSuppressionKey(group.id, contactId) };
+      return { user_id: getCurrentUserId(), suggestion_type: "group_member_suggestion", title: `Add ${suggestion.contact_name || "contact"} to ${group.name}`, description: reasoning || null, confidence_score: Number(suggestion.confidence), is_sensitive: sensitive, target_entity_type: "contact_group", target_entity_id: group.id, payload: { group_id: group.id, contact_id: contactId, contact_name: suggestion.contact_name || null, group_name: group.name, reasoning, default_status: defaultStatus }, suppression_key: buildGroupMemberSuppressionKey(group.id, contactId) };
     });
     const filteredRows = await filterSuppressedGroupMemberRows(rawRows);
     const preferences = await getSuggestionPreferences();
@@ -2253,7 +2262,7 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
 server.registerTool("preview_group_members_from_note", { title: "Preview Group Members From Note", description: "Deterministically preview people that can be imported into a Group from a matching Markdown table or numbered list note. Does not write data.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
   try {
     const group = await resolveGroup(group_id_or_slug);
-    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
     if (error) throw new Error(error.message);
     const preview = previewGroupMembersFromNotes(group, notes || []);
     return jsonTool(preview ? { ok: true, source_note: { id: preview.note.id, title: preview.note.title || "Untitled" }, parsed_rows: preview.rows.length, rows: preview.rows.slice(0, 120) } : { ok: true, source_note: null, parsed_rows: 0, rows: [] });
@@ -2265,9 +2274,9 @@ server.registerTool("preview_group_members_from_note", { title: "Preview Group M
 server.registerTool("import_group_members_from_note", { title: "Import Group Members From Note", description: "Deterministically import people into a Group from a matching Markdown table or numbered list note. Creates missing contacts, preserves rank/order, saves link/relevance/first-step metadata.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
   try {
     const group = await resolveGroup(group_id_or_slug);
-    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", currentUserId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
     if (error) throw new Error(error.message);
-    const result = await importGroupMembersFromNotes(supabase, currentUserId, group, notes || []);
+    const result = await importGroupMembersFromNotes(supabase, getCurrentUserId(), group, notes || []);
     return jsonTool(result ? { ok: true, ...result } : { ok: false, error: "No matching structured note found" });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -2276,27 +2285,27 @@ server.registerTool("import_group_members_from_note", { title: "Import Group Mem
 
 server.registerTool("review_group_member_suggestion", { title: "Review Group Member Suggestion", description: "Apply Review Queue actions for Group member suggestions using the same Keep, Roll Back, and Never Again behavior as the app.", inputSchema: { review_queue_id: z.string(), action: z.enum(["keep", "roll_back", "never_again"]) } }, async ({ review_queue_id, action }) => {
   try {
-    const { data: item, error: fetchError } = await supabase.from("review_queue").select("*").eq("user_id", currentUserId).eq("id", review_queue_id).eq("suggestion_type", "group_member_suggestion").maybeSingle();
+    const { data: item, error: fetchError } = await supabase.from("review_queue").select("*").eq("user_id", getCurrentUserId()).eq("id", review_queue_id).eq("suggestion_type", "group_member_suggestion").maybeSingle();
     if (fetchError) throw new Error(fetchError.message);
     if (!item) throw new Error("Group member suggestion not found");
     const payload = (item as any).payload || {};
     let membershipId = (item as any).target_entity_id;
     if (action === "keep") {
       if (!membershipId) {
-        const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", currentUserId).eq("group_id", payload.group_id).eq("contact_id", payload.contact_id).is("archived_at", null).maybeSingle();
+        const { data: existing } = await supabase.from("contact_group_memberships").select("id").eq("user_id", getCurrentUserId()).eq("group_id", payload.group_id).eq("contact_id", payload.contact_id).is("archived_at", null).maybeSingle();
         membershipId = existing?.id;
       }
       if (!membershipId) {
-        const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: currentUserId, group_id: payload.group_id, contact_id: payload.contact_id, status: payload.default_status || null, reason: (item as any).description || null }).select("id").single();
+        const { data, error } = await supabase.from("contact_group_memberships").insert({ user_id: getCurrentUserId(), group_id: payload.group_id, contact_id: payload.contact_id, status: payload.default_status || null, reason: (item as any).description || null }).select("id").single();
         if (error || !data) throw new Error(error?.message || "Could not create membership");
         membershipId = data.id;
       }
-      await supabase.from("review_queue").update({ status: "kept", target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: (item as any).applied_at || new Date().toISOString(), reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", currentUserId);
+      await supabase.from("review_queue").update({ status: "kept", target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: (item as any).applied_at || new Date().toISOString(), reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", getCurrentUserId());
       return jsonTool({ ok: true, status: "kept", membership_id: membershipId });
     }
-    if (membershipId) await supabase.from("contact_group_memberships").delete().eq("user_id", currentUserId).eq("id", membershipId);
-    if (action === "never_again") await supabase.from("ai_suggestion_suppressions").upsert({ user_id: currentUserId, suggestion_type: "group_member_suggestion", target_entity_type: (item as any).target_entity_type, target_entity_id: (item as any).target_entity_id, normalized_value: String(payload.contact_id || "").toLowerCase(), source_category: null, suppression_key: (item as any).suppression_key || buildGroupMemberSuppressionKey(payload.group_id, payload.contact_id) }, { onConflict: "user_id,suppression_key" });
-    await supabase.from("review_queue").update({ status: action === "never_again" ? "blocked" : "removed", blocked_at: action === "never_again" ? new Date().toISOString() : null, reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", currentUserId);
+    if (membershipId) await supabase.from("contact_group_memberships").delete().eq("user_id", getCurrentUserId()).eq("id", membershipId);
+    if (action === "never_again") await supabase.from("ai_suggestion_suppressions").upsert({ user_id: getCurrentUserId(), suggestion_type: "group_member_suggestion", target_entity_type: (item as any).target_entity_type, target_entity_id: (item as any).target_entity_id, normalized_value: String(payload.contact_id || "").toLowerCase(), source_category: null, suppression_key: (item as any).suppression_key || buildGroupMemberSuppressionKey(payload.group_id, payload.contact_id) }, { onConflict: "user_id,suppression_key" });
+    await supabase.from("review_queue").update({ status: action === "never_again" ? "blocked" : "removed", blocked_at: action === "never_again" ? new Date().toISOString() : null, reviewed_at: new Date().toISOString() }).eq("id", review_queue_id).eq("user_id", getCurrentUserId());
     return jsonTool({ ok: true, status: action === "never_again" ? "blocked" : "removed" });
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -2305,7 +2314,7 @@ server.registerTool("review_group_member_suggestion", { title: "Review Group Mem
 
 server.registerTool("list_collections", { title: "List Collections", description: "List all collections the user has created. Returns each collection's name, slug, description, icon, and the agent_instructions that explain how to capture into it. Call this once at the start of a session, or whenever the user mentions a topic that might fit an existing collection, to know what's available.", inputSchema: {} }, async () => {
   return withLoggedCollectionTool("list_collections", {}, async () => {
-    const { data, error } = await supabase.from("collections").select("id, slug, name, icon, description, agent_instructions, field_schema").eq("user_id", currentUserId).order("updated_at", { ascending: false });
+    const { data, error } = await supabase.from("collections").select("id, slug, name, icon, description, agent_instructions, field_schema").eq("user_id", getCurrentUserId()).order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     const counts = await collectionItemCounts((data || []).map((collection: any) => collection.id));
     return (data || []).map((collection: any) => ({
@@ -2338,7 +2347,7 @@ const addCollectionItemTool = server.registerTool("add_collection_item", { title
   return withLoggedCollectionTool("add_collection_item", { collection_slug, data }, async () => {
     const collection = await getCollectionBySlug(collection_slug);
     validateCollectionData(collection, data || {});
-    const { data: item, error } = await supabase.from("collection_items").insert({ user_id: currentUserId, collection_id: collection.id, data }).select("id, title").single();
+    const { data: item, error } = await supabase.from("collection_items").insert({ user_id: getCurrentUserId(), collection_id: collection.id, data }).select("id, title").single();
     if (error || !item) throw new Error(error?.message || "Could not add collection item");
     return { id: item.id, title: item.title, collection_slug: collection.slug, item_url: collectionItemUrl(collection.slug, item.id) };
   });
@@ -2346,13 +2355,13 @@ const addCollectionItemTool = server.registerTool("add_collection_item", { title
 
 server.registerTool("update_collection_item", { title: "Update Collection Item", description: "Update an existing item in a collection. Useful for status changes, follow-up updates, adding notes to an existing entry.", inputSchema: { item_id: z.string(), data: z.record(z.string(), z.any()) } }, async ({ item_id, data }) => {
   return withLoggedCollectionTool("update_collection_item", { item_id, data }, async () => {
-    const { data: existing, error: existingError } = await supabase.from("collection_items").select("id, collection_id, data, collections:collection_id(*)").eq("user_id", currentUserId).eq("id", item_id).maybeSingle();
+    const { data: existing, error: existingError } = await supabase.from("collection_items").select("id, collection_id, data, collections:collection_id(*)").eq("user_id", getCurrentUserId()).eq("id", item_id).maybeSingle();
     if (existingError) throw new Error(existingError.message);
     if (!existing) throw new Error("Collection item not found");
     const collection = (existing as any).collections;
     validateCollectionData(collection, data || {});
     const merged = { ...((existing as any).data || {}), ...(data || {}) };
-    const { data: updated, error } = await supabase.from("collection_items").update({ data: merged }).eq("user_id", currentUserId).eq("id", item_id).select("id, title, updated_at").single();
+    const { data: updated, error } = await supabase.from("collection_items").update({ data: merged }).eq("user_id", getCurrentUserId()).eq("id", item_id).select("id, title, updated_at").single();
     if (error || !updated) throw new Error(error?.message || "Could not update collection item");
     return { id: updated.id, title: updated.title, updated_at: updated.updated_at };
   });
@@ -2362,7 +2371,7 @@ server.registerTool("list_collection_items", { title: "List Collection Items", d
   return withLoggedCollectionTool("list_collection_items", { collection_slug, search, limit, date_from, date_to, status, sort }, async () => {
     const collection = await getCollectionBySlug(collection_slug);
     const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
-    let q = supabase.from("collection_items").select("id, title, data, updated_at, created_at").eq("user_id", currentUserId).eq("collection_id", collection.id).limit(cappedLimit);
+    let q = supabase.from("collection_items").select("id, title, data, updated_at, created_at").eq("user_id", getCurrentUserId()).eq("collection_id", collection.id).limit(cappedLimit);
     if (search) q = q.textSearch("search_vector", search, { type: "websearch", config: "simple" });
     if (date_from) q = q.gte("indexable_date_1", date_from);
     if (date_to) q = q.lte("indexable_date_1", date_to);
@@ -2379,7 +2388,7 @@ server.registerTool("list_collection_items", { title: "List Collection Items", d
 server.registerTool("search_all_collections", { title: "Search All Collections", description: "Search across all of the user's collections at once. Useful when the user references something but you don't know which collection it might be in.", inputSchema: { query: z.string(), limit: z.number().optional().default(20) } }, async ({ query, limit }) => {
   return withLoggedCollectionTool("search_all_collections", { query, limit }, async () => {
     const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
-    const { data, error } = await supabase.from("collection_items").select("id, title, data, collections:collection_id(slug, name)").eq("user_id", currentUserId).textSearch("search_vector", query, { type: "websearch", config: "simple" }).order("updated_at", { ascending: false }).limit(cappedLimit);
+    const { data, error } = await supabase.from("collection_items").select("id, title, data, collections:collection_id(slug, name)").eq("user_id", getCurrentUserId()).textSearch("search_vector", query, { type: "websearch", config: "simple" }).order("updated_at", { ascending: false }).limit(cappedLimit);
     if (error) throw new Error(error.message);
     return (data || []).map((item: any) => {
       const flat = Object.values(item.data || {}).map((value) => typeof value === "object" ? JSON.stringify(value) : String(value)).join(" ");
@@ -2551,12 +2560,12 @@ app.all("*", async (c) => {
     return c.json({ error: auth.error.message }, auth.error.status as 401);
   }
 
-  currentUserId = auth.userId!;
-  addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
-
-  const transport = new StreamableHTTPTransport();
-  await server.connect(transport);
-  return transport.handleRequest(c);
+  return await requestContext.run({ userId: auth.userId! }, async () => {
+    addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
+    const transport = new StreamableHTTPTransport();
+    await server.connect(transport);
+    return await transport.handleRequest(c);
+  });
 });
 
 Deno.serve(app.fetch);
