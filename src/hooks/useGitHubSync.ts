@@ -5,7 +5,6 @@ import { useAuth } from "@/contexts/AuthContext";
 export interface GitHubConnection {
   id: string;
   user_id: string;
-  github_token: string;
   github_username: string | null;
   repo_owner: string | null;
   repo_name: string | null;
@@ -38,7 +37,7 @@ export function useGitHubConnection() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("github_connections" as any)
-        .select("*")
+        .select("id, user_id, github_username, repo_owner, repo_name, branch, vault_path, sync_enabled, sync_direction, last_sync_at, created_at, updated_at")
         .eq("user_id", user!.id)
         .maybeSingle();
       if (error) throw error;
@@ -104,31 +103,11 @@ export function useGitHubVersionHistory(noteId: string | null) {
     queryKey: ["github-versions", noteId],
     enabled: !!user && !!noteId,
     queryFn: async () => {
-      // Get the sync log to find the file path
-      const { data: syncLog } = await supabase
-        .from("github_sync_log" as any)
-        .select("github_path")
-        .eq("user_id", user!.id)
-        .eq("note_id", noteId!)
-        .maybeSingle() as { data: any };
-
-      if (!syncLog?.github_path) return [];
-
-      const { data: conn } = await supabase
-        .from("github_connections" as any)
-        .select("github_token, repo_owner, repo_name, branch")
-        .eq("user_id", user!.id)
-        .maybeSingle() as { data: any };
-
-      if (!conn) return [];
-
-      const res = await fetch(
-        `https://api.github.com/repos/${conn.repo_owner}/${conn.repo_name}/commits?path=${encodeURIComponent(syncLog.github_path)}&sha=${conn.branch}&per_page=30`,
-        { headers: { Authorization: `token ${conn.github_token}`, Accept: "application/vnd.github.v3+json" } }
-      );
-
-      if (!res.ok) return [];
-      return await res.json();
+      const { data, error } = await supabase.functions.invoke("github-proxy", {
+        body: { action: "version_history", note_id: noteId },
+      });
+      if (error) return [];
+      return (data as any)?.commits || [];
     },
     staleTime: 30_000,
   });
@@ -137,22 +116,13 @@ export function useGitHubVersionHistory(noteId: string | null) {
 export function useGitHubFileAtCommit() {
   return useMutation({
     mutationFn: async ({ path, commitSha }: { path: string; commitSha: string }) => {
-      const { data: conn } = await supabase
-        .from("github_connections" as any)
-        .select("github_token, repo_owner, repo_name")
-        .maybeSingle() as { data: any };
-
-      if (!conn) throw new Error("No GitHub connection");
-
-      const res = await fetch(
-        `https://api.github.com/repos/${conn.repo_owner}/${conn.repo_name}/contents/${encodeURIComponent(path)}?ref=${commitSha}`,
-        { headers: { Authorization: `token ${conn.github_token}`, Accept: "application/vnd.github.v3+json" } }
-      );
-
-      if (!res.ok) throw new Error("Failed to fetch file");
-      const data = await res.json();
-      // GitHub returns base64 content
-      return decodeURIComponent(escape(atob(data.content.replace(/\n/g, ""))));
+      const { data, error } = await supabase.functions.invoke("github-proxy", {
+        body: { action: "file_at_commit", path, commit_sha: commitSha },
+      });
+      if (error) throw error;
+      const content = (data as any)?.content;
+      if (typeof content !== "string") throw new Error("Failed to fetch file");
+      return content;
     },
   });
 }
