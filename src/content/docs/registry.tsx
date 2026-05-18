@@ -686,10 +686,9 @@ const faq: DocPage = {
   headings: [
     { id: "general", title: "General" },
     { id: "ai-privacy", title: "AI & Privacy" },
-    { id: "pricing", title: "Pricing" },
     { id: "technical", title: "Technical" },
   ],
-  searchText: "faq questions answers help support pricing free premium privacy data open source self-host export",
+  searchText: "faq questions answers help support privacy data open source self-host export",
   content: () => (
     <>
       <h2 id="general">General</h2>
@@ -705,12 +704,6 @@ const faq: DocPage = {
       <p>No. Your notes are processed to generate tags and connections for <em>your</em> account only. They are never used to train foundation models.</p>
       <h3>Where is my data stored?</h3>
       <p>Your data is stored securely in a Supabase-hosted PostgreSQL database with row-level security. Attachments are stored in encrypted cloud storage.</p>
-
-      <h2 id="pricing">Pricing</h2>
-      <h3>Is there a free plan?</h3>
-      <p>Yes. The free plan includes all core features — notes, AI processing, Note Graph, contacts, and integrations — with a monthly AI credit limit.</p>
-      <h3>What does Premium include?</h3>
-      <p>Premium unlocks higher AI credit limits, priority processing, and early access to new features. You can upgrade from Settings → Subscription.</p>
 
       <h2 id="technical">Technical</h2>
       <h3>What browsers are supported?</h3>
