@@ -705,12 +705,6 @@ const faq: DocPage = {
       <h3>Where is my data stored?</h3>
       <p>Your data is stored securely in a Supabase-hosted PostgreSQL database with row-level security. Attachments are stored in encrypted cloud storage.</p>
 
-      <h2 id="pricing">Pricing</h2>
-      <h3>Is there a free plan?</h3>
-      <p>Yes. The free plan includes all core features — notes, AI processing, Note Graph, contacts, and integrations — with a monthly AI credit limit.</p>
-      <h3>What does Premium include?</h3>
-      <p>Premium unlocks higher AI credit limits, priority processing, and early access to new features. You can upgrade from Settings → Subscription.</p>
-
       <h2 id="technical">Technical</h2>
       <h3>What browsers are supported?</h3>
       <p>Chrome, Firefox, Safari, and Edge (latest versions). The app works best on Chromium-based browsers.</p>
