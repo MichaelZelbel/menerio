@@ -686,10 +686,9 @@ const faq: DocPage = {
   headings: [
     { id: "general", title: "General" },
     { id: "ai-privacy", title: "AI & Privacy" },
-    { id: "pricing", title: "Pricing" },
     { id: "technical", title: "Technical" },
   ],
-  searchText: "faq questions answers help support pricing free premium privacy data open source self-host export",
+  searchText: "faq questions answers help support privacy data open source self-host export",
   content: () => (
     <>
       <h2 id="general">General</h2>
