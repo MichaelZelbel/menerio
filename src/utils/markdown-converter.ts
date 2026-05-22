@@ -157,6 +157,11 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/<sub>([\s\S]*?)<\/sub>/gi, (_, c) => `<sub>${c}</sub>`);
   md = md.replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, (_, c) => `==${c}==`);
 
+  // Empty paragraphs → preserve as a blank line (Obsidian behaviour).
+  // Each empty <p></p> contributes an additional `\n\n` so users can keep
+  // intentional vertical whitespace between paragraphs.
+  md = md.replace(/<p[^>]*>(?:\s|&nbsp;|<br\s*\/?>(?:\s|&nbsp;)*)*<\/p>/gi, "\n\n\n");
+
   // Paragraphs → double newlines
   md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${inlineHtml(c)}\n\n`);
 
@@ -166,10 +171,8 @@ export function htmlToMarkdown(html: string): string {
   // Decode entities
   md = decodeEntities(md);
 
-  // Normalise whitespace: collapse 3+ consecutive newlines to 2
-  md = md.replace(/\n{3,}/g, "\n\n");
-
-  return md.trim() + "\n";
+  // Trim trailing whitespace but preserve internal blank lines.
+  return md.replace(/[ \t]+\n/g, "\n").replace(/\s+$/, "") + "\n";
 }
 
 /**
