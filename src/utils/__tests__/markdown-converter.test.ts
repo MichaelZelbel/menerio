@@ -503,3 +503,48 @@ describe("markdownToHtml: list continuation lines", () => {
     expect(html).toContain("@scope/package@1.2.3");
   });
 });
+
+// ─── Blank-line preservation (Obsidian parity) ─────────────────────────
+
+describe("blank line preservation", () => {
+  it("markdownToHtml emits empty paragraphs for extra blank lines", () => {
+    const html = markdownToHtml("A\n\n\n\nB");
+    // one normal gap + 2 extra blank lines = 2 empty paragraphs between A and B
+    expect(html).toBe("<p>A</p><p></p><p></p><p>B</p>");
+  });
+
+  it("tiptapJsonToMarkdown preserves empty paragraphs as blank lines", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "A" }] },
+        { type: "paragraph" },
+        { type: "paragraph" },
+        { type: "paragraph", content: [{ type: "text", text: "B" }] },
+      ],
+    };
+    expect(tiptapJsonToMarkdown(doc)).toBe("A\n\n\n\nB");
+  });
+
+  it("round-trips: markdown → html → markdown keeps blank lines", () => {
+    const md = "A\n\n\n\nB";
+    const html = markdownToHtml(md);
+    // simulate tiptap document shape derived from html paragraphs
+    const paragraphs = html.match(/<p>(.*?)<\/p>/g) || [];
+    const doc = {
+      type: "doc",
+      content: paragraphs.map((p) => {
+        const text = p.replace(/<\/?p>/g, "");
+        return text
+          ? { type: "paragraph", content: [{ type: "text", text }] }
+          : { type: "paragraph" };
+      }),
+    };
+    expect(tiptapJsonToMarkdown(doc)).toBe(md);
+  });
+
+  it("htmlToMarkdown turns empty paragraphs into blank lines", () => {
+    const md = htmlToMarkdown("<p>A</p><p></p><p>B</p>");
+    expect(md.trim()).toBe("A\n\n\nB");
+  });
+});

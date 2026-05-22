@@ -157,6 +157,11 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/<sub>([\s\S]*?)<\/sub>/gi, (_, c) => `<sub>${c}</sub>`);
   md = md.replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, (_, c) => `==${c}==`);
 
+  // Empty paragraphs → preserve as a blank line (Obsidian behaviour).
+  // Each empty <p></p> contributes one extra `\n` (one blank source line)
+  // on top of the `\n\n` produced by surrounding paragraphs.
+  md = md.replace(/<p[^>]*>(?:\s|&nbsp;|<br\s*\/?>(?:\s|&nbsp;)*)*<\/p>/gi, "\n");
+
   // Paragraphs → double newlines
   md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${inlineHtml(c)}\n\n`);
 
@@ -166,10 +171,8 @@ export function htmlToMarkdown(html: string): string {
   // Decode entities
   md = decodeEntities(md);
 
-  // Normalise whitespace: collapse 3+ consecutive newlines to 2
-  md = md.replace(/\n{3,}/g, "\n\n");
-
-  return md.trim() + "\n";
+  // Trim trailing whitespace but preserve internal blank lines.
+  return md.replace(/[ \t]+\n/g, "\n").replace(/\s+$/, "") + "\n";
 }
 
 /**
@@ -179,8 +182,8 @@ export function htmlToMarkdown(html: string): string {
  */
 export function tiptapJsonToMarkdown(doc: TiptapNode | null | undefined): string {
   if (!doc) return "";
-  const md = serializeBlock(doc, 0).replace(/\n{3,}/g, "\n\n").trimEnd();
-  return md;
+  // Preserve user-authored blank lines (Obsidian behaviour); only trim trailing whitespace.
+  return serializeBlock(doc, 0).replace(/[ \t]+\n/g, "\n").replace(/\s+$/, "");
 }
 
 /**
@@ -214,11 +217,21 @@ export function markdownToHtml(md: string): string {
     return `%%INLINECODE_${idx}%%`;
   });
 
-  // Split into blocks by double newlines
-  const blocks = html.split(/\n{2,}/);
+  // Split into blocks by double newlines, but capture separator runs so we
+  // can preserve user-authored blank lines (Obsidian behaviour).
+  const segments = html.split(/(\n{2,})/);
   const processedBlocks: string[] = [];
 
-  for (const block of blocks) {
+  for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+    const segment = segments[segIdx];
+    // Odd indices are separator runs (\n\n, \n\n\n, …). For each newline beyond
+    // the first 2, insert one empty paragraph to render a blank line.
+    if (segIdx % 2 === 1) {
+      const extra = Math.max(0, segment.length - 2);
+      for (let i = 0; i < extra; i++) processedBlocks.push("<p></p>");
+      continue;
+    }
+    const block = segment;
     const trimmed = block.trim();
     if (!trimmed) continue;
 
@@ -374,8 +387,27 @@ function markdownListToHtml(block: string): string {
 function serializeBlock(node: TiptapNode, depth: number): string {
   const children = () => serializeInlineChildren(node);
   switch (node.type) {
-    case "doc":
-      return (node.content || []).map((child) => serializeBlock(child, depth)).filter(Boolean).join("\n\n");
+    case "doc": {
+      const kids = node.content || [];
+      const parts: string[] = [];
+      let pendingBlanks = 0;
+      for (const child of kids) {
+        const isEmptyParagraph =
+          child.type === "paragraph" && !(child.content && child.content.length);
+        if (isEmptyParagraph) {
+          pendingBlanks++;
+          continue;
+        }
+        const text = serializeBlock(child, depth);
+        if (parts.length === 0) {
+          parts.push(text);
+        } else {
+          parts.push("\n".repeat(pendingBlanks) + text);
+        }
+        pendingBlanks = 0;
+      }
+      return parts.join("\n\n") + (pendingBlanks > 0 ? "\n".repeat(pendingBlanks) : "");
+    }
     case "paragraph":
       return children();
     case "heading": {
