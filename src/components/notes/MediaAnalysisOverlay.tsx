@@ -207,12 +207,17 @@ function MediaBadge({ element, status, matches, isExpanded, onToggle, noteId, st
     return () => clearInterval(interval);
   }, [element]);
 
+  // Ensure the element's parent has relative positioning for the badge.
+  // Run in an effect (not during render) so the style write doesn't feed back
+  // into the parent MutationObserver and trigger a render loop.
+  useEffect(() => {
+    if (element.parentElement && element.parentElement.style.position !== "relative") {
+      element.parentElement.style.position = "relative";
+    }
+  }, [element]);
+
   if (!pos) return null;
 
-  // Ensure the element's parent has relative positioning for the badge
-  if (element.parentElement) {
-    element.parentElement.style.position = "relative";
-  }
 
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
