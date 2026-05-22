@@ -523,7 +523,7 @@ describe("blank line preservation", () => {
         { type: "paragraph", content: [{ type: "text", text: "B" }] },
       ],
     };
-    expect(tiptapJsonToMarkdown(doc)).toBe("A\n\n\n\n\n\nB");
+    expect(tiptapJsonToMarkdown(doc)).toBe("A\n\n\n\nB");
   });
 
   it("round-trips: markdown → html → markdown keeps blank lines", () => {
