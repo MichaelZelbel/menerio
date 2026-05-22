@@ -387,8 +387,27 @@ function markdownListToHtml(block: string): string {
 function serializeBlock(node: TiptapNode, depth: number): string {
   const children = () => serializeInlineChildren(node);
   switch (node.type) {
-    case "doc":
-      return (node.content || []).map((child) => serializeBlock(child, depth)).join("\n\n");
+    case "doc": {
+      const kids = node.content || [];
+      const parts: string[] = [];
+      let pendingBlanks = 0;
+      for (const child of kids) {
+        const isEmptyParagraph =
+          child.type === "paragraph" && !(child.content && child.content.length);
+        if (isEmptyParagraph) {
+          pendingBlanks++;
+          continue;
+        }
+        const text = serializeBlock(child, depth);
+        if (parts.length === 0) {
+          parts.push(text);
+        } else {
+          parts.push("\n".repeat(pendingBlanks) + text);
+        }
+        pendingBlanks = 0;
+      }
+      return parts.join("\n\n") + (pendingBlanks > 0 ? "\n".repeat(pendingBlanks) : "");
+    }
     case "paragraph":
       return children();
     case "heading": {
