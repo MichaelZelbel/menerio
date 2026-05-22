@@ -158,9 +158,9 @@ export function htmlToMarkdown(html: string): string {
   md = md.replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, (_, c) => `==${c}==`);
 
   // Empty paragraphs → preserve as a blank line (Obsidian behaviour).
-  // Each empty <p></p> contributes an additional `\n\n` so users can keep
-  // intentional vertical whitespace between paragraphs.
-  md = md.replace(/<p[^>]*>(?:\s|&nbsp;|<br\s*\/?>(?:\s|&nbsp;)*)*<\/p>/gi, "\n\n\n");
+  // Each empty <p></p> contributes one extra `\n` (one blank source line)
+  // on top of the `\n\n` produced by surrounding paragraphs.
+  md = md.replace(/<p[^>]*>(?:\s|&nbsp;|<br\s*\/?>(?:\s|&nbsp;)*)*<\/p>/gi, "\n");
 
   // Paragraphs → double newlines
   md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, c) => `${inlineHtml(c)}\n\n`);
