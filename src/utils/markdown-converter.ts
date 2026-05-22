@@ -378,7 +378,7 @@ function serializeBlock(node: TiptapNode, depth: number): string {
   const children = () => serializeInlineChildren(node);
   switch (node.type) {
     case "doc":
-      return (node.content || []).map((child) => serializeBlock(child, depth)).filter(Boolean).join("\n\n");
+      return (node.content || []).map((child) => serializeBlock(child, depth)).join("\n\n");
     case "paragraph":
       return children();
     case "heading": {
