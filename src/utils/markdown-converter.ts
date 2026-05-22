@@ -217,11 +217,21 @@ export function markdownToHtml(md: string): string {
     return `%%INLINECODE_${idx}%%`;
   });
 
-  // Split into blocks by double newlines
-  const blocks = html.split(/\n{2,}/);
+  // Split into blocks by double newlines, but capture separator runs so we
+  // can preserve user-authored blank lines (Obsidian behaviour).
+  const segments = html.split(/(\n{2,})/);
   const processedBlocks: string[] = [];
 
-  for (const block of blocks) {
+  for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+    const segment = segments[segIdx];
+    // Odd indices are separator runs (\n\n, \n\n\n, …). For each newline beyond
+    // the first 2, insert one empty paragraph to render a blank line.
+    if (segIdx % 2 === 1) {
+      const extra = Math.max(0, segment.length - 2);
+      for (let i = 0; i < extra; i++) processedBlocks.push("<p></p>");
+      continue;
+    }
+    const block = segment;
     const trimmed = block.trim();
     if (!trimmed) continue;
 
