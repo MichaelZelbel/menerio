@@ -182,8 +182,8 @@ export function htmlToMarkdown(html: string): string {
  */
 export function tiptapJsonToMarkdown(doc: TiptapNode | null | undefined): string {
   if (!doc) return "";
-  const md = serializeBlock(doc, 0).replace(/\n{3,}/g, "\n\n").trimEnd();
-  return md;
+  // Preserve user-authored blank lines (Obsidian behaviour); only trim trailing whitespace.
+  return serializeBlock(doc, 0).replace(/[ \t]+\n/g, "\n").replace(/\s+$/, "");
 }
 
 /**
