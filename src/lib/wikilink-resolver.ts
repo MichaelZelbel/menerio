@@ -34,6 +34,15 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function decodeHtmlAttribute(str: string): string {
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
 /**
  * Replace raw `[[Title]]` occurrences in HTML with WikilinkExtension-compatible
  * spans. Skips occurrences inside <pre>, <code> tags, or already-rendered
@@ -45,6 +54,19 @@ export function resolveWikilinksInHtml(
   titleMap: Map<string, string>
 ): string {
   if (!html || !html.includes("[[")) return html;
+
+  html = html.replace(/<span\b[^>]*data-wikilink="true"[^>]*>/gi, (tag) => {
+    const existingId = tag.match(/\bdata-note-id="([^"]*)"/i)?.[1];
+    if (existingId) return tag;
+    const rawTitle = tag.match(/\bdata-note-title="([^"]*)"/i)?.[1];
+    if (!rawTitle) return tag;
+    const id = titleMap.get(decodeHtmlAttribute(rawTitle).trim().toLowerCase());
+    if (!id) return tag;
+    if (/\bdata-note-id="[^"]*"/i.test(tag)) {
+      return tag.replace(/\bdata-note-id="[^"]*"/i, `data-note-id="${id}"`);
+    }
+    return tag.replace(/>$/, ` data-note-id="${id}">`);
+  });
 
   // Mask zones where we should NOT substitute: existing wikilink spans, <pre>, <code>.
   const masks: string[] = [];
