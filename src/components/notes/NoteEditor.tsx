@@ -448,8 +448,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }
   }, [createNote]);
 
-  const handleNavigateToNote = useCallback((noteId: string) => {
-    navigate(`/dashboard/notes/${noteId}`);
+  const handleNavigateToNote = useCallback((noteId: string, noteTitle?: string) => {
+    if (noteId) {
+      navigate(`/dashboard/notes/${noteId}`);
+      return;
+    }
+    const resolvedId = noteTitle ? titleMapRef.current?.get(noteTitle.trim().toLowerCase()) : null;
+    if (resolvedId) navigate(`/dashboard/notes/${resolvedId}`);
   }, [navigate]);
 
   const editor = useEditor({
