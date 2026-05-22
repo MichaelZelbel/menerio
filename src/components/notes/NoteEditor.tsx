@@ -517,6 +517,18 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       TaskListShortcut,
     ],
     editorProps: {
+      handleClick: (_view, _pos, event) => {
+        const target = event.target as HTMLElement;
+        const wikilinkEl = target.closest?.(".wikilink-node") as HTMLElement | null;
+        if (!wikilinkEl) return false;
+        const noteId = wikilinkEl.getAttribute("data-note-id") || "";
+        const noteTitle = wikilinkEl.getAttribute("data-note-title") || "";
+        if (!noteId && !noteTitle) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        handleNavigateToNote(noteId, noteTitle);
+        return true;
+      },
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData("text/plain");
         if (!text) return false;
