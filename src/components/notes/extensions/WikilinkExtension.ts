@@ -9,7 +9,7 @@ import { ReactNodeViewRenderer } from "@tiptap/react";
  */
 
 export interface WikilinkOptions {
-  onNavigate?: (noteId: string) => void;
+  onNavigate?: (noteId: string, noteTitle?: string) => void;
   onOpenAutocomplete?: (pos: number) => void;
 }
 
@@ -117,9 +117,12 @@ export const WikilinkExtension = Node.create<WikilinkOptions>({
             const target = event.target as HTMLElement;
             const wikilinkEl = target.closest?.(".wikilink-node");
             if (wikilinkEl) {
-              const noteId = wikilinkEl.getAttribute("data-note-id");
-              if (noteId && extension.options.onNavigate) {
-                extension.options.onNavigate(noteId);
+              const noteId = wikilinkEl.getAttribute("data-note-id") || "";
+              const noteTitle = wikilinkEl.getAttribute("data-note-title") || "";
+              if ((noteId || noteTitle) && extension.options.onNavigate) {
+                event.preventDefault();
+                event.stopPropagation();
+                extension.options.onNavigate(noteId, noteTitle);
                 return true;
               }
             }
