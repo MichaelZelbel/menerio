@@ -48,6 +48,7 @@ export function MediaAnalysisOverlay({ noteId, editorContainerRef }: MediaAnalys
   const [mediaElements, setMediaElements] = useState<MediaElementInfo[]>([]);
   const [expandedSrc, setExpandedSrc] = useState<string | null>(null);
   const observerRef = useRef<MutationObserver | null>(null);
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scanMedia = useCallback(() => {
     const container = editorContainerRef.current;
@@ -79,8 +80,31 @@ export function MediaAnalysisOverlay({ noteId, editorContainerRef }: MediaAnalys
       }
     });
 
-    setMediaElements(elements);
+    // Only update state when the set of media actually changed — otherwise we
+    // create a new array on every observer tick which feeds back into the
+    // MutationObserver and pegs the main thread (breaking editor pointer events).
+    setMediaElements((prev) => {
+      if (prev.length === elements.length) {
+        let identical = true;
+        for (let i = 0; i < prev.length; i++) {
+          if (prev[i].element !== elements[i].element || prev[i].src !== elements[i].src) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical) return prev;
+      }
+      return elements;
+    });
   }, [editorContainerRef]);
+
+  const scheduleScan = useCallback(() => {
+    if (scanTimerRef.current) return; // coalesce rapid mutations
+    scanTimerRef.current = setTimeout(() => {
+      scanTimerRef.current = null;
+      scanMedia();
+    }, 200);
+  }, [scanMedia]);
 
   // Observe DOM changes in editor
   useEffect(() => {
@@ -89,11 +113,11 @@ export function MediaAnalysisOverlay({ noteId, editorContainerRef }: MediaAnalys
 
     scanMedia();
 
-    observerRef.current = new MutationObserver(() => {
-      // Debounce re-scan
-      setTimeout(scanMedia, 200);
-    });
+    observerRef.current = new MutationObserver(scheduleScan);
 
+    // Only watch for structural changes and `src` swaps. Avoid `attributes: true`
+    // so our own style writes (e.g. setting `position: relative` on parents)
+    // don't feed back into the observer.
     observerRef.current.observe(container, {
       childList: true,
       subtree: true,
@@ -102,7 +126,7 @@ export function MediaAnalysisOverlay({ noteId, editorContainerRef }: MediaAnalys
     });
 
     // Re-scan on scroll/resize
-    const rescan = () => setTimeout(scanMedia, 100);
+    const rescan = () => scheduleScan();
     window.addEventListener("resize", rescan);
     container.addEventListener("scroll", rescan, true);
 
@@ -110,13 +134,18 @@ export function MediaAnalysisOverlay({ noteId, editorContainerRef }: MediaAnalys
       observerRef.current?.disconnect();
       window.removeEventListener("resize", rescan);
       container.removeEventListener("scroll", rescan, true);
+      if (scanTimerRef.current) {
+        clearTimeout(scanTimerRef.current);
+        scanTimerRef.current = null;
+      }
     };
-  }, [editorContainerRef, scanMedia, noteId]);
+  }, [editorContainerRef, scanMedia, scheduleScan, noteId]);
 
   // Re-scan when analysis entries change (new entries arrive)
   useEffect(() => {
     scanMedia();
   }, [analysisEntries, scanMedia]);
+
 
   if (analysisEntries.length === 0 && mediaElements.length === 0) return null;
 
