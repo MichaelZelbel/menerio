@@ -780,6 +780,9 @@ server.registerTool(
       if (!existing || existing.user_id !== getCurrentUserId()) {
         return jsonTool({ error: "Note not found" });
       }
+      try { await assertWritable(supabase, getCurrentUserId(), "note", note_id); }
+      catch (e) { return jsonTool({ error: (e as Error).message }); }
+
 
       const updates = restore
         ? { is_trashed: false, trashed_at: null }
