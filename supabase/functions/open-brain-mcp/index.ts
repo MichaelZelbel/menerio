@@ -7,6 +7,16 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
+import {
+  applyVisibility,
+  assertWritable,
+  enterVisibilityScope,
+  filterVisibleNotes,
+  getSensitivePersonIds,
+  redactContactList,
+  redactSensitiveContact,
+} from "./_mcp_visibility.ts";
+
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
