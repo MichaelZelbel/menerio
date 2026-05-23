@@ -171,10 +171,31 @@ export default function TimelinePage() {
       <SEOHead title="Timeline — Menerio" noIndex />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div><h1 className="text-2xl font-display font-bold">Timeline</h1><p className="text-sm text-muted-foreground">{filteredMoments.length} moment{filteredMoments.length !== 1 ? "s" : ""} shown</p></div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              type="search"
+              placeholder="Search moments…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 w-56 pl-8 pr-8"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}><CollapsibleTrigger asChild><Button variant="outline" size="sm"><Filter className="mr-2 h-4 w-4" />Filters{personFilter.length > 0 && <Badge variant="secondary" className="ml-1.5 text-[10px]">{personFilter.length}</Badge>}<ChevronDown className="ml-1 h-3 w-3" /></Button></CollapsibleTrigger></Collapsible>
           <AddEventDialog people={people} onCreated={fetchData} />
         </div>
+
       </div>
 
       <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
