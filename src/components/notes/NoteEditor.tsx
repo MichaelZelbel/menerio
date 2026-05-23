@@ -42,6 +42,7 @@ import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { useToggleMcpVisibility } from "@/hooks/useMcpVisibility";
+import { McpVisibilityButton } from "@/components/common/McpVisibilityButton";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
