@@ -80,6 +80,7 @@ export default function People() {
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
+  const toggleSensitive = useToggleSensitivePerson();
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [bulkGroupId, setBulkGroupId] = useState("");
   const addMembership = useAddMembership();
