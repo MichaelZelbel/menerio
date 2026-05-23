@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Users } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Search, Users, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { SEOHead } from "@/components/SEOHead";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -62,6 +63,8 @@ export default function TimelinePage() {
   const [minConfDate, setMinConfDate] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [personFilter, setPersonFilter] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
 
   const fetchData = async () => {
     if (!user) return;
@@ -101,17 +104,26 @@ export default function TimelinePage() {
     }
   }, [searchParams, setSearchParams]);
 
-  const filteredMoments = useMemo(() => moments.filter((m) => {
-    if (m.impact_level < minImpact) return false;
-    if (m.confidence_truth < minConfTruth) return false;
-    if (m.confidence_date < minConfDate) return false;
-    if (statusFilter.length > 0 && !statusFilter.includes(m.status)) return false;
-    if (personFilter.length > 0) {
-      const ids = participantMap[m.id] || [];
-      if (!personFilter.some((id) => ids.includes(id))) return false;
-    }
-    return true;
-  }), [moments, minImpact, minConfTruth, minConfDate, statusFilter, personFilter, participantMap]);
+  const filteredMoments = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return moments.filter((m) => {
+      if (m.impact_level < minImpact) return false;
+      if (m.confidence_truth < minConfTruth) return false;
+      if (m.confidence_date < minConfDate) return false;
+      if (statusFilter.length > 0 && !statusFilter.includes(m.status)) return false;
+      if (personFilter.length > 0) {
+        const ids = participantMap[m.id] || [];
+        if (!personFilter.some((id) => ids.includes(id))) return false;
+      }
+      if (q) {
+        const inTitle = m.title?.toLowerCase().includes(q);
+        const inDesc = m.description?.toLowerCase().includes(q);
+        if (!inTitle && !inDesc) return false;
+      }
+      return true;
+    });
+  }, [moments, minImpact, minConfTruth, minConfDate, statusFilter, personFilter, participantMap, searchQuery]);
+
 
   const groupedByYear = useMemo(() => {
     const groups: Record<string, TimelineMoment[]> = {};
@@ -152,17 +164,38 @@ export default function TimelinePage() {
     setEditDialogOpen(true);
   };
 
-  const clearFilters = () => { setMinImpact(1); setMinConfTruth(0); setMinConfDate(0); setStatusFilter([]); setPersonFilter([]); };
+  const clearFilters = () => { setMinImpact(1); setMinConfTruth(0); setMinConfDate(0); setStatusFilter([]); setPersonFilter([]); setSearchQuery(""); };
 
   return (
     <div className="space-y-6">
       <SEOHead title="Timeline — Menerio" noIndex />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div><h1 className="text-2xl font-display font-bold">Timeline</h1><p className="text-sm text-muted-foreground">{filteredMoments.length} moment{filteredMoments.length !== 1 ? "s" : ""} shown</p></div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              type="search"
+              placeholder="Search moments…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 w-56 pl-8 pr-8"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}><CollapsibleTrigger asChild><Button variant="outline" size="sm"><Filter className="mr-2 h-4 w-4" />Filters{personFilter.length > 0 && <Badge variant="secondary" className="ml-1.5 text-[10px]">{personFilter.length}</Badge>}<ChevronDown className="ml-1 h-3 w-3" /></Button></CollapsibleTrigger></Collapsible>
           <AddEventDialog people={people} onCreated={fetchData} />
         </div>
+
       </div>
 
       <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
@@ -180,7 +213,7 @@ export default function TimelinePage() {
         </CollapsibleContent>
       </Collapsible>
 
-      {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div> : groupedByYear.length === 0 ? <div className="text-center py-20 text-muted-foreground space-y-4"><Calendar className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments yet</p><p className="text-sm">Add moments manually to build your timeline.</p><AddEventDialog people={people} onCreated={fetchData} /></div> : <div className="space-y-8">{groupedByYear.map(([year, yearMoments]) => <div key={year}><div className="flex items-center gap-3 mb-4"><span className="text-2xl font-bold text-foreground">{year}</span><Separator className="flex-1" /><span className="text-xs text-muted-foreground">{yearMoments.length} moment{yearMoments.length !== 1 ? "s" : ""}</span></div><div className="relative ml-4 border-l-2 border-border pl-6 space-y-4">{yearMoments.map((moment) => <button key={moment.id} onClick={() => openMomentDrawer(moment)} className="block w-full text-left group"><div className="absolute -left-[9px] h-4 w-4 rounded-full border-2 border-background bg-primary mt-1" /><Card className="transition-shadow hover:shadow-md cursor-pointer"><CardContent className="py-3 px-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="font-medium text-sm truncate">{moment.title}</p><p className="text-xs text-muted-foreground mt-0.5">{format(new Date(moment.happened_at), "MMM d, yyyy")}{moment.happened_end && ` — ${format(new Date(moment.happened_end), "MMM d, yyyy")}`}</p></div><div className="flex items-center gap-1.5 shrink-0"><Badge variant="outline" className={`text-[10px] px-1.5 ${statusClasses[moment.status] || ""}`}>{moment.status.replace("_", " ")}</Badge>{(provenanceMap[moment.id] || []).length > 0 && <FileText className="h-3 w-3 text-muted-foreground" />}{moment.verified && <CheckCircle2 className="h-3 w-3 text-success" />}</div></div></CardContent></Card></button>)}</div></div>)}</div>}
+      {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div> : groupedByYear.length === 0 ? (searchQuery.trim() || statusFilter.length > 0 || personFilter.length > 0 || minImpact > 1 || minConfTruth > 0 || minConfDate > 0) ? <div className="text-center py-20 text-muted-foreground space-y-4"><Search className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments match your filters</p><Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button></div> : <div className="text-center py-20 text-muted-foreground space-y-4"><Calendar className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments yet</p><p className="text-sm">Add moments manually to build your timeline.</p><AddEventDialog people={people} onCreated={fetchData} /></div> : <div className="space-y-8">{groupedByYear.map(([year, yearMoments]) => <div key={year}><div className="flex items-center gap-3 mb-4"><span className="text-2xl font-bold text-foreground">{year}</span><Separator className="flex-1" /><span className="text-xs text-muted-foreground">{yearMoments.length} moment{yearMoments.length !== 1 ? "s" : ""}</span></div><div className="relative ml-4 border-l-2 border-border pl-6 space-y-4">{yearMoments.map((moment) => <button key={moment.id} onClick={() => openMomentDrawer(moment)} className="block w-full text-left group"><div className="absolute -left-[9px] h-4 w-4 rounded-full border-2 border-background bg-primary mt-1" /><Card className="transition-shadow hover:shadow-md cursor-pointer"><CardContent className="py-3 px-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="font-medium text-sm truncate">{moment.title}</p><p className="text-xs text-muted-foreground mt-0.5">{format(new Date(moment.happened_at), "MMM d, yyyy")}{moment.happened_end && ` — ${format(new Date(moment.happened_end), "MMM d, yyyy")}`}</p></div><div className="flex items-center gap-1.5 shrink-0"><Badge variant="outline" className={`text-[10px] px-1.5 ${statusClasses[moment.status] || ""}`}>{moment.status.replace("_", " ")}</Badge>{(provenanceMap[moment.id] || []).length > 0 && <FileText className="h-3 w-3 text-muted-foreground" />}{moment.verified && <CheckCircle2 className="h-3 w-3 text-success" />}</div></div></CardContent></Card></button>)}</div></div>)}</div>}
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}><SheetContent className="sm:max-w-lg overflow-y-auto">{selectedMoment && <><SheetHeader><SheetTitle>{selectedMoment.title}</SheetTitle><SheetDescription>{format(new Date(selectedMoment.happened_at), "MMMM d, yyyy")}{selectedMoment.happened_end && ` — ${format(new Date(selectedMoment.happened_end), "MMMM d, yyyy")}`}</SheetDescription></SheetHeader><div className="mt-6 space-y-6"><Button variant="outline" size="sm" onClick={() => openEditDialog(selectedMoment)}><Pencil className="mr-2 h-4 w-4" /> Edit Moment</Button>{selectedMoment.description && <p className="text-sm text-muted-foreground">{selectedMoment.description}</p>}<div className="grid grid-cols-3 gap-3 text-center"><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Impact</p><p className="text-lg font-bold">{selectedMoment.impact_level}/4</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Truth</p><p className="text-lg font-bold">{selectedMoment.confidence_truth}/10</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Date</p><p className="text-lg font-bold">{selectedMoment.confidence_date}/10</p></div></div><div className="flex gap-2 flex-wrap"><Badge variant="outline" className={statusClasses[selectedMoment.status] || ""}>{selectedMoment.status.replace("_", " ")}</Badge><Badge variant="outline">Source: {selectedMoment.source}</Badge></div>{selectedMoment.participants && selectedMoment.participants.length > 0 && <div><h2 className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="h-4 w-4" /> Participants</h2><div className="flex gap-2 flex-wrap">{selectedMoment.participants.map((p) => <Badge key={p.id} variant="secondary">{p.name}</Badge>)}</div></div>}</div></>}</SheetContent></Sheet>
       <AddEventDialog people={people} onCreated={fetchData} editEvent={editMomentData} open={editDialogOpen} onOpenChange={setEditDialogOpen} />

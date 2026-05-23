@@ -1,32 +1,26 @@
-## Goal
-Get `https://menerio.com/` verified in Google Search Console so it shows up as a property and starts collecting indexing/search data.
+## Status
+Die Timeline-Seite (`/dashboard/timeline`) hat aktuell nur Filter (Impact, Confidence, Status, Personen). Eine Textsuche nach Momenten existiert noch nicht — also: noch nicht implementiert, lässt sich aber sauber ergänzen.
 
-## Why the meta-tag method
-Lovable-hosted apps can't use DNS, file-upload, or Analytics verification reliably. The `META` method works: we drop a `<meta name="google-site-verification" content="...">` into `index.html`, deploy, then ask Google to verify.
+## Plan: Suchfeld in der Timeline
 
-## Steps
+### UX
+- Suchfeld in der Header-Zeile neben dem "Filters"-Button (links davon), mit Lupen-Icon und Placeholder „Search moments…".
+- Client-seitige Filterung der bereits geladenen Momente — kein zusätzlicher DB-Roundtrip, sofort responsiv.
+- Case-insensitive, matched gegen **Titel** und **Beschreibung**.
+- Leeres Suchfeld = alle Momente (wie heute).
+- Trefferanzahl im bestehenden „X moments shown"-Text bleibt korrekt, da Suche Teil des `filteredMoments`-Memos wird.
+- „Show All"-Button im Filter-Panel setzt auch das Suchfeld zurück.
+- Wenn kein Treffer: bestehender Empty-State wird angepasst, sodass bei aktiver Suche „No moments match your search" angezeigt wird (statt „No moments yet").
 
-1. **Request a verification token from Google** (via the Search Console connector gateway) for the identifier `https://menerio.com/`. Google returns the exact `content` value to use.
+### Technisch
+- Neuer State `searchQuery: string` in `TimelinePage.tsx`.
+- `filteredMoments` erweitern: Wenn `searchQuery.trim()` nicht leer, filtern auf `title.toLowerCase().includes(q)` ODER `description?.toLowerCase().includes(q)`.
+- `clearFilters` setzt zusätzlich `setSearchQuery("")`.
+- Input-Komponente: bestehendes `@/components/ui/input` mit `Search`-Icon (lucide-react) als Adornment.
+- Keine Änderungen an Datenbank, Edge Functions oder Typen nötig.
 
-2. **Add the meta tag to `index.html`** inside `<head>`:
-   ```html
-   <meta name="google-site-verification" content="<TOKEN>" />
-   ```
+### Optional (nicht in diesem Schritt, nur erwähnt)
+- Später erweiterbar auf Suche in Teilnehmer-Namen oder Provenance-Snippets — bewusst nicht jetzt, um den Scope klein zu halten.
 
-3. **You republish** so the tag is live on `https://menerio.com/`. (Frontend changes only go live after Publish → Update.)
-
-4. **Trigger Google's verification check** through the gateway. A 200 means verified. If it fails with `failedToFindMetaTag`, we re-check the deploy.
-
-5. **Add the verified site to Search Console** so it appears in your property list and starts collecting data.
-
-6. **Optional follow-up:** submit `https://menerio.com/sitemap.xml` via the Sitemaps API so indexing kicks off immediately.
-
-## What you need to do
-- Confirm `menerio.com` is the domain to verify (not `www.menerio.com` or the `.lovable.app` URL).
-- After I add the meta tag, click **Publish → Update** so the change is live before I trigger verification.
-
-## Technical details
-- Gateway: `https://connector-gateway.lovable.dev/google_search_console`
-- Uses your already-connected `GOOGLE_SEARCH_CONSOLE_API_KEY`
-- Only file edited: `index.html` (one meta tag added in `<head>`)
-- No code changes outside that single tag
+### Geänderte Datei
+- `src/pages/TimelinePage.tsx`
