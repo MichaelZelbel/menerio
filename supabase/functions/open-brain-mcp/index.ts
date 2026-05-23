@@ -1070,8 +1070,9 @@ server.registerTool(
     try {
       let q = supabase
         .from("contacts")
-        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes")
+        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes, is_sensitive, mcp_visibility")
         .eq("user_id", getCurrentUserId())
+        .is("merged_into", null)
         .order("name")
         .limit(limit);
 
@@ -1080,12 +1081,17 @@ server.registerTool(
         q = q.or(`name.ilike.*${qq}*,company.ilike.*${qq}*`);
       }
       if (relationship) q = q.eq("relationship", relationship);
+      q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
 
       const { data, error } = await q;
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
+      const redacted = redactContactList(data || []);
+      if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
-      const lines = data.map((c: any, i: number) => {
+      const lines = redacted.map((c: any, i: number) => {
+        if (c._redacted) {
+          return `${i + 1}. ${c.name}${c.relationship ? ` (${c.relationship})` : ""} — 🔒 marked sensitive, PII hidden from AI.`;
+        }
         const parts = [`${i + 1}. ${c.name}`];
         if (c.relationship) parts.push(`(${c.relationship})`);
         if (c.company) parts.push(`@ ${c.company}`);
@@ -1098,12 +1104,13 @@ server.registerTool(
         return parts.join(" ");
       });
 
-      return { content: [{ type: "text" as const, text: `${data.length} contact(s):\n\n${lines.join("\n\n")}` }] };
+      return { content: [{ type: "text" as const, text: `${redacted.length} contact(s):\n\n${lines.join("\n\n")}` }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
+
 
 // Tool 8: Get Contact Context
 server.registerTool(
