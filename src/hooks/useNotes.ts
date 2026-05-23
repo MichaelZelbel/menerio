@@ -33,6 +33,7 @@ export interface Note {
   sync_status: string;
   structured_fields: Record<string, unknown>;
   related: RelatedItem[];
+  mcp_visibility?: "visible" | "hidden";
   created_at: string;
   updated_at: string;
 }
