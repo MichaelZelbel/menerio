@@ -1,66 +1,61 @@
-## Ziel
+## Korrekturen am MCP-Sichtbarkeits-Button
 
-Einheitlicher, kleiner MyCö-Sichtbarkeits-Button für alle Datentypen (People, Notes, Moments, Collection-Items, Action-Items). Klares mentales Modell: **Auge = sichtbar via MyCö**, **durchgestrichenes Auge = versteckt**. Kein Schild mehr — Schild suggeriert fälschlich „geschützt vs. ungeschützt".
+### 1. Beschriftung: „MyCö" → „MCP"
 
-## Neue Komponente: `<McpVisibilityButton />`
+Diktierfehler überall im UI ersetzen. Backend-Code, DB-Spalten und Hook-Namen bleiben unverändert — nur sichtbare Strings.
 
-Ein einziger, wiederverwendbarer Pill-Button, identisch in Aussehen und Verhalten überall:
+Betroffen: `src/components/common/McpVisibilityButton.tsx`
+- Label im sichtbaren Zustand: `"MCP"` statt `"MyCö"`.
+- Tooltip-Texte:
+  - sichtbar (item): „Visible to MCP clients (ChatGPT, Claude, …). Click to hide."
+  - versteckt (item): „Hidden from MCP clients. Click to make visible."
+  - sichtbar (person): „Visible to MCP clients. Click to hide this person and everything linked to them."
+  - versteckt (person): „Hidden from MCP clients. Linked notes & moments are hidden too. Click to make visible."
 
-- **Aus-Zustand (default, sichtbar)**: `Eye`-Icon + Label „MyCö" — dezent (`variant="outline"`, muted Foreground).
-- **An-Zustand (versteckt)**: `EyeOff`-Icon + Label „Hidden" — etwas akzentuiert (`variant="secondary"` oder amber tint), damit klar ist „Status aktiv geändert".
-- Tooltip:
-  - sichtbar → „Visible via MyCö (MCP / ChatGPT, Claude …). Click to hide."
-  - versteckt → „Hidden from MyCö. Click to make visible again."
-- Größe: `size="sm"`, kompakt — passt in Header-Leisten und Listen-Rows.
-- Loading-State während Mutation.
+Außerdem Toast-Texte in `src/hooks/useMcpVisibility.ts` bleiben bereits korrekt („MCP clients") — keine Änderung nötig.
 
-Props:
+Kurzer Sweep nach versehentlichen weiteren „MyCö"-Vorkommen via `rg -n "MyCö"` und ggf. ersetzen.
+
+### 2. Bug: Button aktualisiert sich verzögert beim Zurücktoggeln auf „Visible"
+
+**Diagnose.** `McpVisibilityButton` ist ein reiner Prop-Konsument (`hidden` kommt von oben). Nach dem Klick:
+1. Mutation läuft → `pending=true` → Spinner.
+2. Erfolg → `qc.invalidateQueries({ queryKey: ["notes"] })`.
+3. `useNotes` refetched, `allNotes` aktualisiert sich, `selectedNote` (in `Notes.tsx`) wird über `useMemo` neu berechnet, `NoteEditor` re-rendered, neuer `hidden`-Wert kommt am Button an.
+
+Die Verzögerung beim Zurückwechseln entsteht, weil zwischen Mutation-Ende und Refetch-Ergebnis ein sichtbares Frame-Fenster liegt — beim Hidden-Setzen merkt man es kaum (Spinner deckt Wechsel ab + Border-Dashed-Klasse ist sehr augenfällig), beim Zurücksetzen wirkt das identische Frame wie „nichts passiert", bis ein Hover-Event einen Re-Render erzwingt.
+
+**Fix.** `McpVisibilityButton` führt einen lokalen optimistic-State:
+
 ```ts
-type EntityKind = "person" | "note" | "moment" | "collection_item" | "action_item";
-{ kind: EntityKind; id: string; hidden: boolean; className?: string }
+const [optimistic, setOptimistic] = useState(hidden);
+useEffect(() => setOptimistic(hidden), [hidden]);
+
+const onClick = () => {
+  const next = !optimistic;
+  setOptimistic(next);          // sofortiges UI-Feedback in beide Richtungen
+  if (kind === "person") togglePerson.mutate(
+    { id, isSensitive: next },
+    { onError: () => setOptimistic(hidden) }
+  );
+  else toggleItem.mutate(
+    { id, visibility: next ? "hidden" : "visible" },
+    { onError: () => setOptimistic(hidden) }
+  );
+};
 ```
 
-Intern entscheidet die Komponente:
-- Bei `kind="person"` ruft sie `useToggleSensitivePerson` auf (toggelt `is_sensitive`, wirkt zusätzlich auf verknüpfte Items).
-- Bei allen anderen ruft sie `useToggleMcpVisibility(kind)` auf (toggelt `mcp_visibility`).
+Render verwendet `optimistic` statt `hidden` für Icon, Label, Tooltip und Border-Variante. Bei Fehler wird auf den Prop-Wert zurückgesetzt, bei Erfolg sorgt der `useEffect` für Sync mit der frisch gefetchten Wahrheit. Damit ist das Toggling in beide Richtungen sofort sichtbar — unabhängig vom Refetch-Timing.
 
-So bleibt für den Nutzer das Label **immer** „MyCö / Hidden" mit Auge — die unterschiedliche Backend-Semantik (Person = sensitiv inkl. Vererbung, Item = nur dieses Objekt) bleibt unsichtbar im Tooltip-Detail erklärt:
-- Person-Tooltip ergänzt: „Also hides all notes and moments linked to this person."
+Zusätzlich: `qc.invalidateQueries({ queryKey: ["notes"], refetchType: "active" })` im Hook lassen wie es ist (kein Fix nötig, der Re-Render hängt jetzt nicht mehr daran).
 
-## Einbauorte
+### Geänderte Dateien
 
-1. **People** (`src/pages/People.tsx`) — ersetzt aktuellen Shield-Button + „Sensitive"-Badge im Header der Detail-Ansicht.
-2. **NoteEditor** (`src/components/notes/NoteEditor.tsx`) — ersetzt „MCP hidden"-Badge + Dropdown-Item „Hide from MCP / AI clients". Button wandert in die Header-Toolbar neben die anderen Actions.
-3. **AddEventDialog / Moment-Detail-Drawer** (`src/components/timeline/AddEventDialog.tsx`, `src/pages/TimelinePage.tsx` Sheet) — Button im Drawer-Header.
-4. **CollectionDetail** (`src/pages/CollectionDetail.tsx`) — Button in der Item-Detail-Ansicht (Header oder Inline-Row je nach Layout).
-5. **Actions** (`src/pages/Actions.tsx`) — Button am Action-Item-Row (klein, rechts).
+- `src/components/common/McpVisibilityButton.tsx` — Label/Tooltips „MCP", lokaler Optimistic-State.
 
-Alle bisherigen Shield-Icons/„Mark sensitive"/„MCP hidden"-Badges werden entfernt — eine einzige visuelle Sprache überall.
+### Verifikation
 
-## Aufräumen
-
-- Shield/ShieldOff-Imports in `People.tsx` raus.
-- Separates „MCP hidden"-Badge in NoteEditor raus (Button kommuniziert den Zustand bereits).
-- Dropdown-Item „Hide from MCP" im NoteEditor-Menü raus (redundant zum Button).
-
-## Was unverändert bleibt
-
-- Backend-Filter, RPCs, Hooks (`useToggleMcpVisibility`, `useToggleSensitivePerson`) — nur die UI-Hülle ändert sich.
-- DB-Schema, MCP-Server-Logik.
-
-## Geänderte/neue Dateien
-
-- `src/components/common/McpVisibilityButton.tsx` (neu)
-- `src/pages/People.tsx` (Shield-Button ersetzen)
-- `src/components/notes/NoteEditor.tsx` (Badge + Dropdown raus, Button rein)
-- `src/components/timeline/AddEventDialog.tsx` und/oder `src/pages/TimelinePage.tsx` (Button im Drawer)
-- `src/pages/CollectionDetail.tsx` (Button einbauen)
-- `src/pages/Actions.tsx` (Button pro Row)
-
-## Verifikation
-
-- Button sieht in allen fünf Kontexten identisch aus.
-- Sichtbarer Zustand = Auge + „MyCö"; versteckter Zustand = durchgestrichenes Auge + „Hidden".
-- Klick toggelt sofort, Tooltip erklärt Konsequenz.
-- Bei Person zusätzlich Hinweis im Tooltip, dass auch verknüpfte Items betroffen sind.
-- Keine Shield-Icons mehr im Codebase im Kontext MCP/Sensitive.
+- Alle Buttons zeigen „MCP" statt „MyCö"; keine „MyCö"-Treffer mehr in `src/`.
+- Klick „MCP" → „Hidden" wechselt sofort, Mutation läuft im Hintergrund, Spinner kurz im Icon.
+- Klick „Hidden" → „MCP" wechselt ebenfalls sofort — kein Hover mehr nötig.
+- Bei simuliertem Mutation-Fehler springt der Button zurück in den vorherigen Zustand.
