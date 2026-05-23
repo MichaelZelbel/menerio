@@ -164,7 +164,7 @@ export default function TimelinePage() {
     setEditDialogOpen(true);
   };
 
-  const clearFilters = () => { setMinImpact(1); setMinConfTruth(0); setMinConfDate(0); setStatusFilter([]); setPersonFilter([]); };
+  const clearFilters = () => { setMinImpact(1); setMinConfTruth(0); setMinConfDate(0); setStatusFilter([]); setPersonFilter([]); setSearchQuery(""); };
 
   return (
     <div className="space-y-6">
