@@ -971,14 +971,18 @@ server.registerTool(
     try {
       // Two-pronged search: metadata filter + semantic
       const [metadataResult, semanticResult] = await Promise.all([
-        supabase
-          .from("notes")
-          .select("id, title, content, metadata, created_at")
-          .eq("is_trashed", false)
-          .eq("user_id", getCurrentUserId())
-          .contains("metadata", { people: [name] })
-          .order("created_at", { ascending: false })
-          .limit(limit),
+        (async () => {
+          let mq = supabase
+            .from("notes")
+            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
+            .eq("is_trashed", false)
+            .eq("user_id", getCurrentUserId())
+            .contains("metadata", { people: [name] })
+            .order("created_at", { ascending: false })
+            .limit(limit);
+          mq = await applyVisibility(mq, "notes", supabase, getCurrentUserId());
+          return await mq;
+        })(),
         (async () => {
           const emb = await getEmbedding(`notes about ${name}`);
           const { data, error } = await supabase.rpc("match_note_chunks", {
@@ -988,7 +992,6 @@ server.registerTool(
             p_user_id: getCurrentUserId(),
           });
           if (error || !data) return { data: [] as any[], error };
-          // Aggregate to one row per note (best chunk).
           const byNote = new Map<string, any>();
           for (const c of data as any[]) {
             const ex = byNote.get(c.note_id);
@@ -1000,11 +1003,13 @@ server.registerTool(
           if (ids.length === 0) return { data: [], error: null };
           const { data: rows } = await supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at")
+            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
             .in("id", ids);
-          return { data: rows || [], error: null };
+          const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
+          return { data: filtered, error: null };
         })(),
       ]);
+
 
       // Merge and deduplicate
       const seen = new Set<string>();
