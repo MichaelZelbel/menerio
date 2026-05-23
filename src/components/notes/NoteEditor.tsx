@@ -1154,28 +1154,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 <DropdownMenuSeparator />
 
                 <DropdownMenuItem
-                  onClick={() =>
-                    toggleMcpVisibility.mutate({
-                      id: note.id,
-                      visibility: mcpHidden ? "visible" : "hidden",
-                    })
-                  }
-                  disabled={toggleMcpVisibility.isPending}
-                >
-                  {mcpHidden ? (
-                    <>
-                      <Eye className="mr-2 h-4 w-4" /> Show to MCP / AI clients
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="mr-2 h-4 w-4" /> Hide from MCP / AI clients
-                    </>
-                  )}
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator />
-
-                <DropdownMenuItem
                   onClick={moveToTrash}
                   className="text-destructive focus:text-destructive"
                 >
