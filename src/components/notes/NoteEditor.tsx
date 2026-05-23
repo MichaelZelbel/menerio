@@ -797,6 +797,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
   const togglePin = () => updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
 
+  const toggleMcpVisibility = useToggleMcpVisibility("notes");
+  const mcpHidden = (note as any).mcp_visibility === "hidden";
+
   const downloadMarkdown = () => {
     try {
       const currentMarkdown = sourceMode ? sourceText : editor ? editorToMarkdown(editor) : note.content || "";
