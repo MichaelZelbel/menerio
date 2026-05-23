@@ -335,7 +335,12 @@ export default function People() {
                   </div>
                 </div>
 
-                <div className="flex gap-1">
+                <div className="flex gap-1 items-center">
+                  {(selectedPerson as any).is_sensitive && (
+                    <Badge variant="outline" className="gap-1 text-xs mr-1" title="Hidden from MCP / AI clients">
+                      <Shield className="h-3 w-3" /> Sensitive
+                    </Badge>
+                  )}
                   {!isEditing ? (
                     <>
                       <Button variant="outline" size="sm" onClick={() => startEditing(selectedPerson)}>
@@ -343,6 +348,28 @@ export default function People() {
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
                         <Merge className="h-3.5 w-3.5 mr-1" /> Merge
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          toggleSensitive.mutate({
+                            id: selectedPerson.id,
+                            isSensitive: !(selectedPerson as any).is_sensitive,
+                          })
+                        }
+                        disabled={toggleSensitive.isPending}
+                        title={
+                          (selectedPerson as any).is_sensitive
+                            ? "Make visible to MCP / AI clients again"
+                            : "Mark sensitive — hides this person and all linked notes/moments from MCP / AI"
+                        }
+                      >
+                        {(selectedPerson as any).is_sensitive ? (
+                          <><ShieldOff className="h-3.5 w-3.5 mr-1" /> Unmark sensitive</>
+                        ) : (
+                          <><Shield className="h-3.5 w-3.5 mr-1" /> Mark sensitive</>
+                        )}
                       </Button>
                     </>
                   ) : (
