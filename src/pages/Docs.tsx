@@ -79,7 +79,23 @@ export default function Docs() {
 
   return (
     <div className="container py-8 lg:py-12">
-      <SEOHead title="Documentation — Menerio" description="Learn how to use Menerio with guides, API reference, and tutorials." />
+      <SEOHead
+        title="Documentation — Menerio"
+        description="Learn how to use Menerio with step-by-step guides, an API reference, integration tutorials, and best practices for building your knowledge system."
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "TechArticle",
+          headline: "Menerio Documentation",
+          description: "Guides, API reference, and tutorials for Menerio — an AI-powered knowledge system.",
+          inLanguage: "en",
+          publisher: {
+            "@type": "Organization",
+            name: "Menerio",
+            url: "https://menerio.com",
+          },
+          mainEntityOfPage: "https://menerio.com/docs",
+        }}
+      />
       {/* Search bar */}
       <div className="mb-6 flex items-center gap-3">
         <Button
