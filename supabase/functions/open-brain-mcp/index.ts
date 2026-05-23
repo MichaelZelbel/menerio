@@ -1208,9 +1208,11 @@ server.registerTool(
     inputSchema: { limit: z.number().optional().default(100) },
   },
   async ({ limit }) => {
-    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, mcp_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
+    const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
-    return jsonTool(data);
+    return jsonTool(redactContactList(data || []));
   }
 );
 
@@ -1228,6 +1230,7 @@ server.registerTool(
       if (!matches?.length) return jsonTool({ message: "No people matching that name." });
       q = q.in("person_id", matches.map((p: any) => p.id));
     }
+    q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
@@ -1243,11 +1246,14 @@ server.registerTool(
   },
   async ({ query, limit }) => {
     const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
-    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
+    const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
   }
 );
+
 
 async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
   const participantNames = uniqueStrings([input.person_name, ...(input.participant_names ?? [])]);
