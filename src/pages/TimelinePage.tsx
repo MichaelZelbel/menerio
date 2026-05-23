@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Users } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Search, Users, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { SEOHead } from "@/components/SEOHead";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
