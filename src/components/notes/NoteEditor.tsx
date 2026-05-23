@@ -1062,11 +1062,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                   <Globe className="h-3 w-3" /> Shared
                 </Badge>
               )}
-              {mcpHidden && (
-                <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground ml-1" title="This note is hidden from MCP / AI clients">
-                  <EyeOff className="h-3 w-3" /> MCP hidden
-                </Badge>
-              )}
+              <McpVisibilityButton
+                kind="note"
+                id={note.id}
+                hidden={mcpHidden}
+                className="ml-1"
+              />
             </>
           }
           noteActions={
