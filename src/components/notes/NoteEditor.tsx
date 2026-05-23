@@ -41,6 +41,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
+import { useToggleMcpVisibility } from "@/hooks/useMcpVisibility";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
