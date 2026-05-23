@@ -603,8 +603,10 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
       since.setDate(since.getDate() - days);
       q = q.gte("created_at", since.toISOString());
     }
+    q = await applyVisibility(q, "notes", supabase, getCurrentUserId());
 
     const { data, error } = await q;
+
     if (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     }
