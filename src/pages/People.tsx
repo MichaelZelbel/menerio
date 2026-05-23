@@ -45,8 +45,7 @@ import { PersonDocuments } from "@/components/people/PersonDocuments";
 import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
 import { useGroups } from "@/hooks/useGroups";
 import { useAddMembership, useGroupMemberships } from "@/hooks/useGroupMemberships";
-import { useToggleSensitivePerson } from "@/hooks/useMcpVisibility";
-import { Shield, ShieldOff } from "lucide-react";
+import { McpVisibilityButton } from "@/components/common/McpVisibilityButton";
 
 interface Person {
   id: string;
