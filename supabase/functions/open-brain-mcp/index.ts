@@ -2561,11 +2561,14 @@ app.all("*", async (c) => {
   }
 
   return await requestContext.run({ userId: auth.userId! }, async () => {
-    addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
-    const transport = new StreamableHTTPTransport();
-    await server.connect(transport);
-    return await transport.handleRequest(c);
+    return await enterVisibilityScope(async () => {
+      addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
+      const transport = new StreamableHTTPTransport();
+      await server.connect(transport);
+      return await transport.handleRequest(c);
+    });
   });
 });
+
 
 Deno.serve(app.fetch);
