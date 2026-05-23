@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -27,13 +28,16 @@ const kindToTable: Record<Exclude<McpEntityKind, "person">, McpKind> = {
 };
 
 /**
- * Unified visibility toggle for any MyCö-exposed entity.
- *  - Eye + "MyCö"  = visible to MCP / AI clients
+ * Unified visibility toggle for any MCP-exposed entity.
+ *  - Eye + "MCP"   = visible to MCP / AI clients
  *  - EyeOff + "Hidden" = hidden from MCP / AI clients
  *
  * For `kind="person"` this flips `is_sensitive` (which also cascades to
  * linked notes/moments/actions). For all other kinds it flips
  * `mcp_visibility` on the row itself.
+ *
+ * Keeps a local optimistic state so the label flips instantly in both
+ * directions, regardless of how fast the query refetch lands.
  */
 export function McpVisibilityButton({ kind, id, hidden, className, iconOnly = false }: Props) {
   const togglePerson = useToggleSensitivePerson();
@@ -41,26 +45,37 @@ export function McpVisibilityButton({ kind, id, hidden, className, iconOnly = fa
     kind === "person" ? "contacts" : kindToTable[kind],
   );
 
+  const [optimistic, setOptimistic] = useState(hidden);
+  useEffect(() => setOptimistic(hidden), [hidden]);
+
   const pending = kind === "person" ? togglePerson.isPending : toggleItem.isPending;
 
   const onClick = () => {
+    const next = !optimistic;
+    setOptimistic(next);
     if (kind === "person") {
-      togglePerson.mutate({ id, isSensitive: !hidden });
+      togglePerson.mutate(
+        { id, isSensitive: next },
+        { onError: () => setOptimistic(hidden) },
+      );
     } else {
-      toggleItem.mutate({ id, visibility: hidden ? "visible" : "hidden" });
+      toggleItem.mutate(
+        { id, visibility: next ? "hidden" : "visible" },
+        { onError: () => setOptimistic(hidden) },
+      );
     }
   };
 
-  const tooltip = hidden
+  const tooltip = optimistic
     ? kind === "person"
-      ? "Hidden from MyCö. Linked notes & moments are hidden too. Click to make visible."
-      : "Hidden from MyCö (ChatGPT, Claude, …). Click to make visible."
+      ? "Hidden from MCP clients. Linked notes & moments are hidden too. Click to make visible."
+      : "Hidden from MCP clients. Click to make visible."
     : kind === "person"
-      ? "Visible via MyCö. Click to hide this person and everything linked to them."
-      : "Visible via MyCö (ChatGPT, Claude, …). Click to hide.";
+      ? "Visible to MCP clients. Click to hide this person and everything linked to them."
+      : "Visible to MCP clients (ChatGPT, Claude, …). Click to hide.";
 
-  const Icon = pending ? Loader2 : hidden ? EyeOff : Eye;
-  const label = hidden ? "Hidden" : "MyCö";
+  const Icon = pending ? Loader2 : optimistic ? EyeOff : Eye;
+  const label = optimistic ? "Hidden" : "MCP";
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -72,10 +87,10 @@ export function McpVisibilityButton({ kind, id, hidden, className, iconOnly = fa
             size="sm"
             onClick={onClick}
             disabled={pending}
-            aria-pressed={hidden}
+            aria-pressed={optimistic}
             className={cn(
               "h-7 gap-1.5 px-2 text-xs font-normal",
-              hidden
+              optimistic
                 ? "text-muted-foreground border-dashed"
                 : "text-foreground",
               className,
