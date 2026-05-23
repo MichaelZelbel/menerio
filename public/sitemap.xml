@@ -6,5 +6,6 @@
   <url><loc>https://menerio.com/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
   <url><loc>https://menerio.com/terms</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
   <url><loc>https://menerio.com/cookies</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://menerio.com/community-guidelines</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
   <url><loc>https://menerio.com/impressum</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
 </urlset>
