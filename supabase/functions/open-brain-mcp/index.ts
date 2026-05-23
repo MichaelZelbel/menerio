@@ -725,6 +725,10 @@ server.registerTool(
       if (existing.is_external) {
         return jsonTool({ error: "External (synced) notes cannot be edited directly. Duplicate the note in the app first." });
       }
+      try { await assertWritable(supabase, getCurrentUserId(), "note", note_id); }
+      catch (e) { return jsonTool({ error: (e as Error).message }); }
+
+
 
       const updates: Record<string, unknown> = {};
       if (title !== undefined) updates.title = title;
