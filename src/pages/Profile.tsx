@@ -106,7 +106,7 @@ export default function Profile() {
 
   return (
     <>
-      <SEOHead title="My Profile — Menerio" description="Your personal profile for AI agents" />
+      <SEOHead title="My Profile — Menerio" description="Manage the personal profile AI agents use to understand you — your bio, preferences, goals, and context that powers personalized responses." noIndex />
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
