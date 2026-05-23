@@ -7,6 +7,16 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
+import {
+  applyVisibility,
+  assertWritable,
+  enterVisibilityScope,
+  filterVisibleNotes,
+  getSensitivePersonIds,
+  redactContactList,
+  redactSensitiveContact,
+} from "./_mcp_visibility.ts";
+
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -482,7 +492,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at")
+          .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -500,18 +510,20 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   // as the wildcard. Strip commas/parens/quotes that would break the .or() parser, then build
   // the predicate with `*…*`.
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
-  const { data: textResults } = await supabase
+  let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at")
+    .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
+  textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
+  const { data: textResults } = await textQuery;
 
   const seenIds = new Set<string>();
   const merged: any[] = [];
-  for (const r of semanticResults) {
+  for (const r of await filterVisibleNotes(semanticResults, supabase, getCurrentUserId())) {
     seenIds.add(r.id);
     merged.push(r);
   }
@@ -523,6 +535,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
   return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
 }
+
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
 async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
@@ -590,8 +603,10 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
       since.setDate(since.getDate() - days);
       q = q.gte("created_at", since.toISOString());
     }
+    q = await applyVisibility(q, "notes", supabase, getCurrentUserId());
 
     const { data, error } = await q;
+
     if (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
     }
@@ -710,6 +725,10 @@ server.registerTool(
       if (existing.is_external) {
         return jsonTool({ error: "External (synced) notes cannot be edited directly. Duplicate the note in the app first." });
       }
+      try { await assertWritable(supabase, getCurrentUserId(), "note", note_id); }
+      catch (e) { return jsonTool({ error: (e as Error).message }); }
+
+
 
       const updates: Record<string, unknown> = {};
       if (title !== undefined) updates.title = title;
@@ -761,6 +780,9 @@ server.registerTool(
       if (!existing || existing.user_id !== getCurrentUserId()) {
         return jsonTool({ error: "Note not found" });
       }
+      try { await assertWritable(supabase, getCurrentUserId(), "note", note_id); }
+      catch (e) { return jsonTool({ error: (e as Error).message }); }
+
 
       const updates = restore
         ? { is_trashed: false, trashed_at: null }
@@ -890,9 +912,11 @@ server.registerTool(
         q = q.in("status", ["open", "in_progress"]);
       }
       if (priority) q = q.eq("priority", priority);
+      q = await applyVisibility(q, "action_items", supabase, getCurrentUserId());
 
       const { data, error } = await q.limit(50);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+
 
       let items = data || [];
 
@@ -947,14 +971,18 @@ server.registerTool(
     try {
       // Two-pronged search: metadata filter + semantic
       const [metadataResult, semanticResult] = await Promise.all([
-        supabase
-          .from("notes")
-          .select("id, title, content, metadata, created_at")
-          .eq("is_trashed", false)
-          .eq("user_id", getCurrentUserId())
-          .contains("metadata", { people: [name] })
-          .order("created_at", { ascending: false })
-          .limit(limit),
+        (async () => {
+          let mq = supabase
+            .from("notes")
+            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
+            .eq("is_trashed", false)
+            .eq("user_id", getCurrentUserId())
+            .contains("metadata", { people: [name] })
+            .order("created_at", { ascending: false })
+            .limit(limit);
+          mq = await applyVisibility(mq, "notes", supabase, getCurrentUserId());
+          return await mq;
+        })(),
         (async () => {
           const emb = await getEmbedding(`notes about ${name}`);
           const { data, error } = await supabase.rpc("match_note_chunks", {
@@ -964,7 +992,6 @@ server.registerTool(
             p_user_id: getCurrentUserId(),
           });
           if (error || !data) return { data: [] as any[], error };
-          // Aggregate to one row per note (best chunk).
           const byNote = new Map<string, any>();
           for (const c of data as any[]) {
             const ex = byNote.get(c.note_id);
@@ -976,11 +1003,13 @@ server.registerTool(
           if (ids.length === 0) return { data: [], error: null };
           const { data: rows } = await supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at")
+            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
             .in("id", ids);
-          return { data: rows || [], error: null };
+          const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
+          return { data: filtered, error: null };
         })(),
       ]);
+
 
       // Merge and deduplicate
       const seen = new Set<string>();
@@ -1041,8 +1070,9 @@ server.registerTool(
     try {
       let q = supabase
         .from("contacts")
-        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes")
+        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes, is_sensitive, mcp_visibility")
         .eq("user_id", getCurrentUserId())
+        .is("merged_into", null)
         .order("name")
         .limit(limit);
 
@@ -1051,12 +1081,17 @@ server.registerTool(
         q = q.or(`name.ilike.*${qq}*,company.ilike.*${qq}*`);
       }
       if (relationship) q = q.eq("relationship", relationship);
+      q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
 
       const { data, error } = await q;
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
-      if (!data?.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
+      const redacted = redactContactList(data || []);
+      if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
-      const lines = data.map((c: any, i: number) => {
+      const lines = redacted.map((c: any, i: number) => {
+        if (c._redacted) {
+          return `${i + 1}. ${c.name}${c.relationship ? ` (${c.relationship})` : ""} — 🔒 marked sensitive, PII hidden from AI.`;
+        }
         const parts = [`${i + 1}. ${c.name}`];
         if (c.relationship) parts.push(`(${c.relationship})`);
         if (c.company) parts.push(`@ ${c.company}`);
@@ -1069,12 +1104,13 @@ server.registerTool(
         return parts.join(" ");
       });
 
-      return { content: [{ type: "text" as const, text: `${data.length} contact(s):\n\n${lines.join("\n\n")}` }] };
+      return { content: [{ type: "text" as const, text: `${redacted.length} contact(s):\n\n${lines.join("\n\n")}` }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
+
 
 // Tool 8: Get Contact Context
 server.registerTool(
@@ -1093,11 +1129,19 @@ server.registerTool(
         .select("*")
         .eq("user_id", getCurrentUserId())
         .ilike("name", `%${name}%`)
+        .is("merged_into", null)
+        .eq("mcp_visibility", "visible")
         .limit(1);
 
       if (!contacts?.length) return { content: [{ type: "text" as const, text: `No contact found matching "${name}".` }] };
 
-      const contact = contacts[0] as any;
+      const raw = contacts[0] as any;
+      const contact = redactSensitiveContact(raw) as any;
+
+      if (contact._redacted) {
+        return { content: [{ type: "text" as const, text: `# ${contact.name}\n${contact.relationship ? `Relationship: ${contact.relationship}\n` : ""}\n🔒 This person is marked sensitive in Menerio. Their PII, notes, interactions, and related Moments are hidden from AI tools. Unmark sensitive in the Person profile to grant access.` }] };
+      }
+
       const lines: string[] = [
         `# ${contact.name}`,
         contact.relationship ? `Relationship: ${contact.relationship}` : "",
@@ -1113,7 +1157,6 @@ server.registerTool(
         lines.push(`Last contact: ${days} days ago (${contact.last_contact_date})`);
       }
 
-      // Fetch interactions
       const { data: interactions } = await supabase
         .from("contact_interactions")
         .select("interaction_date, type, summary, action_items")
@@ -1131,15 +1174,16 @@ server.registerTool(
         }
       }
 
-      // Fetch related notes
-      const { data: notes } = await supabase
+      let notesQuery = supabase
         .from("notes")
-        .select("title, content, created_at")
+        .select("title, content, created_at, mcp_visibility, person_id, metadata")
         .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
         .order("created_at", { ascending: false })
         .limit(5);
+      notesQuery = await applyVisibility(notesQuery, "notes", supabase, getCurrentUserId());
+      const { data: notes } = await notesQuery;
 
       if (notes?.length) {
         lines.push("", "## Related Notes");
@@ -1155,6 +1199,7 @@ server.registerTool(
   }
 );
 
+
 server.registerTool(
   "list_people",
   {
@@ -1163,9 +1208,11 @@ server.registerTool(
     inputSchema: { limit: z.number().optional().default(100) },
   },
   async ({ limit }) => {
-    const { data, error } = await supabase.from("contacts").select("id, name, relationship, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, mcp_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
+    const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
-    return jsonTool(data);
+    return jsonTool(redactContactList(data || []));
   }
 );
 
@@ -1183,6 +1230,7 @@ server.registerTool(
       if (!matches?.length) return jsonTool({ message: "No people matching that name." });
       q = q.in("person_id", matches.map((p: any) => p.id));
     }
+    q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
@@ -1198,11 +1246,14 @@ server.registerTool(
   },
   async ({ query, limit }) => {
     const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
-    const { data, error } = await supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
+    const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
     return jsonTool({ fields: MOMENT_RESPONSE_FIELDS, moments: data });
   }
 );
+
 
 async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
   const participantNames = uniqueStrings([input.person_name, ...(input.participant_names ?? [])]);
@@ -2561,11 +2612,14 @@ app.all("*", async (c) => {
   }
 
   return await requestContext.run({ userId: auth.userId! }, async () => {
-    addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
-    const transport = new StreamableHTTPTransport();
-    await server.connect(transport);
-    return await transport.handleRequest(c);
+    return await enterVisibilityScope(async () => {
+      addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
+      const transport = new StreamableHTTPTransport();
+      await server.connect(transport);
+      return await transport.handleRequest(c);
+    });
   });
 });
+
 
 Deno.serve(app.fetch);
