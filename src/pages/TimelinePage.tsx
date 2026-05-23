@@ -63,6 +63,8 @@ export default function TimelinePage() {
   const [minConfDate, setMinConfDate] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [personFilter, setPersonFilter] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
 
   const fetchData = async () => {
     if (!user) return;
