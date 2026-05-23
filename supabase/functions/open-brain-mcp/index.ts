@@ -912,9 +912,11 @@ server.registerTool(
         q = q.in("status", ["open", "in_progress"]);
       }
       if (priority) q = q.eq("priority", priority);
+      q = await applyVisibility(q, "action_items", supabase, getCurrentUserId());
 
       const { data, error } = await q.limit(50);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+
 
       let items = data || [];
 
