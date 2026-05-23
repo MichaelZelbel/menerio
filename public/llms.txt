@@ -1,0 +1,18 @@
+# Menerio
+
+> Menerio is an AI-powered knowledge system. It turns your notes, people, and moments into structured, searchable context that AI assistants can use across tools via MCP.
+
+Menerio captures thoughts as Obsidian-compatible Markdown, links them into a knowledge graph, and exposes them to AI agents through an MCP server, REST API, and integrations like Telegram, Discord, Slack, and GitHub.
+
+## Pages
+
+- [Home](/): Overview of Menerio and what it does.
+- [Features](/features): Capture, knowledge graph, AI chat, integrations, and sharing.
+- [Documentation](/docs): Guides, API reference, and integration tutorials.
+
+## Legal
+
+- [Privacy Policy](/privacy): How Menerio handles user data.
+- [Terms of Service](/terms): Account, content, and subscription terms.
+- [Cookies Policy](/cookies): Cookie usage and preferences.
+- [Community Guidelines](/community-guidelines): Rules for publicly shared notes.

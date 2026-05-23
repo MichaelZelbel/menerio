@@ -17,7 +17,7 @@ const Terms = () => {
 
   return (
     <div className="container py-12 lg:py-16">
-      <SEOHead title="Terms of Service — Menerio" description="Read the Terms of Service for using Menerio." />
+      <SEOHead title="Terms of Service — Menerio" description="Read Menerio's Terms of Service covering account usage, content ownership, subscriptions, acceptable use, and your rights as a user." />
 
       <div className="flex flex-col lg:flex-row gap-12">
         {/* Table of Contents Sidebar */}
