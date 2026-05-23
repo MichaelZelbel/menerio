@@ -1129,11 +1129,19 @@ server.registerTool(
         .select("*")
         .eq("user_id", getCurrentUserId())
         .ilike("name", `%${name}%`)
+        .is("merged_into", null)
+        .eq("mcp_visibility", "visible")
         .limit(1);
 
       if (!contacts?.length) return { content: [{ type: "text" as const, text: `No contact found matching "${name}".` }] };
 
-      const contact = contacts[0] as any;
+      const raw = contacts[0] as any;
+      const contact = redactSensitiveContact(raw) as any;
+
+      if (contact._redacted) {
+        return { content: [{ type: "text" as const, text: `# ${contact.name}\n${contact.relationship ? `Relationship: ${contact.relationship}\n` : ""}\n🔒 This person is marked sensitive in Menerio. Their PII, notes, interactions, and related Moments are hidden from AI tools. Unmark sensitive in the Person profile to grant access.` }] };
+      }
+
       const lines: string[] = [
         `# ${contact.name}`,
         contact.relationship ? `Relationship: ${contact.relationship}` : "",
@@ -1149,7 +1157,6 @@ server.registerTool(
         lines.push(`Last contact: ${days} days ago (${contact.last_contact_date})`);
       }
 
-      // Fetch interactions
       const { data: interactions } = await supabase
         .from("contact_interactions")
         .select("interaction_date, type, summary, action_items")
@@ -1167,15 +1174,16 @@ server.registerTool(
         }
       }
 
-      // Fetch related notes
-      const { data: notes } = await supabase
+      let notesQuery = supabase
         .from("notes")
-        .select("title, content, created_at")
+        .select("title, content, created_at, mcp_visibility, person_id, metadata")
         .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
         .order("created_at", { ascending: false })
         .limit(5);
+      notesQuery = await applyVisibility(notesQuery, "notes", supabase, getCurrentUserId());
+      const { data: notes } = await notesQuery;
 
       if (notes?.length) {
         lines.push("", "## Related Notes");
@@ -1190,6 +1198,7 @@ server.registerTool(
     }
   }
 );
+
 
 server.registerTool(
   "list_people",
