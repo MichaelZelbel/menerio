@@ -104,17 +104,26 @@ export default function TimelinePage() {
     }
   }, [searchParams, setSearchParams]);
 
-  const filteredMoments = useMemo(() => moments.filter((m) => {
-    if (m.impact_level < minImpact) return false;
-    if (m.confidence_truth < minConfTruth) return false;
-    if (m.confidence_date < minConfDate) return false;
-    if (statusFilter.length > 0 && !statusFilter.includes(m.status)) return false;
-    if (personFilter.length > 0) {
-      const ids = participantMap[m.id] || [];
-      if (!personFilter.some((id) => ids.includes(id))) return false;
-    }
-    return true;
-  }), [moments, minImpact, minConfTruth, minConfDate, statusFilter, personFilter, participantMap]);
+  const filteredMoments = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return moments.filter((m) => {
+      if (m.impact_level < minImpact) return false;
+      if (m.confidence_truth < minConfTruth) return false;
+      if (m.confidence_date < minConfDate) return false;
+      if (statusFilter.length > 0 && !statusFilter.includes(m.status)) return false;
+      if (personFilter.length > 0) {
+        const ids = participantMap[m.id] || [];
+        if (!personFilter.some((id) => ids.includes(id))) return false;
+      }
+      if (q) {
+        const inTitle = m.title?.toLowerCase().includes(q);
+        const inDesc = m.description?.toLowerCase().includes(q);
+        if (!inTitle && !inDesc) return false;
+      }
+      return true;
+    });
+  }, [moments, minImpact, minConfTruth, minConfDate, statusFilter, personFilter, participantMap, searchQuery]);
+
 
   const groupedByYear = useMemo(() => {
     const groups: Record<string, TimelineMoment[]> = {};
