@@ -21,7 +21,7 @@ export function SEOHead({
   title,
   description,
   canonicalUrl,
-  ogImage = "/og-image.png",
+  ogImage = "https://menerio.com/og-image.png",
   ogType = "website",
   noIndex = false,
   jsonLd,
