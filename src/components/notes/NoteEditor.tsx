@@ -41,7 +41,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
-import { useToggleMcpVisibility } from "@/hooks/useMcpVisibility";
+import { McpVisibilityButton } from "@/components/common/McpVisibilityButton";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
@@ -797,7 +797,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
   const togglePin = () => updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
 
-  const toggleMcpVisibility = useToggleMcpVisibility("notes");
   const mcpHidden = (note as any).mcp_visibility === "hidden";
 
   const downloadMarkdown = () => {
@@ -1062,11 +1061,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                   <Globe className="h-3 w-3" /> Shared
                 </Badge>
               )}
-              {mcpHidden && (
-                <Badge variant="outline" className="h-6 gap-1 text-xs text-muted-foreground ml-1" title="This note is hidden from MCP / AI clients">
-                  <EyeOff className="h-3 w-3" /> MCP hidden
-                </Badge>
-              )}
+              <McpVisibilityButton
+                kind="note"
+                id={note.id}
+                hidden={mcpHidden}
+                className="ml-1"
+              />
             </>
           }
           noteActions={
@@ -1147,28 +1147,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 )}
                 <DropdownMenuItem onClick={() => setShowForwardDialog(true)}>
                   <Send className="mr-2 h-4 w-4" /> Send to app
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator />
-
-                <DropdownMenuItem
-                  onClick={() =>
-                    toggleMcpVisibility.mutate({
-                      id: note.id,
-                      visibility: mcpHidden ? "visible" : "hidden",
-                    })
-                  }
-                  disabled={toggleMcpVisibility.isPending}
-                >
-                  {mcpHidden ? (
-                    <>
-                      <Eye className="mr-2 h-4 w-4" /> Show to MCP / AI clients
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="mr-2 h-4 w-4" /> Hide from MCP / AI clients
-                    </>
-                  )}
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />
