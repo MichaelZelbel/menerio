@@ -90,6 +90,8 @@ import {
   Download,
   Users,
   MoreHorizontal,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   DropdownMenu,
