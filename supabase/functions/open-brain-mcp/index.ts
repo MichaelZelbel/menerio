@@ -492,7 +492,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at")
+          .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -510,18 +510,20 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   // as the wildcard. Strip commas/parens/quotes that would break the .or() parser, then build
   // the predicate with `*…*`.
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
-  const { data: textResults } = await supabase
+  let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at")
+    .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
     .limit(limit);
+  textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
+  const { data: textResults } = await textQuery;
 
   const seenIds = new Set<string>();
   const merged: any[] = [];
-  for (const r of semanticResults) {
+  for (const r of await filterVisibleNotes(semanticResults, supabase, getCurrentUserId())) {
     seenIds.add(r.id);
     merged.push(r);
   }
@@ -533,6 +535,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
   return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
 }
+
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
 async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
