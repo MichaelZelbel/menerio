@@ -61,10 +61,16 @@ export function SmartDatePicker({
   const [text, setText] = useState<string>(value ? format(value, "yyyy-MM-dd") : "");
   const [textInvalid, setTextInvalid] = useState(false);
   const lastValueRef = useRef<Date | null>(value);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (value !== lastValueRef.current) {
       lastValueRef.current = value;
+      // Don't overwrite the user's in-progress typing
+      if (typeof document !== "undefined" && document.activeElement === inputRef.current) {
+        if (value) setViewMonth(value);
+        return;
+      }
       setText(value ? format(value, "yyyy-MM-dd") : "");
       if (value) setViewMonth(value);
       setTextInvalid(false);
@@ -82,6 +88,7 @@ export function SmartDatePicker({
     setText(raw);
     if (!raw.trim()) {
       setTextInvalid(false);
+      lastValueRef.current = null;
       onChange(null);
       return;
     }
@@ -89,9 +96,20 @@ export function SmartDatePicker({
     if (parsed) {
       setTextInvalid(false);
       setViewMonth(parsed);
+      // Mark as self-originated so the sync effect won't reformat the text
+      lastValueRef.current = parsed;
       onChange(parsed);
     } else {
       setTextInvalid(true);
+    }
+  };
+
+  const handleBlur = () => {
+    if (!text.trim()) return;
+    const parsed = parseLooseDate(text);
+    if (parsed) {
+      setText(format(parsed, "yyyy-MM-dd"));
+      setTextInvalid(false);
     }
   };
 
