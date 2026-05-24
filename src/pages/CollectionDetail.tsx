@@ -40,6 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { SmartDatePicker } from "@/components/ui/smart-date-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
