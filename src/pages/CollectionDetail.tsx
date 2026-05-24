@@ -959,34 +959,11 @@ function FieldInput({
           />
         </div>
       ) : field.type === "date" ? (
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              className={cn(
-                "w-full justify-start",
-                !value && "text-muted-foreground",
-                inputClass,
-              )}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {selectedDate
-                ? format(selectedDate, "MMM d, yyyy")
-                : "Select date"}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-auto p-0">
-            <Calendar
-              mode="single"
-              selected={selectedDate ?? undefined}
-              onSelect={(date) =>
-                onChange(date ? format(date, "yyyy-MM-dd") : "")
-              }
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
+        <SmartDatePicker
+          value={selectedDate ?? null}
+          onChange={(date) => onChange(date ? format(date, "yyyy-MM-dd") : "")}
+          className={inputClass}
+        />
       ) : field.type === "datetime" ? (
         <div className="grid grid-cols-[1fr_120px] gap-2">
           <Popover>
