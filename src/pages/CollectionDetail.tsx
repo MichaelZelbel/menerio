@@ -966,37 +966,16 @@ function FieldInput({
         />
       ) : field.type === "datetime" ? (
         <div className="grid grid-cols-[1fr_120px] gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                className={cn(
-                  "justify-start",
-                  !value && "text-muted-foreground",
-                  inputClass,
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {selectedDate
-                  ? format(selectedDate, "MMM d, yyyy")
-                  : "Select date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto p-0">
-              <Calendar
-                mode="single"
-                selected={selectedDate ?? undefined}
-                onSelect={(date) => {
-                  const currentTime = toTimeInput(value) || "09:00";
-                  onChange(
-                    date ? `${format(date, "yyyy-MM-dd")}T${currentTime}` : "",
-                  );
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+          <SmartDatePicker
+            value={selectedDate ?? null}
+            onChange={(date) => {
+              const currentTime = toTimeInput(value) || "09:00";
+              onChange(
+                date ? `${format(date, "yyyy-MM-dd")}T${currentTime}` : "",
+              );
+            }}
+            className={inputClass}
+          />
           <div className="relative">
             <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
