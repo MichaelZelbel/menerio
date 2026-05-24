@@ -271,18 +271,8 @@ export default function People() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
-        <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
-          <TabsList className="flex flex-wrap h-auto">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="groups">Groups</TabsTrigger>
-            <TabsTrigger value="conversation">Conversation</TabsTrigger>
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview" className="space-y-6 mt-0">
-          {/* Header Card */}
+        {/* Persistent person header — visible across all tabs */}
+        <div className="sticky top-0 z-10 bg-background pb-2 space-y-4 mb-4">
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -379,7 +369,19 @@ export default function People() {
               setMergeOpen(true);
             }}
           />
+        </div>
 
+        <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
+          <TabsList className="flex flex-wrap h-auto">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="groups">Groups</TabsTrigger>
+            <TabsTrigger value="conversation">Conversation</TabsTrigger>
+            <TabsTrigger value="timeline">Timeline</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6 mt-0">
           <Card>
             <CardContent className="pt-6">
               {isEditing ? (
@@ -406,6 +408,9 @@ export default function People() {
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 Related Notes
               </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Automatically derived from notes that mention this person. Open a note to add or remove the mention.
+              </p>
             </CardHeader>
             <CardContent>
               {relatedNotes.length === 0 ? (
@@ -422,6 +427,7 @@ export default function People() {
             </CardContent>
           </Card>
         </TabsContent>
+
 
         <TabsContent value="groups" className="mt-0">
           <PersonGroupsTab personId={selectedPerson.id} />

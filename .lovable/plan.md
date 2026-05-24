@@ -1,32 +1,28 @@
-## Problem
+## Ziele
 
-Im freien Texteingabefeld des `SmartDatePicker` setzt sich beim Tippen zweistelliger Tage (z. B. 11, 12, 15, 20) automatisch eine `0` vor die Eingabe — der Wert lässt sich nicht mehr sauber überschreiben.
+1. **Persönlicher Header bleibt immer sichtbar.** Aktuell befindet sich Name, Avatar, Aliases und die Action-Buttons (Edit / Merge / Delete / McpVisibility) innerhalb des `Overview`-Tab-Inhalts. Wechselt man zu `Profile`, `Groups`, `Conversation`, `Timeline` oder `Documents`, verschwindet der Name.
+2. **Klarheit über „Related Notes"-Bearbeitung.** Die Liste wird automatisch abgeleitet — sie ist keine manuell editierbare Beziehungsliste.
 
-## Ursache
+## Änderungen
 
-Datei: `src/components/ui/smart-date-picker.tsx`
+Datei: `src/pages/People.tsx`
 
-Der Auslöser ist eine Rückkopplung zwischen `handleTextChange` und dem `useEffect`, der `text` aus `value` neu formatiert:
+### 1. Header aus Overview herausziehen (sticky)
 
-Beispiel: Feld zeigt `2024-01-05`, Nutzer will auf `15` ändern.
-1. Nutzer löscht die `5` → Text = `2024-01-0` → parst nicht.
-2. Nutzer tippt `1` → Text = `2024-01-01` → parst erfolgreich als 1. Januar.
-3. `handleTextChange` ruft `onChange(parsed)` auf → Parent aktualisiert `value`.
-4. `useEffect` sieht `value !== lastValueRef.current` und ruft `setText(format(value, "yyyy-MM-dd"))` auf → Text wird zu `2024-01-01` **inklusive führender Null** zurückgesetzt, obwohl der Nutzer gerade noch tippt.
-5. Nutzer tippt `5` → Text = `2024-01-015` → ungültig (roter Rand). Die `0` lässt sich nicht entfernen, weil sie bei jeder validen Zwischeneingabe sofort wieder reingeschrieben wird.
+- Den `Card` mit Avatar/Name/Aliases/Action-Buttons (aktuell Zeilen 286–371) aus `<TabsContent value="overview">` herausnehmen und **oberhalb** der `<Tabs>`-Komponente platzieren, direkt unter dem „Back to People"-Button.
+- Auch `DuplicateHints` (372–381) dorthin verschieben, damit Merge-Hinweise immer sichtbar bleiben.
+- Den Header-Container `sticky top-0 z-10 bg-background` setzen (mit `pb-2` für Atemraum), damit der Name beim Scrollen langer Tabs (Timeline, Documents) sichtbar bleibt.
+- Edit-Mode bleibt unverändert: `isEditing` togglet weiterhin Name-/Alias-Inputs innerhalb desselben Headers — funktioniert auf jedem Tab.
+- `Overview`-Tab enthält danach nur noch die Notes-Card (383–401) und die Related-Notes-Card (403–423).
 
-Bei Tagen 01–09 fällt es nicht auf, weil die führende Null dort sowieso korrekt ist.
+### 2. Related Notes: Bearbeitungshinweis
 
-## Lösung
-
-Zwei kleine Änderungen in `src/components/ui/smart-date-picker.tsx`:
-
-1. **In `handleTextChange`:** vor dem `onChange(parsed)`-Call die Ref aktualisieren: `lastValueRef.current = parsed`. Damit erkennt der `useEffect` die Änderung als selbst verursacht und überschreibt das Textfeld nicht mehr.
-2. **Im Sync-`useEffect`:** zusätzlich ein Fokus-Guard — wenn das Eingabefeld gerade fokussiert ist (`document.activeElement === inputRef.current`), den Text nicht überschreiben. Dafür eine `inputRef` ans `<Input>` hängen. So bleibt die Nutzereingabe auch bei externen Value-Änderungen unangetastet, solange getippt wird.
-
-Beim Verlassen des Feldes (`onBlur`) bleibt das Verhalten korrekt: wenn der aktuelle Text gültig parst, wird er in Normalform (`yyyy-MM-dd`) zurückformatiert; wenn nicht, bleibt der invalid-state sichtbar.
+- Die Related-Notes-Card ist eine reine **Read-only-Ableitung** aus Notes, deren `metadata.people` den Personennamen oder Alias enthält (siehe Query Zeile 112–133). Sie ist bewusst nicht direkt editierbar; die Verbindung wird gesetzt, wenn eine Note die Person erwähnt.
+- In der `CardHeader` eine kleine `CardDescription` (oder `<p className="text-xs text-muted-foreground">`) ergänzen:
+  „Automatically derived from notes that mention this person. Open a note to add or remove the mention."
+- Jeder Listeneintrag bleibt ein `Link` zur Note (bereits vorhanden) — von dort kann der Nutzer die Erwähnung editieren.
 
 ## Keine Änderungen
 
-- Parser-Formate, Kalender, Monat/Jahr-Dropdowns, Popover-Verhalten bleiben unverändert.
-- Keine Integrationen außerhalb dieser Datei.
+- Tab-Struktur, Datenmodell, Queries, ContactProfileTab, PersonTimeline, etc.
+- Kein neues Editier-UI für Related Notes — das Verhalten ist absichtlich abgeleitet.
