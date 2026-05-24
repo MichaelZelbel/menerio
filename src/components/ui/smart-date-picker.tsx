@@ -167,16 +167,20 @@ export function SmartDatePicker({
       <PopoverContent align="start" className="w-auto p-0">
         <div className="space-y-2 border-b p-3">
           <Input
+            ref={inputRef}
             value={text}
             placeholder="YYYY-MM-DD"
             onChange={(e) => handleTextChange(e.target.value)}
+            onBlur={handleBlur}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
                 const parsed = parseLooseDate(text);
                 if (parsed) {
+                  lastValueRef.current = parsed;
                   onChange(parsed);
                   setViewMonth(parsed);
+                  setText(format(parsed, "yyyy-MM-dd"));
                   setOpen(false);
                 }
               }
