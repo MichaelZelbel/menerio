@@ -1,8 +1,10 @@
 import { type DragEvent, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   FilePlus,
   FileText,
   Folder,
@@ -15,7 +17,7 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { Note, SemanticSearchResult } from "@/hooks/useNotes";
+import { Note, SemanticSearchResult, useDuplicateNote } from "@/hooks/useNotes";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
@@ -138,6 +140,8 @@ export function NoteTree({
   sortDirection = "desc",
 }: NoteTreeProps) {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const duplicateNote = useDuplicateNote();
   const depthStep = isMobile ? 8 : 14;
   const noteBasePad = isMobile ? 8 : 14;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
@@ -447,6 +451,22 @@ export function NoteTree({
           >
             <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
           </ContextMenuItem>
+          {!note.is_trashed && (
+            <ContextMenuItem
+              onClick={async () => {
+                try {
+                  const created = await duplicateNote.mutateAsync(note.id);
+                  onSelectFolder(normalizePath(created.folder_path));
+                  onSelectNote(created.id);
+                  navigate(`/dashboard/notes/${created.id}`);
+                } catch {
+                  /* handled by hook */
+                }
+              }}
+            >
+              <Copy className="mr-2 h-3.5 w-3.5" /> Make a copy
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           {note.is_trashed ? (
             <>
