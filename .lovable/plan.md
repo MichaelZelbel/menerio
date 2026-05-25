@@ -1,71 +1,56 @@
-
 ## Goal
 
-Make the Knowledge Graph reflect reality: person profile notes should appear as **person nodes** and be **connected to every note that mentions them** (including alias variants like "Xihui" ↔ "Xihui Wei"). Remove noisy false-positive connections like Michael Hellmich ↔ Gaojie that come from two generic shared tags.
-
-## Diagnosis recap
-
-Three concrete bugs in the current `compute-connections` + graph rendering pipeline:
-
-1. **Person profile notes don't list themselves in `metadata.people`** (e.g. the "Xihui Wei" note has empty metadata). So no other note can match them via the existing string-equality rule.
-2. **Person matching is raw lowercase string equality.** "Xihui" never matches "Xihui Wei", "Michael" never matches "Michael Hellmich". We already have alias data on the `people` (contacts) table and via `metadata.matched_people` — `compute-connections` simply doesn't use it.
-3. **`shared_topic` is too permissive.** Any 2 overlapping topic strings create an edge with strength 0.5. Generic tags like `health` and `employment` link unrelated people.
-
-Plus a smaller display bug:
-
-4. Some person profile notes have `metadata.type` set to `observation` or `null` instead of `person_note`, so they render as gray observation dots.
+Make the Knowledge Graph **honest** about why two notes connect. Today, "About Lucy" and "Love & Relationships Strategy" are linked by a direct edge because both mention Xihui — but the edge gives no hint of *why*, suggesting Lucy is somehow related to relationship strategy. Fix this by (1) routing shared-person edges *through the actual person node*, and (2) labeling every edge with its reason in the side panel and tooltip.
 
 ## Plan
 
-### 1. Backfill + auto-tag person profile notes
+### 1. Route `shared_person` edges through the person node
 
-For every note that represents a person profile (linked to a row in the `people` / contacts table, or whose `metadata.type === 'person_note'`):
+In `get-graph-data`, when assembling the graph:
 
-- Set `metadata.type = 'person_note'`.
-- Ensure `metadata.people` contains the person's canonical name **and** all known aliases (full name, short name, nicknames) drawn from the contacts table.
-- Do this on save (in the existing person-profile save path) **and** as a one-off backfill edge function for existing notes.
+- For every `shared_person` connection between note A and note B that resolves to a canonical person P (already done via the alias map), **do not** emit a direct A↔B edge.
+- Instead, ensure person P exists as a node in the graph (insert it if missing, typed `person_note` — use the contact's profile note if one exists, otherwise synthesize a lightweight person node from the contact row).
+- Emit two edges: A↔P and B↔P, both typed `mentions_person`, strength derived from the original connection. Deduplicate so the same A↔P edge isn't added once per co-mentioned note.
 
-This single change makes "Xihui Wei" connect to every note that mentions "Xihui", and "Michael Hellmich" connect to notes that mention "Michael".
+Visual result: Lucy's note connects to a **Xihui** node, and the Relationships Strategy note also connects to that **Xihui** node. The misleading direct Lucy↔Strategy edge disappears, replaced by the truthful two-hop path Lucy → Xihui → Strategy.
 
-### 2. Alias-aware person matching in `compute-connections`
+### 2. Down-weight shared-person edges when the person is incidental
 
-Replace the current exact-lowercase comparison with an alias-resolving matcher:
+Heuristic applied in `compute-connections` (or in the routing step above):
 
-- Load the user's contacts/aliases once per invocation into an in-memory map `aliasString -> canonicalPersonId`.
-- For each note pair, compare the **set of canonical person IDs** they resolve to, not raw strings. Reuse the existing Levenshtein ≤ 2 fuzzy match from the People Identity system.
-- Strength stays similar (0.7 base, +0.1 per extra shared person, capped at 1.0).
+- If the shared person is **not in either note's title** and is only one of ≥3 people mentioned in that note, treat the mention as incidental and use strength 0.4 instead of 0.7.
+- If the person is in the title or is the only person mentioned, keep strength 0.7+.
 
-### 3. Tighten `shared_topic` to reduce noise
+This stops a tangentially-mentioned person from creating thick, visually dominant edges.
 
-- Require **≥ 3 shared topics** (not 2) for an unconditional edge, with strength 0.6.
-- Keep the "2 shared topics OR 1 shared topic + semantic > 0.5" rule, but at strength 0.4 and only when at least one of the shared topics is non-generic.
-- Maintain a small **stopword topic list** (e.g. `health, work, employment, travel, general, notes`) loaded from a constant; matches on those alone don't count.
+### 3. Label every edge with its reason
 
-### 4. Fix node `type` in the graph payload
+In `KnowledgeGraph.tsx` side panel and hover tooltip:
 
-In `get-graph-data`, prefer **`entity_type` when it equals `person_note`**, and treat any note linked to a contact row as `person_note` regardless of `metadata.type`. As a safety net, the backfill in step 1 already corrects `metadata.type`.
+- For `shared_person` / `mentions_person` edges show: **"via {Person Name}"**.
+- For `shared_topic` show: **"shared topic: {topic1, topic2}"** (from `edge.metadata.topics`, already populated).
+- For `semantic` show: **"similar content ({similarity}%)"**.
+- For `wikilink` / `manual_link` keep existing labels.
 
-### 5. Optional polish (low-risk, high-clarity)
+Add a small inline label on edge hover (using existing Radix `Tooltip` on the SVG/canvas edge layer), and include the same line in the edge details section of the side panel when an edge is selected.
 
-- Add a **"Recompute graph for this user"** admin action that re-runs `compute-connections` for every note after the backfill, so the graph immediately reflects the new rules.
-- In the graph side panel, when a person node is selected, show "Mentioned in N notes" with a quick list, so the user can verify alias resolution worked.
+### 4. Side panel: "Mentioned in N notes" for person nodes
+
+When a person node is selected, list the notes connecting to them (already available from the routed edges). Lets the user immediately verify the connection makes sense ("Xihui is mentioned in: About Lucy, Relationships Strategy, Rome Itinerary, …").
 
 ## Technical details
 
 Files touched:
 
-- `supabase/functions/compute-connections/index.ts` — alias-aware person matching, stricter topic rule, stopword list.
-- `supabase/functions/get-graph-data/index.ts` — robust node-type resolution.
-- New `supabase/functions/backfill-person-metadata/index.ts` — one-off: populate `metadata.type='person_note'` and `metadata.people=[name, ...aliases]` for all person profile notes.
-- `src/components/people/...` (person profile save path) — on save, sync `metadata.people` with the contact's aliases so new edits stay consistent.
-- `src/pages/KnowledgeGraph.tsx` — small label/count in the side panel (optional polish).
-
-No DB migration is required: we're only writing to existing `notes.metadata` and `note_connections` rows.
+- `supabase/functions/get-graph-data/index.ts` — pivot `shared_person` edges through person nodes, ensure person node insertion, emit `mentions_person` edges, attach `metadata.via_person_name` and `metadata.via_person_id`.
+- `supabase/functions/compute-connections/index.ts` — apply the incidental-mention down-weight; persist the shared person ID in `metadata.shared_person_id` so `get-graph-data` can pivot without re-resolving aliases.
+- `supabase/functions/recompute-all-connections/index.ts` — same down-weight (uses the same shared helpers).
+- `src/pages/KnowledgeGraph.tsx` + relevant graph render component — edge hover tooltip, reason line in side panel, "Mentioned in N notes" list for person nodes.
+- No new edge function, no DB migration. After deploy the user just clicks **Rebuild** again.
 
 ## What this will visibly fix
 
-- **Xihui Wei** becomes a pink **person node**, centrally placed, connected to "Xihui eating at Oriental Garden", "About Lucy", "Rome Visit Itinerary", "Love & Relationships Strategy", and "Marriage Papers".
-- **Michael Hellmich** becomes a person node connected to "Love & Relationships Strategy" and "Marriage Papers"; the spurious Michael ↔ Gaojie edge disappears (only `health` + `employment` overlap, both in the stopword list).
-- **Gaojie ↔ Lucy** connects via the existing `Rome Visit Itinerary` mentioning both, *and* — if you mark them as friends in either profile — directly through alias resolution.
-
-After approval I'll implement steps 1–4 first, run the backfill, and confirm the graph in the preview before adding the optional polish.
+- The direct **About Lucy ↔ Love & Relationships Strategy** edge disappears.
+- Both notes connect to a central **Xihui** person node instead — making it obvious the only link is "they both mention Xihui".
+- Hovering any remaining edge shows *why* it exists ("via Xihui", "shared topic: travel, rome", "similar content 78%").
+- Incidental mentions produce thinner, lower-strength edges instead of thick 0.7 ones.

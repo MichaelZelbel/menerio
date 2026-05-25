@@ -59,6 +59,63 @@ export function resolvePeople(people: string[] | undefined | null, aliasMap: Map
   return out;
 }
 
+/**
+ * Resolve people strings to a Map<canonicalId, Set<originalString>> so we can later
+ * check whether a given canonical id appears in a note title.
+ */
+export function resolvePeopleDetailed(
+  people: string[] | undefined | null,
+  aliasMap: Map<string, string>,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (!Array.isArray(people)) return out;
+  for (const p of people) {
+    const raw = String(p || "").trim();
+    if (!raw) continue;
+    const id = aliasMap.get(raw.toLowerCase()) ?? `name:${raw.toLowerCase()}`;
+    if (!out.has(id)) out.set(id, new Set());
+    out.get(id)!.add(raw);
+  }
+  return out;
+}
+
+/**
+ * Compute a shared-person edge between two notes with incidental-mention down-weight.
+ * If the shared person is not in either note's title AND both notes mention >=3 people,
+ * we treat the link as incidental (strength 0.4 instead of 0.7+).
+ */
+export function computeSharedPersons(
+  peopleA: string[],
+  titleA: string,
+  peopleB: string[],
+  titleB: string,
+  aliasMap: Map<string, string>,
+): { strength: number; sharedIds: string[] } | null {
+  const a = resolvePeopleDetailed(peopleA, aliasMap);
+  const b = resolvePeopleDetailed(peopleB, aliasMap);
+  const sharedIds: string[] = [];
+  let anyProminent = false;
+  const titleAL = (titleA || "").toLowerCase();
+  const titleBL = (titleB || "").toLowerCase();
+
+  for (const [id, namesA] of a) {
+    if (!b.has(id)) continue;
+    sharedIds.push(id);
+    const namesB = b.get(id)!;
+    const allNames = [...namesA, ...namesB];
+    const inTitleA = allNames.some((n) => titleAL.includes(n.toLowerCase()));
+    const inTitleB = allNames.some((n) => titleBL.includes(n.toLowerCase()));
+    const incidentalA = !inTitleA && peopleA.length >= 3;
+    const incidentalB = !inTitleB && peopleB.length >= 3;
+    if (!(incidentalA && incidentalB)) anyProminent = true;
+  }
+
+  if (sharedIds.length === 0) return null;
+  const base = anyProminent ? 0.7 : 0.4;
+  const strength = Math.min(1.0, base + (sharedIds.length - 1) * 0.1);
+  return { strength, sharedIds };
+}
+
 /** Returns the intersection size of two sets. */
 export function intersectSize(a: Set<string>, b: Set<string>): number {
   let n = 0;

@@ -1,8 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   buildAliasMap,
-  resolvePeople,
-  intersectSize,
+  computeSharedPersons,
   scoreSharedTopics,
   type Contact,
 } from "../_shared/graph-matching.ts";
@@ -56,8 +55,8 @@ Deno.serve(async (req: Request) => {
       .from("contacts")
       .select("id, name, aliases")
       .eq("user_id", user.id);
+    const myTitle = note.title || "";
     const aliasMap = buildAliasMap((contacts || []) as Contact[]);
-    const myPeopleIds = resolvePeople(people, aliasMap);
 
     const connections: {
       source_note_id: string;
@@ -114,28 +113,30 @@ Deno.serve(async (req: Request) => {
     const otherNotes = needOthers
       ? (await supabase
           .from("notes")
-          .select("id, metadata")
+          .select("id, title, metadata")
           .eq("user_id", user.id)
           .eq("is_trashed", false)
           .neq("id", note_id)
           .limit(1000)).data || []
       : [];
 
-    // --- Shared person connections (alias-aware) ---
-    if (myPeopleIds.size > 0) {
+    // --- Shared person connections (alias-aware, incidental-aware) ---
+    if (people.length > 0) {
       for (const other of otherNotes) {
         const otherMeta = (other.metadata || {}) as Record<string, unknown>;
         const otherPeople = Array.isArray(otherMeta.people) ? otherMeta.people as string[] : [];
-        const otherIds = resolvePeople(otherPeople, aliasMap);
-        const sharedCount = intersectSize(myPeopleIds, otherIds);
-        if (sharedCount > 0) {
-          const strength = Math.min(1.0, 0.7 + (sharedCount - 1) * 0.1);
+        if (otherPeople.length === 0) continue;
+        const result = computeSharedPersons(people, myTitle, otherPeople, other.title || "", aliasMap);
+        if (result) {
           connections.push({
             source_note_id: note_id,
             target_note_id: other.id,
             connection_type: "shared_person",
-            strength,
-            metadata: { shared_person_count: sharedCount },
+            strength: result.strength,
+            metadata: {
+              shared_person_count: result.sharedIds.length,
+              shared_person_ids: result.sharedIds,
+            },
             user_id: user.id,
           });
         }

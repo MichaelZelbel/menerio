@@ -47,9 +47,32 @@ const TYPE_COLORS: Record<string, string> = {
 const EDGE_STYLES: Record<string, { dash: number[]; color: string; opacity: number }> = {
   semantic: { dash: [2, 3], color: "hsl(220, 14%, 55%)", opacity: 0.3 },
   shared_person: { dash: [6, 3], color: "hsl(340, 60%, 55%)", opacity: 0.5 },
+  mentions_person: { dash: [], color: "hsl(340, 60%, 55%)", opacity: 0.6 },
   shared_topic: { dash: [6, 3], color: "hsl(205, 78%, 50%)", opacity: 0.5 },
   manual_link: { dash: [], color: "hsl(220, 70%, 45%)", opacity: 0.8 },
 };
+
+function edgeReason(edge: { type: string; strength: number; metadata?: any }): string {
+  const m = edge.metadata || {};
+  switch (edge.type) {
+    case "mentions_person":
+      return m.via_person_name ? `mentions ${m.via_person_name}` : "mentions person";
+    case "shared_person":
+      return m.via_person_name ? `via ${m.via_person_name}` : "shared person";
+    case "shared_topic": {
+      const t = Array.isArray(m.topics) ? m.topics.join(", ") : null;
+      return t ? `shared topic: ${t}` : "shared topic";
+    }
+    case "semantic": {
+      const pct = Math.round((m.similarity ?? edge.strength) * 100);
+      return `similar content (${pct}%)`;
+    }
+    case "manual_link":
+      return "manual link";
+    default:
+      return edge.type.replace("_", " ");
+  }
+}
 
 interface ForceNode extends GraphNode {
   x?: number;
@@ -127,7 +150,10 @@ export default function KnowledgeGraph() {
 
     const enabledTypes = new Set<string>();
     if (filters.showSemantic) enabledTypes.add("semantic");
-    if (filters.showSharedPerson) enabledTypes.add("shared_person");
+    if (filters.showSharedPerson) {
+      enabledTypes.add("shared_person");
+      enabledTypes.add("mentions_person");
+    }
     if (filters.showSharedTopic) enabledTypes.add("shared_topic");
     if (filters.showManualLink) enabledTypes.add("manual_link");
 
@@ -173,6 +199,7 @@ export default function KnowledgeGraph() {
       target: e.target,
       type: e.type,
       strength: e.strength,
+      metadata: e.metadata,
     }));
 
     return { nodes: forceNodes, links: forceLinks };
@@ -613,6 +640,7 @@ export default function KnowledgeGraph() {
               }}
               linkCanvasObjectMode={() => "replace"}
               linkCanvasObject={linkCanvasObject}
+              linkLabel={(link: any) => edgeReason(link)}
               onNodeClick={handleNodeClick}
               onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
               onNodeDragEnd={(node: any) => {
@@ -680,9 +708,15 @@ export default function KnowledgeGraph() {
                 <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Connections ({selectedNodeEdges.length})
                 </h3>
-                {["manual_link", "semantic", "shared_person", "shared_topic"].map((type) => {
+                {["manual_link", "mentions_person", "semantic", "shared_person", "shared_topic"].map((type) => {
                   const ofType = selectedNodeEdges.filter((e) => e.type === type);
                   if (ofType.length === 0) return null;
+                  // Group reasons (e.g., dedupe "via Xihui" mentions)
+                  const reasonCounts = new Map<string, number>();
+                  for (const e of ofType) {
+                    const r = edgeReason(e as any);
+                    reasonCounts.set(r, (reasonCounts.get(r) || 0) + 1);
+                  }
                   return (
                     <div key={type} className="mb-2">
                       <div className="flex items-center gap-1.5 mb-1">
@@ -694,6 +728,13 @@ export default function KnowledgeGraph() {
                           {type.replace("_", " ")} ({ofType.length})
                         </span>
                       </div>
+                      <ul className="ml-3.5 space-y-0.5">
+                        {Array.from(reasonCounts.entries()).slice(0, 6).map(([reason, count]) => (
+                          <li key={reason} className="text-[10px] text-muted-foreground/80 truncate">
+                            · {reason}{count > 1 ? ` ×${count}` : ""}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   );
                 })}
@@ -727,25 +768,36 @@ export default function KnowledgeGraph() {
               <Separator />
 
               <div className="flex flex-col gap-2">
-                <Button
-                  size="sm"
-                  className="w-full text-xs gap-1.5"
-                  onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Open Note
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs gap-1.5"
-                  onClick={() =>
-                    navigate(`/dashboard/notes/${selectedNode.id}`)
-                  }
-                >
-                  <Sparkles className="h-3 w-3" />
-                  Find Connections
-                </Button>
+                {selectedNode.id.startsWith("contact:") ? (
+                  <Button
+                    size="sm"
+                    className="w-full text-xs gap-1.5"
+                    onClick={() => navigate(`/dashboard/people/${selectedNode.id.slice("contact:".length)}`)}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Open Person
+                  </Button>
+                ) : selectedNode.id.startsWith("person:") ? null : (
+                  <>
+                    <Button
+                      size="sm"
+                      className="w-full text-xs gap-1.5"
+                      onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Open Note
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs gap-1.5"
+                      onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Find Connections
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </div>
