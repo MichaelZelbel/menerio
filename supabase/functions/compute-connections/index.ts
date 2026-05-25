@@ -1,4 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildAliasMap,
+  resolvePeople,
+  intersectSize,
+  scoreSharedTopics,
+  type Contact,
+} from "../_shared/graph-matching.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -43,6 +50,14 @@ Deno.serve(async (req: Request) => {
     const meta = (note.metadata || {}) as Record<string, unknown>;
     const people = Array.isArray(meta.people) ? meta.people as string[] : [];
     const topics = Array.isArray(meta.topics) ? meta.topics as string[] : [];
+
+    // Load contacts for alias resolution.
+    const { data: contacts } = await supabase
+      .from("contacts")
+      .select("id, name, aliases")
+      .eq("user_id", user.id);
+    const aliasMap = buildAliasMap((contacts || []) as Contact[]);
+    const myPeopleIds = resolvePeople(people, aliasMap);
 
     const connections: {
       source_note_id: string;
@@ -94,75 +109,58 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // --- Shared person connections ---
-    if (people.length > 0) {
-      const { data: otherNotes } = await supabase
-        .from("notes")
-        .select("id, metadata")
-        .eq("user_id", user.id)
-        .eq("is_trashed", false)
-        .neq("id", note_id)
-        .limit(500);
+    // Fetch other notes once for both person + topic matching.
+    const needOthers = people.length > 0 || topics.length > 0;
+    const otherNotes = needOthers
+      ? (await supabase
+          .from("notes")
+          .select("id, metadata")
+          .eq("user_id", user.id)
+          .eq("is_trashed", false)
+          .neq("id", note_id)
+          .limit(1000)).data || []
+      : [];
 
-      for (const other of (otherNotes || [])) {
+    // --- Shared person connections (alias-aware) ---
+    if (myPeopleIds.size > 0) {
+      for (const other of otherNotes) {
         const otherMeta = (other.metadata || {}) as Record<string, unknown>;
         const otherPeople = Array.isArray(otherMeta.people) ? otherMeta.people as string[] : [];
-        const shared = people.filter(p => otherPeople.some(op => op.toLowerCase() === p.toLowerCase()));
-        if (shared.length > 0) {
-          const strength = Math.min(1.0, 0.7 + (shared.length - 1) * 0.1);
+        const otherIds = resolvePeople(otherPeople, aliasMap);
+        const sharedCount = intersectSize(myPeopleIds, otherIds);
+        if (sharedCount > 0) {
+          const strength = Math.min(1.0, 0.7 + (sharedCount - 1) * 0.1);
           connections.push({
             source_note_id: note_id,
             target_note_id: other.id,
             connection_type: "shared_person",
             strength,
-            metadata: { people: shared },
+            metadata: { shared_person_count: sharedCount },
             user_id: user.id,
           });
         }
       }
     }
 
-    // --- Shared topic connections ---
+    // --- Shared topic connections (stopword-aware) ---
     if (topics.length > 0) {
-      const { data: otherNotes } = await supabase
-        .from("notes")
-        .select("id, metadata, embedding")
-        .eq("user_id", user.id)
-        .eq("is_trashed", false)
-        .neq("id", note_id)
-        .limit(500);
-
-      for (const other of (otherNotes || [])) {
+      for (const other of otherNotes) {
         const otherMeta = (other.metadata || {}) as Record<string, unknown>;
         const otherTopics = Array.isArray(otherMeta.topics) ? otherMeta.topics as string[] : [];
-        const shared = topics.filter(t => otherTopics.some(ot => ot.toLowerCase() === t.toLowerCase()));
-
-        if (shared.length >= 2) {
-          const strength = shared.length >= 3 ? 0.7 : 0.5;
+        if (otherTopics.length === 0) continue;
+        const semanticAbove05 = connections.some(
+          (c) => c.target_note_id === other.id && c.connection_type === "semantic" && c.strength > 0.5,
+        );
+        const result = scoreSharedTopics(topics, otherTopics, semanticAbove05);
+        if (result) {
           connections.push({
             source_note_id: note_id,
             target_note_id: other.id,
             connection_type: "shared_topic",
-            strength,
-            metadata: { topics: shared },
+            strength: result.strength,
+            metadata: { topics: result.shared },
             user_id: user.id,
           });
-        } else if (shared.length === 1) {
-          // 1 shared topic only counts if semantic similarity > 0.5
-          // Check if we already have a semantic connection with strength > 0.5
-          const hasSemantic = connections.some(
-            c => c.target_note_id === other.id && c.connection_type === "semantic" && c.strength > 0.5
-          );
-          if (hasSemantic) {
-            connections.push({
-              source_note_id: note_id,
-              target_note_id: other.id,
-              connection_type: "shared_topic",
-              strength: 0.3,
-              metadata: { topics: shared },
-              user_id: user.id,
-            });
-          }
         }
       }
     }
