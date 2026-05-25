@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
         const meta = (note.metadata || {}) as Record<string, unknown>;
         const people = Array.isArray(meta.people) ? meta.people as string[] : [];
         const topics = Array.isArray(meta.topics) ? meta.topics as string[] : [];
-        const myPeopleIds = resolvePeople(people, aliasMap);
+        const myTitle = note.title || "";
         const connections: any[] = [];
 
         // --- Semantic connections ---
@@ -138,27 +138,30 @@ Deno.serve(async (req: Request) => {
         const otherNotes = needOthers
           ? (await supabase
               .from("notes")
-              .select("id, metadata")
+              .select("id, title, metadata")
               .eq("user_id", userId)
               .eq("is_trashed", false)
               .neq("id", note.id)
               .limit(1000)).data || []
           : [];
 
-        // --- Shared person connections (alias-aware) ---
-        if (myPeopleIds.size > 0) {
+        // --- Shared person connections (alias-aware, incidental-aware) ---
+        if (people.length > 0) {
           for (const other of otherNotes) {
             const om = (other.metadata || {}) as Record<string, unknown>;
             const op = Array.isArray(om.people) ? om.people as string[] : [];
-            const otherIds = resolvePeople(op, aliasMap);
-            const sharedCount = intersectSize(myPeopleIds, otherIds);
-            if (sharedCount > 0) {
+            if (op.length === 0) continue;
+            const result = computeSharedPersons(people, myTitle, op, other.title || "", aliasMap);
+            if (result) {
               connections.push({
                 source_note_id: note.id,
                 target_note_id: other.id,
                 connection_type: "shared_person",
-                strength: Math.min(1.0, 0.7 + (sharedCount - 1) * 0.1),
-                metadata: { shared_person_count: sharedCount },
+                strength: result.strength,
+                metadata: {
+                  shared_person_count: result.sharedIds.length,
+                  shared_person_ids: result.sharedIds,
+                },
                 user_id: userId,
               });
             }
