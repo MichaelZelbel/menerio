@@ -1,56 +1,38 @@
-## Goal
+## Add "Make a copy" to note context menu
 
-Make the Knowledge Graph **honest** about why two notes connect. Today, "About Lucy" and "Love & Relationships Strategy" are linked by a direct edge because both mention Xihui — but the edge gives no hint of *why*, suggesting Lucy is somehow related to relationship strategy. Fix this by (1) routing shared-person edges *through the actual person node*, and (2) labeling every edge with its reason in the side panel and tooltip.
+Add an Obsidian-style note duplication action to the right-click context menu on notes in the sidebar tree.
 
-## Plan
+### Behavior
 
-### 1. Route `shared_person` edges through the person node
+- Right-click any non-trashed note in the tree → new menu item **"Make a copy"** (between *Copy link* and *Move to…*).
+- Duplicates the note with:
+  - Same `content`, `tags`, `folder_path`, `structured_fields`, `entity_type`.
+  - New `title` derived from the original using Obsidian's convention: append ` 1`, and if that already exists in the same folder, increment (` 2`, ` 3`, …).
+  - Fresh `id`, `created_at`, `updated_at`; `is_pinned=false`, `is_favorite=false`, `is_trashed=false`.
+  - `metadata.duplicated_from = <original id>` so the origin is traceable; `source_app/source_id/source_url` cleared (the copy is a native local note, not a synced external one).
+- After creation: toast "Duplicated note", select the new note, and navigate to `/dashboard/notes/<new-id>`.
 
-In `get-graph-data`, when assembling the graph:
+### Title suffix rule (matches Obsidian)
 
-- For every `shared_person` connection between note A and note B that resolves to a canonical person P (already done via the alias map), **do not** emit a direct A↔B edge.
-- Instead, ensure person P exists as a node in the graph (insert it if missing, typed `person_note` — use the contact's profile note if one exists, otherwise synthesize a lightweight person node from the contact row).
-- Emit two edges: A↔P and B↔P, both typed `mentions_person`, strength derived from the original connection. Deduplicate so the same A↔P edge isn't added once per co-mentioned note.
+```text
+"Meeting notes"      → "Meeting notes 1"
+"Meeting notes 1"    → "Meeting notes 2"
+"Report v3"          → "Report v3 1"   (only trailing " N" is treated as a counter)
+```
 
-Visual result: Lucy's note connects to a **Xihui** node, and the Relationships Strategy note also connects to that **Xihui** node. The misleading direct Lucy↔Strategy edge disappears, replaced by the truthful two-hop path Lucy → Xihui → Strategy.
+Collision check is scoped to the same `folder_path` and the current user's non-trashed notes.
 
-### 2. Down-weight shared-person edges when the person is incidental
+### Files to change
 
-Heuristic applied in `compute-connections` (or in the routing step above):
+1. **`src/hooks/useNotes.ts`** — add `useDuplicateNote()` mutation:
+   - Fetch the source note row.
+   - Query sibling titles in the same folder via `notes` table to compute the next free suffix.
+   - Insert the new note; invalidate `["notes"]`.
+2. **`src/components/notes/NoteTree.tsx`** — add a new `ContextMenuItem` "Make a copy" (with `Copy` icon from lucide-react) in the non-trashed branch of the note context menu. On click: call the duplicate mutation, then `onSelectNote(newId)` and `navigate(\`/dashboard/notes/${newId}\`)`.
+3. **`src/pages/Notes.tsx`** (only if NoteTree needs the handler wired through props) — pass an `onDuplicateNote` callback. If NoteTree can use the hook directly (it already uses other hooks), skip prop drilling and call the hook inside NoteTree.
 
-- If the shared person is **not in either note's title** and is only one of ≥3 people mentioned in that note, treat the mention as incidental and use strength 0.4 instead of 0.7.
-- If the person is in the title or is the only person mentioned, keep strength 0.7+.
+### Out of scope
 
-This stops a tangentially-mentioned person from creating thick, visually dominant edges.
-
-### 3. Label every edge with its reason
-
-In `KnowledgeGraph.tsx` side panel and hover tooltip:
-
-- For `shared_person` / `mentions_person` edges show: **"via {Person Name}"**.
-- For `shared_topic` show: **"shared topic: {topic1, topic2}"** (from `edge.metadata.topics`, already populated).
-- For `semantic` show: **"similar content ({similarity}%)"**.
-- For `wikilink` / `manual_link` keep existing labels.
-
-Add a small inline label on edge hover (using existing Radix `Tooltip` on the SVG/canvas edge layer), and include the same line in the edge details section of the side panel when an edge is selected.
-
-### 4. Side panel: "Mentioned in N notes" for person nodes
-
-When a person node is selected, list the notes connecting to them (already available from the routed edges). Lets the user immediately verify the connection makes sense ("Xihui is mentioned in: About Lucy, Relationships Strategy, Rome Itinerary, …").
-
-## Technical details
-
-Files touched:
-
-- `supabase/functions/get-graph-data/index.ts` — pivot `shared_person` edges through person nodes, ensure person node insertion, emit `mentions_person` edges, attach `metadata.via_person_name` and `metadata.via_person_id`.
-- `supabase/functions/compute-connections/index.ts` — apply the incidental-mention down-weight; persist the shared person ID in `metadata.shared_person_id` so `get-graph-data` can pivot without re-resolving aliases.
-- `supabase/functions/recompute-all-connections/index.ts` — same down-weight (uses the same shared helpers).
-- `src/pages/KnowledgeGraph.tsx` + relevant graph render component — edge hover tooltip, reason line in side panel, "Mentioned in N notes" list for person nodes.
-- No new edge function, no DB migration. After deploy the user just clicks **Rebuild** again.
-
-## What this will visibly fix
-
-- The direct **About Lucy ↔ Love & Relationships Strategy** edge disappears.
-- Both notes connect to a central **Xihui** person node instead — making it obvious the only link is "they both mention Xihui".
-- Hovering any remaining edge shows *why* it exists ("via Xihui", "shared topic: travel, rome", "similar content 78%").
-- Incidental mentions produce thinner, lower-strength edges instead of thick 0.7 ones.
+- No bulk-duplicate from `BulkActionBar` (can be added later if requested).
+- No duplication for external/synced notes' source metadata — copies are always native local notes (consistent with existing "Duplicate to edit" pattern in `NoteEditor.tsx`).
+- No DB migration; uses existing `notes` table.
