@@ -47,9 +47,32 @@ const TYPE_COLORS: Record<string, string> = {
 const EDGE_STYLES: Record<string, { dash: number[]; color: string; opacity: number }> = {
   semantic: { dash: [2, 3], color: "hsl(220, 14%, 55%)", opacity: 0.3 },
   shared_person: { dash: [6, 3], color: "hsl(340, 60%, 55%)", opacity: 0.5 },
+  mentions_person: { dash: [], color: "hsl(340, 60%, 55%)", opacity: 0.6 },
   shared_topic: { dash: [6, 3], color: "hsl(205, 78%, 50%)", opacity: 0.5 },
   manual_link: { dash: [], color: "hsl(220, 70%, 45%)", opacity: 0.8 },
 };
+
+function edgeReason(edge: { type: string; strength: number; metadata?: any }): string {
+  const m = edge.metadata || {};
+  switch (edge.type) {
+    case "mentions_person":
+      return m.via_person_name ? `mentions ${m.via_person_name}` : "mentions person";
+    case "shared_person":
+      return m.via_person_name ? `via ${m.via_person_name}` : "shared person";
+    case "shared_topic": {
+      const t = Array.isArray(m.topics) ? m.topics.join(", ") : null;
+      return t ? `shared topic: ${t}` : "shared topic";
+    }
+    case "semantic": {
+      const pct = Math.round((m.similarity ?? edge.strength) * 100);
+      return `similar content (${pct}%)`;
+    }
+    case "manual_link":
+      return "manual link";
+    default:
+      return edge.type.replace("_", " ");
+  }
+}
 
 interface ForceNode extends GraphNode {
   x?: number;
