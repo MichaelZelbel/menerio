@@ -150,7 +150,10 @@ export default function KnowledgeGraph() {
 
     const enabledTypes = new Set<string>();
     if (filters.showSemantic) enabledTypes.add("semantic");
-    if (filters.showSharedPerson) enabledTypes.add("shared_person");
+    if (filters.showSharedPerson) {
+      enabledTypes.add("shared_person");
+      enabledTypes.add("mentions_person");
+    }
     if (filters.showSharedTopic) enabledTypes.add("shared_topic");
     if (filters.showManualLink) enabledTypes.add("manual_link");
 
@@ -196,6 +199,7 @@ export default function KnowledgeGraph() {
       target: e.target,
       type: e.type,
       strength: e.strength,
+      metadata: e.metadata,
     }));
 
     return { nodes: forceNodes, links: forceLinks };
