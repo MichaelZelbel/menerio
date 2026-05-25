@@ -109,11 +109,13 @@ Deno.serve(async (req: Request) => {
         .in("source_note_id", noteIds)
         .in("target_note_id", noteIds);
 
+      const personNameSet = await buildPersonNameSet(user.id);
+
       return json({
         nodes: (notes || []).map(n => ({
           id: n.id,
           title: n.title,
-          type: (n.metadata as any)?.type || n.entity_type || "note",
+          type: resolveNodeType(n, personNameSet),
           topics: (n.metadata as any)?.topics || [],
           tags: n.tags || [],
           created_at: n.created_at,
