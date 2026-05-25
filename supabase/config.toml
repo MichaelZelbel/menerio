@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.compute-connections]
 verify_jwt = false
 
+[functions.backfill-person-metadata]
+verify_jwt = false
+
 [functions.get-graph-data]
 verify_jwt = false
 
