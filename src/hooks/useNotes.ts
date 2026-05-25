@@ -217,6 +217,79 @@ export function useDeleteNote() {
   });
 }
 
+export function useDuplicateNote() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (sourceId: string): Promise<Note> => {
+      // Fetch source
+      const { data: source, error: srcErr } = await supabase
+        .from("notes" as any)
+        .select("*")
+        .eq("id", sourceId)
+        .single();
+      if (srcErr) throw srcErr;
+      const src = source as unknown as Note;
+
+      // Fetch sibling titles in the same folder
+      const { data: siblings, error: sibErr } = await supabase
+        .from("notes" as any)
+        .select("title")
+        .eq("user_id", user!.id)
+        .eq("folder_path", src.folder_path || "")
+        .eq("is_trashed", false);
+      if (sibErr) throw sibErr;
+      const existing = new Set(
+        ((siblings as unknown as { title: string }[]) || []).map((r) => (r.title || "").trim()),
+      );
+
+      // Obsidian-style suffix: append " 1", incrementing if a base already ends in " N"
+      const baseTitle = (src.title || "Untitled").trim();
+      const match = baseTitle.match(/^(.*?) (\d+)$/);
+      const stem = match ? match[1] : baseTitle;
+      let n = match ? parseInt(match[2], 10) + 1 : 1;
+      let candidate = `${stem} ${n}`;
+      while (existing.has(candidate)) {
+        n += 1;
+        candidate = `${stem} ${n}`;
+      }
+
+      const insertRow = {
+        user_id: user!.id,
+        title: candidate,
+        content: src.content,
+        tags: src.tags || [],
+        folder_path: src.folder_path || "",
+        entity_type: src.entity_type,
+        structured_fields: src.structured_fields || {},
+        metadata: { ...(src.metadata || {}), duplicated_from: src.id },
+        is_pinned: false,
+        is_favorite: false,
+        is_trashed: false,
+      };
+
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .insert(insertRow)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as unknown as Note;
+    },
+    onSuccess: (note) => {
+      qc.invalidateQueries({ queryKey: ["notes"] });
+      showToast.success("Duplicated note");
+      if ((note.title || note.content || "").trim().length >= 20) {
+        invokeWikiIngest(note.id, "INSERT");
+      }
+    },
+    onError: () => {
+      showToast.error("Failed to duplicate note");
+    },
+  });
+}
+
 export function useProcessNote() {
   return useMutation({
     mutationFn: async (noteId: string) => {
