@@ -426,6 +426,8 @@ export default function KnowledgeGraph() {
             )}
           </div>
           <GraphExportButton />
+          <RebuildGraphButton />
+
           <Button
             variant={showFilters ? "secondary" : "outline"}
             size="sm"
