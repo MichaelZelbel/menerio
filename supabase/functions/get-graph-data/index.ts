@@ -10,6 +10,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+async function buildPersonNameSet(userId: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("contacts")
+    .select("name, aliases")
+    .eq("user_id", userId);
+  const set = new Set<string>();
+  for (const c of data || []) {
+    if (c.name) set.add(String(c.name).trim().toLowerCase());
+    for (const a of ((c.aliases as string[]) || [])) {
+      if (a) set.add(String(a).trim().toLowerCase());
+    }
+  }
+  return set;
+}
+
+function resolveNodeType(n: { title: string; metadata: unknown; entity_type: string | null }, personNameSet: Set<string>): string {
+  const m = (n.metadata || {}) as Record<string, unknown>;
+  const explicit = (m.type as string) || n.entity_type || null;
+  if (explicit === "person_note") return explicit;
+  const titleLower = (n.title || "").trim().toLowerCase();
+  if (titleLower && personNameSet.has(titleLower)) return "person_note";
+  return explicit || "note";
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -85,11 +109,13 @@ Deno.serve(async (req: Request) => {
         .in("source_note_id", noteIds)
         .in("target_note_id", noteIds);
 
+      const personNameSet = await buildPersonNameSet(user.id);
+
       return json({
         nodes: (notes || []).map(n => ({
           id: n.id,
           title: n.title,
-          type: (n.metadata as any)?.type || n.entity_type || "note",
+          type: resolveNodeType(n, personNameSet),
           topics: (n.metadata as any)?.topics || [],
           tags: n.tags || [],
           created_at: n.created_at,
@@ -160,11 +186,13 @@ Deno.serve(async (req: Request) => {
       if (data) allConnections = allConnections.concat(data);
     }
 
+    const personNameSet = await buildPersonNameSet(user.id);
+
     return json({
       nodes: filteredNotes.map(n => ({
         id: n.id,
         title: n.title,
-        type: (n.metadata as any)?.type || n.entity_type || "note",
+        type: resolveNodeType(n, personNameSet),
         topics: (n.metadata as any)?.topics || [],
         tags: n.tags || [],
         created_at: n.created_at,
