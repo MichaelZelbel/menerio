@@ -708,9 +708,15 @@ export default function KnowledgeGraph() {
                 <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Connections ({selectedNodeEdges.length})
                 </h3>
-                {["manual_link", "semantic", "shared_person", "shared_topic"].map((type) => {
+                {["manual_link", "mentions_person", "semantic", "shared_person", "shared_topic"].map((type) => {
                   const ofType = selectedNodeEdges.filter((e) => e.type === type);
                   if (ofType.length === 0) return null;
+                  // Group reasons (e.g., dedupe "via Xihui" mentions)
+                  const reasonCounts = new Map<string, number>();
+                  for (const e of ofType) {
+                    const r = edgeReason(e as any);
+                    reasonCounts.set(r, (reasonCounts.get(r) || 0) + 1);
+                  }
                   return (
                     <div key={type} className="mb-2">
                       <div className="flex items-center gap-1.5 mb-1">
@@ -722,6 +728,13 @@ export default function KnowledgeGraph() {
                           {type.replace("_", " ")} ({ofType.length})
                         </span>
                       </div>
+                      <ul className="ml-3.5 space-y-0.5">
+                        {Array.from(reasonCounts.entries()).slice(0, 6).map(([reason, count]) => (
+                          <li key={reason} className="text-[10px] text-muted-foreground/80 truncate">
+                            · {reason}{count > 1 ? ` ×${count}` : ""}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   );
                 })}
