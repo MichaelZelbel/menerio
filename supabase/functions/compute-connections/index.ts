@@ -1,8 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   buildAliasMap,
-  resolvePeople,
-  intersectSize,
+  computeSharedPersons,
   scoreSharedTopics,
   type Contact,
 } from "../_shared/graph-matching.ts";
