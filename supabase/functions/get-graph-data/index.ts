@@ -178,8 +178,8 @@ function pivotSharedPersonEdges(
     }
 
     // Resolve shared person ids: trust metadata if present, else compute live.
-    let sharedIds: string[] = Array.isArray(c.metadata?.shared_person_ids)
-      ? c.metadata.shared_person_ids
+    const sharedIds: string[] = Array.isArray(c.metadata?.shared_person_ids)
+      ? [...c.metadata.shared_person_ids]
       : [];
     const sourceNote = noteById.get(c.source_note_id);
     const targetNote = noteById.get(c.target_note_id);
