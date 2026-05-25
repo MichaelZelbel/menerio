@@ -768,25 +768,36 @@ export default function KnowledgeGraph() {
               <Separator />
 
               <div className="flex flex-col gap-2">
-                <Button
-                  size="sm"
-                  className="w-full text-xs gap-1.5"
-                  onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Open Note
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs gap-1.5"
-                  onClick={() =>
-                    navigate(`/dashboard/notes/${selectedNode.id}`)
-                  }
-                >
-                  <Sparkles className="h-3 w-3" />
-                  Find Connections
-                </Button>
+                {selectedNode.id.startsWith("contact:") ? (
+                  <Button
+                    size="sm"
+                    className="w-full text-xs gap-1.5"
+                    onClick={() => navigate(`/dashboard/people/${selectedNode.id.slice("contact:".length)}`)}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Open Person
+                  </Button>
+                ) : selectedNode.id.startsWith("person:") ? null : (
+                  <>
+                    <Button
+                      size="sm"
+                      className="w-full text-xs gap-1.5"
+                      onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Open Note
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs gap-1.5"
+                      onClick={() => navigate(`/dashboard/notes/${selectedNode.id}`)}
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Find Connections
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </div>
