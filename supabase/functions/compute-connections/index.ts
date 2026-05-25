@@ -57,7 +57,6 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", user.id);
     const myTitle = note.title || "";
     const aliasMap = buildAliasMap((contacts || []) as Contact[]);
-    const myPeopleIds = resolvePeople(people, aliasMap);
 
     const connections: {
       source_note_id: string;
