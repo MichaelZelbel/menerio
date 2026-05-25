@@ -140,6 +140,8 @@ export function NoteTree({
   sortDirection = "desc",
 }: NoteTreeProps) {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const duplicateNote = useDuplicateNote();
   const depthStep = isMobile ? 8 : 14;
   const noteBasePad = isMobile ? 8 : 14;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["__root__"]));
