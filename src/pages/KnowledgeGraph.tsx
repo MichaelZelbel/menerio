@@ -640,6 +640,7 @@ export default function KnowledgeGraph() {
               }}
               linkCanvasObjectMode={() => "replace"}
               linkCanvasObject={linkCanvasObject}
+              linkLabel={(link: any) => edgeReason(link)}
               onNodeClick={handleNodeClick}
               onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
               onNodeDragEnd={(node: any) => {
