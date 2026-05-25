@@ -451,6 +451,22 @@ export function NoteTree({
           >
             <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
           </ContextMenuItem>
+          {!note.is_trashed && (
+            <ContextMenuItem
+              onClick={async () => {
+                try {
+                  const created = await duplicateNote.mutateAsync(note.id);
+                  onSelectFolder(normalizePath(created.folder_path));
+                  onSelectNote(created.id);
+                  navigate(`/dashboard/notes/${created.id}`);
+                } catch {
+                  /* handled by hook */
+                }
+              }}
+            >
+              <Copy className="mr-2 h-3.5 w-3.5" /> Make a copy
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           {note.is_trashed ? (
             <>
