@@ -469,6 +469,7 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     const { data: recentNotes, error: recentNotesError } = await db
       .from("notes")
       .select("id, title, content, metadata, created_at")
+      .eq("ai_visibility", "visible")
       .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false })
       .limit(100);
