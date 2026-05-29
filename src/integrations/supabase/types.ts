@@ -16,13 +16,13 @@ export type Database = {
     Tables: {
       action_items: {
         Row: {
+          ai_visibility: string
           completed_at: string | null
           contact_id: string | null
           content: string
           created_at: string | null
           due_date: string | null
           id: string
-          mcp_visibility: string
           metadata: Json | null
           priority: string
           source_note_id: string | null
@@ -32,13 +32,13 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_visibility?: string
           completed_at?: string | null
           contact_id?: string | null
           content: string
           created_at?: string | null
           due_date?: string | null
           id?: string
-          mcp_visibility?: string
           metadata?: Json | null
           priority?: string
           source_note_id?: string | null
@@ -48,13 +48,13 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          ai_visibility?: string
           completed_at?: string | null
           contact_id?: string | null
           content?: string
           created_at?: string | null
           due_date?: string | null
           id?: string
-          mcp_visibility?: string
           metadata?: Json | null
           priority?: string
           source_note_id?: string | null
@@ -279,6 +279,7 @@ export type Database = {
       }
       collection_items: {
         Row: {
+          ai_visibility: string
           collection_id: string
           created_at: string
           data: Json
@@ -288,13 +289,13 @@ export type Database = {
           indexable_number_1: number | null
           indexable_number_2: number | null
           indexable_text_1: string | null
-          mcp_visibility: string
           search_vector: unknown
           title: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          ai_visibility?: string
           collection_id: string
           created_at?: string
           data?: Json
@@ -304,13 +305,13 @@ export type Database = {
           indexable_number_1?: number | null
           indexable_number_2?: number | null
           indexable_text_1?: string | null
-          mcp_visibility?: string
           search_vector?: unknown
           title?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          ai_visibility?: string
           collection_id?: string
           created_at?: string
           data?: Json
@@ -320,7 +321,6 @@ export type Database = {
           indexable_number_1?: number | null
           indexable_number_2?: number | null
           indexable_text_1?: string | null
-          mcp_visibility?: string
           search_vector?: unknown
           title?: string | null
           updated_at?: string
@@ -742,6 +742,7 @@ export type Database = {
       }
       contacts: {
         Row: {
+          ai_visibility: string
           aliases: string[] | null
           app_mappings: Json | null
           company: string | null
@@ -756,7 +757,6 @@ export type Database = {
           id: string
           is_sensitive: boolean
           last_contact_date: string | null
-          mcp_visibility: string
           merged_at: string | null
           merged_into: string | null
           metadata: Json | null
@@ -770,6 +770,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null
           company?: string | null
@@ -784,7 +785,6 @@ export type Database = {
           id?: string
           is_sensitive?: boolean
           last_contact_date?: string | null
-          mcp_visibility?: string
           merged_at?: string | null
           merged_into?: string | null
           metadata?: Json | null
@@ -798,6 +798,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null
           company?: string | null
@@ -812,7 +813,6 @@ export type Database = {
           id?: string
           is_sensitive?: boolean
           last_contact_date?: string | null
-          mcp_visibility?: string
           merged_at?: string | null
           merged_into?: string | null
           metadata?: Json | null
@@ -1287,7 +1287,7 @@ export type Database = {
           created_at: string
           default_notes_visible: boolean
           default_people_visible: boolean
-          hide_sensitive_linked: boolean
+          hide_sensitive_from_ai: boolean
           updated_at: string
           user_id: string
         }
@@ -1295,7 +1295,7 @@ export type Database = {
           created_at?: string
           default_notes_visible?: boolean
           default_people_visible?: boolean
-          hide_sensitive_linked?: boolean
+          hide_sensitive_from_ai?: boolean
           updated_at?: string
           user_id?: string
         }
@@ -1303,7 +1303,7 @@ export type Database = {
           created_at?: string
           default_notes_visible?: boolean
           default_people_visible?: boolean
-          hide_sensitive_linked?: boolean
+          hide_sensitive_from_ai?: boolean
           updated_at?: string
           user_id?: string
         }
@@ -1557,6 +1557,7 @@ export type Database = {
       }
       moments: {
         Row: {
+          ai_visibility: string
           attachments: Json | null
           category: string | null
           confidence_date: number
@@ -1569,7 +1570,6 @@ export type Database = {
           id: string
           impact_level: number
           is_potential_major: boolean
-          mcp_visibility: string
           merge_auto: boolean
           moment_uid: string
           person_id: string | null
@@ -1581,6 +1581,7 @@ export type Database = {
           verified: boolean
         }
         Insert: {
+          ai_visibility?: string
           attachments?: Json | null
           category?: string | null
           confidence_date?: number
@@ -1593,7 +1594,6 @@ export type Database = {
           id?: string
           impact_level?: number
           is_potential_major?: boolean
-          mcp_visibility?: string
           merge_auto?: boolean
           moment_uid?: string
           person_id?: string | null
@@ -1605,6 +1605,7 @@ export type Database = {
           verified?: boolean
         }
         Update: {
+          ai_visibility?: string
           attachments?: Json | null
           category?: string | null
           confidence_date?: number
@@ -1617,7 +1618,6 @@ export type Database = {
           id?: string
           impact_level?: number
           is_potential_major?: boolean
-          mcp_visibility?: string
           merge_auto?: boolean
           moment_uid?: string
           person_id?: string | null
@@ -1850,6 +1850,7 @@ export type Database = {
       }
       notes: {
         Row: {
+          ai_visibility: string
           content: string
           created_at: string | null
           embedding: string | null
@@ -1860,7 +1861,6 @@ export type Database = {
           is_favorite: boolean | null
           is_pinned: boolean | null
           is_trashed: boolean | null
-          mcp_visibility: string
           metadata: Json | null
           related: Json | null
           source_app: string | null
@@ -1875,6 +1875,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_visibility?: string
           content?: string
           created_at?: string | null
           embedding?: string | null
@@ -1885,7 +1886,6 @@ export type Database = {
           is_favorite?: boolean | null
           is_pinned?: boolean | null
           is_trashed?: boolean | null
-          mcp_visibility?: string
           metadata?: Json | null
           related?: Json | null
           source_app?: string | null
@@ -1900,6 +1900,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          ai_visibility?: string
           content?: string
           created_at?: string | null
           embedding?: string | null
@@ -1910,7 +1911,6 @@ export type Database = {
           is_favorite?: boolean | null
           is_pinned?: boolean | null
           is_trashed?: boolean | null
-          mcp_visibility?: string
           metadata?: Json | null
           related?: Json | null
           source_app?: string | null
@@ -2776,6 +2776,21 @@ export type Database = {
       }
     }
     Functions: {
+      ai_can_see: {
+        Args: { _id: string; _kind: string; _user_id: string }
+        Returns: boolean
+      }
+      ai_hidden_counts: {
+        Args: { _user_id: string }
+        Returns: {
+          action_items_hidden: number
+          collection_items_hidden: number
+          contacts_hidden: number
+          contacts_sensitive: number
+          moments_hidden: number
+          notes_hidden: number
+        }[]
+      }
       deduct_ai_tokens:
         | {
             Args: {
