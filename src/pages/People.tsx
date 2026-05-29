@@ -45,7 +45,7 @@ import { PersonDocuments } from "@/components/people/PersonDocuments";
 import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
 import { useGroups } from "@/hooks/useGroups";
 import { useAddMembership, useGroupMemberships } from "@/hooks/useGroupMemberships";
-import { McpVisibilityButton } from "@/components/common/McpVisibilityButton";
+import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
 
 interface Person {
   id: string;
@@ -328,7 +328,7 @@ export default function People() {
                 <div className="flex gap-1 items-center">
                   {!isEditing ? (
                     <>
-                      <McpVisibilityButton
+                      <AiVisibilityButton
                         kind="person"
                         id={selectedPerson.id}
                         hidden={!!(selectedPerson as any).is_sensitive}
