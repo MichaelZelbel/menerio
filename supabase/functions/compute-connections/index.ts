@@ -122,6 +122,7 @@ Deno.serve(async (req: Request) => {
           .select("id, title, metadata")
           .eq("user_id", user.id)
           .eq("is_trashed", false)
+          .eq("ai_visibility", "visible")
           .neq("id", note_id)
           .limit(1000)).data || []
       : [];
