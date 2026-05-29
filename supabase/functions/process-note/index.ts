@@ -1212,7 +1212,7 @@ async function processInBackground(noteId: string, authHeader: string) {
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external")
+      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility")
       .eq("id", noteId)
       .single();
 
@@ -1220,6 +1220,8 @@ async function processInBackground(noteId: string, authHeader: string) {
       console.error("Note not found:", noteId);
       return;
     }
+
+    const aiHidden = (note as any).ai_visibility === "hidden";
 
     let fullText = `${note.title}\n\n${note.content}`.trim();
     if (!fullText) return;
