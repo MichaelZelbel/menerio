@@ -1,6 +1,11 @@
-// Per-request MCP visibility helpers.
+// Per-request AI visibility helpers.
 // Hidden items and items linked to sensitive persons are filtered out
 // of MCP tool responses. Writes against hidden/sensitive items are blocked.
+//
+// NOTE: column is now `ai_visibility` (renamed from `mcp_visibility`).
+// "Hidden" means hidden from ALL AI pipelines (Lexicon, People, Graph,
+// AI Chat) and MCP clients. This file kept its old name to avoid churn
+// inside open-brain-mcp; the semantics are AI-wide.
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const cache = new AsyncLocalStorage<{
@@ -17,10 +22,10 @@ async function ensureLoaded(supabase: any, userId: string) {
   const store = cache.getStore();
   if (!store || store.loaded) return store;
   const [{ data: prefs }, { data: sensitive }] = await Promise.all([
-    supabase.from("mcp_preferences").select("hide_sensitive_linked").eq("user_id", userId).maybeSingle(),
+    supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
     supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null),
   ]);
-  store.hideSensitiveLinked = prefs?.hide_sensitive_linked ?? true;
+  store.hideSensitiveLinked = prefs?.hide_sensitive_from_ai ?? true;
   store.sensitivePersonIds = new Set((sensitive ?? []).map((r: any) => r.id));
   store.loaded = true;
   return store;
@@ -38,9 +43,9 @@ export async function shouldHideSensitiveLinked(supabase: any, userId: string): 
 
 /**
  * Apply visibility filters to a Supabase query builder.
- * - Always excludes mcp_visibility='hidden'.
+ * - Always excludes ai_visibility='hidden'.
  * - For tables with a person_id column (notes/moments/action_items), excludes rows
- *   whose person_id is in the sensitive set (when hide_sensitive_linked is on).
+ *   whose person_id is in the sensitive set (when hide_sensitive_from_ai is on).
  */
 export async function applyVisibility(
   query: any,
@@ -48,7 +53,7 @@ export async function applyVisibility(
   supabase: any,
   userId: string,
 ) {
-  let q = query.eq("mcp_visibility", "visible");
+  let q = query.eq("ai_visibility", "visible");
   if (table === "contacts") return q;
 
   if (table === "notes" || table === "moments" || table === "action_items") {
@@ -69,7 +74,7 @@ export async function applyVisibility(
  */
 export async function filterVisibleNotes(rows: any[], supabase: any, userId: string): Promise<any[]> {
   if (!rows?.length) return rows;
-  const visible = rows.filter((r) => r.mcp_visibility !== "hidden");
+  const visible = rows.filter((r) => r.ai_visibility !== "hidden");
   if (!(await shouldHideSensitiveLinked(supabase, userId))) return visible;
   const ids = await getSensitivePersonIds(supabase, userId);
   if (ids.size === 0) return visible;
@@ -103,7 +108,7 @@ export function redactContactList<T extends Record<string, any>>(rows: T[] | nul
 }
 
 /**
- * Guard a write against a record. Throws a user-friendly error if MCP isn't allowed to touch it.
+ * Guard a write against a record. Throws a user-friendly error if AI/MCP isn't allowed to touch it.
  */
 export async function assertWritable(
   supabase: any,
@@ -111,7 +116,7 @@ export async function assertWritable(
   kind: "note" | "contact" | "moment" | "action_item" | "collection_item",
   id: string,
 ) {
-  const { data, error } = await supabase.rpc("mcp_can_see", { _user_id: userId, _kind: kind, _id: id });
+  const { data, error } = await supabase.rpc("ai_can_see", { _user_id: userId, _kind: kind, _id: id });
   if (error) throw new Error(`Visibility check failed: ${error.message}`);
   if (!data) {
     throw new Error(
