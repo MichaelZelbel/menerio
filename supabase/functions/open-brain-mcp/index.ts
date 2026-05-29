@@ -15,7 +15,7 @@ import {
   getSensitivePersonIds,
   redactContactList,
   redactSensitiveContact,
-} from "./_mcp_visibility.ts";
+} from "./_ai_visibility.ts";
 
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -492,7 +492,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
+          .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -512,7 +512,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, mcp_visibility, person_id")
+    .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
@@ -974,7 +974,7 @@ server.registerTool(
         (async () => {
           let mq = supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
             .eq("is_trashed", false)
             .eq("user_id", getCurrentUserId())
             .contains("metadata", { people: [name] })
@@ -1003,7 +1003,7 @@ server.registerTool(
           if (ids.length === 0) return { data: [], error: null };
           const { data: rows } = await supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, mcp_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
             .in("id", ids);
           const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
           return { data: filtered, error: null };
@@ -1070,7 +1070,7 @@ server.registerTool(
     try {
       let q = supabase
         .from("contacts")
-        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes, is_sensitive, mcp_visibility")
+        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes, is_sensitive, ai_visibility")
         .eq("user_id", getCurrentUserId())
         .is("merged_into", null)
         .order("name")
@@ -1130,7 +1130,7 @@ server.registerTool(
         .eq("user_id", getCurrentUserId())
         .ilike("name", `%${name}%`)
         .is("merged_into", null)
-        .eq("mcp_visibility", "visible")
+        .eq("ai_visibility", "visible")
         .limit(1);
 
       if (!contacts?.length) return { content: [{ type: "text" as const, text: `No contact found matching "${name}".` }] };
@@ -1176,7 +1176,7 @@ server.registerTool(
 
       let notesQuery = supabase
         .from("notes")
-        .select("title, content, created_at, mcp_visibility, person_id, metadata")
+        .select("title, content, created_at, ai_visibility, person_id, metadata")
         .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
@@ -1208,7 +1208,7 @@ server.registerTool(
     inputSchema: { limit: z.number().optional().default(100) },
   },
   async ({ limit }) => {
-    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, mcp_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, ai_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
     q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });

@@ -469,6 +469,7 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     const { data: recentNotes, error: recentNotesError } = await db
       .from("notes")
       .select("id, title, content, metadata, created_at")
+      .eq("ai_visibility", "visible")
       .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false })
       .limit(100);
@@ -536,13 +537,19 @@ async function processIngest(
 
     const { data: note, error: noteError } = await db
       .from("notes")
-      .select("id, title, content, metadata")
+      .select("id, title, content, metadata, ai_visibility")
       .eq("id", noteId)
       .maybeSingle();
 
     if (noteError) throw noteError;
     if (!note) {
       await logWiki(db, userId, "ingest_skipped", { reason: "note_not_found", note_id: noteId });
+      return;
+    }
+
+    // AI-visibility: a note marked hidden must not contribute to Lexicon pages.
+    if (note.ai_visibility === "hidden") {
+      await logWiki(db, userId, "ingest_skipped", { reason: "ai_hidden", note_id: noteId });
       return;
     }
 

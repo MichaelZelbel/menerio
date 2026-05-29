@@ -41,7 +41,7 @@ import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
-import { McpVisibilityButton } from "@/components/common/McpVisibilityButton";
+import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
@@ -797,7 +797,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const toggleFavorite = () => updateNote.mutate({ id: note.id, is_favorite: !note.is_favorite });
   const togglePin = () => updateNote.mutate({ id: note.id, is_pinned: !note.is_pinned });
 
-  const mcpHidden = (note as any).mcp_visibility === "hidden";
+  const aiHidden = (note as any).ai_visibility === "hidden";
 
   const downloadMarkdown = () => {
     try {
@@ -1061,10 +1061,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                   <Globe className="h-3 w-3" /> Shared
                 </Badge>
               )}
-              <McpVisibilityButton
+              <AiVisibilityButton
                 kind="note"
                 id={note.id}
-                hidden={mcpHidden}
+                hidden={aiHidden}
                 className="ml-1"
               />
             </>

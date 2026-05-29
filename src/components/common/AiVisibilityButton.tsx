@@ -4,15 +4,22 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  useToggleMcpVisibility,
+  useToggleAiVisibility,
   useToggleSensitivePerson,
-  type McpKind,
-} from "@/hooks/useMcpVisibility";
+  type AiKind,
+} from "@/hooks/useAiVisibility";
 
-export type McpEntityKind = "person" | "note" | "moment" | "collection_item" | "action_item";
+export type AiEntityKind = "person" | "note" | "moment" | "collection_item" | "action_item";
+
+const kindToTable: Record<Exclude<AiEntityKind, "person">, AiKind> = {
+  note: "notes",
+  moment: "moments",
+  collection_item: "collection_items",
+  action_item: "action_items",
+};
 
 interface Props {
-  kind: McpEntityKind;
+  kind: AiEntityKind;
   id: string;
   hidden: boolean;
   className?: string;
@@ -20,28 +27,18 @@ interface Props {
   iconOnly?: boolean;
 }
 
-const kindToTable: Record<Exclude<McpEntityKind, "person">, McpKind> = {
-  note: "notes",
-  moment: "moments",
-  collection_item: "collection_items",
-  action_item: "action_items",
-};
-
 /**
- * Unified visibility toggle for any MCP-exposed entity.
- *  - Eye + "MCP"   = visible to MCP / AI clients
- *  - EyeOff + "Hidden" = hidden from MCP / AI clients
+ * Unified visibility toggle for any AI-touched entity.
+ *  - Eye + "AI"     = visible to AI (Lexicon, People, Graph, AI Chat, MCP)
+ *  - EyeOff + "Hidden" = hidden from all AI surfaces
  *
  * For `kind="person"` this flips `is_sensitive` (which also cascades to
  * linked notes/moments/actions). For all other kinds it flips
- * `mcp_visibility` on the row itself.
- *
- * Keeps a local optimistic state so the label flips instantly in both
- * directions, regardless of how fast the query refetch lands.
+ * `ai_visibility` on the row itself.
  */
-export function McpVisibilityButton({ kind, id, hidden, className, iconOnly = false }: Props) {
+export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = false }: Props) {
   const togglePerson = useToggleSensitivePerson();
-  const toggleItem = useToggleMcpVisibility(
+  const toggleItem = useToggleAiVisibility(
     kind === "person" ? "contacts" : kindToTable[kind],
   );
 
@@ -68,14 +65,14 @@ export function McpVisibilityButton({ kind, id, hidden, className, iconOnly = fa
 
   const tooltip = optimistic
     ? kind === "person"
-      ? "Hidden from MCP clients. Linked notes & moments are hidden too. Click to make visible."
-      : "Hidden from MCP clients. Click to make visible."
+      ? "Hidden from AI. Linked notes & moments are hidden too. Click to make visible."
+      : "Hidden from AI: excluded from Lexicon, People, Knowledge Graph, AI Chat and MCP. Local search still finds it. Click to make visible."
     : kind === "person"
-      ? "Visible to MCP clients. Click to hide this person and everything linked to them."
-      : "Visible to MCP clients (ChatGPT, Claude, …). Click to hide.";
+      ? "Visible to AI. Click to hide this person and everything linked to them from all AI features."
+      : "Visible to AI: used in Lexicon, People profiles, Knowledge Graph, AI Chat, and MCP clients. Click to hide.";
 
   const Icon = pending ? Loader2 : optimistic ? EyeOff : Eye;
-  const label = optimistic ? "Hidden" : "MCP";
+  const label = optimistic ? "Hidden" : "AI";
 
   return (
     <TooltipProvider delayDuration={200}>
