@@ -284,6 +284,7 @@ Deno.serve(async (req: Request) => {
         .select("id, title, metadata, tags, entity_type, created_at")
         .eq("user_id", user.id)
         .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
         .in("id", noteIds);
 
       const { data: connections } = await supabase
