@@ -39,12 +39,18 @@ Deno.serve(async (req: Request) => {
     // Fetch the note
     const { data: note, error: noteErr } = await supabase
       .from("notes")
-      .select("id, user_id, title, content, metadata, embedding, tags")
+      .select("id, user_id, title, content, metadata, embedding, tags, ai_visibility")
       .eq("id", note_id)
       .eq("user_id", user.id)
       .single();
 
     if (noteErr || !note) return json({ error: "Note not found" }, 404);
+
+    // Skip connection computation entirely for AI-hidden notes — they must not
+    // appear in the Knowledge Graph or generate suggested connections.
+    if ((note as any).ai_visibility === "hidden") {
+      return json({ ok: true, skipped: "ai_hidden" });
+    }
 
     const meta = (note.metadata || {}) as Record<string, unknown>;
     const people = Array.isArray(meta.people) ? meta.people as string[] : [];
