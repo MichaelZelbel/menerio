@@ -82,10 +82,95 @@ interface OutEdge {
   metadata: Record<string, unknown>;
 }
 
+/** Normalize a name for fuzzy matching: lowercase, strip diacritics, collapse non-alphanumerics. */
+function normalizeName(s: string): string {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Levenshtein distance with early exit at maxDist. */
+function levenshtein(a: string, b: string, maxDist: number): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > maxDist) return maxDist + 1;
+  const n = a.length, m = b.length;
+  if (n === 0) return m;
+  if (m === 0) return n;
+  let prev = new Array(m + 1);
+  let curr = new Array(m + 1);
+  for (let j = 0; j <= m; j++) prev[j] = j;
+  for (let i = 1; i <= n; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= m; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > maxDist) return maxDist + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[m];
+}
+
+interface ContactResolverIndex {
+  exact: Map<string, string>;       // lowercase name/alias -> contact id
+  normalized: Map<string, string>;  // normalized name/alias -> contact id
+  variants: Array<{ norm: string; id: string }>; // for fuzzy
+}
+
+function buildContactResolverIndex(contacts: ContactRow[]): ContactResolverIndex {
+  const exact = new Map<string, string>();
+  const normalized = new Map<string, string>();
+  const variants: Array<{ norm: string; id: string }> = [];
+  for (const c of contacts) {
+    const all = [c.name, ...((c.aliases || []) as string[])].filter(Boolean);
+    for (const v of all) {
+      const lower = String(v).trim().toLowerCase();
+      if (lower && !exact.has(lower)) exact.set(lower, c.id);
+      const norm = normalizeName(v);
+      if (norm && !normalized.has(norm)) normalized.set(norm, c.id);
+      if (norm) variants.push({ norm, id: c.id });
+    }
+  }
+  return { exact, normalized, variants };
+}
+
 /**
- * Pivot shared_person edges through person nodes.
- * For each shared_person edge A↔B, drop the direct edge and emit two mentions_person
- * edges A↔P and B↔P for each canonical person P shared between the two notes.
+ * Resolve a free-form mention name to a real contact id, or null if no confident match.
+ * Order: exact lowercase → normalized → fuzzy (Levenshtein ≤ 2, unique).
+ */
+function resolveMentionToContact(name: string, idx: ContactResolverIndex): string | null {
+  const lower = (name || "").trim().toLowerCase();
+  if (!lower) return null;
+  const exact = idx.exact.get(lower);
+  if (exact) return exact;
+  const norm = normalizeName(name);
+  if (!norm) return null;
+  const nrm = idx.normalized.get(norm);
+  if (nrm) return nrm;
+  // Fuzzy: only short names, only with a unique match at distance ≤ 2.
+  const maxDist = norm.length <= 4 ? 1 : 2;
+  let best: { id: string; dist: number } | null = null;
+  let bestCount = 0;
+  for (const v of idx.variants) {
+    const d = levenshtein(norm, v.norm, maxDist);
+    if (d > maxDist) continue;
+    if (!best || d < best.dist) { best = { id: v.id, dist: d }; bestCount = 1; }
+    else if (d === best.dist && v.id !== best.id) bestCount++;
+  }
+  if (best && bestCount === 1) return best.id;
+  return null;
+}
+
+/**
+ * Pivot shared_person edges through real person nodes (contacts only).
+ * If a mention cannot be resolved to a contact, we DROP the pivot for that name
+ * and keep the direct note↔note shared_person edge instead — no synthetic
+ * `person:<name>` nodes that would be unclickable.
  */
 function pivotSharedPersonEdges(
   notes: NoteRow[],
@@ -94,6 +179,7 @@ function pivotSharedPersonEdges(
   aliasMap: Map<string, string>,
 ): { nodes: OutNode[]; edges: OutEdge[] } {
   const personNameSet = buildPersonNameSet(contacts);
+  const resolverIdx = buildContactResolverIndex(contacts);
   const noteById = new Map<string, NoteRow>();
   for (const n of notes) noteById.set(n.id, n);
 
@@ -125,25 +211,14 @@ function pivotSharedPersonEdges(
   // Dedup mentions_person edges per (note,person)
   const mentionsSeen = new Set<string>();
 
-  function ensurePersonNode(personId: string, displayName: string) {
-    // person node id: contact id (or alias fallback). Prefer profile note id if exists.
-    let nodeId: string;
-    let title: string = displayName;
-    if (personId.startsWith("name:")) {
-      nodeId = `person:${personId.slice(5)}`;
-      title = displayName;
-    } else {
-      const profileId = profileNoteByContact.get(personId);
-      if (profileId) {
-        nodeId = profileId;
-        const profile = noteById.get(profileId);
-        if (profile) title = profile.title;
-      } else {
-        nodeId = `contact:${personId}`;
-        const c = contactById.get(personId);
-        if (c) title = c.name;
-      }
+  function ensureContactNode(contactId: string): { nodeId: string; title: string } {
+    const profileId = profileNoteByContact.get(contactId);
+    if (profileId) {
+      const profile = noteById.get(profileId);
+      return { nodeId: profileId, title: profile?.title || contactById.get(contactId)?.name || "" };
     }
+    const nodeId = `contact:${contactId}`;
+    const title = contactById.get(contactId)?.name || "";
     if (!seenNodeIds.has(nodeId)) {
       seenNodeIds.add(nodeId);
       outNodes.push({
@@ -158,10 +233,16 @@ function pivotSharedPersonEdges(
     return { nodeId, title };
   }
 
-  function personDisplayName(personId: string, fallback: string): string {
-    if (personId.startsWith("name:")) return fallback;
-    const c = contactById.get(personId);
-    return c?.name || fallback;
+  /**
+   * Normalize a sharedId to a real contact id (or null).
+   * sharedId is either a contact uuid OR `name:<lowercased>` (legacy from compute step).
+   */
+  function sharedIdToContactId(sharedId: string): string | null {
+    if (sharedId.startsWith("name:")) {
+      return resolveMentionToContact(sharedId.slice(5), resolverIdx);
+    }
+    // Treat as contact id if known
+    return contactById.has(sharedId) ? sharedId : null;
   }
 
   for (const c of connections) {
@@ -190,17 +271,12 @@ function pivotSharedPersonEdges(
     }
     if (sharedIds.length === 0) continue;
 
+    let pivotedAny = false;
     for (const pid of sharedIds) {
-      // Pick a display name from either note's mentions, fall back to contact name
-      const aDetail = sourceNote
-        ? resolvePeopleDetailed(((sourceNote.metadata as any)?.people) || [], aliasMap)
-        : new Map();
-      const bDetail = targetNote
-        ? resolvePeopleDetailed(((targetNote.metadata as any)?.people) || [], aliasMap)
-        : new Map();
-      const fallback = [...(aDetail.get(pid) || []), ...(bDetail.get(pid) || [])][0] || pid;
-      const display = personDisplayName(pid, fallback);
-      const { nodeId, title } = ensurePersonNode(pid, display);
+      const contactId = sharedIdToContactId(pid);
+      if (!contactId) continue; // unresolved → skip pivot for this name
+
+      const { nodeId, title } = ensureContactNode(contactId);
 
       for (const noteId of [c.source_note_id, c.target_note_id]) {
         if (noteId === nodeId) continue; // person profile already IS this note
@@ -208,17 +284,28 @@ function pivotSharedPersonEdges(
         if (mentionsSeen.has(key)) continue;
         mentionsSeen.add(key);
         outEdges.push({
-          id: `mp:${c.id}:${pid}:${noteId}`,
+          id: `mp:${c.id}:${contactId}:${noteId}`,
           source: noteId,
           target: nodeId,
           type: "mentions_person",
           strength: c.strength,
-          metadata: {
-            via_person_id: pid,
-            via_person_name: title,
-          },
+          metadata: { via_person_id: contactId, via_person_name: title },
         });
       }
+      pivotedAny = true;
+    }
+
+    // Fallback: no pivot succeeded → keep original direct shared_person edge
+    // so the connection isn't lost and the graph stays meaningful.
+    if (!pivotedAny) {
+      outEdges.push({
+        id: c.id,
+        source: c.source_note_id,
+        target: c.target_note_id,
+        type: c.connection_type,
+        strength: c.strength,
+        metadata: c.metadata || {},
+      });
     }
   }
 
