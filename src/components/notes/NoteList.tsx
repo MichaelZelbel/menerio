@@ -1,6 +1,6 @@
 import { memo, useRef, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Note, SemanticSearchResult } from "@/hooks/useNotes";
+import type { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
 import {
   Star,
@@ -107,6 +107,14 @@ const NoteRow = memo(function NoteRow({
           {note.is_favorite && <Star className="h-3 w-3 text-warning fill-warning shrink-0" />}
           {note.is_trashed && <Trash2 className="h-3 w-3 text-destructive shrink-0" />}
           <h4 className="text-sm font-medium truncate flex-1">{note.title || "Untitled"}</h4>
+          {(note as Note).ai_visibility === "hidden" && (
+            <span
+              className="shrink-0 text-[9px] uppercase tracking-wider text-muted-foreground border border-dashed border-border rounded px-1 py-0.5"
+              title="Hidden from AI — local search still finds it"
+            >
+              Hidden
+            </span>
+          )}
           {showSimilarity && similarity !== null && similarity !== undefined && (
             <span className="flex items-center gap-1 shrink-0" title={`${Math.round(similarity * 100)}% match`}>
               <span className={cn("h-1.5 w-1.5 rounded-full", getSimilarityColor(similarity))} />

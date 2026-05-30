@@ -91,6 +91,7 @@ interface Filters {
   showManualLink: boolean;
   noteTypes: Set<string>;
   showOrphans: boolean;
+  showHiddenFromAi: boolean;
   sizeMode: "connections" | "uniform";
   labelMode: "hover" | "always" | "never";
 }
@@ -121,12 +122,17 @@ export default function KnowledgeGraph() {
     showManualLink: true,
     noteTypes: new Set(ALL_NOTE_TYPES),
     showOrphans: false,
+    showHiddenFromAi: false,
     sizeMode: "connections",
     labelMode: "always",
   });
 
   // Fetch graph data from edge function
-  const { data: graphData, isLoading } = useGraphData({ limit: 200, min_strength: filters.minStrength });
+  const { data: graphData, isLoading } = useGraphData({
+    limit: 200,
+    min_strength: filters.minStrength,
+    include_hidden: filters.showHiddenFromAi,
+  });
 
   // Measure container
   useEffect(() => {
@@ -579,6 +585,16 @@ export default function KnowledgeGraph() {
                         className="scale-75"
                       />
                       <Label className="text-[11px]">Size by connections</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={filters.showHiddenFromAi}
+                        onCheckedChange={(v) => setFilters((f) => ({ ...f, showHiddenFromAi: v }))}
+                        className="scale-75"
+                      />
+                      <Label className="text-[11px]" title="Include notes you've hidden from AI features">
+                        Show hidden from AI
+                      </Label>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px]">Labels</Label>

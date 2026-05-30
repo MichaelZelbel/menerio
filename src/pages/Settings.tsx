@@ -39,6 +39,7 @@ import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
+import { AiVisibilitySettings } from "@/components/settings/AiVisibilitySettings";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -233,6 +234,7 @@ export default function Settings() {
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
           <TabsTrigger value="ai-suggestions" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> AI Suggestions</TabsTrigger>
+          <TabsTrigger value="ai-visibility" className="gap-1.5 text-xs"><EyeOff className="h-3.5 w-3.5 hidden sm:block" /> AI Visibility</TabsTrigger>
           <TabsTrigger value="connections" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Apps</TabsTrigger>
           <TabsTrigger value="mcp" className="gap-1.5 text-xs"><Brain className="h-3.5 w-3.5 hidden sm:block" /> MCP</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5 text-xs"><MessageSquare className="h-3.5 w-3.5 hidden sm:block" /> Slack</TabsTrigger>
@@ -359,6 +361,11 @@ export default function Settings() {
         <TabsContent value="ai-suggestions">
           <AISuggestionPreferences />
         </TabsContent>
+
+        <TabsContent value="ai-visibility">
+          <AiVisibilitySettings />
+        </TabsContent>
+
 
 
         <TabsContent value="credits">
