@@ -27,10 +27,12 @@ import {
   Play,
   Square,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
 
 interface MediaItem {
   id: string;
@@ -221,6 +223,7 @@ function BatchAnalysisPanel() {
 export default function MediaLibrary() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const reanalyze = useReanalyzeMedia();
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
 
@@ -425,7 +428,29 @@ export default function MediaLibrary() {
                         <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
                       )}
                       {item.analysis_status === "failed" && (
-                        <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                        <button
+                          type="button"
+                          title={item.original_filename ? `Retry: ${item.original_filename}` : "Retry analysis"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            reanalyze.mutate(
+                              {
+                                noteId: item.note_id,
+                                storagePath: item.storage_path,
+                                mediaType: item.media_type,
+                                originalFilename: item.original_filename ?? undefined,
+                              },
+                              {
+                                onSuccess: () => toast.success("Reanalyzing…"),
+                                onError: (err: Error) => toast.error(err.message),
+                              }
+                            );
+                          }}
+                          className="flex items-center gap-1 bg-destructive/90 hover:bg-destructive text-destructive-foreground text-[9px] px-1.5 py-0.5 rounded-full"
+                        >
+                          <RefreshCw className="h-2.5 w-2.5" />
+                          Retry
+                        </button>
                       )}
                     </div>
                     {contentType && (
