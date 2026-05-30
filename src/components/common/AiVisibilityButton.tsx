@@ -9,6 +9,8 @@ import {
   type AiKind,
 } from "@/hooks/useAiVisibility";
 
+import { AiFootprintDialog } from "@/components/common/AiFootprintDialog";
+
 export type AiEntityKind = "person" | "note" | "moment" | "collection_item" | "action_item";
 
 const kindToTable: Record<Exclude<AiEntityKind, "person">, AiKind> = {
@@ -43,6 +45,7 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
   );
 
   const [optimistic, setOptimistic] = useState(hidden);
+  const [footprintOpen, setFootprintOpen] = useState(false);
   useEffect(() => setOptimistic(hidden), [hidden]);
 
   const pending = kind === "person" ? togglePerson.isPending : toggleItem.isPending;
@@ -58,7 +61,12 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
     } else {
       toggleItem.mutate(
         { id, visibility: next ? "hidden" : "visible" },
-        { onError: () => setOptimistic(hidden) },
+        {
+          onError: () => setOptimistic(hidden),
+          onSuccess: () => {
+            if (next && kind === "note") setFootprintOpen(true);
+          },
+        },
       );
     }
   };
@@ -75,32 +83,41 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
   const label = optimistic ? "Hidden" : "AI";
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onClick}
-            disabled={pending}
-            aria-pressed={optimistic}
-            className={cn(
-              "h-7 gap-1.5 px-2 text-xs font-normal",
-              optimistic
-                ? "text-muted-foreground border-dashed"
-                : "text-foreground",
-              className,
-            )}
-          >
-            <Icon className={cn("h-3.5 w-3.5", pending && "animate-spin")} />
-            {!iconOnly && <span>{label}</span>}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-xs">
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onClick}
+              disabled={pending}
+              aria-pressed={optimistic}
+              className={cn(
+                "h-7 gap-1.5 px-2 text-xs font-normal",
+                optimistic
+                  ? "text-muted-foreground border-dashed"
+                  : "text-foreground",
+                className,
+              )}
+            >
+              <Icon className={cn("h-3.5 w-3.5", pending && "animate-spin")} />
+              {!iconOnly && <span>{label}</span>}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {kind === "note" && (
+        <AiFootprintDialog
+          noteId={id}
+          open={footprintOpen}
+          onOpenChange={setFootprintOpen}
+        />
+      )}
+    </>
   );
 }
