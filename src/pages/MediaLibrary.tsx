@@ -372,46 +372,68 @@ export default function MediaLibrary() {
     enabled: noteIds.length > 0,
   });
 
-  const stats = useMemo(() => {
-    const complete = mediaItems.filter(m => m.analysis_status === "complete").length;
-    const pending = mediaItems.filter(m =>
-      m.analysis_status === "pending" ||
-      m.analysis_status === "processing" ||
-      reanalyze.isPathPending(m.storage_path)
-    ).length;
-    const failed = mediaItems.filter(m => m.analysis_status === "failed").length;
-    return { total: mediaItems.length, complete, pending, failed };
-  }, [mediaItems, reanalyze]);
+  const documentGroups = useMemo(() => groupMediaByDocument(mediaItems), [mediaItems]);
 
-  const filteredItems = useMemo(() => {
-    let items = mediaItems;
+  const stats = useMemo(() => {
+    const complete = documentGroups.filter(g => g.analysis_status === "complete").length;
+    const pending = documentGroups.filter(g =>
+      g.analysis_status === "pending" ||
+      g.analysis_status === "processing" ||
+      reanalyze.isPathPending(g.storage_path)
+    ).length;
+    const failed = documentGroups.filter(g => g.analysis_status === "failed").length;
+    return { total: documentGroups.length, complete, pending, failed };
+  }, [documentGroups, reanalyze]);
+
+  const filteredGroups = useMemo(() => {
+    let groups = documentGroups;
 
     if (contentTypeFilter !== "all") {
-      items = items.filter(m => {
-        const raw = m.raw_analysis as Record<string, unknown> | null;
+      groups = groups.filter(g => {
+        const raw = g.raw_analysis as Record<string, unknown> | null;
         return raw?.content_type === contentTypeFilter;
       });
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      items = items.filter(m =>
-        (m.description || "").toLowerCase().includes(q) ||
-        (m.extracted_text || "").toLowerCase().includes(q) ||
-        (m.original_filename || "").toLowerCase().includes(q) ||
-        (m.topics || []).some(t => t.toLowerCase().includes(q))
+      groups = groups.filter(g =>
+        (g.description || "").toLowerCase().includes(q) ||
+        (g.extracted_text || "").toLowerCase().includes(q) ||
+        (g.original_filename || "").toLowerCase().includes(q) ||
+        g.topics.some(t => t.toLowerCase().includes(q))
       );
     }
 
-    return items;
-  }, [mediaItems, contentTypeFilter, searchQuery]);
+    return groups;
+  }, [documentGroups, contentTypeFilter, searchQuery]);
 
   const getMediaUrl = (storagePath: string) => signedUrls[storagePath] || "";
-  const selectedOpenItem = openItem
-    ? (mediaItems.find((m) => m.id === openItem.id) ||
-      mediaItems.find((m) => m.storage_path === openItem.storage_path && m.page_number === openItem.page_number) ||
-      openItem) as MediaDetailItem
+
+  // Build a synthetic detail item from the matching group (always use the
+  // grouped content so the dialog shows the full multi-page document).
+  const selectedOpenItem: MediaDetailItem | null = openItem
+    ? (() => {
+        const group = documentGroups.find(
+          (g) => g.note_id === openItem.note_id && g.storage_path === openItem.storage_path,
+        );
+        if (!group) return openItem;
+        return {
+          id: group.representative.id,
+          note_id: group.note_id,
+          storage_path: group.storage_path,
+          media_type: group.media_type,
+          page_number: group.page_count > 1 ? null : group.representative.page_number,
+          original_filename: group.original_filename,
+          description: group.description,
+          extracted_text: group.extracted_text,
+          topics: group.topics,
+          raw_analysis: group.raw_analysis,
+          analysis_status: group.analysis_status,
+        };
+      })()
     : null;
+
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
