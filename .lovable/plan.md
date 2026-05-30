@@ -1,68 +1,55 @@
-# PDF/Media-Flow reparieren
+## Ziel
+Den PDF/Media-Analyse-Flow so umbauen, dass ein Dokument in der Media Library als ein logisches Item erscheint, Retry sichtbar und eindeutig läuft, und der Status sauber terminiert.
 
-Vier konkrete Probleme, vier gezielte Fixes — alles im Frontend, keine Edge-Function-Änderungen.
+## Befund
+- Die „Duplikate“ sind aktuell PDF-Seiten: Für ein 2-seitiges PDF liegen zwei `media_analysis`-Records mit identischem `storage_path`, aber unterschiedlicher `page_number` vor. Die Media Library rendert diese Records einzeln, deshalb wirkt dasselbe Dokument doppelt.
+- Retry wird pro `storage_path` gestartet. Wenn zwei Karten denselben `storage_path` haben, schalten beide gleichzeitig auf denselben Pending-Zustand.
+- Die Frontend-Erkennung `hasFreshFinalResult(...)` beendet den Pending-Zustand schon beim ersten frischen `complete`-Record. Bei PDFs mit mehreren Seiten ist das zu grob und kann inkonsistente UI-Zustände erzeugen.
+- Backend-seitig werden bei Retry alte Records gelöscht, ein Placeholder geschrieben, danach neue Page-Records eingefügt und der Placeholder gelöscht. Dadurch gibt es kurzzeitig keinen stabilen „Job“-Record; die UI muss das unnötig erraten.
 
-## 1. Retry-Button reagiert sofort sichtbar
+## Umsetzung
 
-**Problem:** Klick auf "Retry" zeigt keinerlei Reaktion; man weiß nicht, ob etwas läuft.
+### 1. Media Library nach Dokument gruppieren
+- `src/pages/MediaLibrary.tsx` zeigt künftig ein PDF nur noch einmal pro `note_id + storage_path`.
+- Page-Records werden zu einem Dokument-Item zusammengeführt:
+  - Status: `failed` schlägt `processing`, `processing/pending` schlägt `complete`.
+  - Beschreibung/Text: Seiten werden sortiert nach `page_number` zusammengeführt.
+  - Topics: dedupliziert über alle Seiten.
+  - Anzeige: klare Info wie „2 pages“ statt zwei separate Karten.
+- Suche und Statistiken basieren auf diesen gruppierten Items, nicht mehr auf Roh-Records.
 
-**Fix:**
-- `useReanalyzeMedia` so erweitern, dass pro `storage_path` der Pending-Status getrackt wird (statt eines globalen `isPending`).
-- Im Retry-Button (Media Library **und** im MediaAnalysisOverlay innerhalb der Notiz):
-  - während der Mutation: Spinner + Label "Retrying…", Button `disabled`
-  - sofort optimistisch den `analysis_status` der Karte auf `processing` setzen → Badge wechselt unmittelbar von rot auf den Lade-Spinner
+### 2. Retry-State an ein logisches Dokument binden
+- `useReanalyzeMedia` bleibt storage-path-basiert, aber die Terminierung wird robuster:
+  - Pending endet nur, wenn nach dem Retry kein `processing/pending` Record mehr für diesen `storage_path` existiert und mindestens ein frisches finales Ergebnis (`complete` oder `failed`) vorhanden ist.
+  - Dadurch beendet nicht mehr eine einzelne fertige PDF-Seite den Job zu früh.
+- Polling läuft weiter, solange ein Retry-Job offen ist oder DB-Records `processing/pending` sind.
 
-## 2. Status springt ohne manuellen Reload auf Grün
+### 3. Backend-Flow atomarer machen
+- In `supabase/functions/analyze-media/index.ts` wird Retry nicht mehr über „Records verschwinden lassen“ modelliert.
+- Ablauf:
+  1. Vorhandene Records für `note_id + storage_path` werden auf `processing` gesetzt und inhaltlich geleert, statt sofort gelöscht.
+  2. Falls keine Records existieren, wird ein Placeholder erstellt.
+  3. Neue Analyse-Ergebnisse werden vorbereitet.
+  4. Erst danach werden alte/Placeholder-Records ersetzt.
+  5. Bei Fehler bleiben Records sichtbar und werden sauber auf `failed` gesetzt.
+- Ziel: Die UI hat während des gesamten Prozesses einen stabilen Status und kann korrekt terminieren.
 
-**Problem:** MediaLibrary-Query refetcht nie automatisch.
+### 4. Detailansicht für gruppierte PDFs korrigieren
+- `MediaDetailDialog` erhält das zusammengeführte Dokument-Item.
+- Bei PDFs werden alle Seiteninhalte in einem Dialog angezeigt, inklusive Seitentrennern.
+- Retry/Re-analyze im Dialog wirkt nur auf das eine logische Dokument.
+- Der fehlende Dialog-Description-Warnhinweis wird nebenbei behoben.
 
-**Fix:** In der `useQuery` für `media-library` ein `refetchInterval` ergänzen, das alle 5 s pollt, solange mindestens ein Item `pending` oder `processing` ist — analog zum bereits existierenden Pattern in `useMediaAnalysis`.
+### 5. Validierung
+- Nach Umsetzung prüfe ich:
+  - DB-Daten für das betroffene PDF: nur gruppierte Anzeige in der UI, weiterhin korrekte Page-Records in der DB.
+  - Retry-Request: Status wechselt auf „Retrying/Analyzing“, bleibt dort während Verarbeitung, und endet bei finalem DB-Status.
+  - Media Library zeigt dasselbe PDF nur einmal.
+  - Topics/Beschreibung sind konsistent zusammengeführt statt pro Seite widersprüchlich als separate Dokumente sichtbar.
 
-## 3. Volltext + Vorschau direkt aus der Media Library
-
-**Problem:** Beschreibung ist `line-clamp-2`, kein Bild/PDF sichtbar, Klick navigiert weg, ohne dass man den extrahierten Inhalt jemals zu sehen bekommt.
-
-**Fix:** Neuer `MediaDetailDialog` (shadcn `<Dialog>`), der beim Klick auf eine Karte aufgeht statt direkt zur Notiz zu navigieren:
-- Linke Seite: echte Vorschau
-  - Bild → `<img>` mit Signed URL
-  - PDF / `pdf_page` → `<iframe>` mit Signed URL (`#toolbar=0&view=FitH`), Fallback auf File-Icon bei Ladefehler
-- Rechte Seite:
-  - Originaldateiname, Seitenzahl (bei `pdf_page`), Content-Type
-  - **Description** (full)
-  - **Extracted text** (scrollbar, monospaced, `whitespace-pre-wrap`)
-  - Topics als Badges
-  - Buttons: "Open note" (navigiert zur Notiz) und "Retry analysis" (bei `failed`)
-
-Die Karten-Kachel erhält zusätzlich für PDFs eine `iframe`-Mini-Vorschau (mit `pointer-events: none`), damit die graue Icon-Wand verschwindet.
-
-## 4. Inhalt ist auch in der Notiz selbst sichtbar
-
-**Problem:** OCR-Text liegt nur in `media_analysis`. In der Notiz erscheint nichts davon — das bisherige `MediaAnalysisOverlay` zeigt nur ein kleines "AI"-Badge auf dem eingebetteten Element, was Nutzer nicht finden.
-
-**Fix:** Neue Komponente `NoteAttachmentsPanel` unterhalb des Editors:
-- Listet alle `media_analysis`-Einträge der aktuellen Notiz auf, gruppiert pro Datei (PDF-Seiten zu einem Eintrag zusammengefasst).
-- Pro Eintrag: Thumbnail (Bild oder PDF-iframe), Dateiname, Status-Badge.
-- Aufklappbar (`<Collapsible>`) → zeigt Description, full Extracted Text, Topics.
-- Bei `failed`: Retry-Button mit demselben Pending-State wie oben.
-
-So ist garantiert, dass jeder OCR-Text aus einer Notiz heraus lesbar ist — unabhängig davon, ob der TipTap-Embed das PDF/Bild korrekt rendert oder nicht.
-
-## Technische Details
-
-**Geänderte/neue Dateien:**
-- `src/hooks/useMediaAnalysis.ts` — `useReanalyzeMedia` erweitern um `pendingPaths: Set<string>` (oder `isPathPending(path)`); optimistisches Update von `media-library` und `media-analysis` Caches via `onMutate`.
-- `src/pages/MediaLibrary.tsx`:
-  - `refetchInterval` ergänzen
-  - PDF-Kachel: `iframe`-Vorschau statt nur Icon
-  - Card-Klick öffnet neuen Dialog statt `navigate`
-  - Retry-Button mit Spinner/Disabled-State
-- `src/components/media/MediaDetailDialog.tsx` (neu) — Vorschau + Volltext + Topics + Actions.
-- `src/components/notes/NoteAttachmentsPanel.tsx` (neu) — wird in der Notiz-Seite (`src/pages/Notes.tsx` o. ä., wird beim Implementieren lokalisiert) unterhalb des Editors gemountet.
-- `src/components/notes/MediaAnalysisOverlay.tsx` — Retry-Button-Spinner-Pattern angleichen.
-
-**Nicht im Scope:**
-- Änderungen an `analyze-media`/`analyze-pdf` Edge Functions oder am Mistral-Pipeline-Flow.
-- Migration der PDF-Storage-Struktur.
-- Neue Datenfelder in `media_analysis`.
-
-Nach diesen Änderungen: Retry gibt sofort Feedback → Badge wird automatisch grün → ein Klick auf die Karte zeigt PDF + vollständigen Text → derselbe Inhalt ist auch direkt in der Notiz unter dem Editor sichtbar.
+## Betroffene Dateien
+- `src/hooks/useMediaAnalysis.ts`
+- `src/pages/MediaLibrary.tsx`
+- `src/components/media/MediaDetailDialog.tsx`
+- `src/components/notes/NoteAttachmentsPanel.tsx` falls dieselbe Gruppierungslogik dort angepasst werden muss
+- `supabase/functions/analyze-media/index.ts`

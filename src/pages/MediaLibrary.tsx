@@ -50,6 +50,90 @@ interface MediaItem {
   created_at: string | null;
 }
 
+interface DocumentGroup {
+  key: string;
+  note_id: string;
+  storage_path: string;
+  media_type: string;
+  original_filename: string | null;
+  analysis_status: string;
+  description: string | null;
+  extracted_text: string | null;
+  topics: string[];
+  raw_analysis: Record<string, unknown> | null;
+  created_at: string | null;
+  page_count: number;
+  representative: MediaItem;
+}
+
+function groupMediaByDocument(items: MediaItem[]): DocumentGroup[] {
+  const map = new Map<string, DocumentGroup>();
+  // Items are sorted desc by created_at; iterate so page 1 wins when present.
+  const sorted = [...items].sort((a, b) => {
+    const pa = a.page_number ?? -1;
+    const pb = b.page_number ?? -1;
+    return pa - pb;
+  });
+
+  for (const item of sorted) {
+    const key = `${item.note_id}::${item.storage_path}`;
+    const existing = map.get(key);
+
+    if (!existing) {
+      map.set(key, {
+        key,
+        note_id: item.note_id,
+        storage_path: item.storage_path,
+        media_type: item.media_type,
+        original_filename: item.original_filename,
+        analysis_status: item.analysis_status,
+        description: item.description,
+        extracted_text: item.extracted_text,
+        topics: [...(item.topics || [])],
+        raw_analysis: item.raw_analysis,
+        created_at: item.created_at,
+        page_count: 1,
+        representative: item,
+      });
+      continue;
+    }
+
+    existing.page_count += 1;
+
+    // Status precedence: failed > processing/pending > complete
+    const rank = (s: string) =>
+      s === "failed" ? 3 : s === "processing" || s === "pending" ? 2 : 1;
+    if (rank(item.analysis_status) > rank(existing.analysis_status)) {
+      existing.analysis_status = item.analysis_status;
+    }
+
+    // Merge text & description (page order due to pre-sort)
+    if (item.description) {
+      existing.description = existing.description
+        ? `${existing.description}\n\n${item.description}`
+        : item.description;
+    }
+    if (item.extracted_text) {
+      existing.extracted_text = existing.extracted_text
+        ? `${existing.extracted_text}\n\n— Page ${item.page_number ?? "?"} —\n\n${item.extracted_text}`
+        : item.extracted_text;
+    }
+
+    // Deduplicate topics
+    const topicSet = new Set(existing.topics);
+    for (const t of item.topics || []) topicSet.add(t);
+    existing.topics = [...topicSet];
+
+    // Keep the earliest created_at as the document's age
+    if (item.created_at && existing.created_at && item.created_at < existing.created_at) {
+      existing.created_at = item.created_at;
+    }
+  }
+
+  return [...map.values()];
+}
+
+
 const CONTENT_TYPES = [
   "all",
   "screenshot",
@@ -288,46 +372,68 @@ export default function MediaLibrary() {
     enabled: noteIds.length > 0,
   });
 
-  const stats = useMemo(() => {
-    const complete = mediaItems.filter(m => m.analysis_status === "complete").length;
-    const pending = mediaItems.filter(m =>
-      m.analysis_status === "pending" ||
-      m.analysis_status === "processing" ||
-      reanalyze.isPathPending(m.storage_path)
-    ).length;
-    const failed = mediaItems.filter(m => m.analysis_status === "failed").length;
-    return { total: mediaItems.length, complete, pending, failed };
-  }, [mediaItems, reanalyze]);
+  const documentGroups = useMemo(() => groupMediaByDocument(mediaItems), [mediaItems]);
 
-  const filteredItems = useMemo(() => {
-    let items = mediaItems;
+  const stats = useMemo(() => {
+    const complete = documentGroups.filter(g => g.analysis_status === "complete").length;
+    const pending = documentGroups.filter(g =>
+      g.analysis_status === "pending" ||
+      g.analysis_status === "processing" ||
+      reanalyze.isPathPending(g.storage_path)
+    ).length;
+    const failed = documentGroups.filter(g => g.analysis_status === "failed").length;
+    return { total: documentGroups.length, complete, pending, failed };
+  }, [documentGroups, reanalyze]);
+
+  const filteredGroups = useMemo(() => {
+    let groups = documentGroups;
 
     if (contentTypeFilter !== "all") {
-      items = items.filter(m => {
-        const raw = m.raw_analysis as Record<string, unknown> | null;
+      groups = groups.filter(g => {
+        const raw = g.raw_analysis as Record<string, unknown> | null;
         return raw?.content_type === contentTypeFilter;
       });
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      items = items.filter(m =>
-        (m.description || "").toLowerCase().includes(q) ||
-        (m.extracted_text || "").toLowerCase().includes(q) ||
-        (m.original_filename || "").toLowerCase().includes(q) ||
-        (m.topics || []).some(t => t.toLowerCase().includes(q))
+      groups = groups.filter(g =>
+        (g.description || "").toLowerCase().includes(q) ||
+        (g.extracted_text || "").toLowerCase().includes(q) ||
+        (g.original_filename || "").toLowerCase().includes(q) ||
+        g.topics.some(t => t.toLowerCase().includes(q))
       );
     }
 
-    return items;
-  }, [mediaItems, contentTypeFilter, searchQuery]);
+    return groups;
+  }, [documentGroups, contentTypeFilter, searchQuery]);
 
   const getMediaUrl = (storagePath: string) => signedUrls[storagePath] || "";
-  const selectedOpenItem = openItem
-    ? (mediaItems.find((m) => m.id === openItem.id) ||
-      mediaItems.find((m) => m.storage_path === openItem.storage_path && m.page_number === openItem.page_number) ||
-      openItem) as MediaDetailItem
+
+  // Build a synthetic detail item from the matching group (always use the
+  // grouped content so the dialog shows the full multi-page document).
+  const selectedOpenItem: MediaDetailItem | null = openItem
+    ? (() => {
+        const group = documentGroups.find(
+          (g) => g.note_id === openItem.note_id && g.storage_path === openItem.storage_path,
+        );
+        if (!group) return openItem;
+        return {
+          id: group.representative.id,
+          note_id: group.note_id,
+          storage_path: group.storage_path,
+          media_type: group.media_type,
+          page_number: group.page_count > 1 ? null : group.representative.page_number,
+          original_filename: group.original_filename,
+          description: group.description,
+          extracted_text: group.extracted_text,
+          topics: group.topics,
+          raw_analysis: group.raw_analysis,
+          analysis_status: group.analysis_status,
+        };
+      })()
     : null;
+
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
@@ -406,7 +512,7 @@ export default function MediaLibrary() {
               </div>
             ))}
           </div>
-        ) : filteredItems.length === 0 ? (
+        ) : filteredGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
             <Image className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">No media found</p>
@@ -414,24 +520,40 @@ export default function MediaLibrary() {
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredItems.map((item) => {
-              const raw = item.raw_analysis as Record<string, unknown> | null;
+            {filteredGroups.map((group) => {
+              const raw = group.raw_analysis as Record<string, unknown> | null;
               const contentType = raw?.content_type as string | undefined;
-              const noteTitle = noteTitles[item.note_id] || "Untitled";
-              const isPdf = item.media_type === "pdf" || item.media_type === "pdf_page";
+              const noteTitle = noteTitles[group.note_id] || "Untitled";
+              const isPdf = group.media_type === "pdf" || group.media_type === "pdf_page";
 
-              const isRetrying = reanalyze.isPathPending(item.storage_path);
-              const previewUrl = getMediaUrl(item.storage_path);
-              const hasBrokenPreview = Boolean(brokenPreviews[item.storage_path]);
-              const canRetry = !isRetrying && (item.analysis_status === "failed" || item.analysis_status === "complete" || hasBrokenPreview);
+              const isRetrying = reanalyze.isPathPending(group.storage_path);
+              const previewUrl = getMediaUrl(group.storage_path);
+              const hasBrokenPreview = Boolean(brokenPreviews[group.storage_path]);
+              const status = isRetrying ? "processing" : group.analysis_status;
+              const canRetry = !isRetrying && (status === "failed" || status === "complete" || hasBrokenPreview);
+
+              const openDocument = () =>
+                setOpenItem({
+                  id: group.representative.id,
+                  note_id: group.note_id,
+                  storage_path: group.storage_path,
+                  media_type: group.media_type,
+                  page_number: group.page_count > 1 ? null : group.representative.page_number,
+                  original_filename: group.original_filename,
+                  description: group.description,
+                  extracted_text: group.extracted_text,
+                  topics: group.topics,
+                  raw_analysis: group.raw_analysis,
+                  analysis_status: group.analysis_status,
+                });
 
               const retryItem = () => {
                 reanalyze.mutate(
                   {
-                    noteId: item.note_id,
-                    storagePath: item.storage_path,
-                    mediaType: item.media_type === "pdf" || item.media_type === "pdf_page" ? "pdf" : "image",
-                    originalFilename: item.original_filename ?? undefined,
+                    noteId: group.note_id,
+                    storagePath: group.storage_path,
+                    mediaType: isPdf ? "pdf" : "image",
+                    originalFilename: group.original_filename ?? undefined,
                   },
                   {
                     onSuccess: () => toast.success("Reanalyzing…"),
@@ -442,14 +564,14 @@ export default function MediaLibrary() {
 
               return (
                 <div
-                  key={item.id}
+                  key={group.key}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setOpenItem(item as MediaDetailItem)}
+                  onClick={openDocument}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      setOpenItem(item as MediaDetailItem);
+                      openDocument();
                     }
                   }}
                   className="group text-left rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors overflow-hidden"
@@ -466,20 +588,20 @@ export default function MediaLibrary() {
                     ) : (
                       <img
                         src={previewUrl}
-                        alt={item.description || item.original_filename || "Media preview"}
+                        alt={group.description || group.original_filename || "Media preview"}
                         className="w-full h-full object-cover"
                         loading="lazy"
-                        onError={() => setBrokenPreviews((prev) => ({ ...prev, [item.storage_path]: true }))}
+                        onError={() => setBrokenPreviews((prev) => ({ ...prev, [group.storage_path]: true }))}
                       />
                     )}
                     {/* Status badge */}
                     <div className="absolute top-1.5 right-1.5 z-10">
-                      {item.analysis_status === "complete" && !isRetrying && !hasBrokenPreview && (
+                      {status === "complete" && !hasBrokenPreview && (
                         <span className="bg-success/90 text-success-foreground text-[9px] px-1.5 py-0.5 rounded-full">
                           ✓
                         </span>
                       )}
-                      {(item.analysis_status === "pending" || item.analysis_status === "processing" || isRetrying) && (
+                      {(status === "pending" || status === "processing") && (
                         <span className="flex items-center gap-1 bg-background/90 text-muted-foreground text-[9px] px-1.5 py-0.5 rounded-full">
                           <Loader2 className="h-2.5 w-2.5 animate-spin" />
                           {isRetrying ? "Retrying…" : "Analyzing…"}
@@ -488,7 +610,7 @@ export default function MediaLibrary() {
                       {canRetry && (
                         <button
                           type="button"
-                          title={item.original_filename ? `Retry: ${item.original_filename}` : "Retry analysis"}
+                          title={group.original_filename ? `Retry: ${group.original_filename}` : "Retry analysis"}
                           onClick={(e) => {
                             e.stopPropagation();
                             retryItem();
@@ -496,7 +618,7 @@ export default function MediaLibrary() {
                           className="flex items-center gap-1 bg-background/90 hover:bg-accent text-foreground border border-border text-[9px] px-1.5 py-0.5 rounded-full"
                         >
                           <RefreshCw className="h-2.5 w-2.5" />
-                          {item.analysis_status === "complete" ? "Re-analyze" : "Retry"}
+                          {status === "complete" ? "Re-analyze" : "Retry"}
                         </button>
                       )}
                     </div>
@@ -510,19 +632,25 @@ export default function MediaLibrary() {
                   {/* Info */}
                   <div className="p-2.5 space-y-1">
                     <p className="text-xs text-foreground font-medium truncate">{noteTitle}</p>
-                    {item.description && (
-                      <p className="text-[10px] text-muted-foreground line-clamp-2">{item.description}</p>
+                    {group.original_filename && (
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {group.original_filename}
+                        {group.page_count > 1 && <span className="ml-1 opacity-70">· {group.page_count} pages</span>}
+                      </p>
+                    )}
+                    {group.description && (
+                      <p className="text-[10px] text-muted-foreground line-clamp-2">{group.description}</p>
                     )}
                     <div className="flex items-center gap-1 flex-wrap">
-                      {item.topics?.slice(0, 3).map(topic => (
+                      {group.topics.slice(0, 3).map((topic) => (
                         <span key={topic} className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">
                           {topic}
                         </span>
                       ))}
                     </div>
-                    {item.created_at && (
+                    {group.created_at && (
                       <p className="text-[9px] text-muted-foreground/60">
-                        {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        {formatDistanceToNow(new Date(group.created_at), { addSuffix: true })}
                       </p>
                     )}
                   </div>
@@ -532,6 +660,7 @@ export default function MediaLibrary() {
           </div>
         )}
       </div>
+
 
       <MediaDetailDialog
         item={selectedOpenItem}

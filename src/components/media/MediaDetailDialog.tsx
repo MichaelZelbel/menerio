@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ExternalLink, Loader2, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
@@ -77,6 +77,9 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
     <Dialog open={!!item} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl w-[95vw] h-[85vh] p-0 overflow-hidden flex flex-col md:flex-row gap-0">
         <DialogTitle className="sr-only">{item.original_filename || "Media detail"}</DialogTitle>
+        <DialogDescription className="sr-only">
+          Preview and extracted analysis for {item.original_filename || "this attachment"}.
+        </DialogDescription>
 
         {/* Preview */}
         <div className="flex-1 min-h-[40vh] md:min-h-0 bg-muted/40 flex items-center justify-center overflow-hidden">
