@@ -50,10 +50,14 @@ Deno.serve(async (req: Request) => {
 
     const { data: note } = await supabase
       .from("notes")
-      .select("id, title, content, metadata, embedding")
+      .select("id, title, content, metadata, embedding, ai_visibility")
       .eq("id", note_id)
       .eq("user_id", user.id)
       .single();
+
+    if (note && (note as any).ai_visibility === "hidden") {
+      return json({ suggestions: [], skipped: "ai_hidden" });
+    }
 
     if (!note) return json({ error: "Note not found" }, 404);
 

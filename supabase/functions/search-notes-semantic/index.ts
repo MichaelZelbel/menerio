@@ -23,18 +23,20 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function ilikeFallback(userId: string, query: string, limit: number) {
+async function ilikeFallback(userId: string, query: string, limit: number, caller: string) {
   const q = query.toLowerCase();
-  const { data, error } = await supabase
+  let qb = supabase
     .from("notes")
     .select(
-      "id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at"
+      "id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at, ai_visibility"
     )
     .eq("user_id", userId)
     .eq("is_trashed", false)
     .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
     .order("updated_at", { ascending: false })
     .limit(limit);
+  if (caller === "mcp") qb = qb.eq("ai_visibility", "visible");
+  const { data, error } = await qb;
   if (error) throw error;
   return (data || []).map((n: Record<string, unknown>) => ({
     ...n,
