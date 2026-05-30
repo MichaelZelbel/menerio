@@ -28,6 +28,19 @@ import {
   Sparkles,
 } from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
+import { Minimap } from "@/components/graph/Minimap";
+import {
+  assignTiers,
+  shouldShowLabelAuto,
+  nodeScreenRadius,
+  labelFontPx,
+  wrapTitle,
+  rectsOverlap,
+  computeClusters,
+  type Rect,
+  type RenderNode,
+  type LabelTier,
+} from "@/components/graph/graphRendering";
 
 // Color palette for note types using design system hues
 const TYPE_COLORS: Record<string, string> = {
@@ -80,6 +93,8 @@ interface ForceNode extends GraphNode {
   vx?: number;
   vy?: number;
   __connectionCount?: number;
+  __tier?: LabelTier;
+  __importance?: number;
 }
 
 interface Filters {
@@ -93,7 +108,7 @@ interface Filters {
   showOrphans: boolean;
   showHiddenFromAi: boolean;
   sizeMode: "connections" | "uniform";
-  labelMode: "hover" | "always" | "never";
+  labelMode: "auto" | "hover" | "always" | "never";
 }
 
 const ALL_NOTE_TYPES = [
@@ -124,7 +139,7 @@ export default function KnowledgeGraph() {
     showOrphans: false,
     showHiddenFromAi: false,
     sizeMode: "connections",
-    labelMode: "always",
+    labelMode: "auto",
   });
 
   // Fetch graph data from edge function
