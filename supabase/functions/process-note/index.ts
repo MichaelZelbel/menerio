@@ -1029,6 +1029,10 @@ async function generateProfileSuggestions(
         value: (f.value || "").trim(),
       }));
 
+      // Deterministic post-pass: derive Date of birth / Anniversary from age + ref date,
+      // canonicalize aliased labels, and drop malformed birthday facts.
+      extractedFacts = deriveCanonicalFacts(extractedFacts, noteDateISO);
+
       console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length}, relationshipsCount=${extractedRelationships.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
