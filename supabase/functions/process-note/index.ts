@@ -620,10 +620,100 @@ const SINGLETON_PROFILE_LABELS = new Set([
   "job title", "current job title", "role", "title",
   "company", "current company", "employer",
   "current city", "city", "location",
-  "birthday", "date of birth", "dob",
+  "birthday", "date of birth", "dob", "geburtstag", "geburtsdatum",
   "pronouns", "nationality",
   "partner", "spouse",
 ]);
+
+// Labels that all refer to the same canonical field. The first entry in each
+// group is the canonical label that gets persisted.
+const CANONICAL_LABEL_GROUPS: Array<{ canonical: string; aliases: string[] }> = [
+  { canonical: "Date of birth", aliases: ["date of birth", "birthday", "birth date", "dob", "geburtstag", "geburtsdatum"] },
+  { canonical: "Anniversary", aliases: ["anniversary", "wedding anniversary", "hochzeitstag"] },
+];
+
+function canonicalizeLabel(label: string): string {
+  const lower = (label || "").trim().toLowerCase();
+  for (const group of CANONICAL_LABEL_GROUPS) {
+    if (group.aliases.includes(lower)) return group.canonical;
+  }
+  return label;
+}
+
+/**
+ * Deterministic post-pass for the LLM profile extraction.
+ *
+ * Specifically: when the model returns label=Birthday with value like
+ * "61st birthday on 2026-05-25" or "turned 61 on 2026-05-25", rewrite the
+ * fact to {label: "Date of birth", value: "<year>-MM-DD"} where year is the
+ * reference year minus the age. Falls back to noteDateISO if no explicit
+ * reference date is in the value.
+ */
+function deriveCanonicalFacts(
+  facts: Array<{ contact_name: string; category_slug: string; label: string; value: string }>,
+  noteDateISO: string | null,
+) {
+  const out: typeof facts = [];
+  for (const f of facts) {
+    const label = (f.label || "").trim();
+    const value = (f.value || "").trim();
+    const labelLower = label.toLowerCase();
+    const isBirthdayLabel = ["birthday", "date of birth", "dob", "geburtstag", "geburtsdatum"].includes(labelLower);
+
+    if (isBirthdayLabel) {
+      // If value already is an ISO date, just canonicalize the label.
+      const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (isoMatch) {
+        out.push({ ...f, label: "Date of birth", value });
+        continue;
+      }
+
+      // Patterns:
+      //   "61st birthday on 2026-05-25"
+      //   "turned 61 on 2026-05-25"
+      //   "wurde 61 am 2026-05-25"
+      //   "61. Geburtstag am 25.05.2026"
+      const ageDateMatch =
+        value.match(/(\d{1,3})\s*(?:st|nd|rd|th|\.)?\s*(?:birthday|geburtstag|years?\s*old)?[^0-9]{0,20}(\d{4})-(\d{2})-(\d{2})/i) ||
+        value.match(/turned\s+(\d{1,3})\s+(?:on|am)\s+(\d{4})-(\d{2})-(\d{2})/i) ||
+        value.match(/wurde\s+(\d{1,3})\s+(?:on|am)\s+(\d{4})-(\d{2})-(\d{2})/i);
+
+      if (ageDateMatch) {
+        const age = Number(ageDateMatch[1]);
+        const refYear = Number(ageDateMatch[2]);
+        const month = ageDateMatch[3];
+        const day = ageDateMatch[4];
+        if (age > 0 && age < 130 && refYear > 1900 && refYear < 2200) {
+          const birthYear = refYear - age;
+          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}` });
+          continue;
+        }
+      }
+
+      // Age + note date fallback: "X turned 61 last week", with no explicit date in value
+      const ageOnlyMatch = value.match(/(?:turned|wurde|is|ist)\s+(\d{1,3})/i) || value.match(/^(\d{1,3})\s*(?:st|nd|rd|th|\.)?\s*birthday/i);
+      if (ageOnlyMatch && noteDateISO) {
+        const age = Number(ageOnlyMatch[1]);
+        const ref = new Date(noteDateISO);
+        if (age > 0 && age < 130 && !Number.isNaN(ref.getTime())) {
+          const birthYear = ref.getUTCFullYear() - age;
+          const month = String(ref.getUTCMonth() + 1).padStart(2, "0");
+          const day = String(ref.getUTCDate()).padStart(2, "0");
+          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}` });
+          continue;
+        }
+      }
+
+      // Otherwise: drop the fact rather than store unstructured text in a singleton field.
+      console.log(`[profile-extract] dropping malformed birthday fact: "${value}"`);
+      continue;
+    }
+
+    // Generic label canonicalization for non-birthday facts.
+    out.push({ ...f, label: canonicalizeLabel(label) });
+  }
+  return out;
+}
 
 // Sources that are structurally NOT first-person observation. Profile extraction
 // should be skipped for these to avoid mining biographical "facts" out of
