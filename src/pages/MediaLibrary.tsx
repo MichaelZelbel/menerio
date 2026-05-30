@@ -227,6 +227,7 @@ export default function MediaLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
+  const [brokenPreviews, setBrokenPreviews] = useState<Record<string, true>>({});
 
   const { data: mediaItems = [], isLoading } = useQuery({
     queryKey: ["media-library", user?.id],
@@ -242,8 +243,11 @@ export default function MediaLibrary() {
     enabled: !!user,
     refetchInterval: (query) => {
       const items = query.state.data as MediaItem[] | undefined;
-      if (items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")) {
-        return 5000;
+      if (
+        reanalyze.hasActivePendingJobs() ||
+        items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")
+      ) {
+        return 3000;
       }
       return false;
     },
@@ -286,10 +290,14 @@ export default function MediaLibrary() {
 
   const stats = useMemo(() => {
     const complete = mediaItems.filter(m => m.analysis_status === "complete").length;
-    const pending = mediaItems.filter(m => m.analysis_status === "pending" || m.analysis_status === "processing").length;
+    const pending = mediaItems.filter(m =>
+      m.analysis_status === "pending" ||
+      m.analysis_status === "processing" ||
+      reanalyze.isPathPending(m.storage_path)
+    ).length;
     const failed = mediaItems.filter(m => m.analysis_status === "failed").length;
     return { total: mediaItems.length, complete, pending, failed };
-  }, [mediaItems]);
+  }, [mediaItems, reanalyze]);
 
   const filteredItems = useMemo(() => {
     let items = mediaItems;
@@ -315,6 +323,11 @@ export default function MediaLibrary() {
   }, [mediaItems, contentTypeFilter, searchQuery]);
 
   const getMediaUrl = (storagePath: string) => signedUrls[storagePath] || "";
+  const selectedOpenItem = openItem
+    ? (mediaItems.find((m) => m.id === openItem.id) ||
+      mediaItems.find((m) => m.storage_path === openItem.storage_path && m.page_number === openItem.page_number) ||
+      openItem) as MediaDetailItem
+    : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
