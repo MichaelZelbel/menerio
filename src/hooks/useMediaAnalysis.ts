@@ -130,7 +130,14 @@ export function useReanalyzeMedia() {
         (old) => (old ? (old.map(flip) as typeof old) : old),
       );
     },
-    onSettled: (_data, _err, vars) => {
+    onSettled: (_data, err, vars) => {
+      if (err) {
+        setPendingJobs((prev) => {
+          const next = { ...prev };
+          delete next[vars.storagePath];
+          return next;
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["media-analysis", vars.noteId] });
       queryClient.invalidateQueries({ queryKey: ["media-library"] });
     },
