@@ -1,13 +1,20 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  chatWithCredits,
+  deductTokens,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
+const MISTRAL_API_KEY = Deno.env.get("MISTRAL_API_KEY")!;
+
+const MISTRAL_OCR_URL = "https://api.mistral.ai/v1/ocr";
+const MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions";
+const OCR_MODEL = "mistral-ocr-latest";
+const VISION_MODEL = "pixtral-12b-2409";
+const TEXT_MODEL = "mistral-small-latest";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -17,30 +24,343 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const VISION_PROMPT = `Analyze this image thoroughly. Return JSON with:
-- "extracted_text": all readable text in the image, preserving layout and structure as much as possible. Include text from labels, headings, captions, UI elements, handwriting, and any other visible text. If no text is visible, return an empty string.
-- "description": 2-3 sentence description of what the image shows. Be specific about the content, layout, and any notable visual elements. Mention colors, diagrams, charts, UI components, people, objects, or scenes as relevant.
-- "topics": array of 1-5 short topic tags relevant to the image content.
-- "content_type": one of "screenshot", "photo", "diagram", "chart", "whiteboard", "document", "handwriting", "ui_mockup", "code", "other"
-Only extract what's actually visible. Don't invent or infer details that aren't in the image.`;
+const IMAGE_DESCRIBE_PROMPT = `Analyze this image. Return JSON:
+- "description": 2-3 sentence description of what is shown (content, layout, notable visual elements).
+- "topics": array of 1-5 short topic tags.
+- "content_type": one of "screenshot", "photo", "diagram", "chart", "whiteboard", "document", "handwriting", "ui_mockup", "code", "other".
+Only describe what's actually visible.`;
+
+const PAGE_SUMMARY_PROMPT = `You are summarizing a single page of a document. Given the page's extracted markdown text (and any image descriptions), return JSON:
+- "description": 2-3 sentence summary of what this page is about.
+- "topics": array of 1-5 short topic tags.
+- "content_type": one of "document", "slide", "form", "invoice", "report", "article", "diagram", "other".
+Be specific and concise. Do not invent content.`;
+
+function mimeFromExt(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() || "";
+  const map: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+async function fileToBase64DataUrl(
+  storagePath: string,
+  mimeType: string
+): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from("note-attachments")
+    .download(storagePath);
+  if (error || !data) {
+    throw new Error(`Failed to download file: ${error?.message || "no data"}`);
+  }
+  const buf = new Uint8Array(await data.arrayBuffer());
+  // chunk to avoid stack overflow on large files
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+async function mistralFetch(url: string, body: unknown): Promise<any> {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${MISTRAL_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`Mistral ${url} failed: ${resp.status} ${text}`);
+  }
+  return await resp.json();
+}
+
+async function deductFromUsage(
+  userId: string,
+  feature: string,
+  model: string,
+  usage: any
+) {
+  const promptTokens = usage?.prompt_tokens ?? 0;
+  const completionTokens = usage?.completion_tokens ?? 0;
+  const totalTokens =
+    usage?.total_tokens ?? promptTokens + completionTokens ?? 1000;
+  const usageSource = usage?.total_tokens ? "provider" : "fallback";
+  try {
+    await deductTokens(supabase, {
+      userId,
+      tokens: Math.max(1, totalTokens),
+      feature,
+      model,
+      provider: "mistral",
+      promptTokens,
+      completionTokens,
+      usageSource,
+    });
+  } catch (e) {
+    console.warn(`deductTokens failed for ${feature}:`, (e as Error).message);
+  }
+}
+
+interface PageSummary {
+  description: string;
+  topics: string[];
+  content_type?: string;
+}
+
+async function summarizePageText(
+  userId: string,
+  pageText: string,
+  imageDescriptions: string[]
+): Promise<PageSummary> {
+  const combined = [
+    pageText,
+    imageDescriptions.length
+      ? `\n\nEmbedded images on this page:\n- ${imageDescriptions.join("\n- ")}`
+      : "",
+  ].join("");
+  if (combined.trim().length === 0) {
+    return { description: "", topics: [], content_type: "other" };
+  }
+  try {
+    const result = await mistralFetch(MISTRAL_CHAT_URL, {
+      model: TEXT_MODEL,
+      messages: [
+        { role: "system", content: PAGE_SUMMARY_PROMPT },
+        { role: "user", content: combined.slice(0, 12000) },
+      ],
+      response_format: { type: "json_object" },
+    });
+    await deductFromUsage(userId, "analyze-media:summary", TEXT_MODEL, result.usage);
+    const parsed = JSON.parse(result.choices[0].message.content);
+    return {
+      description: String(parsed.description || ""),
+      topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
+      content_type: String(parsed.content_type || "other"),
+    };
+  } catch (e) {
+    console.warn("summarizePageText failed:", (e as Error).message);
+    return { description: "", topics: [], content_type: "other" };
+  }
+}
+
+async function describeImage(
+  userId: string,
+  dataUrl: string,
+  feature: string
+): Promise<PageSummary> {
+  try {
+    const result = await mistralFetch(MISTRAL_CHAT_URL, {
+      model: VISION_MODEL,
+      messages: [
+        { role: "system", content: IMAGE_DESCRIBE_PROMPT },
+        {
+          role: "user",
+          content: [{ type: "image_url", image_url: dataUrl }],
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+    await deductFromUsage(userId, feature, VISION_MODEL, result.usage);
+    const parsed = JSON.parse(result.choices[0].message.content);
+    return {
+      description: String(parsed.description || ""),
+      topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
+      content_type: String(parsed.content_type || "other"),
+    };
+  } catch (e) {
+    console.warn(`describeImage (${feature}) failed:`, (e as Error).message);
+    return { description: "", topics: [], content_type: "other" };
+  }
+}
+
+async function writeAnalysisRecord(p: {
+  userId: string;
+  noteId: string;
+  storagePath: string;
+  mediaType: string;
+  pageNumber: number | null;
+  originalFilename: string | null;
+  extractedText: string;
+  description: string;
+  topics: string[];
+  raw: Record<string, unknown>;
+}) {
+  // Generate embedding
+  const embeddingText = `${p.description} ${p.extractedText}`.trim();
+  let embedding: number[] | null = null;
+  if (embeddingText.length > 0) {
+    try {
+      const embResult = await getEmbeddingWithCredits(
+        supabase,
+        OPENROUTER_API_KEY,
+        p.userId,
+        "analyze-media",
+        embeddingText.slice(0, 8000)
+      );
+      embedding = embResult.embedding;
+    } catch (e) {
+      console.warn("Embedding failed:", (e as Error).message);
+    }
+  }
+
+  await supabase.from("media_analysis").insert({
+    user_id: p.userId,
+    note_id: p.noteId,
+    storage_path: p.storagePath,
+    media_type: p.mediaType,
+    page_number: p.pageNumber,
+    original_filename: p.originalFilename,
+    extracted_text: p.extractedText,
+    description: p.description,
+    topics: p.topics,
+    raw_analysis: p.raw,
+    embedding,
+    analysis_status: "complete",
+  });
+}
+
+async function processImage(
+  userId: string,
+  noteId: string,
+  storagePath: string,
+  originalFilename: string | null
+) {
+  const mimeType = mimeFromExt(storagePath);
+  const dataUrl = await fileToBase64DataUrl(storagePath, mimeType);
+
+  // OCR
+  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
+    model: OCR_MODEL,
+    document: { type: "image_url", image_url: dataUrl },
+  });
+  const ocrPages = ocrResp.pages || [];
+  const extractedText = ocrPages.map((p: any) => p.markdown || "").join("\n").trim();
+  const pagesProcessed = ocrResp.usage_info?.pages_processed || 1;
+  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
+    total_tokens: pagesProcessed * 500,
+  });
+
+  // Vision description
+  const summary = await describeImage(userId, dataUrl, "analyze-media:vision");
+
+  await writeAnalysisRecord({
+    userId,
+    noteId,
+    storagePath,
+    mediaType: "image",
+    pageNumber: null,
+    originalFilename,
+    extractedText,
+    description: summary.description,
+    topics: summary.topics,
+    raw: { ocr: ocrResp, ...summary },
+  });
+}
+
+async function processPdf(
+  userId: string,
+  noteId: string,
+  storagePath: string,
+  originalFilename: string | null
+) {
+  const dataUrl = await fileToBase64DataUrl(storagePath, "application/pdf");
+
+  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
+    model: OCR_MODEL,
+    document: { type: "document_url", document_url: dataUrl },
+    include_image_base64: true,
+  });
+  const pages = ocrResp.pages || [];
+  const pagesProcessed = ocrResp.usage_info?.pages_processed || pages.length;
+  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
+    total_tokens: Math.max(1, pagesProcessed) * 500,
+  });
+
+  if (pages.length === 0) {
+    throw new Error("OCR returned no pages");
+  }
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    const pageNumber = (page.index ?? i) + 1;
+    const pageText: string = page.markdown || "";
+
+    // Describe up to 3 embedded images per page (cost control)
+    const imageDescriptions: string[] = [];
+    const rawImages: any[] = [];
+    const pageImages = Array.isArray(page.images) ? page.images.slice(0, 3) : [];
+    for (const img of pageImages) {
+      const b64 = img.image_base64 || img.base64;
+      if (!b64) continue;
+      const url = b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
+      const desc = await describeImage(userId, url, "analyze-media:pdf-image");
+      if (desc.description) {
+        imageDescriptions.push(desc.description);
+        rawImages.push({ id: img.id, ...desc });
+      }
+    }
+
+    // Page-level summary
+    const summary = await summarizePageText(userId, pageText, imageDescriptions);
+    const combinedDescription = [
+      summary.description,
+      imageDescriptions.length
+        ? `Images: ${imageDescriptions.join(" ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    await writeAnalysisRecord({
+      userId,
+      noteId,
+      storagePath,
+      mediaType: "pdf",
+      pageNumber,
+      originalFilename,
+      extractedText: pageText,
+      description: combinedDescription,
+      topics: summary.topics,
+      raw: {
+        ocr_model: ocrResp.model,
+        page_index: page.index,
+        images: rawImages,
+        summary,
+      },
+    });
+  }
+}
 
 async function processMedia(
   noteId: string,
   storagePath: string,
   mediaType: string,
-  pageNumber: number | null,
   originalFilename: string | null,
   userId: string
 ) {
-  // Create a pending record
-  const { data: record, error: insertErr } = await supabase
+  // Insert a pending placeholder so the UI knows work has started.
+  // For PDFs we'll replace it with per-page records; for images it becomes the final record.
+  const { data: placeholder, error: insertErr } = await supabase
     .from("media_analysis")
     .insert({
       user_id: userId,
       note_id: noteId,
       storage_path: storagePath,
       media_type: mediaType,
-      page_number: pageNumber,
+      page_number: mediaType === "pdf" ? null : null,
       original_filename: originalFilename,
       analysis_status: "processing",
     })
@@ -48,14 +368,12 @@ async function processMedia(
     .single();
 
   if (insertErr) {
-    console.error("Failed to insert media_analysis record:", insertErr);
+    console.error("Failed to insert placeholder:", insertErr);
     return;
   }
-
-  const recordId = record.id;
+  const placeholderId = placeholder.id;
 
   try {
-    // Check credits
     const balance = await checkBalance(supabase, userId);
     if (!balance.allowed) {
       await supabase
@@ -64,170 +382,39 @@ async function processMedia(
           analysis_status: "failed",
           error_message: "Insufficient AI credits",
         })
-        .eq("id", recordId);
+        .eq("id", placeholderId);
       return;
     }
 
-    // Download file from storage
-    const { data: fileData, error: dlErr } = await supabase.storage
-      .from("note-attachments")
-      .download(storagePath);
-
-    if (dlErr || !fileData) {
-      throw new Error(`Failed to download file: ${dlErr?.message || "no data"}`);
-    }
-
-    // Convert to base64
-    const arrayBuf = await fileData.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuf);
-    let binary = "";
-    for (let i = 0; i < uint8.length; i++) {
-      binary += String.fromCharCode(uint8[i]);
-    }
-    const base64 = btoa(binary);
-
-    // Determine MIME type from file extension
-    const ext = storagePath.split(".").pop()?.toLowerCase() || "";
-    const mimeMap: Record<string, string> = {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      gif: "image/gif",
-      webp: "image/webp",
-      svg: "image/svg+xml",
-      pdf: "application/pdf",
-    };
-    const mimeType = mimeMap[ext] || "image/png";
-
-    // Call vision LLM via OpenRouter directly (chatWithCredits doesn't support image content)
-    const openrouterBalance = await checkBalance(supabase, userId);
-    if (!openrouterBalance.allowed) {
-      throw new Error("INSUFFICIENT_CREDITS");
-    }
-
-    const visionBody = {
-      model: "openai/gpt-4o-mini",
-      messages: [
-        { role: "system", content: VISION_PROMPT },
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64}`,
-              },
-            },
-          ],
-        },
-      ],
-      response_format: { type: "json_object" },
-    };
-
-    const visionResp = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(visionBody),
-      }
-    );
-
-    if (!visionResp.ok) {
-      const errText = await visionResp.text().catch(() => "");
-      throw new Error(`Vision LLM failed: ${visionResp.status} ${errText}`);
-    }
-
-    const visionResult = await visionResp.json();
-
-    // Deduct tokens for the vision call
-    const { deductTokens } = await import("../_shared/llm-credits.ts");
-    const usage = visionResult.usage || {};
-    const promptTokens = usage.prompt_tokens || 0;
-    const completionTokens = usage.completion_tokens || 0;
-    const totalTokens =
-      usage.total_tokens || promptTokens + completionTokens || 1000;
-    const usageSource = usage.total_tokens ? "provider" : "fallback";
-
-    await deductTokens(supabase, {
-      userId,
-      tokens: totalTokens,
-      feature: "analyze-media:vision",
-      model: "openai/gpt-4o-mini",
-      provider: "openrouter",
-      promptTokens,
-      completionTokens,
-      usageSource,
-    });
-
-    // Parse the analysis result
-    let analysis: Record<string, unknown>;
-    try {
-      analysis = JSON.parse(
-        visionResult.choices[0].message.content
-      );
-    } catch {
-      analysis = {
-        extracted_text: "",
-        description: "Unable to parse analysis",
-        topics: [],
-        content_type: "other",
-      };
-    }
-
-    const extractedText = (analysis.extracted_text as string) || "";
-    const description = (analysis.description as string) || "";
-    const topics = Array.isArray(analysis.topics)
-      ? (analysis.topics as string[])
-      : [];
-
-    // Generate embedding of combined text
-    const embeddingText = `${description} ${extractedText}`.trim();
-    let embedding: number[] | null = null;
-
-    if (embeddingText.length > 0) {
-      try {
-        const embResult = await getEmbeddingWithCredits(
-          supabase,
-          OPENROUTER_API_KEY,
-          userId,
-          "analyze-media",
-          embeddingText
-        );
-        embedding = embResult.embedding;
-      } catch (e: any) {
-        console.warn("Embedding generation failed:", e.message);
-      }
-    }
-
-    // Update the record with results
+    // Remove placeholder + any previous records for this (note, storage_path)
+    // so re-runs replace prior results.
     await supabase
       .from("media_analysis")
-      .update({
-        extracted_text: extractedText,
-        description,
-        topics,
-        raw_analysis: analysis,
-        embedding,
-        analysis_status: "complete",
-      })
-      .eq("id", recordId);
+      .delete()
+      .eq("note_id", noteId)
+      .eq("storage_path", storagePath);
+
+    if (mediaType === "pdf") {
+      await processPdf(userId, noteId, storagePath, originalFilename);
+    } else {
+      await processImage(userId, noteId, storagePath, originalFilename);
+    }
 
     console.log(
-      `analyze-media complete for note=${noteId}, path=${storagePath}, tokens=${totalTokens}`
+      `analyze-media complete via Mistral (${mediaType}) note=${noteId} path=${storagePath}`
     );
-  } catch (err: any) {
+  } catch (err) {
     console.error("analyze-media error:", err);
-    await supabase
-      .from("media_analysis")
-      .update({
-        analysis_status: "failed",
-        error_message: err.message || "Unknown error",
-      })
-      .eq("id", recordId);
+    // Re-insert a failed marker (placeholder was deleted above for clean re-runs)
+    await supabase.from("media_analysis").insert({
+      user_id: userId,
+      note_id: noteId,
+      storage_path: storagePath,
+      media_type: mediaType,
+      original_filename: originalFilename,
+      analysis_status: "failed",
+      error_message: (err as Error).message || "Unknown error",
+    });
   }
 }
 
@@ -244,8 +431,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // Verify user
     const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
@@ -259,8 +444,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const body = await req.json();
-    const { note_id, storage_path, media_type, page_number, original_filename } =
-      body;
+    const { note_id, storage_path, media_type, original_filename } = body;
 
     if (!note_id || !storage_path || !media_type) {
       return new Response(
@@ -274,30 +458,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // Process in background
     // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(
       processMedia(
         note_id,
         storage_path,
         media_type,
-        page_number ?? null,
         original_filename ?? null,
         user.id
       )
     );
 
+    return new Response(JSON.stringify({ ok: true, processing: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("analyze-media handler error:", err);
     return new Response(
-      JSON.stringify({ ok: true, processing: true }),
+      JSON.stringify({ error: (err as Error).message }),
       {
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (err: any) {
-    console.error("analyze-media handler error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
   }
 });
