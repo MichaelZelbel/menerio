@@ -480,7 +480,13 @@ export default function KnowledgeGraph() {
 
   const handleNodeDoubleClick = useCallback(
     (node: any) => {
-      navigate(`/dashboard/notes/${node.id}`);
+      const id = String(node.id || "");
+      if (id.startsWith("contact:")) {
+        navigate(`/dashboard/people/${id.slice("contact:".length)}`);
+        return;
+      }
+      if (id.startsWith("person:")) return; // unresolved pivots should no longer exist
+      navigate(`/dashboard/notes/${id}`);
     },
     [navigate]
   );
