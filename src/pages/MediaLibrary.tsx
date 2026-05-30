@@ -710,6 +710,11 @@ export default function MediaLibrary() {
                       <p className="text-[10px] text-muted-foreground truncate">
                         {group.original_filename}
                         {group.page_count > 1 && <span className="ml-1 opacity-70">· {group.page_count} pages</span>}
+                        {group.duplicate_count > 0 && (
+                          <span className="ml-1 opacity-70" title="Duplicate uploads of this file were merged into this card">
+                            · {group.duplicate_count + 1} copies
+                          </span>
+                        )}
                       </p>
                     )}
                     {group.description && (
