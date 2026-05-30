@@ -95,6 +95,7 @@ function groupMediaByDocument(items: MediaItem[]): DocumentGroup[] {
         raw_analysis: item.raw_analysis,
         created_at: item.created_at,
         page_count: 1,
+        duplicate_count: 1,
         representative: item,
       });
       continue;
