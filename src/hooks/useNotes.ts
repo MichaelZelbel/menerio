@@ -343,7 +343,9 @@ export function useSemanticSearch() {
       scope?: "all" | "notes" | "media";
     }): Promise<{ results: SemanticSearchResult[]; mode: string }> => {
       const res = await supabase.functions.invoke("search-notes-semantic", {
-        body: { query, threshold, limit, scope },
+        // caller: 'app' keeps hidden-from-AI notes in local search results.
+        // MCP server passes caller: 'mcp' itself to filter them out.
+        body: { query, threshold, limit, scope, caller: "app" },
       });
       if (res.error) throw res.error;
       // Trigger credits refresh after semantic search
