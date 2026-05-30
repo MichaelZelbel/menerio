@@ -288,14 +288,14 @@ export default function ReviewQueue() {
       }
 
       // Insert the profile entry
-      const { error: entryErr } = await supabase.from("profile_entries").insert({
+      const { data: inserted, error: entryErr } = await supabase.from("profile_entries").insert({
         category_id: categoryId,
         contact_id,
         label,
         value,
         sort_order: 0,
         user_id: item.user_id,
-      });
+      }).select("id").maybeSingle();
 
       if (entryErr) {
         showToast.error("Failed to add profile entry: " + entryErr.message);
@@ -305,7 +305,15 @@ export default function ReviewQueue() {
       // Invalidate contact profile queries
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      updateStatus.mutate({ id: item.id, status: "kept" });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: {
+          target_entity_type: "profile_entry",
+          target_entity_id: inserted?.id ?? null,
+          applied_at: new Date().toISOString(),
+        },
+      });
       showToast.success(`Added "${label}: ${value}" to ${contact_name}'s profile`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
@@ -483,8 +491,13 @@ export default function ReviewQueue() {
     showToast.success("Change kept");
   };
 
-  const handleKeep = (item: ReviewItem) => {
-    if (item.status === "pending" || item.status === "pending_review") return handleAccept(item);
+  const handleKeep = async (item: ReviewItem) => {
+    // If the suggestion has not actually been applied yet (no target row written),
+    // run the real accept path. Status alone is not enough — historical Kept items
+    // exist with status="kept" but null target_entity_id because earlier versions
+    // of this page only flipped status without inserting.
+    const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
+    if (!alreadyApplied) return handleAccept(item);
     updateStatus.mutate({ id: item.id, status: "kept" });
     showToast.success("Change kept");
   };
@@ -536,7 +549,21 @@ export default function ReviewQueue() {
   };
 
   const handleKeepAll = async () => {
-    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    // Sequentially apply each item so add_profile_entry / add_relationship /
+    // group_member_suggestion actually write to their tables instead of just
+    // flipping review_queue.status to "kept".
+    for (const item of items) {
+      const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
+      try {
+        if (alreadyApplied) {
+          updateStatus.mutate({ id: item.id, status: "kept" });
+        } else {
+          await handleAccept(item);
+        }
+      } catch (err: any) {
+        showToast.error(`Failed to keep "${item.title}": ${err?.message || "Unknown error"}`);
+      }
+    }
     for (const revision of wikiRevisions) {
       await handleWikiLooksGood(revision);
     }
