@@ -6,6 +6,7 @@ import { FileText, ExternalLink, Loader2, RefreshCw, AlertCircle, CheckCircle2 }
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
+import { PdfThumbnail } from "@/components/media/PdfThumbnail";
 import { toast } from "sonner";
 
 export interface MediaDetailItem {
@@ -84,11 +85,13 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
         {/* Preview */}
         <div className="flex-1 min-h-[40vh] md:min-h-0 bg-muted/40 flex items-center justify-center overflow-hidden">
           {isPdf ? (
-            <div className="flex flex-col items-center gap-3 text-muted-foreground px-6 text-center">
-              <FileText className="h-14 w-14" />
-              <div className="space-y-1">
-                <p className="text-sm text-foreground">PDF document</p>
-                <p className="text-xs">Use Open file to view the original PDF.</p>
+            <div className="flex flex-col items-center gap-3 w-full h-full p-4">
+              <div className="flex-1 w-full flex items-center justify-center overflow-hidden">
+                {signedUrl ? (
+                  <PdfThumbnail url={signedUrl} width={720} contain />
+                ) : (
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                )}
               </div>
               {signedUrl && (
                 <Button variant="outline" size="sm" asChild>
