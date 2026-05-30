@@ -39,6 +39,7 @@ import { OutgoingLinksPanel } from "./OutgoingLinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
+import { NoteAttachmentsPanel } from "./NoteAttachmentsPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
