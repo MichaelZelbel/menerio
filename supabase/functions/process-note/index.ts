@@ -1552,6 +1552,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       source_app: (note as any).source_app,
       is_external: (note as any).is_external,
       metadata: mergedMetadata,
+      note_created_at: (note as any).created_at ?? null,
     });
 
     // Trigger connection computation (fire-and-forget)
