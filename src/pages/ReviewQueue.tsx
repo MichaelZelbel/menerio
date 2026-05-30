@@ -491,8 +491,13 @@ export default function ReviewQueue() {
     showToast.success("Change kept");
   };
 
-  const handleKeep = (item: ReviewItem) => {
-    if (item.status === "pending" || item.status === "pending_review") return handleAccept(item);
+  const handleKeep = async (item: ReviewItem) => {
+    // If the suggestion has not actually been applied yet (no target row written),
+    // run the real accept path. Status alone is not enough — historical Kept items
+    // exist with status="kept" but null target_entity_id because earlier versions
+    // of this page only flipped status without inserting.
+    const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
+    if (!alreadyApplied) return handleAccept(item);
     updateStatus.mutate({ id: item.id, status: "kept" });
     showToast.success("Change kept");
   };
