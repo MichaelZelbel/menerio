@@ -245,6 +245,7 @@ async function executeTool(
         .select("id, title, content, tags, metadata")
         .eq("user_id", userId)
         .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
         .order("updated_at", { ascending: false })
         .limit(10);
