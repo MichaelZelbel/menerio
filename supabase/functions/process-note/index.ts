@@ -1320,7 +1320,7 @@ async function processInBackground(noteId: string, authHeader: string) {
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility")
+      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at")
       .eq("id", noteId)
       .single();
 
