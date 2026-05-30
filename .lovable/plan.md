@@ -1,55 +1,78 @@
-## Ziel
-Den PDF/Media-Analyse-Flow so umbauen, dass ein Dokument in der Media Library als ein logisches Item erscheint, Retry sichtbar und eindeutig läuft, und der Status sauber terminiert.
+## Ergebnis der Prüfung
 
-## Befund
-- Die „Duplikate“ sind aktuell PDF-Seiten: Für ein 2-seitiges PDF liegen zwei `media_analysis`-Records mit identischem `storage_path`, aber unterschiedlicher `page_number` vor. Die Media Library rendert diese Records einzeln, deshalb wirkt dasselbe Dokument doppelt.
-- Retry wird pro `storage_path` gestartet. Wenn zwei Karten denselben `storage_path` haben, schalten beide gleichzeitig auf denselben Pending-Zustand.
-- Die Frontend-Erkennung `hasFreshFinalResult(...)` beendet den Pending-Zustand schon beim ersten frischen `complete`-Record. Bei PDFs mit mehreren Seiten ist das zu grob und kann inkonsistente UI-Zustände erzeugen.
-- Backend-seitig werden bei Retry alte Records gelöscht, ein Placeholder geschrieben, danach neue Page-Records eingefügt und der Placeholder gelöscht. Dadurch gibt es kurzzeitig keinen stabilen „Job“-Record; die UI muss das unnötig erraten.
+Der konkrete Re-Analyse-Job für die DB-Rechnung ist serverseitig nicht hängen geblieben.
 
-## Umsetzung
+Belege aus Supabase:
+- `analyze-pdf` wurde um `14:47:08` gestartet.
+- `analyze-media` meldete um `14:47:12` erfolgreich `complete`.
+- In `media_analysis` stehen für das PDF zwei Seiten als `complete`:
+  - Seite 1: extrahierter Text vorhanden (`1895` Zeichen), Tags vorhanden
+  - Seite 2: extrahierter Text vorhanden (`489` Zeichen), Tags vorhanden
+- Es gibt aktuell keine `pending` oder `processing` Records für diesen User.
 
-### 1. Media Library nach Dokument gruppieren
-- `src/pages/MediaLibrary.tsx` zeigt künftig ein PDF nur noch einmal pro `note_id + storage_path`.
-- Page-Records werden zu einem Dokument-Item zusammengeführt:
-  - Status: `failed` schlägt `processing`, `processing/pending` schlägt `complete`.
-  - Beschreibung/Text: Seiten werden sortiert nach `page_number` zusammengeführt.
-  - Topics: dedupliziert über alle Seiten.
-  - Anzeige: klare Info wie „2 pages“ statt zwei separate Karten.
-- Suche und Statistiken basieren auf diesen gruppierten Items, nicht mehr auf Roh-Records.
+Die Endlosschleife ist daher sehr wahrscheinlich kein OCR-/Mistral-/Backend-Timeout, sondern ein Frontend-Statusproblem im Retry-Polling.
 
-### 2. Retry-State an ein logisches Dokument binden
-- `useReanalyzeMedia` bleibt storage-path-basiert, aber die Terminierung wird robuster:
-  - Pending endet nur, wenn nach dem Retry kein `processing/pending` Record mehr für diesen `storage_path` existiert und mindestens ein frisches finales Ergebnis (`complete` oder `failed`) vorhanden ist.
-  - Dadurch beendet nicht mehr eine einzelne fertige PDF-Seite den Job zu früh.
-- Polling läuft weiter, solange ein Retry-Job offen ist oder DB-Records `processing/pending` sind.
+## Tatsächliche Ursachen
 
-### 3. Backend-Flow atomarer machen
-- In `supabase/functions/analyze-media/index.ts` wird Retry nicht mehr über „Records verschwinden lassen“ modelliert.
-- Ablauf:
-  1. Vorhandene Records für `note_id + storage_path` werden auf `processing` gesetzt und inhaltlich geleert, statt sofort gelöscht.
-  2. Falls keine Records existieren, wird ein Placeholder erstellt.
-  3. Neue Analyse-Ergebnisse werden vorbereitet.
-  4. Erst danach werden alte/Placeholder-Records ersetzt.
-  5. Bei Fehler bleiben Records sichtbar und werden sauber auf `failed` gesetzt.
-- Ziel: Die UI hat während des gesamten Prozesses einen stabilen Status und kann korrekt terminieren.
+1. **Retry bleibt clientseitig künstlich pending**
+   - `useReanalyzeMedia` entscheidet anhand von `updated_at`, ob ein Retry nach dem Klick frisch abgeschlossen wurde.
+   - Die Media-Library-Query lädt aber aktuell kein `updated_at` aus `media_analysis`.
+   - Bei einem Retry werden bestehende Rows aktualisiert, ihre `created_at` bleibt alt.
+   - Nach dem Refetch fehlt dem Client dadurch der frische Timestamp und `isPathPending()` kann den Job nicht sauber als beendet erkennen.
 
-### 4. Detailansicht für gruppierte PDFs korrigieren
-- `MediaDetailDialog` erhält das zusammengeführte Dokument-Item.
-- Bei PDFs werden alle Seiteninhalte in einem Dialog angezeigt, inklusive Seitentrennern.
-- Retry/Re-analyze im Dialog wirkt nur auf das eine logische Dokument.
-- Der fehlende Dialog-Description-Warnhinweis wird nebenbei behoben.
+2. **Das gleiche PDF ist wirklich doppelt vorhanden**
+   - In `note_attachments` existieren zwei Dateien mit unterschiedlichem `storage_path`, aber identischem `sha256` und identischer Größe:
+     - `DB_Rechnung_442370408353.pdf`
+     - `DB_Rechnung_442370408353-2.pdf`
+   - Die Media Library gruppiert aktuell nur nach `note_id + storage_path`, nicht nach Datei-Hash.
+   - Deshalb erscheinen identische Dateien doppelt.
 
-### 5. Validierung
-- Nach Umsetzung prüfe ich:
-  - DB-Daten für das betroffene PDF: nur gruppierte Anzeige in der UI, weiterhin korrekte Page-Records in der DB.
-  - Retry-Request: Status wechselt auf „Retrying/Analyzing“, bleibt dort während Verarbeitung, und endet bei finalem DB-Status.
-  - Media Library zeigt dasselbe PDF nur einmal.
-  - Topics/Beschreibung sind konsistent zusammengeführt statt pro Seite widersprüchlich als separate Dokumente sichtbar.
+3. **Unterschiedliche Tags bei identischem PDF sind erwartbar, solange doppelt analysiert wird**
+   - Beide Uploads werden separat durch AI analysiert.
+   - Die Zusammenfassung/Tag-Erzeugung ist nicht deterministisch genug, um bei zwei separaten Läufen garantiert identische Tags zu erzeugen.
 
-## Betroffene Dateien
-- `src/hooks/useMediaAnalysis.ts`
-- `src/pages/MediaLibrary.tsx`
-- `src/components/media/MediaDetailDialog.tsx`
-- `src/components/notes/NoteAttachmentsPanel.tsx` falls dieselbe Gruppierungslogik dort angepasst werden muss
-- `supabase/functions/analyze-media/index.ts`
+4. **PDF-Reanalyse läuft über zwei Edge Functions**
+   - Das Frontend ruft für PDFs `analyze-pdf` auf.
+   - `analyze-pdf` ruft dann wiederum `analyze-media` auf.
+   - Die eigentliche Arbeit passiert in `analyze-media`.
+   - Das ist nicht die Hauptursache, macht den Flow aber unnötig schwer zu beobachten und fehleranfälliger.
+
+## Fix-Plan
+
+1. **Retry-Terminierung korrekt machen**
+   - In der Media-Library-Query `updated_at` mitladen.
+   - `MediaItem` entsprechend erweitern.
+   - `isJobFinished()` nur auf echte frische DB-Daten beenden lassen, nicht auf alte `created_at`-Werte.
+
+2. **Pending-State robuster aufräumen**
+   - `pendingJobs` aktiv entfernen, sobald ein frisches finales Ergebnis erkannt wurde.
+   - Einen sichtbaren Timeout-/Fehlerzustand anzeigen, wenn nach einer sinnvollen Zeit kein frisches Ergebnis auftaucht.
+   - Dadurch bleibt der Button nicht scheinbar endlos in einem Retry-Zustand.
+
+3. **PDFs direkt über `analyze-media` reanalysieren**
+   - Den Frontend-Retry für PDFs direkt gegen `analyze-media` mit `media_type: "pdf"` schicken.
+   - `analyze-pdf` kann später entweder entfernt oder nur noch als Legacy-Wrapper behalten werden.
+   - Damit gibt es einen eindeutigen Job und eindeutigere Logs.
+
+4. **Doppelte Dateien in der Media Library deduplizieren**
+   - Für Media-Library-Einträge zusätzlich Attachment-Metadaten aus `note_attachments` laden (`sha256`, `size_bytes`, `filename`).
+   - Gruppierung für PDFs erweitern: bevorzugt `note_id + sha256`, fallback `note_id + storage_path`.
+   - Dadurch wird dasselbe PDF innerhalb einer Note nur einmal angezeigt, auch wenn es doppelt hochgeladen wurde.
+
+5. **Retry auf die kanonische Datei anwenden**
+   - Bei duplizierten Attachments eine kanonische Datei wählen, z. B. die älteste oder die mit vollständiger Analyse.
+   - Retry/Re-analyze nur für diese kanonische Datei ausführen.
+   - Analyse-Ergebnisse nicht mehr konkurrierend für identische Duplikate anzeigen.
+
+6. **Optionaler Folge-Fix: Upload-Dedupe**
+   - Beim Upload anhand von `sha256` prüfen, ob dieselbe Datei in derselben Note bereits existiert.
+   - Wenn ja: keinen zweiten Storage-Upload und keine zweite Analyse erzeugen.
+   - Das verhindert neue Dubletten an der Quelle.
+
+## Validierung nach Umsetzung
+
+- Retry einer kleinen PDF-Rechnung startet sichtbar mit `Retrying…`.
+- Nach Abschluss verschwindet der Pending-State automatisch ohne manuellen Refresh.
+- Supabase zeigt keine `processing`-Altlasten.
+- Die Media Library zeigt identische PDFs innerhalb derselben Note nur einmal.
+- Tags/Beschreibung stammen von einem kanonischen Analyseergebnis und springen nicht zwischen Duplikaten.

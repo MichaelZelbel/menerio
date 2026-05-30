@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,15 +63,13 @@ type AnalysisStatusLike = {
   error_message?: string | null;
 };
 
-const MAX_CLIENT_PENDING_MS = 10 * 60 * 1000;
+const MAX_CLIENT_PENDING_MS = 5 * 60 * 1000;
 
 /**
  * A retry job is considered finished only when:
- *  1) there is at least one row for this path whose updated_at >= startedAt (fresh),
- *  2) AND none of the rows for this path are still in 'processing' or 'pending'.
- *
- * This handles multi-page PDFs correctly: completing page 1 must not end the job
- * while page 2 is still processing.
+ *  1) at least one row for this path has updated_at strictly AFTER the job started
+ *     (proving the backend wrote a fresh result), AND
+ *  2) none of the rows for this path are still in 'processing' or 'pending'.
  */
 function isJobFinished(entries: AnalysisStatusLike[] | undefined, path: string, startedAt: number): boolean {
   if (!entries) return false;
@@ -79,7 +77,8 @@ function isJobFinished(entries: AnalysisStatusLike[] | undefined, path: string, 
   if (rows.length === 0) return false;
 
   const hasFresh = rows.some((e) => {
-    const ts = Date.parse(e.updated_at || e.created_at || "");
+    // Use updated_at only — created_at stays old when rows are updated in place.
+    const ts = Date.parse(e.updated_at || "");
     return Number.isFinite(ts) && ts >= startedAt - 1500;
   });
   if (!hasFresh) return false;
@@ -94,28 +93,56 @@ export function useReanalyzeMedia() {
   const queryClient = useQueryClient();
   const [pendingJobs, setPendingJobs] = useState<Record<string, number>>({});
 
-  const isPathPending = (path: string) => {
-    const startedAt = pendingJobs[path];
-    if (!startedAt) return false;
-    if (Date.now() - startedAt > MAX_CLIENT_PENDING_MS) return false;
+  // Watch the query cache and clear pending jobs as soon as fresh DB results land,
+  // or hard-timeout if nothing arrives within MAX_CLIENT_PENDING_MS.
+  useEffect(() => {
+    const evaluate = () => {
+      setPendingJobs((prev) => {
+        const entries = Object.entries(prev);
+        if (entries.length === 0) return prev;
+        const libraryCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-library"] });
+        const noteCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-analysis"] });
+        const allCaches = [...libraryCaches, ...noteCaches];
 
-    const libraryCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-library"] });
-    const noteCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-analysis"] });
-    const finished = [...libraryCaches, ...noteCaches].some(([, entries]) =>
-      isJobFinished(entries, path, startedAt),
-    );
-    return !finished;
-  };
+        let changed = false;
+        const next: Record<string, number> = {};
+        for (const [path, startedAt] of entries) {
+          if (Date.now() - startedAt > MAX_CLIENT_PENDING_MS) {
+            changed = true;
+            continue;
+          }
+          const finished = allCaches.some(([, rows]) => isJobFinished(rows, path, startedAt));
+          if (finished) {
+            changed = true;
+            continue;
+          }
+          next[path] = startedAt;
+        }
+        return changed ? next : prev;
+      });
+    };
 
-  const hasActivePendingJobs = () => Object.keys(pendingJobs).some(isPathPending);
+    const unsub = queryClient.getQueryCache().subscribe(() => evaluate());
+    // Safety net: re-evaluate every 2s to enforce the hard timeout even if no cache event fires.
+    const interval = setInterval(evaluate, 2000);
+    return () => {
+      unsub();
+      clearInterval(interval);
+    };
+  }, [queryClient]);
+
+  const isPathPending = (path: string) => pendingJobs[path] != null;
+  const hasActivePendingJobs = () => Object.keys(pendingJobs).length > 0;
 
   const mutation = useMutation({
     mutationFn: async ({ noteId, storagePath, mediaType, originalFilename }: ReanalyzeVars) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const functionName = mediaType === "pdf" ? "analyze-pdf" : "analyze-media";
-      const { data, error } = await supabase.functions.invoke(functionName, {
+      // Always go directly through analyze-media so there is exactly one job
+      // and one set of logs per retry. analyze-pdf was a thin wrapper that
+      // only made the flow harder to observe.
+      const { data, error } = await supabase.functions.invoke("analyze-media", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: {
           note_id: noteId,
@@ -160,7 +187,7 @@ export function useReanalyzeMedia() {
 
   return {
     ...mutation,
-    pendingPaths: new Set(Object.keys(pendingJobs).filter(isPathPending)),
+    pendingPaths: new Set(Object.keys(pendingJobs)),
     isPathPending,
     hasActivePendingJobs,
   };

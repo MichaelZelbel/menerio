@@ -48,6 +48,7 @@ interface MediaItem {
   raw_analysis: Record<string, unknown> | null;
   analysis_status: string;
   created_at: string | null;
+  updated_at: string | null;
 }
 
 interface DocumentGroup {
@@ -63,6 +64,7 @@ interface DocumentGroup {
   raw_analysis: Record<string, unknown> | null;
   created_at: string | null;
   page_count: number;
+  duplicate_count: number;
   representative: MediaItem;
 }
 
@@ -93,6 +95,7 @@ function groupMediaByDocument(items: MediaItem[]): DocumentGroup[] {
         raw_analysis: item.raw_analysis,
         created_at: item.created_at,
         page_count: 1,
+        duplicate_count: 1,
         representative: item,
       });
       continue;
@@ -318,7 +321,7 @@ export default function MediaLibrary() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("media_analysis")
-        .select("id, note_id, storage_path, media_type, page_number, original_filename, description, extracted_text, topics, raw_analysis, analysis_status, created_at")
+        .select("id, note_id, storage_path, media_type, page_number, original_filename, description, extracted_text, topics, raw_analysis, analysis_status, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(500);
       if (error) throw error;
@@ -336,6 +339,71 @@ export default function MediaLibrary() {
       return false;
     },
   });
+
+  // Load attachment metadata so we can collapse byte-identical duplicates
+  // (same sha256 within the same note) into a single media library card.
+  const storagePaths = useMemo(
+    () => [...new Set(mediaItems.map((m) => m.storage_path).filter(Boolean))],
+    [mediaItems],
+  );
+  const { data: attachmentMeta = {} } = useQuery({
+    queryKey: ["media-library-attachment-meta", user?.id, storagePaths.join("|")],
+    queryFn: async () => {
+      if (storagePaths.length === 0) return {} as Record<string, { sha256: string | null; created_at: string | null }>;
+      const { data } = await supabase
+        .from("note_attachments")
+        .select("storage_path, sha256, created_at")
+        .in("storage_path", storagePaths);
+      const map: Record<string, { sha256: string | null; created_at: string | null }> = {};
+      (data || []).forEach((row: { storage_path: string; sha256: string | null; created_at: string | null }) => {
+        map[row.storage_path] = { sha256: row.sha256, created_at: row.created_at };
+      });
+      return map;
+    },
+    enabled: !!user && storagePaths.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // For each (note_id, sha256) pick a canonical storage_path = oldest attachment.
+  const canonicalPathByDuplicateKey = useMemo(() => {
+    const byKey = new Map<string, { storage_path: string; created_at: string }[]>();
+    for (const m of mediaItems) {
+      const meta = attachmentMeta[m.storage_path];
+      if (!meta?.sha256) continue;
+      const key = `${m.note_id}::${meta.sha256}`;
+      const arr = byKey.get(key) || [];
+      if (!arr.find((p) => p.storage_path === m.storage_path)) {
+        arr.push({ storage_path: m.storage_path, created_at: meta.created_at || "" });
+      }
+      byKey.set(key, arr);
+    }
+    const result: Record<string, string> = {};
+    for (const [, paths] of byKey) {
+      const canonical = [...paths].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      for (const p of paths) result[p.storage_path] = canonical.storage_path;
+    }
+    return result;
+  }, [mediaItems, attachmentMeta]);
+
+  // Collapse duplicate uploads: items whose storage_path maps to a different
+  // canonical path are filtered out (their content is folded into the
+  // canonical group's duplicate_count below).
+  const dedupedMediaItems = useMemo(() => {
+    return mediaItems.filter((m) => {
+      const canonical = canonicalPathByDuplicateKey[m.storage_path];
+      return !canonical || canonical === m.storage_path;
+    });
+  }, [mediaItems, canonicalPathByDuplicateKey]);
+
+  const duplicateCountByCanonical = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of mediaItems) {
+      const canonical = canonicalPathByDuplicateKey[m.storage_path] || m.storage_path;
+      const key = `${m.note_id}::${canonical}`;
+      counts[key] = (counts[key] || 0) + (m.storage_path === canonical ? 0 : 1);
+    }
+    return counts;
+  }, [mediaItems, canonicalPathByDuplicateKey]);
 
   const { data: signedUrls = {} } = useQuery({
     queryKey: ["media-library-signed-urls", mediaItems.map((m) => m.storage_path).join("|")],
@@ -372,7 +440,13 @@ export default function MediaLibrary() {
     enabled: noteIds.length > 0,
   });
 
-  const documentGroups = useMemo(() => groupMediaByDocument(mediaItems), [mediaItems]);
+  const documentGroups = useMemo(() => {
+    const groups = groupMediaByDocument(dedupedMediaItems);
+    return groups.map((g) => ({
+      ...g,
+      duplicate_count: duplicateCountByCanonical[`${g.note_id}::${g.storage_path}`] || 0,
+    }));
+  }, [dedupedMediaItems, duplicateCountByCanonical]);
 
   const stats = useMemo(() => {
     const complete = documentGroups.filter(g => g.analysis_status === "complete").length;
@@ -636,6 +710,11 @@ export default function MediaLibrary() {
                       <p className="text-[10px] text-muted-foreground truncate">
                         {group.original_filename}
                         {group.page_count > 1 && <span className="ml-1 opacity-70">· {group.page_count} pages</span>}
+                        {group.duplicate_count > 0 && (
+                          <span className="ml-1 opacity-70" title="Duplicate uploads of this file were merged into this card">
+                            · {group.duplicate_count + 1} copies
+                          </span>
+                        )}
                       </p>
                     )}
                     {group.description && (
