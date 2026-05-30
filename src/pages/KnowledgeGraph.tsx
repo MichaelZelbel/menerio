@@ -28,6 +28,19 @@ import {
   Sparkles,
 } from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
+import { Minimap } from "@/components/graph/Minimap";
+import {
+  assignTiers,
+  shouldShowLabelAuto,
+  nodeScreenRadius,
+  labelFontPx,
+  wrapTitle,
+  rectsOverlap,
+  computeClusters,
+  type Rect,
+  type RenderNode,
+  type LabelTier,
+} from "@/components/graph/graphRendering";
 
 // Color palette for note types using design system hues
 const TYPE_COLORS: Record<string, string> = {
@@ -80,6 +93,8 @@ interface ForceNode extends GraphNode {
   vx?: number;
   vy?: number;
   __connectionCount?: number;
+  __tier?: LabelTier;
+  __importance?: number;
 }
 
 interface Filters {
@@ -93,7 +108,7 @@ interface Filters {
   showOrphans: boolean;
   showHiddenFromAi: boolean;
   sizeMode: "connections" | "uniform";
-  labelMode: "hover" | "always" | "never";
+  labelMode: "auto" | "hover" | "always" | "never";
 }
 
 const ALL_NOTE_TYPES = [
@@ -124,7 +139,7 @@ export default function KnowledgeGraph() {
     showOrphans: false,
     showHiddenFromAi: false,
     sizeMode: "connections",
-    labelMode: "always",
+    labelMode: "auto",
   });
 
   // Fetch graph data from edge function
@@ -200,6 +215,9 @@ export default function KnowledgeGraph() {
       __connectionCount: connCount.get(n.id) || 0,
     }));
 
+    // Assign LOD tiers + importance scores
+    assignTiers(forceNodes as RenderNode[]);
+
     const forceLinks = edges.map((e) => ({
       source: e.source,
       target: e.target,
@@ -211,87 +229,15 @@ export default function KnowledgeGraph() {
     return { nodes: forceNodes, links: forceLinks };
   }, [graphData, filters]);
 
-  // Node sizing
-  const getNodeSize = useCallback(
-    (node: ForceNode) => {
-      if (filters.sizeMode === "uniform") return 6;
-      const count = node.__connectionCount || 0;
-      return Math.max(4, Math.min(18, 4 + count * 2));
-    },
-    [filters.sizeMode]
-  );
-
   // Node color
   const getNodeColor = useCallback((node: ForceNode) => {
     return TYPE_COLORS[node.type] || TYPE_COLORS.note;
   }, []);
 
-  // Canvas renderer
-  const nodeCanvasObject = useCallback(
-    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      const size = getNodeSize(node);
-      const isHovered = hoveredNode === node.id;
-      const isSelected = selectedNode?.id === node.id;
-      const isDimmed = hoveredNode && !isHovered && !isNeighbor(node.id);
-      const color = getNodeColor(node);
-
-      // Node circle
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, isHovered || isSelected ? size + 2 : size, 0, 2 * Math.PI);
-      ctx.fillStyle = isDimmed ? adjustAlpha(color, 0.2) : color;
-      ctx.fill();
-
-      // Bridge note glow
-      if (bridgeNoteIds.has(node.id) && !isDimmed) {
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, size + 4, 0, 2 * Math.PI);
-        ctx.strokeStyle = "hsla(38, 92%, 50%, 0.4)";
-        ctx.lineWidth = 2 / globalScale;
-        ctx.stroke();
-      }
-
-      if (isSelected) {
-        ctx.strokeStyle = "hsl(220, 70%, 45%)";
-        ctx.lineWidth = 2 / globalScale;
-        ctx.stroke();
-      }
-
-      // Labels
-      const showLabel =
-        filters.labelMode === "always" ||
-        (filters.labelMode === "hover" && (isHovered || isSelected)) ||
-        (globalScale > 1.2 && !isDimmed);
-
-      if (showLabel) {
-        const isDarkTheme = document.documentElement.classList.contains("dark");
-        const fontSize = Math.max(11 / globalScale, 3);
-        ctx.font = `500 ${fontSize}px Inter, system-ui, sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        const label = (node.title || "").length > 28 ? node.title.slice(0, 25) + "…" : node.title;
-        const labelY = node.y + size + 3 / globalScale;
-
-        // Background halo for readability
-        const textWidth = ctx.measureText(label).width;
-        const pad = 2 / globalScale;
-        ctx.fillStyle = isDarkTheme ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.75)";
-        ctx.fillRect(
-          node.x - textWidth / 2 - pad,
-          labelY - pad / 2,
-          textWidth + pad * 2,
-          fontSize + pad
-        );
-
-        // Theme-aware text color
-        if (isDimmed) {
-          ctx.fillStyle = isDarkTheme ? "hsla(220, 15%, 70%, 0.3)" : "hsla(220, 25%, 30%, 0.3)";
-        } else {
-          ctx.fillStyle = isDarkTheme ? "hsl(220, 15%, 85%)" : "hsl(220, 25%, 20%)";
-        }
-        ctx.fillText(label, node.x, labelY);
-      }
-    },
-    [hoveredNode, selectedNode, filters.labelMode, filters.sizeMode, getNodeSize, getNodeColor, bridgeNoteIds]
+  // Node radius in SCREEN pixels — converted to world units via /globalScale in renderers
+  const getNodeScreenSize = useCallback(
+    (node: ForceNode) => nodeScreenRadius(node.__importance || 0, filters.sizeMode === "uniform" ? "uniform" : "importance"),
+    [filters.sizeMode]
   );
 
   // Track neighbors of hovered node for dimming
@@ -314,7 +260,111 @@ export default function KnowledgeGraph() {
     neighborsRef.current = neighbors;
   }, [hoveredNode, processedGraph.links]);
 
-  // Link canvas renderer
+  // Per-frame buffers for label collision avoidance and current zoom snapshot.
+  const placedRectsRef = useRef<Rect[]>([]);
+  const currentZoomRef = useRef(1);
+
+  // Decide whether a label should be drawn based on label-mode + tier + zoom.
+  const shouldDrawLabel = useCallback(
+    (node: ForceNode, isHovered: boolean, isSelected: boolean, zoom: number): boolean => {
+      if (filters.labelMode === "never") return isHovered || isSelected;
+      if (filters.labelMode === "hover") return isHovered || isSelected;
+      if (filters.labelMode === "always") return true;
+      // auto: tier-gated
+      if (isHovered || isSelected) return true;
+      return shouldShowLabelAuto((node.__tier ?? 2) as LabelTier, zoom);
+    },
+    [filters.labelMode]
+  );
+
+  // Canvas node renderer — radius is constant in SCREEN pixels.
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const sizePx = getNodeScreenSize(node);
+      const sizeWorld = sizePx / globalScale;
+      const isHovered = hoveredNode === node.id;
+      const isSelected = selectedNode?.id === node.id;
+      const isDimmed = hoveredNode && !isHovered && !isNeighbor(node.id);
+      const color = getNodeColor(node);
+
+      // Node circle
+      const r = (isHovered || isSelected ? sizePx + 2 : sizePx) / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = isDimmed ? adjustAlpha(color, 0.2) : color;
+      ctx.fill();
+
+      // Bridge note glow
+      if (bridgeNoteIds.has(node.id) && !isDimmed) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 3 / globalScale, 0, 2 * Math.PI);
+        ctx.strokeStyle = "hsla(38, 92%, 50%, 0.45)";
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.stroke();
+      }
+
+      if (isSelected) {
+        ctx.strokeStyle = "hsl(220, 70%, 55%)";
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      }
+
+      // ── Labels ────────────────────────────────────────────────────
+      if (!shouldDrawLabel(node, isHovered, isSelected, globalScale)) return;
+
+      const isDarkTheme = document.documentElement.classList.contains("dark");
+      const tier = (node.__tier ?? 2) as LabelTier;
+      const fontPx = labelFontPx(globalScale, tier);
+      const fontWorld = fontPx / globalScale;
+      ctx.font = `${tier === 0 ? 600 : 500} ${fontWorld}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+
+      // Multi-line when zoomed in, single truncated line when zoomed out
+      const lines = globalScale >= 1.6
+        ? wrapTitle(node.title || "", 26, 2)
+        : [((node.title || "").length > 22 ? (node.title || "").slice(0, 21) + "…" : node.title || "")];
+
+      // Measure label rect (world units)
+      let maxLineW = 0;
+      for (const ln of lines) maxLineW = Math.max(maxLineW, ctx.measureText(ln).width);
+      const lineHeight = fontWorld * 1.15;
+      const totalH = lines.length * lineHeight;
+      const pad = 2 / globalScale;
+      const labelY = node.y + r + 3 / globalScale;
+
+      const rect: Rect = {
+        x: node.x - maxLineW / 2 - pad,
+        y: labelY - pad / 2,
+        w: maxLineW + pad * 2,
+        h: totalH + pad,
+      };
+
+      // Hovered / selected always win — no collision check
+      const skipCollision = isHovered || isSelected || tier === 0;
+      if (!skipCollision) {
+        for (const existing of placedRectsRef.current) {
+          if (rectsOverlap(rect, existing)) return;
+        }
+      }
+      placedRectsRef.current.push(rect);
+
+      // Halo
+      ctx.fillStyle = isDarkTheme ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.82)";
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+      // Text
+      ctx.fillStyle = isDimmed
+        ? (isDarkTheme ? "hsla(220, 15%, 70%, 0.35)" : "hsla(220, 25%, 30%, 0.35)")
+        : (isDarkTheme ? "hsl(220, 15%, 88%)" : "hsl(220, 25%, 18%)");
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], node.x, labelY + i * lineHeight);
+      }
+    },
+    [hoveredNode, selectedNode, getNodeScreenSize, getNodeColor, bridgeNoteIds, isNeighbor, shouldDrawLabel]
+  );
+
+  // Link canvas renderer — edge LOD: thin out weak edges when zoomed out.
   const linkCanvasObject = useCallback(
     (link: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const style = EDGE_STYLES[link.type] || EDGE_STYLES.semantic;
@@ -322,8 +372,16 @@ export default function KnowledgeGraph() {
       const target = link.target;
       if (!source.x || !target.x) return;
 
+      // Edge LOD: at very low zoom, drop weak semantic/shared_topic edges
+      if (globalScale < 0.5) {
+        if (link.type === "semantic" && link.strength < 0.65) return;
+        if (link.type === "shared_topic" && link.strength < 0.55) return;
+      }
+
       const isDimmed = hoveredNode && !neighborsRef.current.has(source.id) && !neighborsRef.current.has(target.id);
-      const width = Math.max(0.5, link.strength * 2.5) / globalScale;
+      // Width: keep roughly constant on screen, slight emphasis at high zoom
+      const widthPx = Math.max(0.6, link.strength * 1.8 + (globalScale > 1.4 ? 0.4 : 0));
+      const width = widthPx / globalScale;
 
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
@@ -346,10 +404,10 @@ export default function KnowledgeGraph() {
         const dy = target.y - source.y;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len === 0) return;
-        const nodeSize = getNodeSize(target);
+        const nodeSize = getNodeScreenSize(target) / globalScale;
         const arrowLen = 6 / globalScale;
-        const arrowX = target.x - (dx / len) * (nodeSize + 2);
-        const arrowY = target.y - (dy / len) * (nodeSize + 2);
+        const arrowX = target.x - (dx / len) * (nodeSize + 2 / globalScale);
+        const arrowY = target.y - (dy / len) * (nodeSize + 2 / globalScale);
         const angle = Math.atan2(dy, dx);
 
         ctx.beginPath();
@@ -367,7 +425,53 @@ export default function KnowledgeGraph() {
         ctx.fill();
       }
     },
-    [hoveredNode, getNodeSize]
+    [hoveredNode, getNodeScreenSize]
+  );
+
+  // Pre-frame: clear collision buffer, snapshot zoom, optionally draw cluster hulls.
+  const onRenderFramePre = useCallback(
+    (ctx: CanvasRenderingContext2D, globalScale: number) => {
+      placedRectsRef.current = [];
+      currentZoomRef.current = globalScale;
+
+      // Cluster overlay only at far zoom-out
+      if (globalScale >= 0.45) return;
+      const clusters = computeClusters(processedGraph.nodes as RenderNode[], 4);
+      const isDarkTheme = document.documentElement.classList.contains("dark");
+      for (const c of clusters) {
+        // Soft filled hull
+        ctx.beginPath();
+        ctx.arc(c.cx, c.cy, c.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = adjustAlpha(c.color, 0.08);
+        ctx.fill();
+        ctx.strokeStyle = adjustAlpha(c.color, 0.35);
+        ctx.lineWidth = 1.5 / globalScale;
+        ctx.setLineDash([4 / globalScale, 4 / globalScale]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Big cluster label centered above
+        const fontPx = 14;
+        const fontWorld = fontPx / globalScale;
+        ctx.font = `600 ${fontWorld}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const label = `${c.label} · ${c.count}`;
+        const w = ctx.measureText(label).width;
+        const pad = 4 / globalScale;
+        ctx.fillStyle = isDarkTheme ? "rgba(0, 0, 0, 0.75)" : "rgba(255, 255, 255, 0.88)";
+        ctx.fillRect(c.cx - w / 2 - pad, c.cy - fontWorld / 2 - pad / 2, w + pad * 2, fontWorld + pad);
+        ctx.fillStyle = isDarkTheme ? "hsl(220, 15%, 92%)" : "hsl(220, 25%, 15%)";
+        ctx.fillText(label, c.cx, c.cy);
+
+        // Reserve a rect so node labels won't overdraw the cluster label
+        placedRectsRef.current.push({
+          x: c.cx - w / 2 - pad, y: c.cy - fontWorld / 2 - pad / 2,
+          w: w + pad * 2, h: fontWorld + pad,
+        });
+      }
+    },
+    [processedGraph.nodes]
   );
 
   const handleNodeClick = useCallback((node: any) => {
@@ -599,7 +703,7 @@ export default function KnowledgeGraph() {
                     <div className="space-y-1">
                       <Label className="text-[11px]">Labels</Label>
                       <div className="flex gap-1">
-                        {(["hover", "always", "never"] as const).map((mode) => (
+                        {(["auto", "hover", "always", "never"] as const).map((mode) => (
                           <button
                             key={mode}
                             onClick={() => setFilters((f) => ({ ...f, labelMode: mode }))}
@@ -641,36 +745,59 @@ export default function KnowledgeGraph() {
               <p className="text-xs">Create notes and let the AI find connections.</p>
             </div>
           ) : (
-            <ForceGraph2D
-              ref={graphRef}
-              graphData={processedGraph}
-              width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
-              height={dimensions.height}
-              nodeCanvasObject={nodeCanvasObject}
-              nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-                const size = getNodeSize(node) + 4;
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
-                ctx.fillStyle = color;
-                ctx.fill();
-              }}
-              linkCanvasObjectMode={() => "replace"}
-              linkCanvasObject={linkCanvasObject}
-              linkLabel={(link: any) => edgeReason(link)}
-              onNodeClick={handleNodeClick}
-              onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
-              onNodeDragEnd={(node: any) => {
-                node.fx = node.x;
-                node.fy = node.y;
-              }}
-              onBackgroundClick={() => setSelectedNode(null)}
-              cooldownTicks={120}
-              d3AlphaDecay={0.02}
-              d3VelocityDecay={0.3}
-              enableNodeDrag
-              enableZoomInteraction
-              enablePanInteraction
-            />
+            <>
+              <ForceGraph2D
+                ref={graphRef}
+                graphData={processedGraph}
+                width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
+                height={dimensions.height}
+                nodeCanvasObject={nodeCanvasObject}
+                nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+                  const size = (getNodeScreenSize(node) + 4) / Math.max(0.001, currentZoomRef.current);
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
+                  ctx.fillStyle = color;
+                  ctx.fill();
+                }}
+                linkCanvasObjectMode={() => "replace"}
+                linkCanvasObject={linkCanvasObject}
+                linkLabel={(link: any) => edgeReason(link)}
+                onRenderFramePre={onRenderFramePre}
+                onNodeClick={handleNodeClick}
+                onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
+                onNodeDragEnd={(node: any) => {
+                  node.fx = node.x;
+                  node.fy = node.y;
+                }}
+                onBackgroundClick={() => setSelectedNode(null)}
+                cooldownTicks={120}
+                d3AlphaDecay={0.02}
+                d3VelocityDecay={0.3}
+                enableNodeDrag
+                enableZoomInteraction
+                enablePanInteraction
+              />
+              <Minimap
+                nodes={processedGraph.nodes as any}
+                getColor={(n: any) => getNodeColor(n as ForceNode)}
+                width={160}
+                height={110}
+                getViewport={() => {
+                  const g = graphRef.current;
+                  if (!g) return null;
+                  const center = g.centerAt();
+                  const zoom = g.zoom();
+                  return {
+                    cx: center?.x ?? 0,
+                    cy: center?.y ?? 0,
+                    zoom: zoom || 1,
+                    w: dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0),
+                    h: dimensions.height,
+                  };
+                }}
+                onPan={(wx, wy) => graphRef.current?.centerAt(wx, wy, 350)}
+              />
+            </>
           )}
         </div>
 

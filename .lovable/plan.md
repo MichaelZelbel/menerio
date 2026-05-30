@@ -1,100 +1,117 @@
-# Visible to AI – konsolidiertes Sichtbarkeits-Modell
+# Note Graph: vom „Blobs-Brei" zu einer semantisch zoombaren Karte
 
-## Konzept
+## Problem
 
-Das bisherige `mcp_visibility` Feld wird semantisch erweitert: **Hidden = "AI fasst diese Notiz nicht an"** — weder MCP-Clients, noch interne AI-Pipelines, noch Ableitungen ins Lexicon, in People-Profile oder in den Knowledge Graph.
+Aktuell skalieren die Knoten **mit der Welt** mit (Radius in Graph-Koordinaten), die Labels aber **mit dem Bildschirm** (`fontSize = 11 / globalScale`). Folge:
 
-Embeddings werden weiterhin generiert, damit **du** die Notiz über die lokale semantische Suche findest. MCP-seitige semantische Suche filtert Hidden-Notes konsequent raus.
+- Reinzoomen → Bubbles werden riesig, Labels bleiben gleich groß → Text wird im Verhältnis winzig und Knoten verdecken Nachbarn.
+- Rauszoomen → Bubbles werden zu klein, alle Labels überlagern sich, man liest nichts.
+- Es gibt keine „Level-of-Detail" — egal wie weit man rein- oder rauszoomt, der Informationswert pro Bildschirmfläche bleibt gleich.
 
-## Was "Hidden" ab sofort blockiert
+Ziel: Zoom wird zu einer echten Navigationsachse. Weit raus = wenige, große, beschriftete Anker + Cluster-Hüllen. Nah ran = saubere, lesbare Detailansicht mit allen Titeln.
 
-| Pipeline | Verhalten bei `hidden` |
-|---|---|
-| MCP-Tools (alle Lese-/Schreib-Tools) | Wie bisher: Note nicht sichtbar/editierbar |
-| **`wiki-ingest` (Lexicon)** | Note wird übersprungen, trägt nichts zu Lexicon-Sections bei |
-| **People-Enrichment** (Personen-Attribute, Beziehungen, Profile-Suggestions) | Note fließt nicht in `generate-profile-suggestions`, `extract-event`, People-Matching ein |
-| **Knowledge Graph** (`get-graph-data`, `compute-connections`) | Note erscheint nicht als Node, keine Connection-Computation |
-| **AI Suggestions / Suggested Connections / Discovery Feed** | Note wird nicht als Quelle oder Ziel vorgeschlagen |
-| **In-App AI-Chat** (Note Chat & Global Chat) | Note wird nicht als Kontext geladen |
-| **Daily Digest / Today's Connections / Weekly Review** | Note bleibt außen vor |
-| **Embeddings & lokale Suche** | ✅ Werden weiter generiert. ILIKE + semantische Suche **in der App** zeigt die Note. MCP-Search-Endpoint filtert sie weg. |
+## Lösung im Überblick
 
-## Was passiert mit bereits abgeleiteten Daten (retroaktiv)
+```text
+Zoomstufe        Was man sieht
+────────────     ──────────────────────────────────────────────
+weit raus (≤0.4) Cluster-Hüllen mit Topic-/Person-Label + Top-Anker
+mittel (0.4-1.2) Knoten konstanter Bildschirmgröße,
+                 nur „wichtige" Labels (Centrality top 25–40 %)
+nah (1.2-2.5)    Alle Labels, leichter Mehrzeilen-Umbruch,
+                 Kanten je nach Typ deutlich
+sehr nah (>2.5)  Volltitel + Topic-Chips inline am Knoten
+```
 
-Kein automatischer Rollback (zu riskant, zu schwer sauber zu machen). Stattdessen:
+## Konkrete Änderungen in `src/pages/KnowledgeGraph.tsx`
 
-- Beim Umschalten auf `hidden` öffnet sich ein **"AI-Footprint"-Dialog**, der listet:
-  - Lexicon-Sections, zu denen diese Note beigetragen hat (über `wiki_section_sources` / Provenance)
-  - People-Profile-Felder mit dieser Note als Quelle (`profile_entries.source_note_id`)
-  - Knowledge-Graph-Edges, die durch diese Note entstanden sind (`note_connections`)
-- Pro Eintrag ein "Remove"-Button. Bulk-Action "Remove all derived data".
-- Im AI-Chat-Sidebar der Note ein dezenter Hinweis "Hidden from AI — past contributions still exist, [review]".
+### 1. Knoten in **Screen-Pixeln** zeichnen, nicht in Graph-Einheiten
 
-## UI-Änderungen
+Heute: `radius = 4–18` (Graph-Einheiten) → wächst mit Zoom.
+Neu: `radius_world = (basePx + importance) / globalScale` → konstante Größe auf dem Bildschirm (~6–14 px), unabhängig vom Zoom. Beim Zoomen wird also der **Abstand zwischen Knoten** sichtbar, nicht die Knoten selbst.
 
-- `McpVisibilityButton` → **`AiVisibilityButton`** (Datei umbenennen, alle Imports anpassen)
-- Label: **"AI"** (sichtbar) / **"Hidden"** (versteckt)
-- Tooltip neu: *"Visible to AI: used in Lexicon, People profiles, Knowledge Graph, AI Chat, and MCP clients."* / *"Hidden from AI: this note is excluded from Lexicon, People, Graph, AI Chat, and MCP. Local search still finds it."*
-- Settings-Seite "MCP Preferences" → **"AI Visibility"**: `hide_sensitive_linked` umbenannt zu `hide_sensitive_from_ai`, Beschreibungstexte überarbeitet.
-- Person-Toggle (`is_sensitive`) bekommt klarere Beschriftung: *"Sensitive — hidden from all AI features"*.
+Importance-Score: `log(1 + connectionCount)`, optional + Centrality aus `GraphAnalytics`.
 
-## Technische Umsetzung
+### 2. Level-of-Detail (LOD) für Labels
 
-### DB
-- Migration: `mcp_visibility` Spalten umbenennen → **`ai_visibility`** (Werte `visible` / `hidden`) auf `notes`, `contacts`, `moments`, `collection_items`, `action_items`. Default-Werte und Indizes mitziehen.
-- `mcp_preferences` Tabelle umbenennen → `ai_visibility_preferences`. Spalte `hide_sensitive_linked` → `hide_sensitive_from_ai`.
-- RPC `mcp_can_see` → `ai_can_see` (gleiche Logik, neuer Name).
-- View / Helper: `notes_for_ai(user_id)` als zentrale Quelle für alle Edge-Functions, die "AI-zugelassene" Notes brauchen.
+Neuer Helper `computeLabelTier(node, zoom)`:
 
-### Shared Helper
-- `supabase/functions/_shared/ai_visibility.ts` (aus `open-brain-mcp/_mcp_visibility.ts` herausgezogen und verallgemeinert):
-  - `applyAiVisibility(query, table, supabase, userId)`
-  - `filterVisibleForAi(rows, supabase, userId)`
-  - `assertAiWritable(...)`
-  - `getSensitivePersonIds(...)` (unverändert)
+- **Tier 0** (immer sichtbar, ab Zoom ≥ 0.2): Person-Nodes, Top 10 % nach Connectivity, gepinnte/gemerkte Anker.
+- **Tier 1** (ab Zoom ≥ 0.8): Top 40 %.
+- **Tier 2** (ab Zoom ≥ 1.4): Alle übrigen.
 
-### Edge-Functions, die den Helper neu nutzen müssen
-| Function | Anpassung |
-|---|---|
-| `wiki-ingest` | Skip wenn `note.ai_visibility = 'hidden'` oder `person_id ∈ sensitive`. Vor Insert in `wiki_section_sources` prüfen. |
-| `wiki-cleanup`, `backfill-wikilinks` | Gleiche Filterung. |
-| `generate-profile-suggestions`, `extract-event`, `draft-event` | Source-Notes filtern. |
-| `compute-connections`, `recompute-all-connections`, `get-graph-data` | Hidden Notes als Quelle UND Ziel ausschließen. |
-| `suggest-connections`, `find-connections`, Discovery Feed | Gleiches. |
-| `note-chat`, `conversation-chat`, Global Chat | Kontext-Notes filtern. |
-| `daily-digest`, `weekly-review` | Filtern. |
-| `search-notes-semantic` | **Neu**: Parameter `caller: 'app' \| 'mcp'`. Für `'app'` zeigt Hidden-Notes (mit Badge), für `'mcp'` filtert sie raus. |
-| `process-note` | Beim Insert/Update einer Hidden-Note KEINE AI-Ableitungen triggern, nur Embedding generieren. |
+Der bestehende „Labels: hover / always / never"-Switch bleibt, bekommt aber einen vierten Modus **Auto (LOD)** als Default — `always` wird zum Power-User-Override.
 
-### Frontend
-- `useNotes`, `useGraphData`, Lexicon-Hooks: bestehende `is_trashed`-Filter erweitern um optional `includeHidden` (Default: true für UI, weil User sie sehen darf).
-- Note-Karten/Listen zeigen ein dezentes "Hidden from AI"-Badge.
-- Knowledge-Graph: Hidden-Notes-Toggle in der Sidebar ("Show hidden from AI") — Default off, da User sie absichtlich versteckt hat.
-- Lexicon-Seite & People-Profile: Hidden-Notes erscheinen nicht in den abgeleiteten Sektionen, aber bleiben in der rohen "Linked Notes"-Liste sichtbar (mit Badge).
-- Neuer Komponente `AiFootprintDialog.tsx`: zeigt Provenance beim Umschalten.
+### 3. Label-Typografie reagiert auf Zoom
 
-### Migration alter Begriffe
-- Alle UI-Strings "MCP" → "AI" wo es um Visibility geht. Connector-Sektionen (`MCPConnectionManager`, `MCP API Tokens`) bleiben "MCP" — das sind echte Protokoll-Namen.
-- Memory-Files aktualisieren: `mem://features/notes`, evtl. neuer Eintrag `mem://features/ai-visibility`.
+- Font-Size in **Screen-Pixeln**: 11 px bei Zoom ≤ 1, linear auf 14 px bei Zoom ≥ 2, gecapped.
+- Bei Zoom > 1.6: kein `…`-Truncate mehr — stattdessen **Wortumbruch auf max. 2 Zeilen** (à 24 Zeichen).
+- Bei Zoom ≤ 1: Truncate auf 18–24 Zeichen (heutige Logik, etwas straffer).
+- Halo (Hintergrund-Rect) bleibt für Lesbarkeit, wird bei dichteren Labels semitransparenter.
 
-## Out of Scope (für später)
+### 4. Greedy Label-Collision-Avoidance
 
-- Automatischer Rollback von Lexicon/Profile-Beiträgen (kann Phase 2 sein, falls "Markieren & Warnen" nicht reicht).
-- Per-Pipeline-Opt-out für Power-User (z. B. "diese Note: nur Lexicon ja, Graph nein"). Aktuell ein einziger Toggle.
-- Verschlüsselung von Hidden-Notes (separates Feature).
+Vor dem Render-Loop: Labels nach Priorität sortieren (Tier 0 > Tier 1 > Tier 2, Tiebreaker = Connectivity). Pro Frame in einem `placedRects: DOMRect[]` Buffer prüfen, ob das geplante Label-Rect ein bereits platziertes schneidet. Bei Kollision: Label dieser Frame **nicht** zeichnen (Knoten bleibt sichtbar, Hover zeigt den Titel weiterhin).
 
-## Reihenfolge der Umsetzung
+Aufwand O(n²) bei < 500 Knoten unkritisch; sortierte Tier-0-Liste limitiert das Gros der Vergleiche.
 
-1. **DB-Migration** + RPC-Rename (atomar, mit Backwards-Alias-Views falls nötig).
-2. **Shared `ai_visibility.ts`** Helper + Tests.
-3. Alle **Edge-Functions** durchgehen (Liste oben).
-4. **Frontend-Rename** `McpVisibilityButton` → `AiVisibilityButton`, Tooltips, Badges.
-5. **AiFootprintDialog** mit Provenance-Übersicht.
-6. **Settings-Seite** umlabeln.
-7. Memory-Updates.
+### 5. Cluster-Hüllen bei weitem Zoom
+
+Bei `globalScale < 0.45`:
+
+- Aus `metadata.topics` der sichtbaren Knoten + aus `mentions_person`-Edges Cluster bilden (Knoten mit gemeinsamem Top-Topic oder gleicher Person).
+- Pro Cluster ≥ 4 Knoten: konvexe Hülle (oder weicher Circle-Fit über Bounding-Box) zeichnen, sehr dezent (8 % Alpha der Cluster-Farbe), darüber **ein** großes Label „Topic · N notes" oder „People around X · N notes".
+- Einzelne Knoten innerhalb des Clusters werden bei diesem Zoom unbeschriftet / als kleine Punkte gerendert.
+- Doppelklick auf eine Hülle → `graphRef.zoomToFit` auf die Cluster-Bounds.
+
+Cluster-Berechnung wird memoized und nur bei Daten-/Filter-Änderung neu gemacht.
+
+### 6. Kanten je nach Zoom anpassen
+
+- Sehr weit raus: nur `manual_link` + `mentions_person` + Top-Strength `semantic` (z. B. > 0.7) zeichnen, andere komplett ausblenden.
+- Mittel: heutige Logik.
+- Nah: alles inkl. dünner schwacher Semantik-Kanten; Strichstärke leicht erhöhen damit Linien nicht „verschwinden".
+
+### 7. Mini-Map unten rechts
+
+Kleines 160×120-Canvas absolut positioniert im Graph-Container:
+
+- Zeigt **alle** Knoten als 1-px-Punkte in Type-Farben.
+- Aktueller Viewport als gestrichelter Rahmen.
+- Klick auf Mini-Map → `graphRef.centerAt()` auf die geklickte Stelle.
+
+Macht „Wo bin ich gerade?" beim Reinzoomen trivial.
+
+### 8. Bestehender „Size by connections"-Switch
+
+Bleibt, schaltet jetzt zwischen **Importance** (Default, Bildschirmgröße variiert mit Centrality) und **Uniform** (alle Knoten 8 px). Tooltip wird angepasst.
+
+## Was sich für den Nutzer ändert
+
+- Beim Rauszoomen bekommt man eine echte **Übersichtskarte**: thematische Cluster, ein paar große Anker, lesbare Beschriftung — kein Bubble-Brei mehr.
+- Beim Reinzoomen werden progressiv **mehr Titel sichtbar**, vorhandene Titel werden größer und vollständig lesbar; die Knoten bleiben handhabbar groß statt den Screen zu füllen.
+- Mini-Map gibt jederzeit räumliche Orientierung.
+- Hover und Selektion verhalten sich wie bisher.
+
+## Out of Scope (Phase 2 falls gewünscht)
+
+- WebGL-Render-Switch (aktuell react-force-graph-2d Canvas reicht für ≤ 2k Knoten).
+- Persistente Cluster-Definitionen in der DB (Cluster bleiben ein reines Rendering-Konstrukt).
+- Auto-Layout-Wechsel (z. B. radial um eine Person) — könnte später ein eigener „View"-Modus werden.
+- Touch-Gestures-Optimierung.
 
 ## Risiken
 
-- **Breaking Change** in Edge-Functions, die `mcp_visibility` direkt referenzieren — sauberer Sweep nötig (rg-Suche vor Migration).
-- **Performance**: Mehr Filter in mehr Pipelines. Bestehende Indizes auf `mcp_visibility` umbenennen, nicht neu erstellen.
-- **User-Erwartung**: User die heute eine Note "MCP-hidden" haben, finden sie morgen plötzlich nicht mehr im Graph. Migration sollte mit einem In-App-Hinweis ("Wir haben MCP-Visibility erweitert zu AI-Visibility — deine 12 versteckten Notes sind jetzt komplett aus AI-Pipelines raus.") begleitet werden.
+- Cluster-Detection auf dem Render-Pfad muss memoized sein, sonst flackert es beim Pan.
+- Greedy Collision kann bei sehr dichten Graphen „wichtige" Labels schlucken — Tier-0-Set sollte konservativ sein.
+- Screen-konstante Knoten plus Force-Simulation: die Force-Repulsion arbeitet weiter in Graph-Koordinaten — beim sehr starken Reinzoomen sehen Abstände dann u. U. „leer" aus. Mit `cooldownTicks` + bestehendem Layout sollte das aber okay aussehen; ggf. d3-Force-Charge leicht anpassen.
+
+## Reihenfolge der Umsetzung
+
+1. Screen-konstante Knoten + LOD-Tier-Berechnung (Tier 0/1/2).
+2. Label-Typografie inkl. Mehrzeilen-Umbruch bei hohem Zoom.
+3. Greedy Collision-Avoidance.
+4. Kanten-LOD.
+5. Mini-Map.
+6. Cluster-Hüllen bei weitem Zoom.
+7. Tooltips und „Labels: Auto"-Default in der Sidebar.
