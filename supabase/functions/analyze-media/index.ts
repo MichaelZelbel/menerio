@@ -215,7 +215,17 @@ async function writeAnalysisRecord(p: {
     }
   }
 
-  await supabase.from("media_analysis").insert({
+  // Upsert by (note_id, storage_path, page_number) so retries replace existing
+  // page rows in-place instead of creating duplicates. Find an existing row first.
+  const { data: existing } = await supabase
+    .from("media_analysis")
+    .select("id")
+    .eq("note_id", p.noteId)
+    .eq("storage_path", p.storagePath)
+    .is("page_number", p.pageNumber as number | null)
+    .maybeSingle();
+
+  const payload = {
     user_id: p.userId,
     note_id: p.noteId,
     storage_path: p.storagePath,
@@ -228,7 +238,15 @@ async function writeAnalysisRecord(p: {
     raw_analysis: p.raw,
     embedding,
     analysis_status: "complete",
-  });
+    error_message: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    await supabase.from("media_analysis").update(payload).eq("id", existing.id);
+  } else {
+    await supabase.from("media_analysis").insert(payload);
+  }
 }
 
 async function processImage(
