@@ -98,6 +98,7 @@ async function createWeeklyReviewForUser(
     .select("id, title, content, metadata, tags, created_at, entity_type")
     .eq("user_id", userId)
     .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
     .gte("created_at", since.toISOString())
     .order("created_at", { ascending: false });
 

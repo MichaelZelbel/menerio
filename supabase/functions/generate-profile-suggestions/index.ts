@@ -40,6 +40,7 @@ serve(async (req) => {
       .select("title, content, tags, metadata, entity_type, created_at")
       .eq("user_id", userId)
       .eq("is_trashed", false)
+      .eq("ai_visibility", "visible")
       .order("created_at", { ascending: false })
       .limit(500);
 

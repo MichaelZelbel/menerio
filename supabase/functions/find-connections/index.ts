@@ -82,6 +82,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .select("id, title, content, metadata, embedding")
         .eq("user_id", user.id)
         .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
         .order("created_at", { ascending: false })
         .limit(3);
 

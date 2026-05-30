@@ -183,6 +183,7 @@ async function handleDailyDiscovery(userId: string) {
     .select("id, title, content, metadata, embedding")
     .eq("user_id", userId)
     .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
     .not("embedding", "is", null)
     .order("updated_at", { ascending: false })
     .limit(20);

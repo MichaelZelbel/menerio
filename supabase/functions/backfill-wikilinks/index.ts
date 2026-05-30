@@ -35,7 +35,8 @@ Deno.serve(async (req) => {
       .from("notes")
       .select("id, title, content")
       .eq("user_id", user.id)
-      .eq("is_trashed", false);
+      .eq("is_trashed", false)
+      .eq("ai_visibility", "visible");
 
     if (notesErr) throw notesErr;
 
