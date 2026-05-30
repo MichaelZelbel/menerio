@@ -1,103 +1,85 @@
-## Ziel
+## Was wirklich schiefläuft
 
-Der Media-Library-Flow wird so umgebaut, dass ein Dokument aus Nutzersicht stabil an Ort und Stelle bleibt, einen echten Status zeigt und PDF-Vorschauen zuverlässig angezeigt werden.
+Der Vorschlag in der Review Queue (`review_queue` Zeile gefunden) sieht so aus:
 
-## Was aktuell wirklich schiefläuft
+```
+title:    "Add to Gunther Reinhard's profile: Birthday"
+payload:  { category_slug: "identity", label: "Birthday",
+            value: "61st birthday on 2026-05-25", category_id: null }
+status:   "kept"
+target_entity_id: null
+applied_at:       null
+```
 
-1. **Die Liste hängt an `media_analysis` statt an einem stabilen Dokumentmodell.**
-   - Beim Re-analyze werden Analyse-Zeilen aktualisiert/neu geschrieben.
-   - Die Media Library sortiert nach `media_analysis.created_at` und gruppiert danach clientseitig.
-   - Dadurch kann ein Dokument beim Retry seine Position ändern oder kurz verschwinden.
+In `profile_entries` für Gunther Reinhard: **null Zeilen** — obwohl drei Einträge (Birthday, Reporting manager, Job title) auf „kept" stehen. Es gibt also zwei voneinander unabhängige Bugs:
 
-2. **Der Backend-Write ist nicht atomar genug.**
-   - `writeAnalysisRecord` sucht bestehende PDF-Seiten mit `.is("page_number", value)`; für `page_number = 1/2` ist das der falsche Operator.
-   - Dadurch können statt Updates neue Zeilen entstehen.
-   - Danach werden alte `processing`-Zeilen gelöscht. Das erklärt Verschieben, doppelte/wechselnde Einträge und instabile Statusanzeige.
+### Bug 1 — „Keep" schreibt nichts ins Profil
 
-3. **Es gibt keine Datenbank-Garantie gegen doppelte Analyse-Seiten.**
-   - Ohne eindeutigen Schlüssel für `(note_id, storage_path, page_number)` kann jeder Retry neue Page-Rows erzeugen.
+In `src/pages/ReviewQueue.tsx`:
 
-4. **PDF-Vorschau ist derzeit kein echter Preview-Flow.**
-   - In der Media Library wird für PDFs nur ein Fallback/Icon gezeigt.
-   - In anderen Stellen kann die native PDF-Einbettung kaputt wirken.
-   - Re-analyze löst dieses Preview-Problem nicht, weil Analyse und Preview zwei getrennte Dinge sind.
+- `handleKeep` ruft `handleAccept` nur auf, wenn `item.status === "pending" | "pending_review"`. Für alles andere (`auto_applied_unreviewed`, oder wenn das Item schon einmal angefasst wurde) wird nur `status = "kept"` gesetzt, **ohne** in `profile_entries` einzutragen.
+- `handleKeepAll` ist noch radikaler: es macht ausschließlich `updateStatus.mutate({status: "kept"})` für jedes Item und ruft `handleAccept` gar nie auf. Genau das hat hier zugeschlagen — drei kept-Items, alle ohne `target_entity_id`, alle ohne entsprechenden DB-Eintrag.
 
-## Implementierungsplan
+Dass die UI dann „Change kept" als Erfolgsmeldung zeigt, ist die Fehlinformation, die du beschrieben hast.
 
-### 1. Datenbank absichern
+### Bug 2 — Die AI rechnet das Geburtsdatum nicht aus
 
-Migration für `media_analysis`:
+Im `PROFILE_EXTRACTION_PROMPT` in `supabase/functions/process-note/index.ts` steht nichts dazu, aus „Alter + Bezugsdatum" das eigentliche Geburtsdatum abzuleiten. Das LLM speichert die Aussage roh als `value: "61st birthday on 2026-05-25"` — semantisch sinnlos für ein Profilfeld, das man später wiederverwenden will (Erinnerungen, Lexicon, MCP).
 
-- Vorhandene Duplikate pro `(user_id, note_id, storage_path, page_number)` bereinigen.
-  - Behalten wird die beste Zeile: `complete` vor `processing/failed`, danach die neueste.
-- Eindeutigen Index hinzufügen:
-  - `user_id`
-  - `note_id`
-  - `storage_path`
-  - `page_number` mit `NULLS NOT DISTINCT`
-- Optionaler Index für schnelle Library-Abfragen:
-  - `(user_id, note_id, storage_path)`
+Außerdem nutzt das Label `"Birthday"`, das schon in `SINGLETON_PROFILE_LABELS` steht, aber nicht der projektübliche Begriff `"Date of birth"` ist (existierender Eintrag in deiner DB heißt schon „Date of birth"). Dadurch entstehen zwei konkurrierende Felder.
 
-Damit kann ein Retry nicht mehr mehrere konkurrierende Analyse-Zeilen für dieselbe PDF-Seite erzeugen.
+---
 
-### 2. Edge Function `analyze-media` korrigieren
+## Plan
 
-- `writeAnalysisRecord` auf echtes Upsert umstellen:
-  - `page_number === null` korrekt behandeln
-  - `page_number !== null` mit Gleichheitsvergleich bzw. eindeutigem `onConflict`
-- Bestehende Reihen nicht löschen, solange keine erfolgreichen neuen Ergebnisse vorliegen.
-- Placeholder-Row nur nach erfolgreichem Abschluss entfernen.
-- Fehlerzustand klar schreiben:
-  - Wenn OCR/Analyse scheitert, bleiben sichtbare Zeilen erhalten und werden `failed`.
-- Rückgabe/Logs eindeutiger machen:
-  - `job_started_at`
-  - `pages_processed`
-  - `storage_path`
-  - finaler Status
+### 1. Review Queue: „Keep" muss immer das anwenden, was es verspricht
 
-### 3. Media Library auf stabiles Dokumentmodell umbauen
+Datei: `src/pages/ReviewQueue.tsx`
 
-- Dokumentgruppen bekommen einen stabilen Schlüssel:
-  - bevorzugt `note_id + sha256`
-  - fallback `note_id + storage_path`
-- Sortierung nicht mehr nach Analyse-Erstellzeit, sondern stabil nach Upload-/Attachment-Zeit oder initialer Dokumentposition.
-- Re-analyze ändert nur den Status der bestehenden Card, niemals ihre Position.
-- Während Retry:
-  - Card bleibt sichtbar
-  - Overlay/Badge zeigt Spinner
-  - Button ist deaktiviert und zeigt `Analyzing…`
-  - alter Content bleibt sichtbar, bis frische Ergebnisse da sind
-- Nach Abschluss:
-  - Status wechselt sichtbar auf `Analyzed`
-  - Button wird wieder `Re-analyze`
-  - falls Analyse scheitert: `Failed` + Retry bleibt verfügbar
+- `handleKeep`: Für jeden Status, der noch nicht angewendet wurde (`pending`, `pending_review`, `auto_applied_unreviewed` ohne `target_entity_id`), `handleAccept(item)` aufrufen. Nur wenn das Item nachweislich schon angewendet wurde (`target_entity_id` gesetzt **und** `applied_at` gesetzt), reicht der reine Status-Flip.
+- `handleKeepAll`: Statt blindem `updateStatus.mutate` für jedes Item `await handleAccept(item)` sequenziell oder mit `Promise.allSettled` ausführen, damit die jeweiligen Einfüge-Pfade laufen (Profile-Entry, Relationship, Group-Member, …). Fehler einzeln per Toast melden, statt „All visible changes kept" zu lügen.
+- `handleAcceptProfileEntry`: Nach erfolgreichem Insert die `review_queue`-Zeile mit `target_entity_id` und `applied_at` aktualisieren (via `extra`-Param der `updateStatus`-Mutation). Dann kann „Roll Back" / Audit wirklich funktionieren.
+- Bestehende kept-Items mit `target_entity_id IS NULL` einmalig „heilen": Beim Öffnen der Queue erkennt der UI-Code solche „verwaisten Kept" als nicht angewendet und bietet einen „Apply now"-Button (kein Magie-Auto-Apply, damit nicht ungewollt sensible Daten reinrutschen).
 
-### 4. Pending-State sauber machen
+### 2. AI lernt, Geburtsdaten und ähnliche Fakten zu errechnen
 
-- Pending-State nicht mehr nur nach `storage_path`, sondern nach Dokument-Key tracken.
-- Abschluss erst dann markieren, wenn:
-  - alle erwarteten Seiten final sind (`complete` oder `failed`)
-  - mindestens eine Zeile frischer ist als Job-Start
-  - keine Zeile mehr `processing`/`pending` ist
-- Timeout bleibt als Fail-Safe, aber UI zeigt dann einen klaren Fehler statt endlosem Spinner.
+Datei: `supabase/functions/process-note/index.ts`
 
-### 5. PDF-Vorschau wirklich herstellen
+a) **Prompt-Erweiterung** im `PROFILE_EXTRACTION_PROMPT`:
+   - Neuer Abschnitt „Derived facts — when the note gives you age + reference date, compute the underlying canonical fact":
+     - Geburtstag: „X turned N on YYYY-MM-DD" / „N. Geburtstag am …" → `label: "Date of birth"`, `value: "YYYY-05-25"` (Jahr = Bezugsjahr − N, Monat/Tag vom Bezugsdatum).
+     - Hochzeitstag analog (Anniversary).
+     - Berufsdauer: „X arbeitet seit 10 Jahren bei Y" + Note-Datum → `Start at company: YYYY`.
+   - Regel: Nur ableiten, wenn Bezugsdatum **explizit** im Text steht oder unzweifelhaft aus dem Note-Kontext (`created_at` der Note wird zusätzlich in den User-Prompt gehängt) hervorgeht.
+   - Format-Vorgabe: Datumswerte immer als ISO `YYYY-MM-DD`; Labels in einer kleinen kanonischen Liste (Date of birth, Anniversary, Start at company, …) statt freier Strings.
+   - 2–3 konkrete Few-Shot-Beispiele inkl. des Gunther-Falls (anonymisiert).
 
-- Eine eigene PDF-Preview-Komponente einführen.
-- Für Karten: erste PDF-Seite als Canvas-Thumbnail rendern.
-- Für Detaildialog: erste Seite bzw. Dokumentvorschau mit Ladezustand anzeigen.
-- Wenn Rendering fehlschlägt:
-  - Fallback nicht als kaputte Vorschau, sondern als sauberer PDF-Fallback mit `Open file`.
-- Dafür `pdfjs-dist` verwenden, statt sich auf Browser-iframe-Verhalten zu verlassen.
+b) **Deterministischer Sanity-Pass** nach dem LLM-Parse (Defense in depth):
+   - Wenn `label` zu `birthday|date of birth|dob|geburtstag` matcht und `value` ein Muster `"<N>(st|nd|rd|th)? birthday on YYYY-MM-DD"` / `"turned N on YYYY-MM-DD"` / `"wurde N am YYYY-MM-DD"` enthält, in `{label: "Date of birth", value: "YYYY-MM-DD"}` umschreiben (Jahr = Bezugsjahr − N).
+   - Wenn `label = "Birthday"` und `value` bereits ein ISO-Datum ist, Label kanonisch auf `Date of birth` setzen.
+   - Bezugsdatum aus dem Text via Regex, sonst Fallback auf Note-`created_at`.
 
-### 6. Verifikation
+c) `SINGLETON_PROFILE_LABELS` ergänzen, damit `date of birth` und `birthday` als eine logische Spalte gelten — also keine doppelten Vorschläge mehr.
 
-Nach Umsetzung prüfen:
+d) Note-Date in den User-Prompt aufnehmen (`Note date: YYYY-MM-DD`), damit das LLM für relative Aussagen („letzten Montag") ankoppeln kann. Note-`created_at` ist bereits verfügbar im Aufrufer.
 
-- Retry auf `DB_Rechnung_442370408353.pdf`.
-- Card bleibt während des gesamten Vorgangs an derselben Grid-Position.
-- Spinner läuft nur während echter Analyse.
-- Nach Abschluss erscheint klarer Success-Status.
-- Keine neuen doppelten `media_analysis`-Rows entstehen.
-- PDF-Thumbnail erscheint oder fällt sauber auf PDF-Fallback zurück.
-- Edge-Logs zeigen genau einen abgeschlossenen Job pro Klick.
+### 3. Saubere Anzeige im People-Profil
+
+Nach erfolgreichem Insert in `handleAcceptProfileEntry` werden bereits `["contact-profile-entries", "contact-profile-categories"]` invalidiert. Zusätzlich:
+
+- Im Success-Toast einen „View profile"-Link auf `/dashboard/people/<contact_id>` rendern, damit man sieht, dass es wirklich gelandet ist.
+- Im Profil-Rendering (`src/components/people/ContactProfileTab.tsx`) sicherstellen, dass `Identity & Basics` Einträge mit Label „Date of birth" ein ISO-Datum hübsch formatieren (z. B. „25 May 1965"). Nur Anzeigeschicht, keine Logikänderung.
+
+### 4. Verifikation
+
+- Migration nicht nötig (rein Code).
+- Manuell prüfen: erneut Notiz „Günther hatte am Montag, 25.05.2026 seinen 61. Geburtstag" verarbeiten → Review-Queue-Eintrag muss zeigen `Date of birth: 1965-05-25`. „Keep" → Eintrag erscheint im Profil unter Identity & Basics.
+- Für die drei bereits „kept" Items in deiner DB: einmalig manuell „Apply now" anbieten, oder ich räume sie per Mini-Skript auf, falls du das lieber hättest (`status: "pending_review"`, `payload.value` für Birthday umrechnen) — sag kurz Bescheid.
+
+---
+
+## Geänderte Dateien (geplant)
+
+- `supabase/functions/process-note/index.ts` — Prompt, Sanity-Pass, Singleton-Set, Note-Date im Prompt
+- `src/pages/ReviewQueue.tsx` — `handleKeep`, `handleKeepAll`, `handleAcceptProfileEntry` (target_entity_id zurückschreiben), „Apply now" für verwaiste kept-Items
+- `src/components/people/ContactProfileTab.tsx` — Datums-Formatierung für „Date of birth"
