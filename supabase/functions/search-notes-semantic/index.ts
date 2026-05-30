@@ -23,18 +23,20 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function ilikeFallback(userId: string, query: string, limit: number) {
+async function ilikeFallback(userId: string, query: string, limit: number, caller: string) {
   const q = query.toLowerCase();
-  const { data, error } = await supabase
+  let qb = supabase
     .from("notes")
     .select(
-      "id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at"
+      "id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at, ai_visibility"
     )
     .eq("user_id", userId)
     .eq("is_trashed", false)
     .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
     .order("updated_at", { ascending: false })
     .limit(limit);
+  if (caller === "mcp") qb = qb.eq("ai_visibility", "visible");
+  const { data, error } = await qb;
   if (error) throw error;
   return (data || []).map((n: Record<string, unknown>) => ({
     ...n,
@@ -67,6 +69,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const threshold = body.threshold ?? 0.25;
     const limit = Math.min(body.limit ?? 20, 50);
     const scope = body.scope || "all"; // "all" | "notes" | "media"
+    const caller = body.caller === "mcp" ? "mcp" : "app"; // "app" (default) sees hidden notes, "mcp" filters them out
 
     let results: unknown[];
     let mode = "semantic";
@@ -158,13 +161,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
         // Hydrate full note rows for chunk hits.
         const noteIds = Array.from(noteMap.keys());
         if (noteIds.length > 0) {
-          const { data: noteRows } = await supabase
+          let hydrateQ = supabase
             .from("notes")
-            .select("id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at")
+            .select("id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, is_external, sync_status, structured_fields, related, created_at, updated_at, ai_visibility")
             .in("id", noteIds);
+          if (caller === "mcp") hydrateQ = hydrateQ.eq("ai_visibility", "visible");
+          const { data: noteRows } = await hydrateQ;
+          const hydratedIds = new Set((noteRows || []).map((r: any) => r.id));
+          if (caller === "mcp") {
+            for (const id of noteIds) if (!hydratedIds.has(id)) noteMap.delete(id);
+          }
           for (const row of (noteRows || []) as any[]) {
             const existing = noteMap.get(row.id);
-            if (existing) noteMap.set(row.id, { ...row, ...existing, content: row.content });
+            if (existing) noteMap.set(row.id, { ...row, ...existing, content: row.content, ai_visibility: row.ai_visibility });
           }
         }
 
@@ -200,7 +209,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
 
         // Always run ILIKE to catch notes without chunks/embeddings yet.
-        const textResults = await ilikeFallback(user.id, query, limit);
+        const textResults = await ilikeFallback(user.id, query, limit, caller);
         for (const t of textResults) {
           if (!noteMap.has(t.id)) noteMap.set(t.id, t);
         }
@@ -212,11 +221,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (embErr: any) {
       if (embErr.message === "INSUFFICIENT_CREDITS" || embErr.message === "NO_ACTIVE_PERIOD") {
         console.log("Falling back to ILIKE search: insufficient credits");
-        results = await ilikeFallback(user.id, query, limit);
+        results = await ilikeFallback(user.id, query, limit, caller);
         mode = "ilike_fallback_no_credits";
       } else {
         console.error("Semantic search failed, falling back to ILIKE:", embErr);
-        results = await ilikeFallback(user.id, query, limit);
+        results = await ilikeFallback(user.id, query, limit, caller);
         mode = "ilike_fallback";
       }
     }

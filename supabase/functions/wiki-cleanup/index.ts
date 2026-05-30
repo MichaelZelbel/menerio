@@ -158,12 +158,12 @@ serve(async (req) => {
 
       const { data: sources, error: sErr } = await db
         .from("wiki_page_sources")
-        .select("note_id, notes:note_id(id, title, content)")
+        .select("note_id, notes:note_id(id, title, content, ai_visibility)")
         .eq("wiki_page_id", pageId).eq("user_id", userId);
       if (sErr) throw sErr;
 
       const noteBlocks = (sources || [])
-        .map((s: any) => s.notes ? `### ${s.notes.title || "Untitled"}\n${noteContentToText(s.notes.content).slice(0, 4000)}` : "")
+        .map((s: any) => (s.notes && s.notes.ai_visibility !== "hidden") ? `### ${s.notes.title || "Untitled"}\n${noteContentToText(s.notes.content).slice(0, 4000)}` : "")
         .filter(Boolean).join("\n\n---\n\n");
 
       if (!noteBlocks) {

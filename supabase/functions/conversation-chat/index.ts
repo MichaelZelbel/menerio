@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
       supabase.from("conversation_messages").select("role, content").eq("user_id", user.id).eq("person_id", personId).order("created_at", { ascending: false }).limit(10),
       personId ? supabase.from("contacts").select("id, name, notes, tags, aliases, metadata").eq("user_id", user.id).eq("id", personId).single() : Promise.resolve({ data: null }),
       personId ? supabase.from("profile_entries").select("label, value, profile_categories(name)").eq("user_id", user.id).eq("contact_id", personId).limit(50) : Promise.resolve({ data: [] }),
-      supabase.from("notes").select("title, created_at, metadata").eq("user_id", user.id).eq("is_trashed", false).order("created_at", { ascending: false }).limit(50),
+      supabase.from("notes").select("title, created_at, metadata").eq("user_id", user.id).eq("is_trashed", false).eq("ai_visibility", "visible").order("created_at", { ascending: false }).limit(50),
       supabase.from("moments").select("title, description, happened_at, impact_level, status").eq("user_id", user.id).is("deleted_at", null).order("happened_at", { ascending: false }).limit(50),
       personId ? supabase.from("person_documents").select("title, content").eq("user_id", user.id).eq("person_id", personId).eq("memory_type", "short_term") : Promise.resolve({ data: [] }),
     ]);

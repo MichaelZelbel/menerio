@@ -230,6 +230,19 @@ async function executeTool(
             });
           }
         }
+        // Filter out AI-hidden notes
+        const candidateIds = Array.from(byNote.keys());
+        if (candidateIds.length > 0) {
+          const { data: visible } = await db
+            .from("notes")
+            .select("id")
+            .in("id", candidateIds)
+            .eq("ai_visibility", "visible");
+          const visibleSet = new Set((visible || []).map((n: any) => n.id));
+          for (const id of candidateIds) {
+            if (!visibleSet.has(id)) byNote.delete(id);
+          }
+        }
         const results = Array.from(byNote.values()).slice(0, 10);
         return JSON.stringify({ results, count: results.length });
       } catch {
@@ -245,6 +258,7 @@ async function executeTool(
         .select("id, title, content, tags, metadata")
         .eq("user_id", userId)
         .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
         .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
         .order("updated_at", { ascending: false })
         .limit(10);

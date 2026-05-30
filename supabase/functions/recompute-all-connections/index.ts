@@ -81,6 +81,7 @@ Deno.serve(async (req: Request) => {
         .select("id, title, content, metadata, embedding, tags")
         .eq("user_id", userId)
         .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
         .order("updated_at", { ascending: false })
         .limit(batchSize);
 
@@ -141,6 +142,7 @@ Deno.serve(async (req: Request) => {
               .select("id, title, metadata")
               .eq("user_id", userId)
               .eq("is_trashed", false)
+              .eq("ai_visibility", "visible")
               .neq("id", note.id)
               .limit(1000)).data || []
           : [];

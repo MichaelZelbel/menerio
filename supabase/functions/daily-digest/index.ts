@@ -163,6 +163,7 @@ async function processDigestForUser(userId: string, email: string, userName: str
       .select("title, metadata")
       .eq("user_id", userId)
       .eq("is_trashed", false)
+      .eq("ai_visibility", "visible")
       .gte("created_at", yesterdayStart)
       .lte("created_at", yesterdayEnd),
     supabase
