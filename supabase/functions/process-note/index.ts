@@ -923,8 +923,9 @@ async function generateProfileSuggestions(
   noteTitle: string,
   noteContent: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
-  context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown> },
+  context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown>; note_created_at?: string | null },
 ) {
+  const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
