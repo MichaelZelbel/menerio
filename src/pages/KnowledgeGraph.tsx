@@ -703,7 +703,7 @@ export default function KnowledgeGraph() {
                     <div className="space-y-1">
                       <Label className="text-[11px]">Labels</Label>
                       <div className="flex gap-1">
-                        {(["hover", "always", "never"] as const).map((mode) => (
+                        {(["auto", "hover", "always", "never"] as const).map((mode) => (
                           <button
                             key={mode}
                             onClick={() => setFilters((f) => ({ ...f, labelMode: mode }))}
