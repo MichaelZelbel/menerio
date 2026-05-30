@@ -613,7 +613,19 @@ Rules:
 - Do NOT invent or assume
 - Skip vague, third-party, or authorship-only mentions
 - Return empty arrays if nothing qualifies
-- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student`;
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+
+DERIVED FACTS — compute the canonical underlying fact when the note gives you enough to do so safely:
+- If the note states an age AND a reference date (explicit "on YYYY-MM-DD" in the text, or unambiguously from the provided Note date), compute the date of birth:
+    label = "Date of birth", value = "YYYY-MM-DD" where year = referenceYear - age, month/day from the reference date.
+- If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
+- If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact at all — never store free text like "61st birthday on 2026-05-25" as a value.
+- Always normalize date values to ISO YYYY-MM-DD.
+
+Derived-fact examples:
+- Note text "Gunther turned 61 on 2026-05-25." → {contact_name: "Gunther", category_slug: "identity", label: "Date of birth", value: "1965-05-25"}
+- Note text "Anna's 30th birthday was on 2024-03-12." → {label: "Date of birth", value: "1994-03-12"}
+- Note text "Tom is 40 years old" with Note date 2026-01-10 and no explicit birthday date → DO NOT emit a Date of birth (we don't know month/day).`;
 
 // Labels that should only ever have ONE pending suggestion / entry per contact at a time.
 const SINGLETON_PROFILE_LABELS = new Set([
