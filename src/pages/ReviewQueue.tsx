@@ -549,7 +549,21 @@ export default function ReviewQueue() {
   };
 
   const handleKeepAll = async () => {
-    items.forEach((item) => updateStatus.mutate({ id: item.id, status: "kept" }));
+    // Sequentially apply each item so add_profile_entry / add_relationship /
+    // group_member_suggestion actually write to their tables instead of just
+    // flipping review_queue.status to "kept".
+    for (const item of items) {
+      const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
+      try {
+        if (alreadyApplied) {
+          updateStatus.mutate({ id: item.id, status: "kept" });
+        } else {
+          await handleAccept(item);
+        }
+      } catch (err: any) {
+        showToast.error(`Failed to keep "${item.title}": ${err?.message || "Unknown error"}`);
+      }
+    }
     for (const revision of wikiRevisions) {
       await handleWikiLooksGood(revision);
     }
