@@ -95,7 +95,7 @@ async function deductFromUsage(
   const promptTokens = usage?.prompt_tokens ?? 0;
   const completionTokens = usage?.completion_tokens ?? 0;
   const totalTokens =
-    usage?.total_tokens ?? promptTokens + completionTokens ?? 1000;
+    usage?.total_tokens ?? (promptTokens + completionTokens || 1000);
   const usageSource = usage?.total_tokens ? "provider" : "fallback";
   try {
     await deductTokens(supabase, {
