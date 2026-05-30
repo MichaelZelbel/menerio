@@ -215,6 +215,9 @@ export default function KnowledgeGraph() {
       __connectionCount: connCount.get(n.id) || 0,
     }));
 
+    // Assign LOD tiers + importance scores
+    assignTiers(forceNodes as RenderNode[]);
+
     const forceLinks = edges.map((e) => ({
       source: e.source,
       target: e.target,
