@@ -288,14 +288,14 @@ export default function ReviewQueue() {
       }
 
       // Insert the profile entry
-      const { error: entryErr } = await supabase.from("profile_entries").insert({
+      const { data: inserted, error: entryErr } = await supabase.from("profile_entries").insert({
         category_id: categoryId,
         contact_id,
         label,
         value,
         sort_order: 0,
         user_id: item.user_id,
-      });
+      }).select("id").maybeSingle();
 
       if (entryErr) {
         showToast.error("Failed to add profile entry: " + entryErr.message);
@@ -305,7 +305,15 @@ export default function ReviewQueue() {
       // Invalidate contact profile queries
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      updateStatus.mutate({ id: item.id, status: "kept" });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: {
+          target_entity_type: "profile_entry",
+          target_entity_id: inserted?.id ?? null,
+          applied_at: new Date().toISOString(),
+        },
+      });
       showToast.success(`Added "${label}: ${value}" to ${contact_name}'s profile`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
