@@ -1,78 +1,103 @@
-## Ergebnis der Prüfung
+## Ziel
 
-Der konkrete Re-Analyse-Job für die DB-Rechnung ist serverseitig nicht hängen geblieben.
+Der Media-Library-Flow wird so umgebaut, dass ein Dokument aus Nutzersicht stabil an Ort und Stelle bleibt, einen echten Status zeigt und PDF-Vorschauen zuverlässig angezeigt werden.
 
-Belege aus Supabase:
-- `analyze-pdf` wurde um `14:47:08` gestartet.
-- `analyze-media` meldete um `14:47:12` erfolgreich `complete`.
-- In `media_analysis` stehen für das PDF zwei Seiten als `complete`:
-  - Seite 1: extrahierter Text vorhanden (`1895` Zeichen), Tags vorhanden
-  - Seite 2: extrahierter Text vorhanden (`489` Zeichen), Tags vorhanden
-- Es gibt aktuell keine `pending` oder `processing` Records für diesen User.
+## Was aktuell wirklich schiefläuft
 
-Die Endlosschleife ist daher sehr wahrscheinlich kein OCR-/Mistral-/Backend-Timeout, sondern ein Frontend-Statusproblem im Retry-Polling.
+1. **Die Liste hängt an `media_analysis` statt an einem stabilen Dokumentmodell.**
+   - Beim Re-analyze werden Analyse-Zeilen aktualisiert/neu geschrieben.
+   - Die Media Library sortiert nach `media_analysis.created_at` und gruppiert danach clientseitig.
+   - Dadurch kann ein Dokument beim Retry seine Position ändern oder kurz verschwinden.
 
-## Tatsächliche Ursachen
+2. **Der Backend-Write ist nicht atomar genug.**
+   - `writeAnalysisRecord` sucht bestehende PDF-Seiten mit `.is("page_number", value)`; für `page_number = 1/2` ist das der falsche Operator.
+   - Dadurch können statt Updates neue Zeilen entstehen.
+   - Danach werden alte `processing`-Zeilen gelöscht. Das erklärt Verschieben, doppelte/wechselnde Einträge und instabile Statusanzeige.
 
-1. **Retry bleibt clientseitig künstlich pending**
-   - `useReanalyzeMedia` entscheidet anhand von `updated_at`, ob ein Retry nach dem Klick frisch abgeschlossen wurde.
-   - Die Media-Library-Query lädt aber aktuell kein `updated_at` aus `media_analysis`.
-   - Bei einem Retry werden bestehende Rows aktualisiert, ihre `created_at` bleibt alt.
-   - Nach dem Refetch fehlt dem Client dadurch der frische Timestamp und `isPathPending()` kann den Job nicht sauber als beendet erkennen.
+3. **Es gibt keine Datenbank-Garantie gegen doppelte Analyse-Seiten.**
+   - Ohne eindeutigen Schlüssel für `(note_id, storage_path, page_number)` kann jeder Retry neue Page-Rows erzeugen.
 
-2. **Das gleiche PDF ist wirklich doppelt vorhanden**
-   - In `note_attachments` existieren zwei Dateien mit unterschiedlichem `storage_path`, aber identischem `sha256` und identischer Größe:
-     - `DB_Rechnung_442370408353.pdf`
-     - `DB_Rechnung_442370408353-2.pdf`
-   - Die Media Library gruppiert aktuell nur nach `note_id + storage_path`, nicht nach Datei-Hash.
-   - Deshalb erscheinen identische Dateien doppelt.
+4. **PDF-Vorschau ist derzeit kein echter Preview-Flow.**
+   - In der Media Library wird für PDFs nur ein Fallback/Icon gezeigt.
+   - In anderen Stellen kann die native PDF-Einbettung kaputt wirken.
+   - Re-analyze löst dieses Preview-Problem nicht, weil Analyse und Preview zwei getrennte Dinge sind.
 
-3. **Unterschiedliche Tags bei identischem PDF sind erwartbar, solange doppelt analysiert wird**
-   - Beide Uploads werden separat durch AI analysiert.
-   - Die Zusammenfassung/Tag-Erzeugung ist nicht deterministisch genug, um bei zwei separaten Läufen garantiert identische Tags zu erzeugen.
+## Implementierungsplan
 
-4. **PDF-Reanalyse läuft über zwei Edge Functions**
-   - Das Frontend ruft für PDFs `analyze-pdf` auf.
-   - `analyze-pdf` ruft dann wiederum `analyze-media` auf.
-   - Die eigentliche Arbeit passiert in `analyze-media`.
-   - Das ist nicht die Hauptursache, macht den Flow aber unnötig schwer zu beobachten und fehleranfälliger.
+### 1. Datenbank absichern
 
-## Fix-Plan
+Migration für `media_analysis`:
 
-1. **Retry-Terminierung korrekt machen**
-   - In der Media-Library-Query `updated_at` mitladen.
-   - `MediaItem` entsprechend erweitern.
-   - `isJobFinished()` nur auf echte frische DB-Daten beenden lassen, nicht auf alte `created_at`-Werte.
+- Vorhandene Duplikate pro `(user_id, note_id, storage_path, page_number)` bereinigen.
+  - Behalten wird die beste Zeile: `complete` vor `processing/failed`, danach die neueste.
+- Eindeutigen Index hinzufügen:
+  - `user_id`
+  - `note_id`
+  - `storage_path`
+  - `page_number` mit `NULLS NOT DISTINCT`
+- Optionaler Index für schnelle Library-Abfragen:
+  - `(user_id, note_id, storage_path)`
 
-2. **Pending-State robuster aufräumen**
-   - `pendingJobs` aktiv entfernen, sobald ein frisches finales Ergebnis erkannt wurde.
-   - Einen sichtbaren Timeout-/Fehlerzustand anzeigen, wenn nach einer sinnvollen Zeit kein frisches Ergebnis auftaucht.
-   - Dadurch bleibt der Button nicht scheinbar endlos in einem Retry-Zustand.
+Damit kann ein Retry nicht mehr mehrere konkurrierende Analyse-Zeilen für dieselbe PDF-Seite erzeugen.
 
-3. **PDFs direkt über `analyze-media` reanalysieren**
-   - Den Frontend-Retry für PDFs direkt gegen `analyze-media` mit `media_type: "pdf"` schicken.
-   - `analyze-pdf` kann später entweder entfernt oder nur noch als Legacy-Wrapper behalten werden.
-   - Damit gibt es einen eindeutigen Job und eindeutigere Logs.
+### 2. Edge Function `analyze-media` korrigieren
 
-4. **Doppelte Dateien in der Media Library deduplizieren**
-   - Für Media-Library-Einträge zusätzlich Attachment-Metadaten aus `note_attachments` laden (`sha256`, `size_bytes`, `filename`).
-   - Gruppierung für PDFs erweitern: bevorzugt `note_id + sha256`, fallback `note_id + storage_path`.
-   - Dadurch wird dasselbe PDF innerhalb einer Note nur einmal angezeigt, auch wenn es doppelt hochgeladen wurde.
+- `writeAnalysisRecord` auf echtes Upsert umstellen:
+  - `page_number === null` korrekt behandeln
+  - `page_number !== null` mit Gleichheitsvergleich bzw. eindeutigem `onConflict`
+- Bestehende Reihen nicht löschen, solange keine erfolgreichen neuen Ergebnisse vorliegen.
+- Placeholder-Row nur nach erfolgreichem Abschluss entfernen.
+- Fehlerzustand klar schreiben:
+  - Wenn OCR/Analyse scheitert, bleiben sichtbare Zeilen erhalten und werden `failed`.
+- Rückgabe/Logs eindeutiger machen:
+  - `job_started_at`
+  - `pages_processed`
+  - `storage_path`
+  - finaler Status
 
-5. **Retry auf die kanonische Datei anwenden**
-   - Bei duplizierten Attachments eine kanonische Datei wählen, z. B. die älteste oder die mit vollständiger Analyse.
-   - Retry/Re-analyze nur für diese kanonische Datei ausführen.
-   - Analyse-Ergebnisse nicht mehr konkurrierend für identische Duplikate anzeigen.
+### 3. Media Library auf stabiles Dokumentmodell umbauen
 
-6. **Optionaler Folge-Fix: Upload-Dedupe**
-   - Beim Upload anhand von `sha256` prüfen, ob dieselbe Datei in derselben Note bereits existiert.
-   - Wenn ja: keinen zweiten Storage-Upload und keine zweite Analyse erzeugen.
-   - Das verhindert neue Dubletten an der Quelle.
+- Dokumentgruppen bekommen einen stabilen Schlüssel:
+  - bevorzugt `note_id + sha256`
+  - fallback `note_id + storage_path`
+- Sortierung nicht mehr nach Analyse-Erstellzeit, sondern stabil nach Upload-/Attachment-Zeit oder initialer Dokumentposition.
+- Re-analyze ändert nur den Status der bestehenden Card, niemals ihre Position.
+- Während Retry:
+  - Card bleibt sichtbar
+  - Overlay/Badge zeigt Spinner
+  - Button ist deaktiviert und zeigt `Analyzing…`
+  - alter Content bleibt sichtbar, bis frische Ergebnisse da sind
+- Nach Abschluss:
+  - Status wechselt sichtbar auf `Analyzed`
+  - Button wird wieder `Re-analyze`
+  - falls Analyse scheitert: `Failed` + Retry bleibt verfügbar
 
-## Validierung nach Umsetzung
+### 4. Pending-State sauber machen
 
-- Retry einer kleinen PDF-Rechnung startet sichtbar mit `Retrying…`.
-- Nach Abschluss verschwindet der Pending-State automatisch ohne manuellen Refresh.
-- Supabase zeigt keine `processing`-Altlasten.
-- Die Media Library zeigt identische PDFs innerhalb derselben Note nur einmal.
-- Tags/Beschreibung stammen von einem kanonischen Analyseergebnis und springen nicht zwischen Duplikaten.
+- Pending-State nicht mehr nur nach `storage_path`, sondern nach Dokument-Key tracken.
+- Abschluss erst dann markieren, wenn:
+  - alle erwarteten Seiten final sind (`complete` oder `failed`)
+  - mindestens eine Zeile frischer ist als Job-Start
+  - keine Zeile mehr `processing`/`pending` ist
+- Timeout bleibt als Fail-Safe, aber UI zeigt dann einen klaren Fehler statt endlosem Spinner.
+
+### 5. PDF-Vorschau wirklich herstellen
+
+- Eine eigene PDF-Preview-Komponente einführen.
+- Für Karten: erste PDF-Seite als Canvas-Thumbnail rendern.
+- Für Detaildialog: erste Seite bzw. Dokumentvorschau mit Ladezustand anzeigen.
+- Wenn Rendering fehlschlägt:
+  - Fallback nicht als kaputte Vorschau, sondern als sauberer PDF-Fallback mit `Open file`.
+- Dafür `pdfjs-dist` verwenden, statt sich auf Browser-iframe-Verhalten zu verlassen.
+
+### 6. Verifikation
+
+Nach Umsetzung prüfen:
+
+- Retry auf `DB_Rechnung_442370408353.pdf`.
+- Card bleibt während des gesamten Vorgangs an derselben Grid-Position.
+- Spinner läuft nur während echter Analyse.
+- Nach Abschluss erscheint klarer Success-Status.
+- Keine neuen doppelten `media_analysis`-Rows entstehen.
+- PDF-Thumbnail erscheint oder fällt sauber auf PDF-Fallback zurück.
+- Edge-Logs zeigen genau einen abgeschlossenen Job pro Klick.

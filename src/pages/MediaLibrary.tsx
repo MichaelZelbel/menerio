@@ -34,6 +34,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
 import { MediaDetailDialog, MediaDetailItem } from "@/components/media/MediaDetailDialog";
+import { PdfThumbnail } from "@/components/media/PdfThumbnail";
 
 interface MediaItem {
   id: string;
@@ -442,10 +443,19 @@ export default function MediaLibrary() {
 
   const documentGroups = useMemo(() => {
     const groups = groupMediaByDocument(dedupedMediaItems);
-    return groups.map((g) => ({
+    const enriched = groups.map((g) => ({
       ...g,
       duplicate_count: duplicateCountByCanonical[`${g.note_id}::${g.storage_path}`] || 0,
     }));
+    // Stable order: newest grouped document first. group.created_at is the
+    // earliest media_analysis row in the group, which is stable across retries
+    // because we now upsert in place instead of inserting new rows.
+    enriched.sort((a, b) => {
+      const ta = a.created_at ? Date.parse(a.created_at) : 0;
+      const tb = b.created_at ? Date.parse(b.created_at) : 0;
+      return tb - ta;
+    });
+    return enriched;
   }, [dedupedMediaItems, duplicateCountByCanonical]);
 
   const stats = useMemo(() => {
@@ -652,11 +662,20 @@ export default function MediaLibrary() {
                 >
                   {/* Thumbnail */}
                   <div className="relative h-36 bg-muted flex items-center justify-center overflow-hidden">
-                    {isPdf || hasBrokenPreview || !previewUrl ? (
+                    {isPdf ? (
+                      previewUrl ? (
+                        <PdfThumbnail url={previewUrl} width={320} />
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-muted-foreground/70 px-3 text-center">
+                          <FileText className="h-10 w-10" />
+                          <span className="text-[10px] leading-tight">PDF document</span>
+                        </div>
+                      )
+                    ) : hasBrokenPreview || !previewUrl ? (
                       <div className="flex flex-col items-center gap-2 text-muted-foreground/70 px-3 text-center">
-                        {isPdf ? <FileText className="h-10 w-10" /> : <Image className="h-10 w-10" />}
+                        <Image className="h-10 w-10" />
                         <span className="text-[10px] leading-tight">
-                          {hasBrokenPreview ? "Preview unavailable" : isPdf ? "PDF document" : "Loading preview…"}
+                          {hasBrokenPreview ? "Preview unavailable" : "Loading preview…"}
                         </span>
                       </div>
                     ) : (

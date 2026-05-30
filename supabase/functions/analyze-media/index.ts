@@ -215,15 +215,21 @@ async function writeAnalysisRecord(p: {
     }
   }
 
-  // Upsert by (note_id, storage_path, page_number) so retries replace existing
-  // page rows in-place instead of creating duplicates. Find an existing row first.
-  const { data: existing } = await supabase
-    .from("media_analysis")
-    .select("id")
-    .eq("note_id", p.noteId)
-    .eq("storage_path", p.storagePath)
-    .is("page_number", p.pageNumber as number | null)
-    .maybeSingle();
+  // Upsert by (user_id, note_id, storage_path, page_number) — backed by the
+  // media_analysis_unique_page unique index. Use .eq/.is properly so that
+  // page_number = 1 vs NULL are never confused.
+  let existingId: string | null = null;
+  {
+    let q = supabase
+      .from("media_analysis")
+      .select("id")
+      .eq("user_id", p.userId)
+      .eq("note_id", p.noteId)
+      .eq("storage_path", p.storagePath);
+    q = p.pageNumber === null ? q.is("page_number", null) : q.eq("page_number", p.pageNumber);
+    const { data: existing } = await q.maybeSingle();
+    existingId = existing?.id ?? null;
+  }
 
   const payload = {
     user_id: p.userId,
@@ -242,10 +248,12 @@ async function writeAnalysisRecord(p: {
     updated_at: new Date().toISOString(),
   };
 
-  if (existing?.id) {
-    await supabase.from("media_analysis").update(payload).eq("id", existing.id);
+  if (existingId) {
+    const { error } = await supabase.from("media_analysis").update(payload).eq("id", existingId);
+    if (error) console.warn("media_analysis update failed:", error.message);
   } else {
-    await supabase.from("media_analysis").insert(payload);
+    const { error } = await supabase.from("media_analysis").insert(payload);
+    if (error) console.warn("media_analysis insert failed:", error.message);
   }
 }
 
