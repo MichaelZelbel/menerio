@@ -33,6 +33,7 @@ import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
+import { MediaDetailDialog, MediaDetailItem } from "@/components/media/MediaDetailDialog";
 
 interface MediaItem {
   id: string;
