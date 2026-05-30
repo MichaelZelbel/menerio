@@ -485,29 +485,18 @@ export default function MediaLibrary() {
                           {isRetrying ? "Retrying…" : "Analyzing…"}
                         </span>
                       )}
-                      {item.analysis_status === "failed" && !isRetrying && (
+                      {canRetry && (
                         <button
                           type="button"
                           title={item.original_filename ? `Retry: ${item.original_filename}` : "Retry analysis"}
                           onClick={(e) => {
                             e.stopPropagation();
-                            reanalyze.mutate(
-                              {
-                                noteId: item.note_id,
-                                storagePath: item.storage_path,
-                                mediaType: item.media_type === "pdf" || item.media_type === "pdf_page" ? "pdf" : "image",
-                                originalFilename: item.original_filename ?? undefined,
-                              },
-                              {
-                                onSuccess: () => toast.success("Reanalyzing…"),
-                                onError: (err: Error) => toast.error(err.message),
-                              }
-                            );
+                            retryItem();
                           }}
-                          className="flex items-center gap-1 bg-destructive/90 hover:bg-destructive text-destructive-foreground text-[9px] px-1.5 py-0.5 rounded-full"
+                          className="flex items-center gap-1 bg-background/90 hover:bg-accent text-foreground border border-border text-[9px] px-1.5 py-0.5 rounded-full"
                         >
                           <RefreshCw className="h-2.5 w-2.5" />
-                          Retry
+                          {item.analysis_status === "complete" ? "Re-analyze" : "Retry"}
                         </button>
                       )}
                     </div>
@@ -537,7 +526,7 @@ export default function MediaLibrary() {
                       </p>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -545,8 +534,8 @@ export default function MediaLibrary() {
       </div>
 
       <MediaDetailDialog
-        item={openItem}
-        noteTitle={openItem ? noteTitles[openItem.note_id] : undefined}
+        item={selectedOpenItem}
+        noteTitle={selectedOpenItem ? noteTitles[selectedOpenItem.note_id] : undefined}
         onClose={() => setOpenItem(null)}
       />
     </div>
