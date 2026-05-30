@@ -440,7 +440,13 @@ export default function MediaLibrary() {
     enabled: noteIds.length > 0,
   });
 
-  const documentGroups = useMemo(() => groupMediaByDocument(mediaItems), [mediaItems]);
+  const documentGroups = useMemo(() => {
+    const groups = groupMediaByDocument(dedupedMediaItems);
+    return groups.map((g) => ({
+      ...g,
+      duplicate_count: duplicateCountByCanonical[`${g.note_id}::${g.storage_path}`] || 0,
+    }));
+  }, [dedupedMediaItems, duplicateCountByCanonical]);
 
   const stats = useMemo(() => {
     const complete = documentGroups.filter(g => g.analysis_status === "complete").length;
