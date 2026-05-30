@@ -219,6 +219,8 @@ function MediaBadge({ element, status, matches, isExpanded, onToggle, noteId, st
   if (!pos) return null;
 
 
+  const isRetrying = reanalyze.isPathPending(storagePath);
+
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
     reanalyze.mutate({
@@ -229,20 +231,23 @@ function MediaBadge({ element, status, matches, isExpanded, onToggle, noteId, st
     });
   };
 
+  const effectiveStatus = isRetrying ? "processing" : status;
+
   const badgeContent = () => {
-    switch (status) {
+    switch (effectiveStatus) {
       case "pending":
       case "processing":
         return (
           <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" /> Analyzing…
+            <Loader2 className="h-3 w-3 animate-spin" /> {isRetrying ? "Retrying…" : "Analyzing…"}
           </span>
         );
       case "failed":
         return (
           <button
             onClick={handleRetry}
-            className="flex items-center gap-1 text-[10px] text-warning hover:text-warning/80 transition-colors"
+            disabled={isRetrying}
+            className="flex items-center gap-1 text-[10px] text-warning hover:text-warning/80 transition-colors disabled:opacity-50"
           >
             <AlertTriangle className="h-3 w-3" /> Retry
           </button>

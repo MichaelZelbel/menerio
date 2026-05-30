@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,7 +37,6 @@ export function useMediaAnalysis(noteId: string | undefined) {
     },
     enabled: !!noteId && !!user,
     refetchInterval: (query) => {
-      // Poll while any entry is pending/processing
       const entries = query.state.data;
       if (entries?.some((e: MediaAnalysisEntry) => e.analysis_status === "pending" || e.analysis_status === "processing")) {
         return 5000;
@@ -48,16 +48,19 @@ export function useMediaAnalysis(noteId: string | undefined) {
   return query;
 }
 
+export interface ReanalyzeVars {
+  noteId: string;
+  storagePath: string;
+  mediaType: string;
+  originalFilename?: string;
+}
+
 export function useReanalyzeMedia() {
   const queryClient = useQueryClient();
+  const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
 
-  return useMutation({
-    mutationFn: async ({ noteId, storagePath, mediaType, originalFilename }: {
-      noteId: string;
-      storagePath: string;
-      mediaType: string;
-      originalFilename?: string;
-    }) => {
+  const mutation = useMutation({
+    mutationFn: async ({ noteId, storagePath, mediaType, originalFilename }: ReanalyzeVars) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -74,8 +77,41 @@ export function useReanalyzeMedia() {
       if (error) throw error;
       return data;
     },
-    onSuccess: (_, vars) => {
+    onMutate: async (vars) => {
+      setPendingPaths((prev) => {
+        const next = new Set(prev);
+        next.add(vars.storagePath);
+        return next;
+      });
+
+      // Optimistic update: flip status to "processing" for matching items in cached queries
+      const flip = (entry: MediaAnalysisEntry | { storage_path: string; analysis_status: string }) =>
+        entry.storage_path === vars.storagePath
+          ? { ...entry, analysis_status: "processing", error_message: null }
+          : entry;
+
+      queryClient.setQueriesData<MediaAnalysisEntry[]>({ queryKey: ["media-analysis", vars.noteId] }, (old) =>
+        old ? old.map((e) => flip(e) as MediaAnalysisEntry) : old,
+      );
+      queryClient.setQueriesData<Array<{ storage_path: string; analysis_status: string }>>(
+        { queryKey: ["media-library"] },
+        (old) => (old ? (old.map(flip) as typeof old) : old),
+      );
+    },
+    onSettled: (_data, _err, vars) => {
+      setPendingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(vars.storagePath);
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["media-analysis", vars.noteId] });
+      queryClient.invalidateQueries({ queryKey: ["media-library"] });
     },
   });
+
+  return {
+    ...mutation,
+    pendingPaths,
+    isPathPending: (path: string) => pendingPaths.has(path),
+  };
 }

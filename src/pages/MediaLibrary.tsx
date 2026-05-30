@@ -29,10 +29,11 @@ import {
   Sparkles,
   RefreshCw,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
+import { MediaDetailDialog, MediaDetailItem } from "@/components/media/MediaDetailDialog";
 
 interface MediaItem {
   id: string;
@@ -222,10 +223,10 @@ function BatchAnalysisPanel() {
 
 export default function MediaLibrary() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const reanalyze = useReanalyzeMedia();
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
+  const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
 
   const { data: mediaItems = [], isLoading } = useQuery({
     queryKey: ["media-library", user?.id],
@@ -239,6 +240,13 @@ export default function MediaLibrary() {
       return (data || []) as MediaItem[];
     },
     enabled: !!user,
+    refetchInterval: (query) => {
+      const items = query.state.data as MediaItem[] | undefined;
+      if (items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")) {
+        return 5000;
+      }
+      return false;
+    },
   });
 
   const { data: signedUrls = {} } = useQuery({
@@ -399,35 +407,52 @@ export default function MediaLibrary() {
               const noteTitle = noteTitles[item.note_id] || "Untitled";
               const isPdf = item.media_type === "pdf" || item.media_type === "pdf_page";
 
+              const isRetrying = reanalyze.isPathPending(item.storage_path);
+              const previewUrl = getMediaUrl(item.storage_path);
+
               return (
                 <button
                   key={item.id}
-                  onClick={() => navigate(`/dashboard/notes/${item.note_id}`)}
+                  onClick={() => setOpenItem(item as MediaDetailItem)}
                   className="group text-left rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors overflow-hidden"
                 >
                   {/* Thumbnail */}
                   <div className="relative h-36 bg-muted flex items-center justify-center overflow-hidden">
                     {isPdf ? (
-                      <FileText className="h-12 w-12 text-muted-foreground/30" />
+                      previewUrl ? (
+                        <>
+                          <iframe
+                            src={`${previewUrl}#toolbar=0&navpanes=0&view=FitH${item.page_number ? `&page=${item.page_number}` : ""}`}
+                            title={item.original_filename || "PDF"}
+                            className="w-full h-full border-0 bg-white pointer-events-none"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background/10" />
+                        </>
+                      ) : (
+                        <FileText className="h-12 w-12 text-muted-foreground/30" />
+                      )
                     ) : (
                       <img
-                        src={getMediaUrl(item.storage_path)}
+                        src={previewUrl}
                         alt={item.description || ""}
                         className="w-full h-full object-cover"
                         loading="lazy"
                       />
                     )}
                     {/* Status badge */}
-                    <div className="absolute top-1.5 right-1.5">
-                      {item.analysis_status === "complete" && (
+                    <div className="absolute top-1.5 right-1.5 z-10">
+                      {item.analysis_status === "complete" && !isRetrying && (
                         <span className="bg-success/90 text-success-foreground text-[9px] px-1.5 py-0.5 rounded-full">
                           ✓
                         </span>
                       )}
-                      {(item.analysis_status === "pending" || item.analysis_status === "processing") && (
-                        <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+                      {(item.analysis_status === "pending" || item.analysis_status === "processing" || isRetrying) && (
+                        <span className="flex items-center gap-1 bg-background/90 text-muted-foreground text-[9px] px-1.5 py-0.5 rounded-full">
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                          {isRetrying ? "Retrying…" : "Analyzing…"}
+                        </span>
                       )}
-                      {item.analysis_status === "failed" && (
+                      {item.analysis_status === "failed" && !isRetrying && (
                         <button
                           type="button"
                           title={item.original_filename ? `Retry: ${item.original_filename}` : "Retry analysis"}
@@ -437,7 +462,7 @@ export default function MediaLibrary() {
                               {
                                 noteId: item.note_id,
                                 storagePath: item.storage_path,
-                                mediaType: item.media_type,
+                                mediaType: item.media_type === "pdf" || item.media_type === "pdf_page" ? "pdf" : "image",
                                 originalFilename: item.original_filename ?? undefined,
                               },
                               {
@@ -454,7 +479,7 @@ export default function MediaLibrary() {
                       )}
                     </div>
                     {contentType && (
-                      <Badge variant="secondary" className="absolute bottom-1.5 left-1.5 text-[9px]">
+                      <Badge variant="secondary" className="absolute bottom-1.5 left-1.5 text-[9px] z-10">
                         {contentType.replace("_", " ")}
                       </Badge>
                     )}
@@ -485,6 +510,12 @@ export default function MediaLibrary() {
           </div>
         )}
       </div>
+
+      <MediaDetailDialog
+        item={openItem}
+        noteTitle={openItem ? noteTitles[openItem.note_id] : undefined}
+        onClose={() => setOpenItem(null)}
+      />
     </div>
   );
 }

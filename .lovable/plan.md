@@ -1,44 +1,68 @@
-# Mistral Document AI für PDF- und Bildverständnis
+# PDF/Media-Flow reparieren
 
-Du hast recht – wir hatten Mistral OCR als Lösung festgelegt. Im aktuellen Code wird stattdessen `gpt-4o-mini` über OpenRouter mit `image_url` aufgerufen, und PDFs als `data:application/pdf;base64,...` durchgereicht. Genau daran scheitern die 11 PDFs ("Invalid MIME type. Only image types are supported."). Bilder funktionieren zwar, aber wir wechseln sie konsistent mit auf Mistral, damit ein einziger Ingestion-Pfad existiert.
+Vier konkrete Probleme, vier gezielte Fixes — alles im Frontend, keine Edge-Function-Änderungen.
 
-## Ziel
-PDFs und Bilder werden über **Mistral Document AI** (`mistral-ocr-latest`) verarbeitet:
-- PDFs: vollständiger Text **pro Seite** + eingebettete Bilder werden separat beschrieben.
-- Bilder: OCR-Text + Vision-Beschreibung.
-- Ergebnis landet weiterhin in `media_analysis` (ein Record pro Seite/Bild), inkl. `extracted_text`, `description`, `topics`, `embedding`.
+## 1. Retry-Button reagiert sofort sichtbar
 
-## Änderungen
+**Problem:** Klick auf "Retry" zeigt keinerlei Reaktion; man weiß nicht, ob etwas läuft.
 
-### 1. Secret
-- Neu: `MISTRAL_API_KEY` (per `add_secret` anfragen, nachdem du den Plan freigibst).
+**Fix:**
+- `useReanalyzeMedia` so erweitern, dass pro `storage_path` der Pending-Status getrackt wird (statt eines globalen `isPending`).
+- Im Retry-Button (Media Library **und** im MediaAnalysisOverlay innerhalb der Notiz):
+  - während der Mutation: Spinner + Label "Retrying…", Button `disabled`
+  - sofort optimistisch den `analysis_status` der Karte auf `processing` setzen → Badge wechselt unmittelbar von rot auf den Lade-Spinner
 
-### 2. `supabase/functions/analyze-media/index.ts` umbauen
-- **Bilder**: `POST https://api.mistral.ai/v1/ocr` mit `model: "mistral-ocr-latest"` und `document: { type: "image_url", image_url: "data:<mime>;base64,..." }`. Liefert `pages[0].markdown` (= OCR-Text). Für die `description` zusätzlich ein kurzer Call an `pixtral-12b` (Vision-Chat) mit demselben Bild → 2–3 Sätze + Topics + `content_type`. Beides zusammen in den Record.
-- **PDFs**: 
-  1. PDF aus Storage laden, als `data:application/pdf;base64,...` an `/v1/ocr` schicken mit `include_image_base64: true`.
-  2. Antwort enthält `pages[]` mit `markdown` und ggf. `images[]` (eingebettete Grafiken).
-  3. **Pro Seite** einen `media_analysis`-Record schreiben (`page_number = idx+1`), `extracted_text = page.markdown`.
-  4. Für jedes eingebettete Bild auf der Seite zusätzlich ein Pixtral-Call für die Beschreibung, in `raw_analysis.images[]` ablegen; die kombinierten Bildbeschreibungen in `description` der Seite mergen.
-  5. `topics` werden aus dem Gesamttext der Seite via Pixtral/Mistral-Chat extrahiert (ein Call pro Seite, oder ein Sammel-Call am Ende – ich mache es pro Seite für saubere Embeddings).
-- Token-Accounting weiterhin über `deductTokens` (Mistral liefert `usage` mit; Fallback wie heute).
-- Embeddings (`getEmbeddingWithCredits`) bleiben wie bisher pro Record.
+## 2. Status springt ohne manuellen Reload auf Grün
 
-### 3. `analyze-pdf` vereinfachen
-- Bleibt als dünner Wrapper, ruft aber `analyze-media` mit `media_type: "pdf"`. Keine inhaltlichen Änderungen, nur Kommentar aktualisieren ("now uses Mistral OCR").
+**Problem:** MediaLibrary-Query refetcht nie automatisch.
 
-### 4. `backfill-media-analysis`
-- Status-Filter `analysis_status = 'failed'` triggert Re-Analyse aller bestehenden kaputten PDFs über den neuen Pfad. Bereits vorhanden – nur dokumentieren, dass dies jetzt funktioniert.
+**Fix:** In der `useQuery` für `media-library` ein `refetchInterval` ergänzen, das alle 5 s pollt, solange mindestens ein Item `pending` oder `processing` ist — analog zum bereits existierenden Pattern in `useMediaAnalysis`.
 
-### 5. UI / Retry
-- `useReanalyzeMedia` existiert. In der Media Library bei `failed`-Status einen kleinen "Erneut analysieren"-Button anzeigen (falls noch nicht da – wird im Build-Schritt verifiziert).
+## 3. Volltext + Vorschau direkt aus der Media Library
 
-## Out of Scope
-- Multi-PDF-Parallelisierung, Caching, Page-Range-Selection. Erstmal alle Seiten.
-- Wechsel der Bildanalyse von Mistral zurück zu OpenRouter falls Pixtral schlechter performt – können wir später A/B testen.
+**Problem:** Beschreibung ist `line-clamp-2`, kein Bild/PDF sichtbar, Klick navigiert weg, ohne dass man den extrahierten Inhalt jemals zu sehen bekommt.
 
-## Kosten/Limits
-- Mistral OCR ist günstig (~$1/1000 Seiten), Pixtral pro Bild gering. Per `checkBalance` & `deductTokens` weiterhin in unser Credit-System integriert (Tokens grob via `usage` oder Fallback `1000`).
+**Fix:** Neuer `MediaDetailDialog` (shadcn `<Dialog>`), der beim Klick auf eine Karte aufgeht statt direkt zur Notiz zu navigieren:
+- Linke Seite: echte Vorschau
+  - Bild → `<img>` mit Signed URL
+  - PDF / `pdf_page` → `<iframe>` mit Signed URL (`#toolbar=0&view=FitH`), Fallback auf File-Icon bei Ladefehler
+- Rechte Seite:
+  - Originaldateiname, Seitenzahl (bei `pdf_page`), Content-Type
+  - **Description** (full)
+  - **Extracted text** (scrollbar, monospaced, `whitespace-pre-wrap`)
+  - Topics als Badges
+  - Buttons: "Open note" (navigiert zur Notiz) und "Retry analysis" (bei `failed`)
 
-## Nach Freigabe brauche ich von dir
-- Bestätigung, dass ich `MISTRAL_API_KEY` als Secret anfragen darf (du legst ihn dann in Lovable Cloud ab).
+Die Karten-Kachel erhält zusätzlich für PDFs eine `iframe`-Mini-Vorschau (mit `pointer-events: none`), damit die graue Icon-Wand verschwindet.
+
+## 4. Inhalt ist auch in der Notiz selbst sichtbar
+
+**Problem:** OCR-Text liegt nur in `media_analysis`. In der Notiz erscheint nichts davon — das bisherige `MediaAnalysisOverlay` zeigt nur ein kleines "AI"-Badge auf dem eingebetteten Element, was Nutzer nicht finden.
+
+**Fix:** Neue Komponente `NoteAttachmentsPanel` unterhalb des Editors:
+- Listet alle `media_analysis`-Einträge der aktuellen Notiz auf, gruppiert pro Datei (PDF-Seiten zu einem Eintrag zusammengefasst).
+- Pro Eintrag: Thumbnail (Bild oder PDF-iframe), Dateiname, Status-Badge.
+- Aufklappbar (`<Collapsible>`) → zeigt Description, full Extracted Text, Topics.
+- Bei `failed`: Retry-Button mit demselben Pending-State wie oben.
+
+So ist garantiert, dass jeder OCR-Text aus einer Notiz heraus lesbar ist — unabhängig davon, ob der TipTap-Embed das PDF/Bild korrekt rendert oder nicht.
+
+## Technische Details
+
+**Geänderte/neue Dateien:**
+- `src/hooks/useMediaAnalysis.ts` — `useReanalyzeMedia` erweitern um `pendingPaths: Set<string>` (oder `isPathPending(path)`); optimistisches Update von `media-library` und `media-analysis` Caches via `onMutate`.
+- `src/pages/MediaLibrary.tsx`:
+  - `refetchInterval` ergänzen
+  - PDF-Kachel: `iframe`-Vorschau statt nur Icon
+  - Card-Klick öffnet neuen Dialog statt `navigate`
+  - Retry-Button mit Spinner/Disabled-State
+- `src/components/media/MediaDetailDialog.tsx` (neu) — Vorschau + Volltext + Topics + Actions.
+- `src/components/notes/NoteAttachmentsPanel.tsx` (neu) — wird in der Notiz-Seite (`src/pages/Notes.tsx` o. ä., wird beim Implementieren lokalisiert) unterhalb des Editors gemountet.
+- `src/components/notes/MediaAnalysisOverlay.tsx` — Retry-Button-Spinner-Pattern angleichen.
+
+**Nicht im Scope:**
+- Änderungen an `analyze-media`/`analyze-pdf` Edge Functions oder am Mistral-Pipeline-Flow.
+- Migration der PDF-Storage-Struktur.
+- Neue Datenfelder in `media_analysis`.
+
+Nach diesen Änderungen: Retry gibt sofort Feedback → Badge wird automatisch grün → ein Klick auf die Karte zeigt PDF + vollständigen Text → derselbe Inhalt ist auch direkt in der Notiz unter dem Editor sichtbar.

@@ -39,6 +39,7 @@ import { OutgoingLinksPanel } from "./OutgoingLinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
 
 import { MediaAnalysisOverlay } from "./MediaAnalysisOverlay";
+import { NoteAttachmentsPanel } from "./NoteAttachmentsPanel";
 import { LocalGraphPanel } from "./LocalGraphPanel";
 import { NoteMetadataEditor } from "./NoteMetadataEditor";
 import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
@@ -1310,6 +1311,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         {/* Media analysis overlay badges */}
         {!sourceMode && <MediaAnalysisOverlay noteId={note.id} editorContainerRef={editorContainerRef} />}
       </div>
+
+      {/* Attachments & extracted content */}
+      {!sourceMode && <NoteAttachmentsPanel noteId={note.id} />}
+
 
       {/* Connections panel */}
       {showConnections && (
