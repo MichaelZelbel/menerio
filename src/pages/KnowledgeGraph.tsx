@@ -485,17 +485,6 @@ export default function KnowledgeGraph() {
     [navigate]
   );
 
-  const handleNodeClick = useCallback((node: any) => {
-    setSelectedNode(node);
-  }, []);
-
-  const handleNodeDoubleClick = useCallback(
-    (node: any) => {
-      navigate(`/dashboard/notes/${node.id}`);
-    },
-    [navigate]
-  );
-
   const handleSearch = useCallback(
     (term: string) => {
       setFilters((f) => ({ ...f, searchTerm: term }));
@@ -763,7 +752,7 @@ export default function KnowledgeGraph() {
               height={dimensions.height}
               nodeCanvasObject={nodeCanvasObject}
               nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-                const size = getNodeSize(node) + 4;
+                const size = (getNodeScreenSize(node) + 4) / Math.max(0.001, currentZoomRef.current);
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
                 ctx.fillStyle = color;
