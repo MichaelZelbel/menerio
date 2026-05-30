@@ -55,9 +55,44 @@ export interface ReanalyzeVars {
   originalFilename?: string;
 }
 
+type AnalysisStatusLike = {
+  storage_path: string;
+  analysis_status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  error_message?: string | null;
+};
+
+const MAX_CLIENT_PENDING_MS = 10 * 60 * 1000;
+
+function hasFreshFinalResult(entries: AnalysisStatusLike[] | undefined, path: string, startedAt: number) {
+  if (!entries) return false;
+  return entries.some((entry) => {
+    if (entry.storage_path !== path) return false;
+    if (entry.analysis_status !== "complete" && entry.analysis_status !== "failed") return false;
+    const timestamp = Date.parse(entry.updated_at || entry.created_at || "");
+    return Number.isFinite(timestamp) && timestamp >= startedAt - 1000;
+  });
+}
+
 export function useReanalyzeMedia() {
   const queryClient = useQueryClient();
-  const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
+  const [pendingJobs, setPendingJobs] = useState<Record<string, number>>({});
+
+  const isPathPending = (path: string) => {
+    const startedAt = pendingJobs[path];
+    if (!startedAt) return false;
+    if (Date.now() - startedAt > MAX_CLIENT_PENDING_MS) return false;
+
+    const libraryCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-library"] });
+    const noteCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-analysis"] });
+    const hasFinal = [...libraryCaches, ...noteCaches].some(([, entries]) =>
+      hasFreshFinalResult(entries, path, startedAt),
+    );
+    return !hasFinal;
+  };
+
+  const hasActivePendingJobs = () => Object.keys(pendingJobs).some(isPathPending);
 
   const mutation = useMutation({
     mutationFn: async ({ noteId, storagePath, mediaType, originalFilename }: ReanalyzeVars) => {
@@ -78,16 +113,13 @@ export function useReanalyzeMedia() {
       return data;
     },
     onMutate: async (vars) => {
-      setPendingPaths((prev) => {
-        const next = new Set(prev);
-        next.add(vars.storagePath);
-        return next;
-      });
+      const startedAt = Date.now();
+      setPendingJobs((prev) => ({ ...prev, [vars.storagePath]: startedAt }));
 
       // Optimistic update: flip status to "processing" for matching items in cached queries
-      const flip = (entry: MediaAnalysisEntry | { storage_path: string; analysis_status: string }) =>
+      const flip = (entry: MediaAnalysisEntry | AnalysisStatusLike) =>
         entry.storage_path === vars.storagePath
-          ? { ...entry, analysis_status: "processing", error_message: null }
+          ? { ...entry, analysis_status: "processing", error_message: null, updated_at: new Date(startedAt).toISOString() }
           : entry;
 
       queryClient.setQueriesData<MediaAnalysisEntry[]>({ queryKey: ["media-analysis", vars.noteId] }, (old) =>
@@ -99,11 +131,6 @@ export function useReanalyzeMedia() {
       );
     },
     onSettled: (_data, _err, vars) => {
-      setPendingPaths((prev) => {
-        const next = new Set(prev);
-        next.delete(vars.storagePath);
-        return next;
-      });
       queryClient.invalidateQueries({ queryKey: ["media-analysis", vars.noteId] });
       queryClient.invalidateQueries({ queryKey: ["media-library"] });
     },
@@ -111,7 +138,8 @@ export function useReanalyzeMedia() {
 
   return {
     ...mutation,
-    pendingPaths,
-    isPathPending: (path: string) => pendingPaths.has(path),
+    pendingPaths: new Set(Object.keys(pendingJobs).filter(isPathPending)),
+    isPathPending,
+    hasActivePendingJobs,
   };
 }
