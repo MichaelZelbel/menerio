@@ -745,36 +745,59 @@ export default function KnowledgeGraph() {
               <p className="text-xs">Create notes and let the AI find connections.</p>
             </div>
           ) : (
-            <ForceGraph2D
-              ref={graphRef}
-              graphData={processedGraph}
-              width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
-              height={dimensions.height}
-              nodeCanvasObject={nodeCanvasObject}
-              nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-                const size = (getNodeScreenSize(node) + 4) / Math.max(0.001, currentZoomRef.current);
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
-                ctx.fillStyle = color;
-                ctx.fill();
-              }}
-              linkCanvasObjectMode={() => "replace"}
-              linkCanvasObject={linkCanvasObject}
-              linkLabel={(link: any) => edgeReason(link)}
-              onNodeClick={handleNodeClick}
-              onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
-              onNodeDragEnd={(node: any) => {
-                node.fx = node.x;
-                node.fy = node.y;
-              }}
-              onBackgroundClick={() => setSelectedNode(null)}
-              cooldownTicks={120}
-              d3AlphaDecay={0.02}
-              d3VelocityDecay={0.3}
-              enableNodeDrag
-              enableZoomInteraction
-              enablePanInteraction
-            />
+            <>
+              <ForceGraph2D
+                ref={graphRef}
+                graphData={processedGraph}
+                width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
+                height={dimensions.height}
+                nodeCanvasObject={nodeCanvasObject}
+                nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+                  const size = (getNodeScreenSize(node) + 4) / Math.max(0.001, currentZoomRef.current);
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
+                  ctx.fillStyle = color;
+                  ctx.fill();
+                }}
+                linkCanvasObjectMode={() => "replace"}
+                linkCanvasObject={linkCanvasObject}
+                linkLabel={(link: any) => edgeReason(link)}
+                onRenderFramePre={onRenderFramePre}
+                onNodeClick={handleNodeClick}
+                onNodeHover={(node: any) => setHoveredNode(node?.id || null)}
+                onNodeDragEnd={(node: any) => {
+                  node.fx = node.x;
+                  node.fy = node.y;
+                }}
+                onBackgroundClick={() => setSelectedNode(null)}
+                cooldownTicks={120}
+                d3AlphaDecay={0.02}
+                d3VelocityDecay={0.3}
+                enableNodeDrag
+                enableZoomInteraction
+                enablePanInteraction
+              />
+              <Minimap
+                nodes={processedGraph.nodes as any}
+                getColor={(n: any) => getNodeColor(n as ForceNode)}
+                width={160}
+                height={110}
+                getViewport={() => {
+                  const g = graphRef.current;
+                  if (!g) return null;
+                  const center = g.centerAt();
+                  const zoom = g.zoom();
+                  return {
+                    cx: center?.x ?? 0,
+                    cy: center?.y ?? 0,
+                    zoom: zoom || 1,
+                    w: dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0),
+                    h: dimensions.height,
+                  };
+                }}
+                onPan={(wx, wy) => graphRef.current?.centerAt(wx, wy, 350)}
+              />
+            </>
           )}
         </div>
 
