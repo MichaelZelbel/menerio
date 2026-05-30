@@ -223,7 +223,7 @@ function BatchAnalysisPanel() {
 
 export default function MediaLibrary() {
   const { user } = useAuth();
-  const navigate = useNavigate();
+  // navigate handled inside MediaDetailDialog
   const reanalyze = useReanalyzeMedia();
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
