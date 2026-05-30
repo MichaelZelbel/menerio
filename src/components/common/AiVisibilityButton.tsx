@@ -9,6 +9,8 @@ import {
   type AiKind,
 } from "@/hooks/useAiVisibility";
 
+import { AiFootprintDialog } from "@/components/common/AiFootprintDialog";
+
 export type AiEntityKind = "person" | "note" | "moment" | "collection_item" | "action_item";
 
 const kindToTable: Record<Exclude<AiEntityKind, "person">, AiKind> = {
