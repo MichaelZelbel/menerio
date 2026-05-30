@@ -351,8 +351,17 @@ async function processMedia(
   originalFilename: string | null,
   userId: string
 ) {
-  // Insert a pending placeholder so the UI knows work has started.
-  // For PDFs we'll replace it with per-page records; for images it becomes the final record.
+  // Remove previous records before inserting the placeholder. The UI polls this
+  // placeholder while Mistral OCR/Vision runs in the background.
+  const { error: cleanupErr } = await supabase
+    .from("media_analysis")
+    .delete()
+    .eq("note_id", noteId)
+    .eq("storage_path", storagePath);
+  if (cleanupErr) {
+    console.warn("Failed to clean previous analysis records:", cleanupErr.message);
+  }
+
   const { data: placeholder, error: insertErr } = await supabase
     .from("media_analysis")
     .insert({
@@ -386,35 +395,26 @@ async function processMedia(
       return;
     }
 
-    // Remove placeholder + any previous records for this (note, storage_path)
-    // so re-runs replace prior results.
-    await supabase
-      .from("media_analysis")
-      .delete()
-      .eq("note_id", noteId)
-      .eq("storage_path", storagePath);
-
     if (mediaType === "pdf") {
       await processPdf(userId, noteId, storagePath, originalFilename);
     } else {
       await processImage(userId, noteId, storagePath, originalFilename);
     }
 
+    await supabase.from("media_analysis").delete().eq("id", placeholderId);
+
     console.log(
       `analyze-media complete via Mistral (${mediaType}) note=${noteId} path=${storagePath}`
     );
   } catch (err) {
     console.error("analyze-media error:", err);
-    // Re-insert a failed marker (placeholder was deleted above for clean re-runs)
-    await supabase.from("media_analysis").insert({
-      user_id: userId,
-      note_id: noteId,
-      storage_path: storagePath,
-      media_type: mediaType,
-      original_filename: originalFilename,
-      analysis_status: "failed",
-      error_message: (err as Error).message || "Unknown error",
-    });
+    await supabase
+      .from("media_analysis")
+      .update({
+        analysis_status: "failed",
+        error_message: (err as Error).message || "Unknown error",
+      })
+      .eq("id", placeholderId);
   }
 }
 
