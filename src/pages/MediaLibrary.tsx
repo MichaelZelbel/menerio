@@ -227,6 +227,7 @@ export default function MediaLibrary() {
   const reanalyze = useReanalyzeMedia();
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
+  const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
 
   const { data: mediaItems = [], isLoading } = useQuery({
     queryKey: ["media-library", user?.id],
@@ -240,6 +241,13 @@ export default function MediaLibrary() {
       return (data || []) as MediaItem[];
     },
     enabled: !!user,
+    refetchInterval: (query) => {
+      const items = query.state.data as MediaItem[] | undefined;
+      if (items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")) {
+        return 5000;
+      }
+      return false;
+    },
   });
 
   const { data: signedUrls = {} } = useQuery({
