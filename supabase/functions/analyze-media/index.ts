@@ -369,36 +369,48 @@ async function processMedia(
   originalFilename: string | null,
   userId: string
 ) {
-  // Remove previous records before inserting the placeholder. The UI polls this
-  // placeholder while Mistral OCR/Vision runs in the background.
-  const { error: cleanupErr } = await supabase
+  const jobStartedAt = new Date().toISOString();
+
+  // Mark all existing rows for this (note, path) as 'processing' in-place so
+  // the UI keeps a single, stable item to display. New page results from this
+  // run will overwrite by (note, path, page_number).
+  const { data: existingRows, error: selectErr } = await supabase
     .from("media_analysis")
-    .delete()
+    .select("id, page_number")
     .eq("note_id", noteId)
     .eq("storage_path", storagePath);
-  if (cleanupErr) {
-    console.warn("Failed to clean previous analysis records:", cleanupErr.message);
+
+  if (selectErr) {
+    console.warn("Failed to read existing analysis rows:", selectErr.message);
   }
 
-  const { data: placeholder, error: insertErr } = await supabase
-    .from("media_analysis")
-    .insert({
+  const existingPageNumbers = new Set<number | null>(
+    (existingRows || []).map((r: any) => r.page_number),
+  );
+
+  if (existingRows && existingRows.length > 0) {
+    await supabase
+      .from("media_analysis")
+      .update({
+        analysis_status: "processing",
+        error_message: null,
+        updated_at: jobStartedAt,
+      })
+      .eq("note_id", noteId)
+      .eq("storage_path", storagePath);
+  } else {
+    // First run: insert a single placeholder row so the UI sees the job.
+    await supabase.from("media_analysis").insert({
       user_id: userId,
       note_id: noteId,
       storage_path: storagePath,
       media_type: mediaType,
-      page_number: mediaType === "pdf" ? null : null,
+      page_number: null,
       original_filename: originalFilename,
       analysis_status: "processing",
-    })
-    .select("id")
-    .single();
-
-  if (insertErr) {
-    console.error("Failed to insert placeholder:", insertErr);
-    return;
+    });
+    existingPageNumbers.add(null);
   }
-  const placeholderId = placeholder.id;
 
   try {
     const balance = await checkBalance(supabase, userId);
@@ -408,8 +420,10 @@ async function processMedia(
         .update({
           analysis_status: "failed",
           error_message: "Insufficient AI credits",
+          updated_at: new Date().toISOString(),
         })
-        .eq("id", placeholderId);
+        .eq("note_id", noteId)
+        .eq("storage_path", storagePath);
       return;
     }
 
@@ -419,7 +433,15 @@ async function processMedia(
       await processImage(userId, noteId, storagePath, originalFilename);
     }
 
-    await supabase.from("media_analysis").delete().eq("id", placeholderId);
+    // Remove leftover 'processing' rows from before this run that were not
+    // overwritten (e.g. a previous run with a page_number=null placeholder, or
+    // page count shrank). Anything still 'processing' for this path is stale.
+    await supabase
+      .from("media_analysis")
+      .delete()
+      .eq("note_id", noteId)
+      .eq("storage_path", storagePath)
+      .eq("analysis_status", "processing");
 
     console.log(
       `analyze-media complete via Mistral (${mediaType}) note=${noteId} path=${storagePath}`
@@ -431,8 +453,11 @@ async function processMedia(
       .update({
         analysis_status: "failed",
         error_message: (err as Error).message || "Unknown error",
+        updated_at: new Date().toISOString(),
       })
-      .eq("id", placeholderId);
+      .eq("note_id", noteId)
+      .eq("storage_path", storagePath)
+      .eq("analysis_status", "processing");
   }
 }
 
