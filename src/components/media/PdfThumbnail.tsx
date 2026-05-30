@@ -61,8 +61,9 @@ export function PdfThumbnail({ url, width = 320, className = "", contain = false
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        renderTask = page.render({ canvasContext: ctx as any, viewport, canvas } as any);
-        await renderTask?.promise;
+        const task: any = page.render({ canvasContext: ctx, viewport, canvas } as any);
+        renderTask = task;
+        await task.promise;
         if (!cancelled) setStatus("ready");
       } catch (err) {
         if (!cancelled) {
