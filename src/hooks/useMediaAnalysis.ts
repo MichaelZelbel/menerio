@@ -39,7 +39,7 @@ export function useMediaAnalysis(noteId: string | undefined) {
     refetchInterval: (query) => {
       const entries = query.state.data;
       if (entries?.some((e: MediaAnalysisEntry) => e.analysis_status === "pending" || e.analysis_status === "processing")) {
-        return 5000;
+        return 3000;
       }
       return false;
     },
@@ -65,14 +65,29 @@ type AnalysisStatusLike = {
 
 const MAX_CLIENT_PENDING_MS = 10 * 60 * 1000;
 
-function hasFreshFinalResult(entries: AnalysisStatusLike[] | undefined, path: string, startedAt: number) {
+/**
+ * A retry job is considered finished only when:
+ *  1) there is at least one row for this path whose updated_at >= startedAt (fresh),
+ *  2) AND none of the rows for this path are still in 'processing' or 'pending'.
+ *
+ * This handles multi-page PDFs correctly: completing page 1 must not end the job
+ * while page 2 is still processing.
+ */
+function isJobFinished(entries: AnalysisStatusLike[] | undefined, path: string, startedAt: number): boolean {
   if (!entries) return false;
-  return entries.some((entry) => {
-    if (entry.storage_path !== path) return false;
-    if (entry.analysis_status !== "complete" && entry.analysis_status !== "failed") return false;
-    const timestamp = Date.parse(entry.updated_at || entry.created_at || "");
-    return Number.isFinite(timestamp) && timestamp >= startedAt - 1000;
+  const rows = entries.filter((e) => e.storage_path === path);
+  if (rows.length === 0) return false;
+
+  const hasFresh = rows.some((e) => {
+    const ts = Date.parse(e.updated_at || e.created_at || "");
+    return Number.isFinite(ts) && ts >= startedAt - 1500;
   });
+  if (!hasFresh) return false;
+
+  const stillRunning = rows.some(
+    (e) => e.analysis_status === "processing" || e.analysis_status === "pending",
+  );
+  return !stillRunning;
 }
 
 export function useReanalyzeMedia() {
@@ -86,10 +101,10 @@ export function useReanalyzeMedia() {
 
     const libraryCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-library"] });
     const noteCaches = queryClient.getQueriesData<AnalysisStatusLike[]>({ queryKey: ["media-analysis"] });
-    const hasFinal = [...libraryCaches, ...noteCaches].some(([, entries]) =>
-      hasFreshFinalResult(entries, path, startedAt),
+    const finished = [...libraryCaches, ...noteCaches].some(([, entries]) =>
+      isJobFinished(entries, path, startedAt),
     );
-    return !hasFinal;
+    return !finished;
   };
 
   const hasActivePendingJobs = () => Object.keys(pendingJobs).some(isPathPending);
@@ -116,18 +131,18 @@ export function useReanalyzeMedia() {
       const startedAt = Date.now();
       setPendingJobs((prev) => ({ ...prev, [vars.storagePath]: startedAt }));
 
-      // Optimistic update: flip status to "processing" for matching items in cached queries
-      const flip = (entry: MediaAnalysisEntry | AnalysisStatusLike) =>
+      // Optimistic update: flip every row for this storage_path to "processing".
+      const flip = <T extends AnalysisStatusLike>(entry: T): T =>
         entry.storage_path === vars.storagePath
           ? { ...entry, analysis_status: "processing", error_message: null, updated_at: new Date(startedAt).toISOString() }
           : entry;
 
       queryClient.setQueriesData<MediaAnalysisEntry[]>({ queryKey: ["media-analysis", vars.noteId] }, (old) =>
-        old ? old.map((e) => flip(e) as MediaAnalysisEntry) : old,
+        old ? old.map(flip) : old,
       );
-      queryClient.setQueriesData<Array<{ storage_path: string; analysis_status: string }>>(
+      queryClient.setQueriesData<AnalysisStatusLike[]>(
         { queryKey: ["media-library"] },
-        (old) => (old ? (old.map(flip) as typeof old) : old),
+        (old) => (old ? old.map(flip) : old),
       );
     },
     onSettled: (_data, err, vars) => {
