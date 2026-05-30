@@ -45,6 +45,7 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
   );
 
   const [optimistic, setOptimistic] = useState(hidden);
+  const [footprintOpen, setFootprintOpen] = useState(false);
   useEffect(() => setOptimistic(hidden), [hidden]);
 
   const pending = kind === "person" ? togglePerson.isPending : toggleItem.isPending;
@@ -60,7 +61,12 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
     } else {
       toggleItem.mutate(
         { id, visibility: next ? "hidden" : "visible" },
-        { onError: () => setOptimistic(hidden) },
+        {
+          onError: () => setOptimistic(hidden),
+          onSuccess: () => {
+            if (next && kind === "note") setFootprintOpen(true);
+          },
+        },
       );
     }
   };
