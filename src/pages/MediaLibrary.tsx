@@ -48,6 +48,7 @@ interface MediaItem {
   raw_analysis: Record<string, unknown> | null;
   analysis_status: string;
   created_at: string | null;
+  updated_at: string | null;
 }
 
 interface DocumentGroup {
@@ -63,6 +64,7 @@ interface DocumentGroup {
   raw_analysis: Record<string, unknown> | null;
   created_at: string | null;
   page_count: number;
+  duplicate_count: number;
   representative: MediaItem;
 }
 
