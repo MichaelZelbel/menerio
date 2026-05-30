@@ -1312,6 +1312,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         {!sourceMode && <MediaAnalysisOverlay noteId={note.id} editorContainerRef={editorContainerRef} />}
       </div>
 
+      {/* Attachments & extracted content */}
+      {!sourceMode && <NoteAttachmentsPanel noteId={note.id} />}
+
+
       {/* Connections panel */}
       {showConnections && (
         <div className="shrink-0 border-t border-border px-4 py-3 overflow-y-auto max-h-[40%] bg-muted/10">
