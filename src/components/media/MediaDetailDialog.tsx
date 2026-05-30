@@ -56,6 +56,7 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
 
   const contentType = (item.raw_analysis as Record<string, unknown> | null)?.content_type as string | undefined;
   const isPending = reanalyze.isPathPending(item.storage_path);
+  const effectiveStatus = isPending ? "processing" : item.analysis_status;
 
   const handleRetry = () => {
     reanalyze.mutate(
@@ -79,24 +80,33 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
 
         {/* Preview */}
         <div className="flex-1 min-h-[40vh] md:min-h-0 bg-muted/40 flex items-center justify-center overflow-hidden">
-          {!signedUrl ? (
+          {isPdf ? (
+            <div className="flex flex-col items-center gap-3 text-muted-foreground px-6 text-center">
+              <FileText className="h-14 w-14" />
+              <div className="space-y-1">
+                <p className="text-sm text-foreground">PDF document</p>
+                <p className="text-xs">Use Open file to view the original PDF.</p>
+              </div>
+              {signedUrl && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={signedUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                    Open file
+                  </a>
+                </Button>
+              )}
+            </div>
+          ) : !signedUrl ? (
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           ) : previewFailed ? (
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <FileText className="h-12 w-12" />
               <span className="text-xs">Preview unavailable</span>
             </div>
-          ) : isPdf ? (
-            <iframe
-              src={`${signedUrl}#toolbar=0&view=FitH${item.page_number ? `&page=${item.page_number}` : ""}`}
-              title={item.original_filename || "PDF"}
-              className="w-full h-full border-0 bg-white"
-              onError={() => setPreviewFailed(true)}
-            />
           ) : (
             <img
               src={signedUrl}
-              alt={item.description || ""}
+              alt={item.description || item.original_filename || "Media preview"}
               className="max-w-full max-h-full object-contain"
               onError={() => setPreviewFailed(true)}
             />
@@ -113,7 +123,7 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
               {noteTitle && <span className="truncate max-w-[180px]">{noteTitle}</span>}
               {item.page_number != null && <span>Page {item.page_number}</span>}
               {contentType && <Badge variant="secondary" className="text-[9px]">{contentType.replace("_", " ")}</Badge>}
-              <StatusBadge status={item.analysis_status} />
+              <StatusBadge status={effectiveStatus} />
             </div>
           </div>
 
@@ -169,7 +179,7 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
               <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
               Open note
             </Button>
-            {(item.analysis_status === "failed" || item.analysis_status === "complete") && (
+            {(item.analysis_status === "failed" || item.analysis_status === "complete" || previewFailed) && (
               <Button variant="secondary" size="sm" disabled={isPending} onClick={handleRetry}>
                 {isPending ? (
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

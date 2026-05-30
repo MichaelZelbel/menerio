@@ -227,6 +227,7 @@ export default function MediaLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
+  const [brokenPreviews, setBrokenPreviews] = useState<Record<string, true>>({});
 
   const { data: mediaItems = [], isLoading } = useQuery({
     queryKey: ["media-library", user?.id],
@@ -242,8 +243,11 @@ export default function MediaLibrary() {
     enabled: !!user,
     refetchInterval: (query) => {
       const items = query.state.data as MediaItem[] | undefined;
-      if (items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")) {
-        return 5000;
+      if (
+        reanalyze.hasActivePendingJobs() ||
+        items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")
+      ) {
+        return 3000;
       }
       return false;
     },
@@ -286,10 +290,14 @@ export default function MediaLibrary() {
 
   const stats = useMemo(() => {
     const complete = mediaItems.filter(m => m.analysis_status === "complete").length;
-    const pending = mediaItems.filter(m => m.analysis_status === "pending" || m.analysis_status === "processing").length;
+    const pending = mediaItems.filter(m =>
+      m.analysis_status === "pending" ||
+      m.analysis_status === "processing" ||
+      reanalyze.isPathPending(m.storage_path)
+    ).length;
     const failed = mediaItems.filter(m => m.analysis_status === "failed").length;
     return { total: mediaItems.length, complete, pending, failed };
-  }, [mediaItems]);
+  }, [mediaItems, reanalyze]);
 
   const filteredItems = useMemo(() => {
     let items = mediaItems;
@@ -315,6 +323,11 @@ export default function MediaLibrary() {
   }, [mediaItems, contentTypeFilter, searchQuery]);
 
   const getMediaUrl = (storagePath: string) => signedUrls[storagePath] || "";
+  const selectedOpenItem = openItem
+    ? (mediaItems.find((m) => m.id === openItem.id) ||
+      mediaItems.find((m) => m.storage_path === openItem.storage_path && m.page_number === openItem.page_number) ||
+      openItem) as MediaDetailItem
+    : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
@@ -409,39 +422,59 @@ export default function MediaLibrary() {
 
               const isRetrying = reanalyze.isPathPending(item.storage_path);
               const previewUrl = getMediaUrl(item.storage_path);
+              const hasBrokenPreview = Boolean(brokenPreviews[item.storage_path]);
+              const canRetry = !isRetrying && (item.analysis_status === "failed" || item.analysis_status === "complete" || hasBrokenPreview);
+
+              const retryItem = () => {
+                reanalyze.mutate(
+                  {
+                    noteId: item.note_id,
+                    storagePath: item.storage_path,
+                    mediaType: item.media_type === "pdf" || item.media_type === "pdf_page" ? "pdf" : "image",
+                    originalFilename: item.original_filename ?? undefined,
+                  },
+                  {
+                    onSuccess: () => toast.success("Reanalyzing…"),
+                    onError: (err: Error) => toast.error(err.message),
+                  }
+                );
+              };
 
               return (
-                <button
+                <div
                   key={item.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setOpenItem(item as MediaDetailItem)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setOpenItem(item as MediaDetailItem);
+                    }
+                  }}
                   className="group text-left rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors overflow-hidden"
                 >
                   {/* Thumbnail */}
                   <div className="relative h-36 bg-muted flex items-center justify-center overflow-hidden">
-                    {isPdf ? (
-                      previewUrl ? (
-                        <>
-                          <iframe
-                            src={`${previewUrl}#toolbar=0&navpanes=0&view=FitH${item.page_number ? `&page=${item.page_number}` : ""}`}
-                            title={item.original_filename || "PDF"}
-                            className="w-full h-full border-0 bg-white pointer-events-none"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background/10" />
-                        </>
-                      ) : (
-                        <FileText className="h-12 w-12 text-muted-foreground/30" />
-                      )
+                    {isPdf || hasBrokenPreview || !previewUrl ? (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground/70 px-3 text-center">
+                        {isPdf ? <FileText className="h-10 w-10" /> : <Image className="h-10 w-10" />}
+                        <span className="text-[10px] leading-tight">
+                          {hasBrokenPreview ? "Preview unavailable" : isPdf ? "PDF document" : "Loading preview…"}
+                        </span>
+                      </div>
                     ) : (
                       <img
                         src={previewUrl}
-                        alt={item.description || ""}
+                        alt={item.description || item.original_filename || "Media preview"}
                         className="w-full h-full object-cover"
                         loading="lazy"
+                        onError={() => setBrokenPreviews((prev) => ({ ...prev, [item.storage_path]: true }))}
                       />
                     )}
                     {/* Status badge */}
                     <div className="absolute top-1.5 right-1.5 z-10">
-                      {item.analysis_status === "complete" && !isRetrying && (
+                      {item.analysis_status === "complete" && !isRetrying && !hasBrokenPreview && (
                         <span className="bg-success/90 text-success-foreground text-[9px] px-1.5 py-0.5 rounded-full">
                           ✓
                         </span>
@@ -452,29 +485,18 @@ export default function MediaLibrary() {
                           {isRetrying ? "Retrying…" : "Analyzing…"}
                         </span>
                       )}
-                      {item.analysis_status === "failed" && !isRetrying && (
+                      {canRetry && (
                         <button
                           type="button"
                           title={item.original_filename ? `Retry: ${item.original_filename}` : "Retry analysis"}
                           onClick={(e) => {
                             e.stopPropagation();
-                            reanalyze.mutate(
-                              {
-                                noteId: item.note_id,
-                                storagePath: item.storage_path,
-                                mediaType: item.media_type === "pdf" || item.media_type === "pdf_page" ? "pdf" : "image",
-                                originalFilename: item.original_filename ?? undefined,
-                              },
-                              {
-                                onSuccess: () => toast.success("Reanalyzing…"),
-                                onError: (err: Error) => toast.error(err.message),
-                              }
-                            );
+                            retryItem();
                           }}
-                          className="flex items-center gap-1 bg-destructive/90 hover:bg-destructive text-destructive-foreground text-[9px] px-1.5 py-0.5 rounded-full"
+                          className="flex items-center gap-1 bg-background/90 hover:bg-accent text-foreground border border-border text-[9px] px-1.5 py-0.5 rounded-full"
                         >
                           <RefreshCw className="h-2.5 w-2.5" />
-                          Retry
+                          {item.analysis_status === "complete" ? "Re-analyze" : "Retry"}
                         </button>
                       )}
                     </div>
@@ -504,7 +526,7 @@ export default function MediaLibrary() {
                       </p>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -512,8 +534,8 @@ export default function MediaLibrary() {
       </div>
 
       <MediaDetailDialog
-        item={openItem}
-        noteTitle={openItem ? noteTitles[openItem.note_id] : undefined}
+        item={selectedOpenItem}
+        noteTitle={selectedOpenItem ? noteTitles[selectedOpenItem.note_id] : undefined}
         onClose={() => setOpenItem(null)}
       />
     </div>
