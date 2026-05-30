@@ -512,7 +512,154 @@ export default function MediaLibrary() {
               </div>
             ))}
           </div>
-        ) : filteredItems.length === 0 ? (
+        ) : filteredGroups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+            <Image className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm">No media found</p>
+            <p className="text-xs mt-1">Upload images or PDFs to your notes to see them here</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {filteredGroups.map((group) => {
+              const raw = group.raw_analysis as Record<string, unknown> | null;
+              const contentType = raw?.content_type as string | undefined;
+              const noteTitle = noteTitles[group.note_id] || "Untitled";
+              const isPdf = group.media_type === "pdf" || group.media_type === "pdf_page";
+
+              const isRetrying = reanalyze.isPathPending(group.storage_path);
+              const previewUrl = getMediaUrl(group.storage_path);
+              const hasBrokenPreview = Boolean(brokenPreviews[group.storage_path]);
+              const status = isRetrying ? "processing" : group.analysis_status;
+              const canRetry = !isRetrying && (status === "failed" || status === "complete" || hasBrokenPreview);
+
+              const openDocument = () =>
+                setOpenItem({
+                  id: group.representative.id,
+                  note_id: group.note_id,
+                  storage_path: group.storage_path,
+                  media_type: group.media_type,
+                  page_number: group.page_count > 1 ? null : group.representative.page_number,
+                  original_filename: group.original_filename,
+                  description: group.description,
+                  extracted_text: group.extracted_text,
+                  topics: group.topics,
+                  raw_analysis: group.raw_analysis,
+                  analysis_status: group.analysis_status,
+                });
+
+              const retryItem = () => {
+                reanalyze.mutate(
+                  {
+                    noteId: group.note_id,
+                    storagePath: group.storage_path,
+                    mediaType: isPdf ? "pdf" : "image",
+                    originalFilename: group.original_filename ?? undefined,
+                  },
+                  {
+                    onSuccess: () => toast.success("Reanalyzing…"),
+                    onError: (err: Error) => toast.error(err.message),
+                  }
+                );
+              };
+
+              return (
+                <div
+                  key={group.key}
+                  role="button"
+                  tabIndex={0}
+                  onClick={openDocument}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openDocument();
+                    }
+                  }}
+                  className="group text-left rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors overflow-hidden"
+                >
+                  {/* Thumbnail */}
+                  <div className="relative h-36 bg-muted flex items-center justify-center overflow-hidden">
+                    {isPdf || hasBrokenPreview || !previewUrl ? (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground/70 px-3 text-center">
+                        {isPdf ? <FileText className="h-10 w-10" /> : <Image className="h-10 w-10" />}
+                        <span className="text-[10px] leading-tight">
+                          {hasBrokenPreview ? "Preview unavailable" : isPdf ? "PDF document" : "Loading preview…"}
+                        </span>
+                      </div>
+                    ) : (
+                      <img
+                        src={previewUrl}
+                        alt={group.description || group.original_filename || "Media preview"}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={() => setBrokenPreviews((prev) => ({ ...prev, [group.storage_path]: true }))}
+                      />
+                    )}
+                    {/* Status badge */}
+                    <div className="absolute top-1.5 right-1.5 z-10">
+                      {status === "complete" && !hasBrokenPreview && (
+                        <span className="bg-success/90 text-success-foreground text-[9px] px-1.5 py-0.5 rounded-full">
+                          ✓
+                        </span>
+                      )}
+                      {(status === "pending" || status === "processing") && (
+                        <span className="flex items-center gap-1 bg-background/90 text-muted-foreground text-[9px] px-1.5 py-0.5 rounded-full">
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                          {isRetrying ? "Retrying…" : "Analyzing…"}
+                        </span>
+                      )}
+                      {canRetry && (
+                        <button
+                          type="button"
+                          title={group.original_filename ? `Retry: ${group.original_filename}` : "Retry analysis"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            retryItem();
+                          }}
+                          className="flex items-center gap-1 bg-background/90 hover:bg-accent text-foreground border border-border text-[9px] px-1.5 py-0.5 rounded-full"
+                        >
+                          <RefreshCw className="h-2.5 w-2.5" />
+                          {status === "complete" ? "Re-analyze" : "Retry"}
+                        </button>
+                      )}
+                    </div>
+                    {contentType && (
+                      <Badge variant="secondary" className="absolute bottom-1.5 left-1.5 text-[9px] z-10">
+                        {contentType.replace("_", " ")}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="p-2.5 space-y-1">
+                    <p className="text-xs text-foreground font-medium truncate">{noteTitle}</p>
+                    {group.original_filename && (
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {group.original_filename}
+                        {group.page_count > 1 && <span className="ml-1 opacity-70">· {group.page_count} pages</span>}
+                      </p>
+                    )}
+                    {group.description && (
+                      <p className="text-[10px] text-muted-foreground line-clamp-2">{group.description}</p>
+                    )}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {group.topics.slice(0, 3).map((topic) => (
+                        <span key={topic} className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">
+                          {topic}
+                        </span>
+                      ))}
+                    </div>
+                    {group.created_at && (
+                      <p className="text-[9px] text-muted-foreground/60">
+                        {formatDistanceToNow(new Date(group.created_at), { addSuffix: true })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
             <Image className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">No media found</p>
