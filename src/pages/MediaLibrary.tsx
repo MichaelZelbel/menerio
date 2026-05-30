@@ -50,6 +50,90 @@ interface MediaItem {
   created_at: string | null;
 }
 
+interface DocumentGroup {
+  key: string;
+  note_id: string;
+  storage_path: string;
+  media_type: string;
+  original_filename: string | null;
+  analysis_status: string;
+  description: string | null;
+  extracted_text: string | null;
+  topics: string[];
+  raw_analysis: Record<string, unknown> | null;
+  created_at: string | null;
+  page_count: number;
+  representative: MediaItem;
+}
+
+function groupMediaByDocument(items: MediaItem[]): DocumentGroup[] {
+  const map = new Map<string, DocumentGroup>();
+  // Items are sorted desc by created_at; iterate so page 1 wins when present.
+  const sorted = [...items].sort((a, b) => {
+    const pa = a.page_number ?? -1;
+    const pb = b.page_number ?? -1;
+    return pa - pb;
+  });
+
+  for (const item of sorted) {
+    const key = `${item.note_id}::${item.storage_path}`;
+    const existing = map.get(key);
+
+    if (!existing) {
+      map.set(key, {
+        key,
+        note_id: item.note_id,
+        storage_path: item.storage_path,
+        media_type: item.media_type,
+        original_filename: item.original_filename,
+        analysis_status: item.analysis_status,
+        description: item.description,
+        extracted_text: item.extracted_text,
+        topics: [...(item.topics || [])],
+        raw_analysis: item.raw_analysis,
+        created_at: item.created_at,
+        page_count: 1,
+        representative: item,
+      });
+      continue;
+    }
+
+    existing.page_count += 1;
+
+    // Status precedence: failed > processing/pending > complete
+    const rank = (s: string) =>
+      s === "failed" ? 3 : s === "processing" || s === "pending" ? 2 : 1;
+    if (rank(item.analysis_status) > rank(existing.analysis_status)) {
+      existing.analysis_status = item.analysis_status;
+    }
+
+    // Merge text & description (page order due to pre-sort)
+    if (item.description) {
+      existing.description = existing.description
+        ? `${existing.description}\n\n${item.description}`
+        : item.description;
+    }
+    if (item.extracted_text) {
+      existing.extracted_text = existing.extracted_text
+        ? `${existing.extracted_text}\n\n— Page ${item.page_number ?? "?"} —\n\n${item.extracted_text}`
+        : item.extracted_text;
+    }
+
+    // Deduplicate topics
+    const topicSet = new Set(existing.topics);
+    for (const t of item.topics || []) topicSet.add(t);
+    existing.topics = [...topicSet];
+
+    // Keep the earliest created_at as the document's age
+    if (item.created_at && existing.created_at && item.created_at < existing.created_at) {
+      existing.created_at = item.created_at;
+    }
+  }
+
+  return [...map.values()];
+}
+
+
 const CONTENT_TYPES = [
   "all",
   "screenshot",
