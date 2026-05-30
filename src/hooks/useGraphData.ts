@@ -44,6 +44,7 @@ export function useGraphData(options?: {
   note_type?: string;
   topic?: string;
   person?: string;
+  include_hidden?: boolean;
 }) {
   const { user } = useAuth();
 

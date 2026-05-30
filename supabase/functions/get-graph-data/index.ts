@@ -245,6 +245,7 @@ Deno.serve(async (req: Request) => {
       note_type,
       topic,
       person,
+      include_hidden = false,
     } = body;
 
     const contacts = await loadContacts(user.id);
@@ -279,13 +280,14 @@ Deno.serve(async (req: Request) => {
       const noteIds = Array.from(visited);
       if (noteIds.length === 0) return json({ nodes: [], edges: [] });
 
-      const { data: notes } = await supabase
+      let notesQ = supabase
         .from("notes")
-        .select("id, title, metadata, tags, entity_type, created_at")
+        .select("id, title, metadata, tags, entity_type, created_at, ai_visibility")
         .eq("user_id", user.id)
         .eq("is_trashed", false)
-        .eq("ai_visibility", "visible")
         .in("id", noteIds);
+      if (!include_hidden) notesQ = notesQ.eq("ai_visibility", "visible");
+      const { data: notes } = await notesQ;
 
       const { data: connections } = await supabase
         .from("note_connections")
@@ -307,12 +309,12 @@ Deno.serve(async (req: Request) => {
     // Full graph mode
     let notesQuery = supabase
       .from("notes")
-      .select("id, title, metadata, tags, entity_type, created_at")
+      .select("id, title, metadata, tags, entity_type, created_at, ai_visibility")
       .eq("user_id", user.id)
       .eq("is_trashed", false)
-      .eq("ai_visibility", "visible")
       .order("created_at", { ascending: false })
       .limit(limit);
+    if (!include_hidden) notesQuery = notesQuery.eq("ai_visibility", "visible");
 
     if (note_type) {
       notesQuery = notesQuery.eq("entity_type", note_type);
