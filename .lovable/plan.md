@@ -1,60 +1,44 @@
-# Plan: Jeder Graph-Knoten ist eine echte, klickbare Entität
+# Mistral Document AI für PDF- und Bildverständnis
+
+Du hast recht – wir hatten Mistral OCR als Lösung festgelegt. Im aktuellen Code wird stattdessen `gpt-4o-mini` über OpenRouter mit `image_url` aufgerufen, und PDFs als `data:application/pdf;base64,...` durchgereicht. Genau daran scheitern die 11 PDFs ("Invalid MIME type. Only image types are supported."). Bilder funktionieren zwar, aber wir wechseln sie konsistent mit auf Mistral, damit ein einziger Ingestion-Pfad existiert.
 
 ## Ziel
-Im Note Graph soll jeder sichtbare Knoten entweder
-- eine **Note** (`/dashboard/notes/:id`) oder
-- eine **Person** in People (`/dashboard/people/:contactId`)
+PDFs und Bilder werden über **Mistral Document AI** (`mistral-ocr-latest`) verarbeitet:
+- PDFs: vollständiger Text **pro Seite** + eingebettete Bilder werden separat beschrieben.
+- Bilder: OCR-Text + Vision-Beschreibung.
+- Ergebnis landet weiterhin in `media_analysis` (ein Record pro Seite/Bild), inkl. `extracted_text`, `description`, `topics`, `embedding`.
 
-sein. Keine synthetischen `person:<name>`-Knoten mehr, die ins Leere klicken.
+## Änderungen
 
-## Ursache (heute)
-`supabase/functions/get-graph-data/index.ts` → `pivotSharedPersonEdges`:
-- Resolved Personen-Erwähnungen über `aliasMap` (exakter, lowercased Match auf `contacts.name` + `contacts.aliases`).
-- Findet die Funktion **keinen** Kontakt, erzeugt sie einen Pivot-Knoten mit ID `person:<lowercased name>` und Titel = roher Mention-Name.
-- Diese `person:`-Knoten sind nicht klickbar (kein Editor-Ziel, keine People-Seite).
-- Beispiel: "Nate Jones" / "Karpathy" existieren als Kontakt oder Alias, werden aber wegen Whitespace/Capitalization/Schreibweise nicht gematcht.
+### 1. Secret
+- Neu: `MISTRAL_API_KEY` (per `add_secret` anfragen, nachdem du den Plan freigibst).
 
-## Lösung
+### 2. `supabase/functions/analyze-media/index.ts` umbauen
+- **Bilder**: `POST https://api.mistral.ai/v1/ocr` mit `model: "mistral-ocr-latest"` und `document: { type: "image_url", image_url: "data:<mime>;base64,..." }`. Liefert `pages[0].markdown` (= OCR-Text). Für die `description` zusätzlich ein kurzer Call an `pixtral-12b` (Vision-Chat) mit demselben Bild → 2–3 Sätze + Topics + `content_type`. Beides zusammen in den Record.
+- **PDFs**: 
+  1. PDF aus Storage laden, als `data:application/pdf;base64,...` an `/v1/ocr` schicken mit `include_image_base64: true`.
+  2. Antwort enthält `pages[]` mit `markdown` und ggf. `images[]` (eingebettete Grafiken).
+  3. **Pro Seite** einen `media_analysis`-Record schreiben (`page_number = idx+1`), `extracted_text = page.markdown`.
+  4. Für jedes eingebettete Bild auf der Seite zusätzlich ein Pixtral-Call für die Beschreibung, in `raw_analysis.images[]` ablegen; die kombinierten Bildbeschreibungen in `description` der Seite mergen.
+  5. `topics` werden aus dem Gesamttext der Seite via Pixtral/Mistral-Chat extrahiert (ein Call pro Seite, oder ein Sammel-Call am Ende – ich mache es pro Seite für saubere Embeddings).
+- Token-Accounting weiterhin über `deductTokens` (Mistral liefert `usage` mit; Fallback wie heute).
+- Embeddings (`getEmbeddingWithCredits`) bleiben wie bisher pro Record.
 
-### 1. Stärkere Personen-Auflösung in `get-graph-data`
-Neue Resolver-Reihenfolge pro Mention-String:
-1. Exakter Alias-Match (wie heute).
-2. **Normalisierter** Match: Whitespace zusammenziehen, Diakritika strippen, Punkte/Bindestriche entfernen, lowercase. Kontakte einmal pro Request normalisieren und in einer zweiten Map cachen.
-3. **Fuzzy-Match** über Levenshtein ≤ 2 gegen Kontakt-Namen + Aliase, gemäß bestehender People-Identity-Konvention (siehe `mem://features/people-identity`). Nur eindeutige Treffer akzeptieren (genau 1 Kandidat mit Distanz ≤ 2); sonst gilt der Match als ambig.
-4. **Note-Title-Match**: wenn eine eigene Note exakt/normalisiert den Mention-Namen als Titel hat (z. B. eine Profilnotiz "Nate Jones"), pivot auf diese Note (bestehender `profileNoteByContact`-Pfad ausweiten auf alle Notes, nicht nur Kontakt-Profile).
+### 3. `analyze-pdf` vereinfachen
+- Bleibt als dünner Wrapper, ruft aber `analyze-media` mit `media_type: "pdf"`. Keine inhaltlichen Änderungen, nur Kommentar aktualisieren ("now uses Mistral OCR").
 
-### 2. Fallback statt synthetischem Knoten
-Wenn keiner der Resolver greift:
-- **Kein** `person:<name>`-Knoten mehr erzeugen.
-- Stattdessen die ursprüngliche `shared_person`-Verbindung als **direkte Note↔Note-Edge** beibehalten (Edge-Type `shared_person`, wie er aus der DB kommt). Der Graph verliert dadurch nichts an Information; nur das Pivot-Detail entfällt für unbekannte Personen.
-- Bestehende Render-Logik für `shared_person` ist bereits da (vor dem Pivot war das der Default).
+### 4. `backfill-media-analysis`
+- Status-Filter `analysis_status = 'failed'` triggert Re-Analyse aller bestehenden kaputten PDFs über den neuen Pfad. Bereits vorhanden – nur dokumentieren, dass dies jetzt funktioniert.
 
-### 3. Klick-Verhalten klarstellen
-In `src/pages/KnowledgeGraph.tsx` `handleNodeClick`:
-- Person-Knoten (Pivot via Kontakt) → `/dashboard/people/:contactId`.
-- Profil-Note als Pivot → `/dashboard/notes/:noteId`.
-- Note-Knoten → `/dashboard/notes/:noteId`.
-- Defensive Guard: Knoten mit ID-Präfix `person:` oder `contact:<uuid>` ohne tatsächlichen Kontakt werden gar nicht mehr erzeugt; falls doch (Edge Case), werden sie übersprungen.
+### 5. UI / Retry
+- `useReanalyzeMedia` existiert. In der Media Library bei `failed`-Status einen kleinen "Erneut analysieren"-Button anzeigen (falls noch nicht da – wird im Build-Schritt verifiziert).
 
-### 4. Tests / Verifikation
-- Manuell mit dem aktuellen Vault: prüfen, dass Knoten "natejones" und "karpathy" entweder als Kontakt-Knoten (klickbar nach People) auftauchen oder verschwinden zugunsten von Note↔Note-Edges.
-- `console.log` temporär in `pivotSharedPersonEdges` für unresolved Mentions, dann entfernen.
+## Out of Scope
+- Multi-PDF-Parallelisierung, Caching, Page-Range-Selection. Erstmal alle Seiten.
+- Wechsel der Bildanalyse von Mistral zurück zu OpenRouter falls Pixtral schlechter performt – können wir später A/B testen.
 
-## Technische Details
+## Kosten/Limits
+- Mistral OCR ist günstig (~$1/1000 Seiten), Pixtral pro Bild gering. Per `checkBalance` & `deductTokens` weiterhin in unser Credit-System integriert (Tokens grob via `usage` oder Fallback `1000`).
 
-Geänderte Dateien:
-- `supabase/functions/get-graph-data/index.ts`
-  - Neue Helper `buildNormalizedAliasMap(contacts)` + `resolvePersonToContactId(name, maps, contacts)`.
-  - `ensurePersonNode` entfällt für den unresolved-Fall; gibt `null` zurück → Caller emittiert stattdessen die direkte Note↔Note-Edge.
-- `src/pages/KnowledgeGraph.tsx`
-  - `handleNodeClick`: explizit Routing für `contact:<uuid>` → People-Profil.
-  - Hover/Selection-State: Pivot-Person zeigt im Side-Panel Liste der referenzierenden Notes.
-- (optional) `src/components/graph/graphRendering.ts`: keine Änderung nötig, da Person-Knoten weiterhin Tier 0 bleiben.
-
-Bewusst **nicht** dabei:
-- Auto-Anlage von Kontakten aus unbekannten Mentions (gehört in Review Queue, ist separater Flow).
-- Änderungen an `recompute-all-connections` oder anderen Pipelines — die DB-Edges bleiben wie sie sind, nur die Render-Pivot-Logik wird strenger.
-
-## Risiken
-- Fuzzy-Match kann falsch-positiv mergen (z. B. zwei verschiedene "Chris"). Mitigation: nur bei Distanz ≤ 2 **und** genau einem Kandidaten.
-- Bei sehr vielen Mentions wird die direkte Note↔Note-Kante als Fallback wieder häufiger sichtbar → leichte Zunahme der Edge-Dichte. Akzeptabel, weil Edge-LOD bei niedrigem Zoom bereits ausfiltert.
+## Nach Freigabe brauche ich von dir
+- Bestätigung, dass ich `MISTRAL_API_KEY` als Secret anfragen darf (du legst ihn dann in Lovable Cloud ab).
