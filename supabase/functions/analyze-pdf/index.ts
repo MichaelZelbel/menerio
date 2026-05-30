@@ -13,9 +13,9 @@ const corsHeaders = {
 
 /**
  * PDF analysis edge function.
- * Since Deno edge functions can't do full PDF-to-image conversion,
- * we send the PDF directly to the vision model which supports PDF input.
- * For multi-page PDFs, we analyze the whole document as one unit.
+ * Thin wrapper around analyze-media. PDFs are processed via Mistral OCR
+ * (mistral-ocr-latest) which extracts per-page markdown text and embedded
+ * images; each page becomes its own media_analysis record.
  */
 async function processPdf(
   noteId: string,
