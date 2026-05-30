@@ -1,6 +1,6 @@
 import { memo, useRef, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Note, SemanticSearchResult } from "@/hooks/useNotes";
+import type { Note, SemanticSearchResult } from "@/hooks/useNotes";
 import { cn } from "@/lib/utils";
 import {
   Star,
