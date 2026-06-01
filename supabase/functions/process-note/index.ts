@@ -1,10 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  getEmbeddingWithCredits,
-  chatWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -968,16 +967,20 @@ async function generateProfileSuggestions(
     }> = [];
 
     try {
-      const result = await chatWithCredits(
-        supabase, OPENROUTER_API_KEY, userId, "process-note-profile",
-        [
-          { role: "system", content: PROFILE_EXTRACTION_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        { response_format: { type: "json_object" } },
-      );
+      const result = await runChat({
+        db: supabase,
+        userId,
+        callSite: "process-note.profile_extraction",
+        messages: [{ role: "user", content: userPrompt }],
+        defaults: {
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          systemPrompt: PROFILE_EXTRACTION_PROMPT,
+        },
+        callOptions: { response_format: { type: "json_object" } },
+      });
 
-      const rawContent = result.result.choices[0].message.content;
+      const rawContent = result.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
 
@@ -1366,17 +1369,21 @@ async function processInBackground(noteId: string, authHeader: string) {
     };
 
     try {
-      const chatResult = await chatWithCredits(
-        supabase, OPENROUTER_API_KEY, note.user_id, "process-note",
-        [
-          { role: "system", content: METADATA_SYSTEM_PROMPT },
-          { role: "user", content: fullText.slice(0, 24000) },
-        ],
-        { response_format: { type: "json_object" } }
-      );
+      const chatResult = await runChat({
+        db: supabase,
+        userId: note.user_id,
+        callSite: "process-note.metadata",
+        messages: [{ role: "user", content: fullText.slice(0, 24000) }],
+        defaults: {
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          systemPrompt: METADATA_SYSTEM_PROMPT,
+        },
+        callOptions: { response_format: { type: "json_object" } },
+      });
 
       try {
-        metadata = JSON.parse(chatResult.result.choices[0].message.content);
+        metadata = JSON.parse(chatResult.content);
       } catch {
         metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }
