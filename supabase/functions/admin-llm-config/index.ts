@@ -80,6 +80,16 @@ Deno.serve(async (req) => {
       if (error) throw error;
       if (!row) return json({ error: "Unknown call_site" }, 404);
 
+      // OCR endpoint is not a chat endpoint — surface a clear notice instead of failing.
+      if (typeof row.model === "string" && row.model.includes("ocr")) {
+        return json({
+          ok: false,
+          error: "OCR-Endpoint can't be tested via chat. Trigger via real PDF/image upload to verify.",
+          provider: row.provider,
+          model: row.model,
+        });
+      }
+
       const startedAt = Date.now();
       try {
         const result = await runChat({
