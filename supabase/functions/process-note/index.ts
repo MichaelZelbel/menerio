@@ -1,10 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  getEmbeddingWithCredits,
-  chatWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
