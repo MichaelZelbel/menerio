@@ -65,6 +65,7 @@ import {
   ToggleLeft,
   RefreshCw,
   Wrench,
+  Cpu,
 } from "lucide-react";
 
 type AppRole = "free" | "premium" | "premium_gift" | "admin";
