@@ -9,7 +9,7 @@
 
 import { deductTokens, type CreditInfo } from "./llm-credits.ts";
 
-export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini";
+export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
 export interface CallConfig {
   call_site: string;
