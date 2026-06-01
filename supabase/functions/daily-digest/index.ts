@@ -200,7 +200,7 @@ async function processDigestForUser(userId: string, email: string, userName: str
     return;
   }
 
-  const bullets = await synthesizeDigest({
+  const bullets = await synthesizeDigest(userId, {
     notes: notes as { title: string; metadata: Record<string, unknown> }[],
     openActions: actions as { content: string; priority: string; created_at: string }[],
     overdueContacts,
