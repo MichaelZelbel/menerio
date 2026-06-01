@@ -210,7 +210,7 @@ function EditDialog({
   const [draft, setDraft] = useState<Config>({ ...config });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testPrompt, setTestPrompt] = useState("Sag 'Hallo' und nenne das Modell und den Provider, den du gerade nutzt.");
+  const [testPrompt, setTestPrompt] = useState("Say 'Hello' and tell me which model and provider you are using.");
   const [testResult, setTestResult] = useState<any>(null);
 
   const presets = MODEL_PRESETS[draft.provider] ?? [];
