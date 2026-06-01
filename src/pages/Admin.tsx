@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 const ModerationPanel = lazy(() => import("@/components/admin/ModerationPanel"));
+const LLMConfigPanel = lazy(() => import("@/components/admin/LLMConfigPanel"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
