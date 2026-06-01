@@ -98,19 +98,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       const [embResult, chatResult] = await Promise.all([
         getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, userId, "quick-capture", content).catch(() => null),
-        chatWithCredits(
-          supabase, OPENROUTER_API_KEY, userId, "quick-capture",
-          [
-            { role: "system", content: METADATA_SYSTEM_PROMPT },
-            { role: "user", content },
-          ],
-          { response_format: { type: "json_object" } }
-        ),
+        runChat({
+          db: supabase,
+          userId,
+          callSite: "quick-capture.metadata",
+          messages: [{ role: "user", content }],
+          defaults: {
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini",
+            systemPrompt: QUICK_CAPTURE_METADATA_PROMPT,
+          },
+          callOptions: { response_format: { type: "json_object" } },
+        }),
       ]);
 
       let extracted: Record<string, unknown> = {};
       try {
-        extracted = JSON.parse(chatResult.result.choices[0].message.content);
+        extracted = JSON.parse(chatResult.content);
       } catch {
         extracted = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }
