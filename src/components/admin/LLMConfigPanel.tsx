@@ -285,7 +285,7 @@ function EditDialog({
               </Select>
             </div>
             <div>
-              <Label>Modell</Label>
+              <Label>Model</Label>
               <Select
                 value={isCustomModel ? "__custom__" : draft.model}
                 onValueChange={(v) => {
@@ -305,28 +305,43 @@ function EditDialog({
                 className="mt-2 font-mono text-xs"
                 value={draft.model}
                 onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                placeholder="z. B. openai/gpt-4o-mini oder openrouter/auto"
+                placeholder="e.g. openai/gpt-4o-mini or openrouter/auto"
               />
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between">
-              <Label>System-Prompt</Label>
-              {draft.system_prompt && (
-                <Button size="sm" variant="ghost" onClick={() => setDraft({ ...draft, system_prompt: null })}>
-                  <RotateCcw className="h-3 w-3 mr-1" /> Auf Code-Default zurücksetzen
-                </Button>
+          {draft.is_chat === false ? (
+            <div className="rounded-md border p-3 bg-muted/30 text-xs text-muted-foreground">
+              This endpoint is not a chat call — only provider and model apply. No system prompt.
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between">
+                <Label>System prompt</Label>
+                {draft.system_prompt && (
+                  <Button size="sm" variant="ghost" onClick={() => setDraft({ ...draft, system_prompt: null })}>
+                    <RotateCcw className="h-3 w-3 mr-1" /> Reset to code default
+                  </Button>
+                )}
+              </div>
+              <Textarea
+                rows={10}
+                value={draft.system_prompt ?? ""}
+                onChange={(e) => setDraft({ ...draft, system_prompt: e.target.value })}
+                placeholder="Leave empty to use the code default."
+                className="font-mono text-xs"
+              />
+              {draft.placeholders && draft.placeholders.length > 0 && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Available placeholders:{" "}
+                  {draft.placeholders.map((p) => (
+                    <code key={p} className="mx-0.5">{`{{${p}}}`}</code>
+                  ))}
+                  {" "}— substituted with runtime context before sending.
+                </p>
               )}
             </div>
-            <Textarea
-              rows={6}
-              value={draft.system_prompt ?? ""}
-              onChange={(e) => setDraft({ ...draft, system_prompt: e.target.value })}
-              placeholder="(leer = der hartkodierte Default in der Edge Function wird verwendet)"
-              className="font-mono text-xs"
-            />
-          </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -339,7 +354,7 @@ function EditDialog({
               />
             </div>
             <div>
-              <Label>Max Tokens</Label>
+              <Label>Max tokens</Label>
               <Input
                 type="number" min="1"
                 value={draft.max_tokens ?? ""}
@@ -349,12 +364,12 @@ function EditDialog({
             </div>
             <div className="flex items-end gap-2 pb-2">
               <Switch checked={draft.enabled} onCheckedChange={(v) => setDraft({ ...draft, enabled: v })} />
-              <Label>Aktiv</Label>
+              <Label>Active</Label>
             </div>
           </div>
 
           <div className="space-y-2 rounded-md border p-3 bg-muted/30">
-            <Label className="text-xs">Test Run</Label>
+            <Label className="text-xs">Test run</Label>
             <Textarea
               rows={2}
               value={testPrompt}
@@ -363,7 +378,7 @@ function EditDialog({
             />
             <Button size="sm" onClick={runTest} disabled={testing || saving}>
               {testing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-              Save & Test
+              Save & test
             </Button>
             {testResult && (
               <div className="text-xs mt-2 space-y-1">
