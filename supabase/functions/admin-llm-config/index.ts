@@ -90,6 +90,36 @@ Derived-fact examples:
 
 const JSON_OBJECT_OPTIONS = { response_format: { type: "json_object" } };
 
+const PROCESS_NOTE_DEFAULTS = [
+  {
+    call_site: "process-note.metadata",
+    description: "Extracts title, people, dates, topics, sentiment, and summary from a note.",
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini",
+    system_prompt: PROCESS_NOTE_METADATA_PROMPT,
+    temperature: null,
+    max_tokens: null,
+    extra_options: JSON_OBJECT_OPTIONS,
+    enabled: true,
+  },
+  {
+    call_site: "process-note.profile_extraction",
+    description: "Extracts profile facts from a note and writes to the Review Queue.",
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini",
+    system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
+    temperature: null,
+    max_tokens: null,
+    extra_options: JSON_OBJECT_OPTIONS,
+    enabled: true,
+  },
+] as const;
+
+async function syncProcessNoteDefaults(admin: any) {
+  const { error } = await admin.from("llm_call_configs").upsert(PROCESS_NOTE_DEFAULTS, { onConflict: "call_site" });
+  if (error) throw error;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -116,6 +146,7 @@ Deno.serve(async (req) => {
     const action = body.action as string;
 
     if (action === "list") {
+      await syncProcessNoteDefaults(admin);
       const { data: rows, error } = await admin
         .from("llm_call_configs")
         .select("*")
@@ -128,33 +159,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === "sync_defaults") {
-      const defaults = [
-        {
-          call_site: "process-note.metadata",
-          description: "Extracts title, people, dates, topics, sentiment, and summary from a note.",
-          provider: "openrouter",
-          model: "openai/gpt-4o-mini",
-          system_prompt: PROCESS_NOTE_METADATA_PROMPT,
-          temperature: null,
-          max_tokens: null,
-          extra_options: JSON_OBJECT_OPTIONS,
-          enabled: true,
-        },
-        {
-          call_site: "process-note.profile_extraction",
-          description: "Extracts profile facts from a note and writes to the Review Queue.",
-          provider: "openrouter",
-          model: "openai/gpt-4o-mini",
-          system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
-          temperature: null,
-          max_tokens: null,
-          extra_options: JSON_OBJECT_OPTIONS,
-          enabled: true,
-        },
-      ];
-      const { error } = await admin.from("llm_call_configs").upsert(defaults, { onConflict: "call_site" });
-      if (error) throw error;
-      return json({ ok: true, synced: defaults.map((d) => d.call_site) });
+      await syncProcessNoteDefaults(admin);
+      return json({ ok: true, synced: PROCESS_NOTE_DEFAULTS.map((d) => d.call_site) });
     }
 
     if (action === "test") {
