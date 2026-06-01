@@ -1171,9 +1171,56 @@ export type Database = {
           },
         ]
       }
+      llm_call_configs: {
+        Row: {
+          call_site: string
+          created_at: string
+          description: string | null
+          enabled: boolean
+          extra_options: Json
+          max_tokens: number | null
+          model: string
+          provider: string
+          system_prompt: string | null
+          temperature: number | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          call_site: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          extra_options?: Json
+          max_tokens?: number | null
+          model: string
+          provider?: string
+          system_prompt?: string | null
+          temperature?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          call_site?: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          extra_options?: Json
+          max_tokens?: number | null
+          model?: string
+          provider?: string
+          system_prompt?: string | null
+          temperature?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       llm_usage_events: {
         Row: {
+          call_site: string | null
           completion_tokens: number
+          config_source: string | null
           created_at: string
           credits_charged: number
           feature: string
@@ -1187,7 +1234,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          call_site?: string | null
           completion_tokens?: number
+          config_source?: string | null
           created_at?: string
           credits_charged?: number
           feature: string
@@ -1201,7 +1250,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          call_site?: string | null
           completion_tokens?: number
+          config_source?: string | null
           created_at?: string
           credits_charged?: number
           feature?: string
