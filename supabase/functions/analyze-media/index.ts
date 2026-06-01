@@ -1,17 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  deductTokens,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
+import { runChat, runOcr } from "../_shared/llm-router.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const MISTRAL_API_KEY = Deno.env.get("MISTRAL_API_KEY")!;
 
-const MISTRAL_OCR_URL = "https://api.mistral.ai/v1/ocr";
-const MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions";
+// Code-default models (used as fallback when DB config is disabled/missing).
 const OCR_MODEL = "mistral-ocr-latest";
 const VISION_MODEL = "pixtral-12b-2409";
 const TEXT_MODEL = "mistral-small-latest";
