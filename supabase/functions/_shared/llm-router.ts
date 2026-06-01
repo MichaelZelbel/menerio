@@ -296,6 +296,20 @@ export async function runChat(args: {
       });
       break;
     }
+    case "mistral": {
+      const key = Deno.env.get("MISTRAL_API_KEY");
+      if (!key) throw new Error("MISTRAL_API_KEY not configured");
+      result = await callOpenAICompatible({
+        url: "https://api.mistral.ai/v1/chat/completions",
+        apiKey: key,
+        model: effective.model,
+        messages,
+        temperature: effective.temperature,
+        maxTokens: effective.max_tokens,
+        extra,
+      });
+      break;
+    }
     case "gemini": {
       const key = Deno.env.get("GEMINI_API_KEY");
       if (!key) throw new Error("GEMINI_API_KEY not configured. Add it in Project Settings → Secrets.");
