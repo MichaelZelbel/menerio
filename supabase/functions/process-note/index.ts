@@ -1369,17 +1369,21 @@ async function processInBackground(noteId: string, authHeader: string) {
     };
 
     try {
-      const chatResult = await chatWithCredits(
-        supabase, OPENROUTER_API_KEY, note.user_id, "process-note",
-        [
-          { role: "system", content: METADATA_SYSTEM_PROMPT },
-          { role: "user", content: fullText.slice(0, 24000) },
-        ],
-        { response_format: { type: "json_object" } }
-      );
+      const chatResult = await runChat({
+        db: supabase,
+        userId: note.user_id,
+        callSite: "process-note.metadata",
+        messages: [{ role: "user", content: fullText.slice(0, 24000) }],
+        defaults: {
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          systemPrompt: METADATA_SYSTEM_PROMPT,
+        },
+        callOptions: { response_format: { type: "json_object" } },
+      });
 
       try {
-        metadata = JSON.parse(chatResult.result.choices[0].message.content);
+        metadata = JSON.parse(chatResult.content);
       } catch {
         metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }
