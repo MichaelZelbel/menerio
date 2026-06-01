@@ -234,16 +234,16 @@ async function processImage(
   const dataUrl = await fileToBase64DataUrl(storagePath, mimeType);
 
   // OCR
-  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
-    model: OCR_MODEL,
+  const ocrResult = await runOcr({
+    db: supabase,
+    userId,
+    callSite: "analyze-media.ocr",
     document: { type: "image_url", image_url: dataUrl },
+    defaults: { model: OCR_MODEL },
   });
-  const ocrPages = ocrResp.pages || [];
+  const ocrResp = ocrResult.raw;
+  const ocrPages = ocrResult.pages;
   const extractedText = ocrPages.map((p: any) => p.markdown || "").join("\n").trim();
-  const pagesProcessed = ocrResp.usage_info?.pages_processed || 1;
-  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
-    total_tokens: pagesProcessed * 500,
-  });
 
   // Vision description
   const summary = await describeImage(userId, dataUrl, "analyze-media:vision");
