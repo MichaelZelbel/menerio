@@ -95,7 +95,7 @@ export default function LLMConfigPanel() {
   const [loading, setLoading] = useState(true);
   const [configs, setConfigs] = useState<Config[]>([]);
   const [availability, setAvailability] = useState<Record<Provider, boolean>>({
-    lovable: false, openrouter: false, openai: false, anthropic: false, gemini: false,
+    lovable: false, openrouter: false, openai: false, anthropic: false, gemini: false, mistral: false,
   });
   const [editing, setEditing] = useState<Config | null>(null);
   const [filter, setFilter] = useState("");
