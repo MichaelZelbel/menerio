@@ -95,6 +95,46 @@ export async function resolveConfig(
   return { effective: row, source: "db" };
 }
 
+/**
+ * Replace `{{key}}` placeholders with the supplied values. Missing keys collapse
+ * to empty string (with a console warning) so a misconfigured prompt never
+ * leaks `{{...}}` text to the model.
+ */
+export function interpolatePrompt(
+  prompt: string | null,
+  vars?: Record<string, string | number | null | undefined>
+): string | null {
+  if (!prompt) return prompt;
+  if (!vars) return prompt;
+  return prompt.replace(/\{\{(\w+)\}\}/g, (_m, key) => {
+    const v = vars[key];
+    if (v === undefined) {
+      console.warn(`[llm-router] missing template var: ${key}`);
+      return "";
+    }
+    return String(v ?? "");
+  });
+}
+
+/**
+ * Resolve the effective system prompt for a call site: DB row's system_prompt
+ * (if enabled and non-empty), else the supplied fallback, then run placeholder
+ * interpolation. Use this from edge functions that build their own LLM call
+ * (custom fetch, tool loops, etc.) instead of going through {@link runChat}.
+ */
+export async function resolveSystemPrompt(
+  db: any,
+  callSite: string,
+  fallback: string,
+  vars?: Record<string, string | number | null | undefined>
+): Promise<string> {
+  const row = await loadConfig(db, callSite);
+  const base = row?.enabled && row.system_prompt && row.system_prompt.trim().length > 0
+    ? row.system_prompt
+    : fallback;
+  return interpolatePrompt(base, vars) ?? "";
+}
+
 function buildMessagesWithSystem(messages: ChatMessage[], systemPrompt: string | null): ChatMessage[] {
   if (!systemPrompt) return messages;
   // Replace existing system message if any, else prepend
@@ -229,13 +269,16 @@ export async function runChat(args: {
   callSite: string;
   messages: ChatMessage[];
   defaults: CallDefaults;
-  /** Per-call options that override DB extras (e.g. response_format). */
+  /** Per-call options that override DB extras (e.g. response_format, tools). */
   callOptions?: Record<string, unknown>;
   /** Skip credit deduction (used for admin test-run; admins still cost). */
   skipDeduct?: boolean;
+  /** Values substituted into `{{placeholders}}` inside the system prompt. */
+  templateVars?: Record<string, string | number | null | undefined>;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
-  const messages = buildMessagesWithSystem(args.messages, effective.system_prompt);
+  const interpolated = interpolatePrompt(effective.system_prompt, args.templateVars);
+  const messages = buildMessagesWithSystem(args.messages, interpolated);
   const extra = { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) };
 
   let result: any;
