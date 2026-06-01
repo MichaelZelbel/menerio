@@ -235,8 +235,19 @@ export async function resolveAttachmentImagesInHtml(
       return `<a${merged} href="${url}" data-attachment-name="${name}" target="_blank" rel="noopener">${label}</a>`;
     },
   );
+  // Replace src="" on <iframe data-attachment-name="X"> (PDF embeds).
+  out = out.replace(
+    /<iframe\b([^>]*?)data-attachment-name="([^"]+)"([^>]*?)(\/?)>(?:<\/iframe>)?/gi,
+    (full, pre: string, name: string, post: string, selfClose: string) => {
+      const url = urlByName.get(decodeHtmlEntities(name));
+      if (!url) return full;
+      const merged = `${pre}${post}`.replace(/\ssrc="[^"]*"/i, "");
+      return `<iframe${merged} src="${url}" data-attachment-name="${name}"></iframe>`;
+    },
+  );
   return out;
 }
+
 
 function decodeHtmlEntities(s: string): string {
   return s
