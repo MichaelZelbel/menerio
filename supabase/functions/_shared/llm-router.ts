@@ -269,13 +269,16 @@ export async function runChat(args: {
   callSite: string;
   messages: ChatMessage[];
   defaults: CallDefaults;
-  /** Per-call options that override DB extras (e.g. response_format). */
+  /** Per-call options that override DB extras (e.g. response_format, tools). */
   callOptions?: Record<string, unknown>;
   /** Skip credit deduction (used for admin test-run; admins still cost). */
   skipDeduct?: boolean;
+  /** Values substituted into `{{placeholders}}` inside the system prompt. */
+  templateVars?: Record<string, string | number | null | undefined>;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
-  const messages = buildMessagesWithSystem(args.messages, effective.system_prompt);
+  const interpolated = interpolatePrompt(effective.system_prompt, args.templateVars);
+  const messages = buildMessagesWithSystem(args.messages, interpolated);
   const extra = { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) };
 
   let result: any;
