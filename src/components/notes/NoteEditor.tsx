@@ -714,7 +714,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const hasIframe = /<iframe[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml);
     if (!hasImg && !hasIframe) return;
     const imgNeeds = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
-    const iframeNeeds = /<iframe[^>]*\bsrc=""[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
+    const iframeNeeds = /<iframe[^>]*\bsrc=("|"about:blank")[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc="(?!about:blank")[^"]+")/i.test(currentHtml);
     if (!imgNeeds && !iframeNeeds) return;
 
     void (async () => {
