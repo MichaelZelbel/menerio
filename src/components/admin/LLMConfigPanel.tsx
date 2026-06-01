@@ -41,6 +41,7 @@ const PROVIDER_LABELS: Record<Provider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   gemini: "Gemini (Google)",
+  mistral: "Mistral",
 };
 
 const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
@@ -79,6 +80,14 @@ const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
     { value: "gemini-2.0-flash", label: "gemini-2.0-flash" },
     { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite" },
     { value: "gemini-1.5-pro", label: "gemini-1.5-pro" },
+  ],
+  mistral: [
+    { value: "mistral-ocr-latest", label: "Mistral OCR (PDF/Image)" },
+    { value: "pixtral-12b-2409", label: "Pixtral 12B (Vision)" },
+    { value: "pixtral-large-latest", label: "Pixtral Large (Vision)" },
+    { value: "mistral-small-latest", label: "Mistral Small" },
+    { value: "mistral-medium-latest", label: "Mistral Medium" },
+    { value: "mistral-large-latest", label: "Mistral Large" },
   ],
 };
 
