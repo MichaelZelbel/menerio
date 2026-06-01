@@ -360,7 +360,7 @@ function EditDialog({
             />
             <Button size="sm" onClick={runTest} disabled={testing || saving}>
               {testing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-              Speichern & Testen
+              Save & Test
             </Button>
             {testResult && (
               <div className="text-xs mt-2 space-y-1">
