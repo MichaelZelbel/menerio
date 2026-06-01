@@ -174,7 +174,7 @@ export default function LLMConfigPanel() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{c.model}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {c.system_prompt ? "Custom" : <span className="italic">Code-Default</span>}
+                      {c.is_chat === false ? <span className="italic">n/a (non-chat)</span> : c.system_prompt ? "Custom" : <span className="italic">Code default</span>}
                     </TableCell>
                     <TableCell>{c.enabled ? "✓" : "—"}</TableCell>
                     <TableCell>
