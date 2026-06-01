@@ -19,6 +19,7 @@ const PROVIDER_SECRETS: Record<Provider, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   gemini: "GEMINI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
 };
 
 function providerAvailability(): Record<Provider, boolean> {
@@ -78,6 +79,16 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error) throw error;
       if (!row) return json({ error: "Unknown call_site" }, 404);
+
+      // OCR endpoint is not a chat endpoint — surface a clear notice instead of failing.
+      if (typeof row.model === "string" && row.model.includes("ocr")) {
+        return json({
+          ok: false,
+          error: "OCR-Endpoint can't be tested via chat. Trigger via real PDF/image upload to verify.",
+          provider: row.provider,
+          model: row.model,
+        });
+      }
 
       const startedAt = Date.now();
       try {

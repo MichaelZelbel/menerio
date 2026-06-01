@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { Loader2, Play, RotateCcw, Save } from "lucide-react";
 
-type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini";
+type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
 type Config = {
   call_site: string;
@@ -41,6 +41,7 @@ const PROVIDER_LABELS: Record<Provider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   gemini: "Gemini (Google)",
+  mistral: "Mistral",
 };
 
 const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
@@ -80,13 +81,21 @@ const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
     { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite" },
     { value: "gemini-1.5-pro", label: "gemini-1.5-pro" },
   ],
+  mistral: [
+    { value: "mistral-ocr-latest", label: "Mistral OCR (PDF/Image)" },
+    { value: "pixtral-12b-2409", label: "Pixtral 12B (Vision)" },
+    { value: "pixtral-large-latest", label: "Pixtral Large (Vision)" },
+    { value: "mistral-small-latest", label: "Mistral Small" },
+    { value: "mistral-medium-latest", label: "Mistral Medium" },
+    { value: "mistral-large-latest", label: "Mistral Large" },
+  ],
 };
 
 export default function LLMConfigPanel() {
   const [loading, setLoading] = useState(true);
   const [configs, setConfigs] = useState<Config[]>([]);
   const [availability, setAvailability] = useState<Record<Provider, boolean>>({
-    lovable: false, openrouter: false, openai: false, anthropic: false, gemini: false,
+    lovable: false, openrouter: false, openai: false, anthropic: false, gemini: false, mistral: false,
   });
   const [editing, setEditing] = useState<Config | null>(null);
   const [filter, setFilter] = useState("");

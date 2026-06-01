@@ -1,92 +1,65 @@
-# LLM Call Configuration in Admin
+# Mistral in LLM Config integrieren
 
-## Ziel
+## Befund
 
-Du sollst in der Admin-Section pro „Call-Site" (z. B. `process-note`, `note-chat`, `analyze-media`, `find-connections`, `daily-digest`, `quick-capture` …) festlegen können:
+Du hast recht — Mistral wurde übersehen. `supabase/functions/analyze-media/index.ts` ruft Mistral direkt auf (eigener `mistralFetch`-Helper), nicht über `_shared/llm-credits.ts`. Deshalb taucht es weder als Provider noch als Call-Site im neuen LLM-Config-Panel auf. `analyze-pdf` ist nur ein Wrapper um `analyze-media`.
 
-1. **System-Prompt** (überschreibbar pro Call-Site)
-2. **Provider** (Lovable AI Gateway, OpenRouter, später optional eigene OpenAI/Anthropic/Gemini-Keys)
-3. **Modell** (frei wählbar pro Provider, inkl. OpenRouter „auto"-Routing oder kostenlose `:free`-Modelle)
-4. **Status pro Eintrag** (aktiv/inaktiv → fällt automatisch auf Default zurück)
+Drei verschiedene Mistral-Endpunkte sind im Einsatz:
 
-Das ist **machbar und kein Denkfehler**, aber kein Mini-Change. Heute sind Prompts und Modellnamen hart in ~25 Edge Functions verdrahtet (`_shared/llm-credits.ts` + `_shared/group-ai.ts` + diverse `process-note`, `note-chat`, …). Wir zentralisieren das in einer einzigen Tabelle + einem Helper, und bauen darauf eine Admin-UI.
+| Zweck | Endpoint | Modell |
+|---|---|---|
+| OCR (PDF, Bilder) | `POST /v1/ocr` | `mistral-ocr-latest` |
+| Vision (Bildinterpretation) | `POST /v1/chat/completions` (multimodal) | `pixtral-12b-2409` |
+| Text-Nachverarbeitung (Zusammenfassung etc.) | `POST /v1/chat/completions` | `mistral-small-latest` |
 
-## Architektur
+## Plan
 
-```text
- Admin UI  ──►  llm_call_configs  ──►  _shared/llm-router.ts
-                                            │
-                                            ├─► Lovable AI Gateway
-                                            ├─► OpenRouter (spezifisches Modell ODER openrouter/auto)
-                                            └─► OpenAI / Anthropic / Gemini (eigene Keys, optional)
-                                            
- LLM Usage Log bekommt zusätzlich: call_site, config_id, system_prompt_hash
-```
+### 1. Provider „mistral" im Router
 
-## Umsetzung in 4 Schritten
+`supabase/functions/_shared/llm-router.ts`:
+- `Provider`-Type um `"mistral"` erweitern.
+- Neuer Adapter `callMistralChat(...)` — Mistral ist OpenAI-kompatibel für Chat/Vision, also dünner Wrapper um `callOpenAICompatible` mit `https://api.mistral.ai/v1/chat/completions`.
+- OCR ist **kein** Chat-Endpoint und passt nicht in `runChat`. Dafür eine separate Funktion `runOcr({ db, userId, callSite, document|image, defaults })`, die `POST /v1/ocr` aufruft, das gleiche Config-Lookup (`llm_call_configs`) nutzt und über `deductTokens` abrechnet (mit Token-Schätzung aus Seitenanzahl × Pauschale, da OCR keine echten Tokens liefert).
+- Secret-Mapping in `admin-llm-config/index.ts`: `mistral → MISTRAL_API_KEY`.
 
-### 1. Datenmodell (Migration)
+### 2. Drei neue Call-Sites in `llm_call_configs`
 
-Neue Tabelle `public.llm_call_configs`:
-- `call_site text primary key` — stabiler Bezeichner, z. B. `process-note.profile_extraction`
-- `description text` — was dieser Call tut (für die UI)
-- `provider text` — `lovable` | `openrouter` | `openai` | `anthropic` | `gemini`
-- `model text` — z. B. `google/gemini-3-flash-preview`, `openrouter/auto`, `meta-llama/llama-3.3-70b-instruct:free`
-- `system_prompt text` — optional; wenn `NULL` → Code-Default
-- `temperature numeric`, `max_tokens int`, `extra_options jsonb`
-- `enabled boolean default true`
-- `updated_by uuid`, `updated_at timestamptz`
+Seed-Migration:
 
-RLS: nur `has_role(auth.uid(), 'admin')` darf lesen/schreiben. GRANTs für `authenticated` + `service_role`.
+| call_site | provider | model | Beschreibung |
+|---|---|---|---|
+| `analyze-media.ocr` | mistral | `mistral-ocr-latest` | OCR für PDFs & gescannte Bilder |
+| `analyze-media.vision` | mistral | `pixtral-12b-2409` | Bildinterpretation (Captions, Objekte, Szene) |
+| `analyze-media.text` | mistral | `mistral-small-latest` | Nachgelagerte Textverarbeitung der OCR-Ergebnisse |
 
-Seed-Migration füllt die Tabelle mit allen heute existierenden Call-Sites und ihren aktuellen Defaults (extrahiert aus den Edge Functions), damit nichts an Verhalten kippt.
+Die heutigen Default-System-Prompts aus `analyze-media/index.ts` werden 1:1 in `system_prompt` der jeweiligen Zeile übernommen, damit Verhalten gleich bleibt.
 
-Zusätzlich `llm_usage_log` um `call_site text` und `config_id text` ergänzen, damit du im Admin-Log siehst, welcher Eintrag welchen Call gefahren hat.
+### 3. `analyze-media` umverdrahten
 
-### 2. Zentraler Router (`supabase/functions/_shared/llm-router.ts`)
+- Vision-Call (Zeile ~137) und Text-Call (Zeile ~164) gehen über `runChat({ callSite: "analyze-media.vision" | "analyze-media.text", ... })`.
+- OCR-Calls (Zeilen ~270 und ~306) gehen über `runOcr({ callSite: "analyze-media.ocr", ... })`.
+- Lokales `MISTRAL_API_KEY` / `mistralFetch` entfernen, da Router das übernimmt.
+- Default-Block in jedem Call enthält Provider+Model+Prompt als Code-Fallback (gleicher Sicherheitsnetz-Mechanismus wie bei den anderen umgezogenen Functions).
 
-Eine Funktion `runLLM({ callSite, userId, messages, defaults })`:
-- Lädt Config aus `llm_call_configs` (mit kurzem In-Memory-Cache pro Cold-Start).
-- Fällt bei `enabled=false` oder Fehlern auf `defaults` zurück.
-- Wählt Provider-Adapter:
-  - **Lovable AI Gateway** → bestehender Pfad (Header `Lovable-API-Key`).
-  - **OpenRouter** → bestehender Pfad in `llm-credits.ts`. Sonderfall `model = "openrouter/auto"` ⇒ OpenRouter wählt selbst.
-  - **OpenAI/Anthropic/Gemini** → optionaler 2. Bauschritt; nur aktivieren, wenn entsprechende Secrets existieren (`OPENAI_API_KEY` etc.). Andernfalls in der UI als „Provider nicht konfiguriert" ausgrauen.
-- Wendet `system_prompt` aus DB an (überschreibt den im Code), kombiniert mit user-/assistant-Messages.
-- Verwendet weiterhin `deductTokens` / `deductExternalLLMTokens`, schreibt `call_site` und `config_id` in `llm_usage_log`.
+### 4. Admin-UI
 
-Alle bestehenden Edge Functions werden umgestellt, statt `chatWithCredits(...)` direkt → `runLLM({ callSite: "process-note.profile_extraction", ... })`. Default-System-Prompt bleibt im Code als Fallback.
+`LLMConfigPanel.tsx`:
+- Provider-Dropdown bekommt `mistral` als Option (ausgegraut, wenn `MISTRAL_API_KEY` nicht in `availability`).
+- Kuratierte Modell-Liste für Provider Mistral: `mistral-ocr-latest`, `pixtral-12b-2409`, `mistral-large-latest`, `mistral-small-latest`, `mistral-medium-latest`, plus Freitext.
+- Hinweis-Badge an Call-Site `analyze-media.ocr`: „OCR-Endpoint — Chat-Parameter (temperature, max_tokens) werden ignoriert".
+- „Save & Test"-Button für `analyze-media.ocr` ruft einen leichten OCR-Smoke-Test gegen ein winziges Test-PDF (oder antwortet mit „Test für OCR nicht im Chat-Modus möglich — bitte über echte Datei testen"), für die anderen beiden funktioniert der bestehende Chat-Test.
 
-### 3. Admin-UI (`src/pages/Admin.tsx` + neuer Tab `LLM Configuration`)
+### 5. Risiko / Rollback
 
-- Tabelle aller Call-Sites mit Spalten: Beschreibung, Provider, Modell, Enabled, „letzter Aufruf".
-- Edit-Dialog pro Zeile:
-  - Provider-Dropdown (nur konfigurierte Provider sind wählbar).
-  - Modell-Dropdown, abhängig vom Provider:
-    - Lovable: kuratierte Liste aus dem Knowledge-Snippet.
-    - OpenRouter: `auto` + eingebaute Liste populärer/kostenloser Modelle + Freitext-Override.
-    - Weitere Provider: Freitext.
-  - Monaco/Textarea für System-Prompt mit „Auf Code-Default zurücksetzen"-Button.
-  - Temperature, Max Tokens, JSON-Extra-Options.
-  - „Test Run"-Button (ruft eine neue Edge Function `admin-test-llm-config` mit Dummy-Input).
-- Reine Admin-Route, geschützt via `AdminRoute`.
+- Verhalten bleibt identisch, weil Seed = heutige Hardcoded-Defaults.
+- `enabled=false` auf einer Zeile fällt automatisch auf den Code-Default zurück (Mistral direkt).
+- Falls `MISTRAL_API_KEY` fehlt: Router wirft klaren Fehler statt stiller Falschnutzung.
 
-### 4. Beobachtbarkeit
+## Technische Details
 
-- `LLM Usage Log` (existierende Admin-View) bekommt zusätzlich Filter `call_site` und einen Direkt-Link „Diesen Call konfigurieren" → öffnet die Config-Zeile.
-- Wenn die DB-Config fehlt/defekt ist, loggen wir `usage_source = "fallback-default"` und zeigen das in der UI.
+- Neue Files: keine. Nur Edits an `_shared/llm-router.ts`, `admin-llm-config/index.ts`, `analyze-media/index.ts`, `LLMConfigPanel.tsx` + eine Seed-Migration.
+- `MISTRAL_API_KEY` ist bereits als Secret konfiguriert (analyze-media nutzt es aktuell), also kein neuer Secret-Schritt nötig.
 
-## Aufwand / Risiko
+## Offene Frage
 
-- ~1 Migration, ~1 neuer Shared-Router, ~20 Edge Functions umverdrahten (mechanisch), ~1 Admin-Page, optional 1 Test-Edge-Function.
-- Risiko: dass beim Umstellen versehentlich Verhalten kippt. Dagegen: Seed-Migration spiegelt heutige Defaults, plus Fallback-auf-Code-Default, plus „enabled=false" als Sicherheits-Off-Switch.
-
-## Was wir **nicht** zuerst bauen
-
-- Pro-Workspace- oder Pro-User-Overrides (erstmal global).
-- Versionierung / Diff der Prompts (kann später hinzu).
-- A/B-Testing zweier Modelle gegeneinander (später).
-
-## Offene Frage an dich
-
-1. Sollen wir die externen Provider (OpenAI, Anthropic, Gemini direkt) gleich mit anlegen — dann brauche ich, dass du in einer späteren Build-Iteration die entsprechenden API-Keys hinzufügst — oder erstmal nur **Lovable AI Gateway + OpenRouter (inkl. `auto` und `:free`-Modelle)**? Letzteres deckt deinen Use-Case ab und spart einen Bauschritt.
+Soll ich für `analyze-media.ocr` zusätzlich erlauben, **statt** Mistral-OCR ein Vision-Modell (z. B. Gemini 3 Flash oder GPT-4o) zu nutzen? Das wäre dann ein zweiter Code-Pfad im Router, aber gibt dir die Freiheit, OCR komplett wegzuschalten. Wenn nein, bleibt `analyze-media.ocr` Mistral-only und du steuerst nur Modell-Variante + Enable/Disable.

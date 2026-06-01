@@ -1,17 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  deductTokens,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
+import { runChat, runOcr } from "../_shared/llm-router.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const MISTRAL_API_KEY = Deno.env.get("MISTRAL_API_KEY")!;
 
-const MISTRAL_OCR_URL = "https://api.mistral.ai/v1/ocr";
-const MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions";
+// Code-default models (used as fallback when DB config is disabled/missing).
 const OCR_MODEL = "mistral-ocr-latest";
 const VISION_MODEL = "pixtral-12b-2409";
 const TEXT_MODEL = "mistral-small-latest";
@@ -70,54 +68,14 @@ async function fileToBase64DataUrl(
   return `data:${mimeType};base64,${btoa(binary)}`;
 }
 
-async function mistralFetch(url: string, body: unknown): Promise<any> {
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${MISTRAL_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`Mistral ${url} failed: ${resp.status} ${text}`);
-  }
-  return await resp.json();
-}
-
-async function deductFromUsage(
-  userId: string,
-  feature: string,
-  model: string,
-  usage: any
-) {
-  const promptTokens = usage?.prompt_tokens ?? 0;
-  const completionTokens = usage?.completion_tokens ?? 0;
-  const totalTokens =
-    usage?.total_tokens ?? (promptTokens + completionTokens || 1000);
-  const usageSource = usage?.total_tokens ? "provider" : "fallback";
-  try {
-    await deductTokens(supabase, {
-      userId,
-      tokens: Math.max(1, totalTokens),
-      feature,
-      model,
-      provider: "mistral",
-      promptTokens,
-      completionTokens,
-      usageSource,
-    });
-  } catch (e) {
-    console.warn(`deductTokens failed for ${feature}:`, (e as Error).message);
-  }
-}
-
 interface PageSummary {
   description: string;
   topics: string[];
   content_type?: string;
 }
+
+const IMAGE_DESCRIBE_DEFAULT_PROMPT = IMAGE_DESCRIBE_PROMPT;
+const PAGE_SUMMARY_DEFAULT_PROMPT = PAGE_SUMMARY_PROMPT;
 
 async function summarizePageText(
   userId: string,
@@ -134,16 +92,19 @@ async function summarizePageText(
     return { description: "", topics: [], content_type: "other" };
   }
   try {
-    const result = await mistralFetch(MISTRAL_CHAT_URL, {
-      model: TEXT_MODEL,
-      messages: [
-        { role: "system", content: PAGE_SUMMARY_PROMPT },
-        { role: "user", content: combined.slice(0, 12000) },
-      ],
-      response_format: { type: "json_object" },
+    const result = await runChat({
+      db: supabase,
+      userId,
+      callSite: "analyze-media.text",
+      messages: [{ role: "user", content: combined.slice(0, 12000) }],
+      defaults: {
+        provider: "mistral",
+        model: TEXT_MODEL,
+        systemPrompt: PAGE_SUMMARY_DEFAULT_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
     });
-    await deductFromUsage(userId, "analyze-media:summary", TEXT_MODEL, result.usage);
-    const parsed = JSON.parse(result.choices[0].message.content);
+    const parsed = JSON.parse(result.content || "{}");
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
@@ -158,29 +119,35 @@ async function summarizePageText(
 async function describeImage(
   userId: string,
   dataUrl: string,
-  feature: string
+  _feature: string
 ): Promise<PageSummary> {
   try {
-    const result = await mistralFetch(MISTRAL_CHAT_URL, {
-      model: VISION_MODEL,
+    const result = await runChat({
+      db: supabase,
+      userId,
+      callSite: "analyze-media.vision",
       messages: [
-        { role: "system", content: IMAGE_DESCRIBE_PROMPT },
         {
           role: "user",
-          content: [{ type: "image_url", image_url: dataUrl }],
+          // Mistral/OpenAI-compatible multimodal: content array
+          content: [{ type: "image_url", image_url: dataUrl }] as unknown as string,
         },
       ],
-      response_format: { type: "json_object" },
+      defaults: {
+        provider: "mistral",
+        model: VISION_MODEL,
+        systemPrompt: IMAGE_DESCRIBE_DEFAULT_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
     });
-    await deductFromUsage(userId, feature, VISION_MODEL, result.usage);
-    const parsed = JSON.parse(result.choices[0].message.content);
+    const parsed = JSON.parse(result.content || "{}");
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
       content_type: String(parsed.content_type || "other"),
     };
   } catch (e) {
-    console.warn(`describeImage (${feature}) failed:`, (e as Error).message);
+    console.warn(`describeImage failed:`, (e as Error).message);
     return { description: "", topics: [], content_type: "other" };
   }
 }
@@ -267,16 +234,16 @@ async function processImage(
   const dataUrl = await fileToBase64DataUrl(storagePath, mimeType);
 
   // OCR
-  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
-    model: OCR_MODEL,
+  const ocrResult = await runOcr({
+    db: supabase,
+    userId,
+    callSite: "analyze-media.ocr",
     document: { type: "image_url", image_url: dataUrl },
+    defaults: { model: OCR_MODEL },
   });
-  const ocrPages = ocrResp.pages || [];
+  const ocrResp = ocrResult.raw;
+  const ocrPages = ocrResult.pages;
   const extractedText = ocrPages.map((p: any) => p.markdown || "").join("\n").trim();
-  const pagesProcessed = ocrResp.usage_info?.pages_processed || 1;
-  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
-    total_tokens: pagesProcessed * 500,
-  });
 
   // Vision description
   const summary = await describeImage(userId, dataUrl, "analyze-media:vision");
@@ -303,16 +270,16 @@ async function processPdf(
 ) {
   const dataUrl = await fileToBase64DataUrl(storagePath, "application/pdf");
 
-  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
-    model: OCR_MODEL,
+  const ocrResult = await runOcr({
+    db: supabase,
+    userId,
+    callSite: "analyze-media.ocr",
     document: { type: "document_url", document_url: dataUrl },
-    include_image_base64: true,
+    extra: { include_image_base64: true },
+    defaults: { model: OCR_MODEL },
   });
-  const pages = ocrResp.pages || [];
-  const pagesProcessed = ocrResp.usage_info?.pages_processed || pages.length;
-  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
-    total_tokens: Math.max(1, pagesProcessed) * 500,
-  });
+  const ocrResp = ocrResult.raw;
+  const pages = ocrResult.pages;
 
   if (pages.length === 0) {
     throw new Error("OCR returned no pages");

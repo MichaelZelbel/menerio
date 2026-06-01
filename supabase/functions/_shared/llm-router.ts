@@ -9,7 +9,7 @@
 
 import { deductTokens, type CreditInfo } from "./llm-credits.ts";
 
-export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini";
+export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
 export interface CallConfig {
   call_site: string;
@@ -296,6 +296,20 @@ export async function runChat(args: {
       });
       break;
     }
+    case "mistral": {
+      const key = Deno.env.get("MISTRAL_API_KEY");
+      if (!key) throw new Error("MISTRAL_API_KEY not configured");
+      result = await callOpenAICompatible({
+        url: "https://api.mistral.ai/v1/chat/completions",
+        apiKey: key,
+        model: effective.model,
+        messages,
+        temperature: effective.temperature,
+        maxTokens: effective.max_tokens,
+        extra,
+      });
+      break;
+    }
     case "gemini": {
       const key = Deno.env.get("GEMINI_API_KEY");
       if (!key) throw new Error("GEMINI_API_KEY not configured. Add it in Project Settings → Secrets.");
@@ -355,4 +369,95 @@ export async function runChat(args: {
     model: effective.model,
     provider: effective.provider,
   };
+}
+
+/**
+ * Run a Mistral OCR call. Not a chat endpoint — accepts a `document` payload
+ * shaped per Mistral's /v1/ocr API. Uses `llm_call_configs` for model
+ * selection and falls back to defaults on missing/disabled rows.
+ *
+ * Token accounting: OCR doesn't return prompt/completion tokens, so we
+ * estimate from `usage_info.pages_processed` (or document type).
+ */
+export async function runOcr(args: {
+  db: any;
+  userId: string;
+  callSite: string;
+  /** Mistral OCR `document` payload, e.g. { type: "document_url", document_url: dataUrl }. */
+  document: Record<string, unknown>;
+  /** Extra body fields like include_image_base64. */
+  extra?: Record<string, unknown>;
+  defaults: { model: string };
+  /** Cost per processed page (token equivalent for billing). Default 500. */
+  tokensPerPage?: number;
+}): Promise<{
+  raw: any;
+  pages: any[];
+  model: string;
+  configSource: "db" | "fallback-default";
+  pagesProcessed: number;
+}> {
+  const { effective, source } = await resolveConfig(args.db, args.callSite, {
+    provider: "mistral",
+    model: args.defaults.model,
+  });
+  if (effective.provider !== "mistral") {
+    // OCR endpoint is Mistral-specific; fall back to defaults if misconfigured.
+    console.warn(
+      `[llm-router] runOcr called with non-mistral provider '${effective.provider}' for ${args.callSite}; using Mistral OCR endpoint with default model.`
+    );
+  }
+  const key = Deno.env.get("MISTRAL_API_KEY");
+  if (!key) throw new Error("MISTRAL_API_KEY not configured");
+
+  const model = effective.provider === "mistral" ? effective.model : args.defaults.model;
+  const body: Record<string, unknown> = {
+    model,
+    document: args.document,
+    ...(effective.extra_options ?? {}),
+    ...(args.extra ?? {}),
+  };
+  const r = await fetch("https://api.mistral.ai/v1/ocr", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => "");
+    throw new Error(`Mistral OCR failed (${r.status}): ${msg}`);
+  }
+  const json = await r.json();
+  const pages: any[] = Array.isArray(json.pages) ? json.pages : [];
+  const pagesProcessed = json.usage_info?.pages_processed ?? pages.length ?? 1;
+  const tokens = Math.max(1, pagesProcessed * (args.tokensPerPage ?? 500));
+
+  try {
+    await deductTokens(args.db, {
+      userId: args.userId,
+      tokens,
+      feature: args.callSite,
+      model,
+      provider: "mistral",
+      promptTokens: 0,
+      completionTokens: 0,
+      usageSource: "fallback",
+    });
+    try {
+      await args.db
+        .from("llm_usage_events")
+        .update({ call_site: args.callSite, config_source: source })
+        .eq("user_id", args.userId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+    } catch {
+      // non-fatal
+    }
+  } catch (err) {
+    console.warn(`[llm-router] OCR deduct failed for ${args.callSite}:`, (err as Error).message);
+  }
+
+  return { raw: json, pages, model, configSource: source, pagesProcessed };
 }
