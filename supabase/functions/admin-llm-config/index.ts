@@ -19,6 +19,7 @@ const PROVIDER_SECRETS: Record<Provider, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   gemini: "GEMINI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
 };
 
 function providerAvailability(): Record<Provider, boolean> {
