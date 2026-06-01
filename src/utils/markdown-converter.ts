@@ -136,6 +136,10 @@ export function htmlToMarkdown(html: string): string {
   // Images — preserve Obsidian wikilink embeds when an attachment marker is present
   md = md.replace(/<img[^>]*data-attachment-name="([^"]+)"[^>]*\/?>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
   md = md.replace(/<a[^>]*data-attachment-name="([^"]+)"[^>]*>[\s\S]*?<\/a>/gi, (_, name) => `![[${decodeEntities(name)}]]`);
+  // PDF iframes — Obsidian embed when attachment marker is present, otherwise ![pdf](url)
+  md = md.replace(/<iframe[^>]*data-type="pdf"[^>]*data-attachment-name="([^"]+)"[^>]*>(?:[\s\S]*?<\/iframe>)?/gi, (_, name) => `![[${decodeEntities(name)}]]`);
+  md = md.replace(/<iframe[^>]*data-attachment-name="([^"]+)"[^>]*data-type="pdf"[^>]*>(?:[\s\S]*?<\/iframe>)?/gi, (_, name) => `![[${decodeEntities(name)}]]`);
+  md = md.replace(/<iframe[^>]*data-type="pdf"[^>]*src="([^"]*)"[^>]*>(?:[\s\S]*?<\/iframe>)?/gi, (_, src) => `![pdf](${src})`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_, src, alt) => `![${alt}](${src})`);
   md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, (_, src) => `![](${src})`);
 
