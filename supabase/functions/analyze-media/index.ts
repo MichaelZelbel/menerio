@@ -270,16 +270,16 @@ async function processPdf(
 ) {
   const dataUrl = await fileToBase64DataUrl(storagePath, "application/pdf");
 
-  const ocrResp = await mistralFetch(MISTRAL_OCR_URL, {
-    model: OCR_MODEL,
+  const ocrResult = await runOcr({
+    db: supabase,
+    userId,
+    callSite: "analyze-media.ocr",
     document: { type: "document_url", document_url: dataUrl },
-    include_image_base64: true,
+    extra: { include_image_base64: true },
+    defaults: { model: OCR_MODEL },
   });
-  const pages = ocrResp.pages || [];
-  const pagesProcessed = ocrResp.usage_info?.pages_processed || pages.length;
-  await deductFromUsage(userId, "analyze-media:ocr", OCR_MODEL, {
-    total_tokens: Math.max(1, pagesProcessed) * 500,
-  });
+  const ocrResp = ocrResult.raw;
+  const pages = ocrResult.pages;
 
   if (pages.length === 0) {
     throw new Error("OCR returned no pages");
