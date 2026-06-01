@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, deductTokens } from "./llm-credits.ts";
+import { runChat } from "./llm-router.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,26 +67,43 @@ export async function deductFixedCredits(admin: any, userId: string, feature: st
   });
 }
 
-export async function callJson(messages: Array<{ role: string; content: string }>) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages, temperature: 0.2, response_format: { type: "json_object" } }),
+/**
+ * JSON-returning chat call routed through the central LLM router so the system
+ * prompt is taken from `llm_call_configs` (admin-editable) with the call-site
+ * default as fallback. Caller still owns the user message; the system message
+ * (if present in `messages`) is replaced by the configured prompt.
+ */
+export async function callJson(
+  db: any,
+  userId: string,
+  callSite: string,
+  messages: Array<{ role: string; content: string }>,
+) {
+  const result = await runChat({
+    db,
+    userId,
+    callSite,
+    messages,
+    defaults: { provider: "openrouter", model: MODEL },
+    callOptions: { response_format: { type: "json_object" } },
   });
-  if (!response.ok) throw new Error(`LLM call failed: ${response.status} ${await response.text().catch(() => "")}`);
-  const data = await response.json();
-  return JSON.parse(data.choices?.[0]?.message?.content || "{}");
+  return JSON.parse(result.content || "{}");
 }
 
-export async function callMarkdown(messages: Array<{ role: string; content: string }>) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages, temperature: 0.25 }),
+export async function callMarkdown(
+  db: any,
+  userId: string,
+  callSite: string,
+  messages: Array<{ role: string; content: string }>,
+) {
+  const result = await runChat({
+    db,
+    userId,
+    callSite,
+    messages,
+    defaults: { provider: "openrouter", model: MODEL },
   });
-  if (!response.ok) throw new Error(`LLM call failed: ${response.status} ${await response.text().catch(() => "")}`);
-  const data = await response.json();
-  return String(data.choices?.[0]?.message?.content || "").trim();
+  return String(result.content || "").trim();
 }
 
 const UNTRUSTED_TEXT_KEYS = new Set(["name", "title", "summary", "content", "description", "purpose", "company", "role", "notes", "reasoning"]);

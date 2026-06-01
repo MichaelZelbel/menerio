@@ -1,10 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  openRouterWithCredits,
   insufficientCreditsResponse,
-  type CreditInfo,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { SUGGEST_CONNECTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -130,22 +130,24 @@ Return a JSON array with objects containing:
 Only return should_link: true for connections that would genuinely help the user.
 Don't suggest links just because notes share a common word. The connection should be insightful.`;
 
-    // LLM call with credit deduction
-    const { result: llmData, credits } = await openRouterWithCredits(
-      supabase, OPENROUTER_API_KEY, user.id, "suggest-connections:chat", "chat/completions",
-      {
+    // LLM call (system prompt + provider+model resolved via llm_call_configs)
+    const chatResult = await runChat({
+      db: supabase,
+      userId: user.id,
+      callSite: "suggest-connections.main",
+      messages: [{ role: "user", content: prompt }],
+      defaults: {
+        provider: "openrouter",
         model: "openai/gpt-4o-mini",
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: "You analyze note connections. Always respond with valid JSON containing a 'suggestions' array." },
-          { role: "user", content: prompt },
-        ],
-      }
-    );
+        systemPrompt: SUGGEST_CONNECTIONS_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    const credits = chatResult.credits;
 
     let suggestions: any[] = [];
     try {
-      const parsed = JSON.parse(llmData.choices[0].message.content);
+      const parsed = JSON.parse(chatResult.content);
       suggestions = (parsed.suggestions || parsed).filter((s: any) => s.should_link);
     } catch {
       suggestions = [];
@@ -162,10 +164,10 @@ Don't suggest links just because notes share a common word. The connection shoul
 
     return json({
       suggestions: enriched,
-      credits: {
+      credits: credits ? {
         remaining_tokens: credits.remaining_tokens,
         remaining_credits: credits.remaining_credits,
-      },
+      } : null,
     });
   } catch (err: any) {
     if (err.message === "INSUFFICIENT_CREDITS" || err.message === "NO_ACTIVE_PERIOD") {

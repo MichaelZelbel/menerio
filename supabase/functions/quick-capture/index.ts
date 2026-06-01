@@ -3,9 +3,10 @@ import { sha256Hex } from "../_shared/sha256.ts";
 import {
   checkBalance,
   getEmbeddingWithCredits,
-  chatWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { QUICK_CAPTURE_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,16 +26,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
-- "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
-- "people": array of people mentioned (empty if none)
-- "action_items": array of implied to-dos (empty if none)
-- "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
-- "topics": array of 1-5 short topic tags (always generate at least one)
-- "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
-- "sentiment": one of "positive", "negative", "neutral"
-- "summary": one-sentence summary of the note
-Only extract what's explicitly there. Don't invent details.`;
+// (system prompt lives in `_shared/llm-defaults.ts` so the Admin Dashboard can override it)
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
@@ -106,19 +98,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       const [embResult, chatResult] = await Promise.all([
         getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, userId, "quick-capture", content).catch(() => null),
-        chatWithCredits(
-          supabase, OPENROUTER_API_KEY, userId, "quick-capture",
-          [
-            { role: "system", content: METADATA_SYSTEM_PROMPT },
-            { role: "user", content },
-          ],
-          { response_format: { type: "json_object" } }
-        ),
+        runChat({
+          db: supabase,
+          userId,
+          callSite: "quick-capture.metadata",
+          messages: [{ role: "user", content }],
+          defaults: {
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini",
+            systemPrompt: QUICK_CAPTURE_METADATA_PROMPT,
+          },
+          callOptions: { response_format: { type: "json_object" } },
+        }),
       ]);
 
       let extracted: Record<string, unknown> = {};
       try {
-        extracted = JSON.parse(chatResult.result.choices[0].message.content);
+        extracted = JSON.parse(chatResult.content);
       } catch {
         extracted = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }

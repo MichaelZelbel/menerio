@@ -1,12 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { runChat } from "../_shared/llm-router.ts";
+import { DAILY_DIGEST_PROMPT } from "../_shared/llm-defaults.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -23,12 +23,15 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function synthesizeDigest(data: {
-  notes: { title: string; metadata: Record<string, unknown> }[];
-  openActions: { content: string; priority: string; created_at: string }[];
-  overdueContacts: { name: string; days_overdue: number }[];
-  userName: string;
-}): Promise<string[]> {
+async function synthesizeDigest(
+  userId: string,
+  data: {
+    notes: { title: string; metadata: Record<string, unknown> }[];
+    openActions: { content: string; priority: string; created_at: string }[];
+    overdueContacts: { name: string; days_overdue: number }[];
+    userName: string;
+  },
+): Promise<string[]> {
   const prompt = `You are a personal assistant creating a daily briefing. Based on the data below, write 3-5 concise bullet points for a daily digest email. Be specific and actionable.
 
 User: ${data.userName}
@@ -44,25 +47,20 @@ ${data.overdueContacts.map((c) => `- ${c.name} (${c.days_overdue} days overdue)`
 
 Return a JSON array of strings, each a single bullet point. Example: ["bullet 1", "bullet 2"]`;
 
-  const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "Return valid JSON with key 'bullets' containing an array of strings." },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
-
-  const d = await r.json();
   try {
-    const parsed = JSON.parse(d.choices[0].message.content);
+    const chatResult = await runChat({
+      db: supabase,
+      userId,
+      callSite: "daily-digest.main",
+      messages: [{ role: "user", content: prompt }],
+      defaults: {
+        provider: "openrouter",
+        model: "openai/gpt-4o-mini",
+        systemPrompt: DAILY_DIGEST_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    const parsed = JSON.parse(chatResult.content);
     return Array.isArray(parsed.bullets) ? parsed.bullets : [parsed.bullets || "No summary available."];
   } catch {
     return ["Your daily digest could not be generated. Check your notes in Menerio."];
@@ -202,7 +200,7 @@ async function processDigestForUser(userId: string, email: string, userName: str
     return;
   }
 
-  const bullets = await synthesizeDigest({
+  const bullets = await synthesizeDigest(userId, {
     notes: notes as { title: string; metadata: Record<string, unknown> }[],
     openActions: actions as { content: string; priority: string; created_at: string }[],
     overdueContacts,

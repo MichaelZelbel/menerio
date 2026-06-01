@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { chatWithCredits, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import { insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { GENERATE_PROFILE_SUGGESTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,22 +159,27 @@ Based on these patterns, suggest profile entries the user might want to add. For
 
 Only suggest things you're reasonably confident about. Return 5-15 suggestions max. Return valid JSON array.`;
 
-    const { result, credits } = await chatWithCredits(
-      db, openrouterKey, userId, "profile-suggestions",
-      [
-        { role: "system", content: "You are a profile analyst. Return ONLY a JSON array of suggestion objects. No markdown, no explanation outside the JSON." },
-        { role: "user", content: prompt },
-      ],
-      { response_format: { type: "json_object" } }
-    );
+    const chatResult = await runChat({
+      db,
+      userId,
+      callSite: "generate-profile-suggestions.main",
+      messages: [{ role: "user", content: prompt }],
+      defaults: {
+        provider: "openrouter",
+        model: "openai/gpt-4o-mini",
+        systemPrompt: GENERATE_PROFILE_SUGGESTIONS_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    const credits = chatResult.credits;
 
     let suggestions: any[] = [];
     try {
-      const content = result.choices?.[0]?.message?.content || "[]";
+      const content = chatResult.content || "[]";
       const parsed = JSON.parse(content);
       suggestions = Array.isArray(parsed) ? parsed : (parsed.suggestions || parsed.entries || []);
     } catch {
-      console.error("Failed to parse LLM response:", result.choices?.[0]?.message?.content);
+      console.error("Failed to parse LLM response:", chatResult.content);
       suggestions = [];
     }
 
@@ -183,7 +190,7 @@ Only suggest things you're reasonably confident about. Return 5-15 suggestions m
 
     return new Response(JSON.stringify({
       suggestions,
-      credits: { remaining_credits: credits.remaining_credits },
+      credits: credits ? { remaining_credits: credits.remaining_credits } : null,
       analyzed_notes: notes.length,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

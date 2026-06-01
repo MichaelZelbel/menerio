@@ -2,9 +2,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 import {
   checkBalance,
-  openRouterWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { WEEKLY_REVIEW_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -141,29 +142,23 @@ async function createWeeklyReviewForUser(
 Notes:
 ${noteSummaries.join("\n\n")}`;
 
-  const { result: llmData, credits } = await openRouterWithCredits(
-    supabaseAdmin,
-    OPENROUTER_API_KEY,
+  const chatResult = await runChat({
+    db: supabaseAdmin,
     userId,
-    "weekly-review:chat",
-    "chat/completions",
-    {
+    callSite: "weekly-review.main",
+    messages: [{ role: "user", content: prompt }],
+    defaults: {
+      provider: "openrouter",
       model: "openai/gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an insightful personal knowledge analyst. Analyze captured thoughts and produce a structured weekly review. Be specific and reference actual content from the notes. Return valid JSON only.",
-        },
-        { role: "user", content: prompt },
-      ],
+      systemPrompt: WEEKLY_REVIEW_PROMPT,
     },
-  );
+    callOptions: { response_format: { type: "json_object" } },
+  });
+  const credits = chatResult.credits;
 
   let reviewData: Record<string, unknown>;
   try {
-    reviewData = JSON.parse(llmData.choices[0].message.content);
+    reviewData = JSON.parse(chatResult.content);
   } catch {
     throw new Error("Failed to parse AI response");
   }
@@ -195,7 +190,7 @@ ${noteSummaries.join("\n\n")}`;
   return {
     ...savedReview,
     saved: true,
-    credits: { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits },
+    credits: credits ? { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits } : null,
   };
 }
 

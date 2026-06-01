@@ -2,8 +2,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
   getEmbeddingWithCredits,
-  chatWithCredits,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { INGEST_THOUGHT_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -13,14 +14,6 @@ const SLACK_CAPTURE_CHANNEL = Deno.env.get("SLACK_CAPTURE_CHANNEL")!;
 const BRAIN_OWNER_USER_ID = Deno.env.get("BRAIN_OWNER_USER_ID")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's captured note. Return JSON with:
-- "people": array of people mentioned (empty if none)
-- "action_items": array of implied to-dos (empty if none)
-- "dates_mentioned": array of dates YYYY-MM-DD (empty if none)
-- "topics": array of 1-3 short topic tags (always at least one)
-- "type": one of "observation", "task", "idea", "reference", "person_note"
-Only extract what's explicitly there.`;
 
 async function replyInSlack(channel: string, threadTs: string, text: string): Promise<void> {
   await fetch("https://slack.com/api/chat.postMessage", {
@@ -79,19 +72,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       const [embResult, chatResult] = await Promise.all([
         getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, BRAIN_OWNER_USER_ID, "ingest-thought", messageText),
-        chatWithCredits(
-          supabase, OPENROUTER_API_KEY, BRAIN_OWNER_USER_ID, "ingest-thought",
-          [
-            { role: "system", content: METADATA_SYSTEM_PROMPT },
-            { role: "user", content: messageText },
-          ],
-          { response_format: { type: "json_object" } }
-        ),
+        runChat({
+          db: supabase,
+          userId: BRAIN_OWNER_USER_ID,
+          callSite: "ingest-thought.metadata",
+          messages: [{ role: "user", content: messageText }],
+          defaults: {
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini",
+            systemPrompt: INGEST_THOUGHT_METADATA_PROMPT,
+          },
+          callOptions: { response_format: { type: "json_object" } },
+        }),
       ]);
 
       embedding = embResult.embedding;
       try {
-        metadata = JSON.parse(chatResult.result.choices[0].message.content);
+        metadata = JSON.parse(chatResult.content);
       } catch {
         metadata = { topics: ["uncategorized"], type: "observation" };
       }
