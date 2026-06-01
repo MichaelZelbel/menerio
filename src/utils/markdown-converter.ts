@@ -437,8 +437,11 @@ function serializeBlock(node: TiptapNode, depth: number): string {
     }
     case "videoEmbed":
       return `![video](${node.attrs?.src || ""})`;
-    case "pdfEmbed":
+    case "pdfEmbed": {
+      const attachName = String(node.attrs?.["data-attachment-name"] || node.attrs?.dataAttachmentName || "");
+      if (attachName) return `![[${attachName}]]`;
       return `![pdf](${node.attrs?.src || ""})`;
+    }
     case "audioEmbed":
       return `![audio](${node.attrs?.src || ""})`;
     default:
