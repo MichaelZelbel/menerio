@@ -190,7 +190,7 @@ ${noteSummaries.join("\n\n")}`;
   return {
     ...savedReview,
     saved: true,
-    credits: { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits },
+    credits: credits ? { remaining_tokens: credits.remaining_tokens, remaining_credits: credits.remaining_credits } : null,
   };
 }
 
