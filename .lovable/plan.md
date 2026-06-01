@@ -1,65 +1,53 @@
-# Mistral in LLM Config integrieren
+## Ziel
 
-## Befund
+Wenn eine Notiz eine angehängte PDF enthält, soll sie im Editor als **eingebettete Vorschau (Iframe)** erscheinen – nicht nur als blauer Link.
 
-Du hast recht — Mistral wurde übersehen. `supabase/functions/analyze-media/index.ts` ruft Mistral direkt auf (eigener `mistralFetch`-Helper), nicht über `_shared/llm-credits.ts`. Deshalb taucht es weder als Provider noch als Call-Site im neuen LLM-Config-Panel auf. `analyze-pdf` ist nur ein Wrapper um `analyze-media`.
+## Diagnose
 
-Drei verschiedene Mistral-Endpunkte sind im Einsatz:
+Stand der Notiz `Abiturzeugnis`: Im DB-Inhalt steht
+`[Abitur Zeugnis Michael Zelbel.pdf](#)`
+– ein normaler Markdown-Link mit `href="#"`. Zwei Probleme:
 
-| Zweck | Endpoint | Modell |
-|---|---|---|
-| OCR (PDF, Bilder) | `POST /v1/ocr` | `mistral-ocr-latest` |
-| Vision (Bildinterpretation) | `POST /v1/chat/completions` (multimodal) | `pixtral-12b-2409` |
-| Text-Nachverarbeitung (Zusammenfassung etc.) | `POST /v1/chat/completions` | `mistral-small-latest` |
+1. **Insertion-Pfad verliert die Datei-Referenz.** Wenn eine PDF als Obsidian-Embed `![[Datei.pdf]]` gespeichert ist, rendert `inlineMarkdown` sie als `<a href="#" data-attachment-name="...">`. Beim Speichern serialisiert der Editor das aber als `[Name](#)` und das `data-attachment-name` geht verloren → keine Vorschau möglich.
+2. **Round-Trip von `pdfEmbed` ist kaputt.** Beim Speichern wird `pdfEmbed` zwar zu `![pdf](url)` serialisiert, aber `markdownToHtml` macht daraus ein `<img>`, nie wieder ein `<iframe>`. Vorschau verschwindet beim nächsten Laden.
 
-## Plan
+## Lösung
 
-### 1. Provider „mistral" im Router
+### 1. PDF-Erkennung in `inlineMarkdown` (markdown → editor HTML)
 
-`supabase/functions/_shared/llm-router.ts`:
-- `Provider`-Type um `"mistral"` erweitern.
-- Neuer Adapter `callMistralChat(...)` — Mistral ist OpenAI-kompatibel für Chat/Vision, also dünner Wrapper um `callOpenAICompatible` mit `https://api.mistral.ai/v1/chat/completions`.
-- OCR ist **kein** Chat-Endpoint und passt nicht in `runChat`. Dafür eine separate Funktion `runOcr({ db, userId, callSite, document|image, defaults })`, die `POST /v1/ocr` aufruft, das gleiche Config-Lookup (`llm_call_configs`) nutzt und über `deductTokens` abrechnet (mit Token-Schätzung aus Seitenanzahl × Pauschale, da OCR keine echten Tokens liefert).
-- Secret-Mapping in `admin-llm-config/index.ts`: `mistral → MISTRAL_API_KEY`.
+In `src/utils/markdown-converter.ts`:
 
-### 2. Drei neue Call-Sites in `llm_call_configs`
+- `![[Datei.pdf]]` (und andere PDF-Extensions) → `<iframe data-type="pdf" data-attachment-name="Datei.pdf" src=""></iframe>` statt eines `<a>`.
+- `![pdf](url)` → `<iframe data-type="pdf" src="url"></iframe>`.
+- Normales `[X.pdf](#)` (Altbestand) → ebenfalls Iframe-Placeholder mit `data-attachment-name="X.pdf"`, damit der Resolver die Signed URL nachträglich einsetzen kann.
+- Normales `[X.pdf](https://…)` (mit echter URL) → Iframe direkt mit dieser URL.
 
-Seed-Migration:
+### 2. Resolver erweitern
 
-| call_site | provider | model | Beschreibung |
-|---|---|---|---|
-| `analyze-media.ocr` | mistral | `mistral-ocr-latest` | OCR für PDFs & gescannte Bilder |
-| `analyze-media.vision` | mistral | `pixtral-12b-2409` | Bildinterpretation (Captions, Objekte, Szene) |
-| `analyze-media.text` | mistral | `mistral-small-latest` | Nachgelagerte Textverarbeitung der OCR-Ergebnisse |
+In `src/lib/upload-attachment.ts` (`resolveAttachmentImagesInHtml`):
+- Zusätzlich `<iframe data-attachment-name="…">` matchen und `src=""` mit der signierten URL füllen (analog zu `<img>` und `<a>`).
 
-Die heutigen Default-System-Prompts aus `analyze-media/index.ts` werden 1:1 in `system_prompt` der jeweiligen Zeile übernommen, damit Verhalten gleich bleibt.
+### 3. `PdfEmbed` Markdown-Serialisierung stabilisieren
 
-### 3. `analyze-media` umverdrahten
+In `src/components/notes/extensions/PdfEmbed.ts`:
+- Attribut `data-attachment-name` zusätzlich speichern, damit beim Round-Trip aus dem Iframe wieder `![[Datei.pdf]]` wird, nicht `![pdf](signed-url-die-abläuft)`.
 
-- Vision-Call (Zeile ~137) und Text-Call (Zeile ~164) gehen über `runChat({ callSite: "analyze-media.vision" | "analyze-media.text", ... })`.
-- OCR-Calls (Zeilen ~270 und ~306) gehen über `runOcr({ callSite: "analyze-media.ocr", ... })`.
-- Lokales `MISTRAL_API_KEY` / `mistralFetch` entfernen, da Router das übernimmt.
-- Default-Block in jedem Call enthält Provider+Model+Prompt als Code-Fallback (gleicher Sicherheitsnetz-Mechanismus wie bei den anderen umgezogenen Functions).
+In `src/utils/markdown-converter.ts` Serializer-Case `pdfEmbed`:
+- Wenn `data-attachment-name` gesetzt ist → `![[Datei.pdf]]` ausgeben (Obsidian-kompatibel, stabil).
+- Sonst Fallback `![pdf](url)`.
 
-### 4. Admin-UI
+### 4. FileUploadHandler
 
-`LLMConfigPanel.tsx`:
-- Provider-Dropdown bekommt `mistral` als Option (ausgegraut, wenn `MISTRAL_API_KEY` nicht in `availability`).
-- Kuratierte Modell-Liste für Provider Mistral: `mistral-ocr-latest`, `pixtral-12b-2409`, `mistral-large-latest`, `mistral-small-latest`, `mistral-medium-latest`, plus Freitext.
-- Hinweis-Badge an Call-Site `analyze-media.ocr`: „OCR-Endpoint — Chat-Parameter (temperature, max_tokens) werden ignoriert".
-- „Save & Test"-Button für `analyze-media.ocr` ruft einen leichten OCR-Smoke-Test gegen ein winziges Test-PDF (oder antwortet mit „Test für OCR nicht im Chat-Modus möglich — bitte über echte Datei testen"), für die anderen beiden funktioniert der bestehende Chat-Test.
+In `src/components/notes/extensions/FileUploadHandler.ts`:
+- Beim Insert von PDFs `data-attachment-name: filename` mitgeben, damit das gerade eingefügte Embed sofort stabil serialisiert.
 
-### 5. Risiko / Rollback
+## Auswirkung auf bestehende Notizen
 
-- Verhalten bleibt identisch, weil Seed = heutige Hardcoded-Defaults.
-- `enabled=false` auf einer Zeile fällt automatisch auf den Code-Default zurück (Mistral direkt).
-- Falls `MISTRAL_API_KEY` fehlt: Router wirft klaren Fehler statt stiller Falschnutzung.
+- Die bestehende Notiz `Abiturzeugnis` zeigt nach dem Fix automatisch die PDF-Vorschau (via Fallback-Erkennung von `[X.pdf](#)` + Lookup in `note_attachments` per Dateiname).
+- Keine Migration nötig.
 
-## Technische Details
+## Test
 
-- Neue Files: keine. Nur Edits an `_shared/llm-router.ts`, `admin-llm-config/index.ts`, `analyze-media/index.ts`, `LLMConfigPanel.tsx` + eine Seed-Migration.
-- `MISTRAL_API_KEY` ist bereits als Secret konfiguriert (analyze-media nutzt es aktuell), also kein neuer Secret-Schritt nötig.
-
-## Offene Frage
-
-Soll ich für `analyze-media.ocr` zusätzlich erlauben, **statt** Mistral-OCR ein Vision-Modell (z. B. Gemini 3 Flash oder GPT-4o) zu nutzen? Das wäre dann ein zweiter Code-Pfad im Router, aber gibt dir die Freiheit, OCR komplett wegzuschalten. Wenn nein, bleibt `analyze-media.ocr` Mistral-only und du steuerst nur Modell-Variante + Enable/Disable.
+1. Bestehende Notiz `Abiturzeugnis` neu laden → PDF erscheint als eingebetteter Viewer.
+2. Neue PDF per Drag-&-Drop in eine Notiz ziehen → Vorschau erscheint sofort, bleibt nach Reload erhalten.
+3. PDF per Embed-Toolbar (URL) einfügen → Vorschau erscheint, bleibt nach Reload erhalten.
