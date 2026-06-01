@@ -2,10 +2,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
   getEmbeddingWithCredits,
-  chatWithCredits,
   insufficientCreditsResponse,
   type CreditInfo,
 } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import { FIND_CONNECTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -174,18 +175,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ].filter(Boolean).join("\n");
 
       try {
-        const chatResult = await chatWithCredits(
-          supabase, OPENROUTER_API_KEY, user.id, "find-connections",
-          [
-            {
-              role: "system",
-              content: "You are a knowledge analyst. Given a set of related notes, contacts, and action items, write a concise 2-3 sentence insight explaining the non-obvious connections between these items. Focus on cross-domain patterns, time-bridging connections, and actionable observations. Be specific, not generic.",
-            },
-            { role: "user", content: insightContext },
-          ]
-        );
-        insight = chatResult.result.choices?.[0]?.message?.content || null;
-        lastCredits = chatResult.credits;
+        const chatResult = await runChat({
+          db: supabase,
+          userId: user.id,
+          callSite: "find-connections.main",
+          messages: [{ role: "user", content: insightContext }],
+          defaults: {
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini",
+            systemPrompt: FIND_CONNECTIONS_PROMPT,
+          },
+        });
+        insight = chatResult.content || null;
+        lastCredits = chatResult.credits ?? lastCredits;
       } catch (err: any) {
         if (err.message === "INSUFFICIENT_CREDITS") {
           insight = null; // Skip insight generation if credits ran out
