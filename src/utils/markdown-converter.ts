@@ -554,7 +554,7 @@ function inlineMarkdown(text: string): string {
       return `<img src="" alt="${alt}" data-attachment-name="${safeName}">`;
     }
     if (isPdf) {
-      return `<iframe data-type="pdf" src="" data-attachment-name="${safeName}" frameborder="0" title="${alt}"></iframe>`;
+      return `<iframe data-type="pdf" src="about:blank" data-attachment-name="${safeName}" frameborder="0" title="${alt}"></iframe>`;
     }
     // Non-image attachments: render as a downloadable link placeholder.
     return `<a href="#" data-attachment-name="${safeName}" class="attachment-link">${alt}</a>`;
@@ -574,7 +574,7 @@ function inlineMarkdown(text: string): string {
     const name = String(label).trim();
     const safeName = encodeAttribute(name);
     if (href === "#" || href === "") {
-      return `<iframe data-type="pdf" src="" data-attachment-name="${safeName}" frameborder="0" title="${safeName}"></iframe>`;
+      return `<iframe data-type="pdf" src="about:blank" data-attachment-name="${safeName}" frameborder="0" title="${safeName}"></iframe>`;
     }
     return `<iframe data-type="pdf" src="${encodeAttribute(href)}" data-attachment-name="${safeName}" frameborder="0" title="${safeName}"></iframe>`;
   });

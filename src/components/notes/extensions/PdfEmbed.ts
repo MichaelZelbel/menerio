@@ -39,7 +39,7 @@ export const PdfEmbed = Node.create({
         "iframe",
         mergeAttributes(
           {
-            src: HTMLAttributes.src,
+            src: HTMLAttributes.src || "about:blank",
             frameborder: "0",
             "data-type": "pdf",
           },
