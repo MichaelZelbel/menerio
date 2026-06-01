@@ -709,10 +709,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     let cancelled = false;
     const currentHtml = editor.getHTML();
     if (!currentHtml.includes("data-attachment-name=")) return;
-    // Only swap when at least one placeholder still has an empty/missing src.
-    if (!/<img[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml)) return;
-    const needsResolve = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
-    if (!needsResolve) return;
+    // Only swap when at least one img/iframe placeholder still has an empty/missing src.
+    const hasImg = /<img[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml);
+    const hasIframe = /<iframe[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml);
+    if (!hasImg && !hasIframe) return;
+    const imgNeeds = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
+    const iframeNeeds = /<iframe[^>]*\bsrc=""[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
+    if (!imgNeeds && !iframeNeeds) return;
 
     void (async () => {
       try {
