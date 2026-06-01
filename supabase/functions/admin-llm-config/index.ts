@@ -127,6 +127,36 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "sync_defaults") {
+      const defaults = [
+        {
+          call_site: "process-note.metadata",
+          description: "Extracts title, people, dates, topics, sentiment, and summary from a note.",
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          system_prompt: PROCESS_NOTE_METADATA_PROMPT,
+          temperature: null,
+          max_tokens: null,
+          extra_options: JSON_OBJECT_OPTIONS,
+          enabled: true,
+        },
+        {
+          call_site: "process-note.profile_extraction",
+          description: "Extracts profile facts from a note and writes to the Review Queue.",
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
+          temperature: null,
+          max_tokens: null,
+          extra_options: JSON_OBJECT_OPTIONS,
+          enabled: true,
+        },
+      ];
+      const { error } = await admin.from("llm_call_configs").upsert(defaults, { onConflict: "call_site" });
+      if (error) throw error;
+      return json({ ok: true, synced: defaults.map((d) => d.call_site) });
+    }
+
     if (action === "test") {
       const callSite = String(body.call_site || "");
       const userPrompt = String(body.prompt || "Sag 'Hallo' und nenne das Modell und den Provider, den du nutzt.");
