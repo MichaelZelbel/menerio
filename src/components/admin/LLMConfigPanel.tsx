@@ -33,6 +33,8 @@ type Config = {
   extra_options: Record<string, unknown>;
   enabled: boolean;
   updated_at: string;
+  placeholders?: string[];
+  is_chat?: boolean;
 };
 
 const PROVIDER_LABELS: Record<Provider, string> = {
