@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { Loader2, Play, RotateCcw, Save } from "lucide-react";
 
-type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini";
+type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
 type Config = {
   call_site: string;
