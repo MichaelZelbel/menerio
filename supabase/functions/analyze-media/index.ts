@@ -68,54 +68,14 @@ async function fileToBase64DataUrl(
   return `data:${mimeType};base64,${btoa(binary)}`;
 }
 
-async function mistralFetch(url: string, body: unknown): Promise<any> {
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${MISTRAL_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`Mistral ${url} failed: ${resp.status} ${text}`);
-  }
-  return await resp.json();
-}
-
-async function deductFromUsage(
-  userId: string,
-  feature: string,
-  model: string,
-  usage: any
-) {
-  const promptTokens = usage?.prompt_tokens ?? 0;
-  const completionTokens = usage?.completion_tokens ?? 0;
-  const totalTokens =
-    usage?.total_tokens ?? (promptTokens + completionTokens || 1000);
-  const usageSource = usage?.total_tokens ? "provider" : "fallback";
-  try {
-    await deductTokens(supabase, {
-      userId,
-      tokens: Math.max(1, totalTokens),
-      feature,
-      model,
-      provider: "mistral",
-      promptTokens,
-      completionTokens,
-      usageSource,
-    });
-  } catch (e) {
-    console.warn(`deductTokens failed for ${feature}:`, (e as Error).message);
-  }
-}
-
 interface PageSummary {
   description: string;
   topics: string[];
   content_type?: string;
 }
+
+const IMAGE_DESCRIBE_DEFAULT_PROMPT = IMAGE_DESCRIBE_PROMPT;
+const PAGE_SUMMARY_DEFAULT_PROMPT = PAGE_SUMMARY_PROMPT;
 
 async function summarizePageText(
   userId: string,
@@ -132,16 +92,19 @@ async function summarizePageText(
     return { description: "", topics: [], content_type: "other" };
   }
   try {
-    const result = await mistralFetch(MISTRAL_CHAT_URL, {
-      model: TEXT_MODEL,
-      messages: [
-        { role: "system", content: PAGE_SUMMARY_PROMPT },
-        { role: "user", content: combined.slice(0, 12000) },
-      ],
-      response_format: { type: "json_object" },
+    const result = await runChat({
+      db: supabase,
+      userId,
+      callSite: "analyze-media.text",
+      messages: [{ role: "user", content: combined.slice(0, 12000) }],
+      defaults: {
+        provider: "mistral",
+        model: TEXT_MODEL,
+        systemPrompt: PAGE_SUMMARY_DEFAULT_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
     });
-    await deductFromUsage(userId, "analyze-media:summary", TEXT_MODEL, result.usage);
-    const parsed = JSON.parse(result.choices[0].message.content);
+    const parsed = JSON.parse(result.content || "{}");
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
@@ -156,29 +119,35 @@ async function summarizePageText(
 async function describeImage(
   userId: string,
   dataUrl: string,
-  feature: string
+  _feature: string
 ): Promise<PageSummary> {
   try {
-    const result = await mistralFetch(MISTRAL_CHAT_URL, {
-      model: VISION_MODEL,
+    const result = await runChat({
+      db: supabase,
+      userId,
+      callSite: "analyze-media.vision",
       messages: [
-        { role: "system", content: IMAGE_DESCRIBE_PROMPT },
         {
           role: "user",
-          content: [{ type: "image_url", image_url: dataUrl }],
+          // Mistral/OpenAI-compatible multimodal: content array
+          content: [{ type: "image_url", image_url: dataUrl }] as unknown as string,
         },
       ],
-      response_format: { type: "json_object" },
+      defaults: {
+        provider: "mistral",
+        model: VISION_MODEL,
+        systemPrompt: IMAGE_DESCRIBE_DEFAULT_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
     });
-    await deductFromUsage(userId, feature, VISION_MODEL, result.usage);
-    const parsed = JSON.parse(result.choices[0].message.content);
+    const parsed = JSON.parse(result.content || "{}");
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
       content_type: String(parsed.content_type || "other"),
     };
   } catch (e) {
-    console.warn(`describeImage (${feature}) failed:`, (e as Error).message);
+    console.warn(`describeImage failed:`, (e as Error).message);
     return { description: "", topics: [], content_type: "other" };
   }
 }
