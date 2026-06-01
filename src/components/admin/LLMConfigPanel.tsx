@@ -130,7 +130,8 @@ export default function LLMConfigPanel() {
       <CardHeader>
         <CardTitle>LLM Call Configuration</CardTitle>
         <CardDescription>
-          Konfiguriere pro AI-Aufruf Provider, Modell und System-Prompt. Inaktive Einträge fallen auf den Code-Default zurück.
+          Configure provider, model, and system prompt per AI call site. Inactive entries fall back to the code default.
+          Runtime context is injected via <code>{`{{placeholder}}`}</code> substitution.
         </CardDescription>
         <div className="flex flex-wrap gap-2 pt-2">
           {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
@@ -154,11 +155,11 @@ export default function LLMConfigPanel() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Call-Site</TableHead>
+                  <TableHead>Call site</TableHead>
                   <TableHead>Provider</TableHead>
-                  <TableHead>Modell</TableHead>
-                  <TableHead>System-Prompt</TableHead>
-                  <TableHead>Aktiv</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>System prompt</TableHead>
+                  <TableHead>Active</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
