@@ -527,23 +527,30 @@ function escapeMarkdownText(text: string): string {
 function inlineMarkdown(text: string): string {
   let r = text;
 
+  // PDF embed via explicit `![pdf](url)` syntax — render as iframe.
+  r = r.replace(/!\[pdf\]\(([^)]+)\)/gi, (_, src) => {
+    return `<iframe data-type="pdf" src="${encodeAttribute(src)}" frameborder="0" title="PDF document"></iframe>`;
+  });
+
   // Images (before links)
   r = r.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
 
   // Obsidian-style attachment embeds: ![[filename.ext]]
-  // Emit a placeholder <img> with the filename in data-attachment-name.
+  // Emit a placeholder element with the filename in data-attachment-name.
   // The async resolver (resolveAttachmentImagesInHtml) swaps in a real
-  // signed URL before the editor mounts; non-image attachments fall back
-  // to a wikilink-style link node.
+  // signed URL before the editor mounts.
   r = r.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
     const name = String(target).trim();
     const alt = encodeAttribute(display || name);
     const safeName = encodeAttribute(name);
     const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
     const isImage = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext);
+    const isPdf = ext === "pdf";
     if (isImage) {
-      // Empty src so the browser shows nothing until the resolver fills it in.
       return `<img src="" alt="${alt}" data-attachment-name="${safeName}">`;
+    }
+    if (isPdf) {
+      return `<iframe data-type="pdf" src="" data-attachment-name="${safeName}" frameborder="0" title="${alt}"></iframe>`;
     }
     // Non-image attachments: render as a downloadable link placeholder.
     return `<a href="#" data-attachment-name="${safeName}" class="attachment-link">${alt}</a>`;
@@ -555,8 +562,22 @@ function inlineMarkdown(text: string): string {
     return `<span data-wikilink="true" data-note-id="" data-note-title="${encodeAttribute(target)}" data-display-text="${encodeAttribute(display || "")}" class="wikilink-node" contenteditable="false">[[${label}]]</span>`;
   });
 
+  // Legacy/attachment PDF links: `[Some File.pdf](#)` or `[X.pdf](https://…)`.
+  // Convert to a PDF iframe so the embedded viewer shows up. When the href
+  // is `#`, rely on the attachment resolver to fill in a signed URL via
+  // the filename lookup; otherwise embed the URL directly.
+  r = r.replace(/\[([^\]]+\.pdf)\]\(([^)]+)\)/gi, (_, label, href) => {
+    const name = String(label).trim();
+    const safeName = encodeAttribute(name);
+    if (href === "#" || href === "") {
+      return `<iframe data-type="pdf" src="" data-attachment-name="${safeName}" frameborder="0" title="${safeName}"></iframe>`;
+    }
+    return `<iframe data-type="pdf" src="${encodeAttribute(href)}" data-attachment-name="${safeName}" frameborder="0" title="${safeName}"></iframe>`;
+  });
+
   // Links
   r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
 
   // Bold + italic
   r = r.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
