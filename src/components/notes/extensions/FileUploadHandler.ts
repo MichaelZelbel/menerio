@@ -71,7 +71,7 @@ export const FileUploadHandler = Extension.create({
           (editor.commands as any).setAudioEmbed({ src: url });
           break;
         case "pdf":
-          (editor.commands as any).setPdfEmbed({ src: url });
+          (editor.commands as any).setPdfEmbed({ src: url, "data-attachment-name": filename });
           break;
       }
     };
