@@ -967,16 +967,20 @@ async function generateProfileSuggestions(
     }> = [];
 
     try {
-      const result = await chatWithCredits(
-        supabase, OPENROUTER_API_KEY, userId, "process-note-profile",
-        [
-          { role: "system", content: PROFILE_EXTRACTION_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        { response_format: { type: "json_object" } },
-      );
+      const result = await runChat({
+        db: supabase,
+        userId,
+        callSite: "process-note.profile_extraction",
+        messages: [{ role: "user", content: userPrompt }],
+        defaults: {
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          systemPrompt: PROFILE_EXTRACTION_PROMPT,
+        },
+        callOptions: { response_format: { type: "json_object" } },
+      });
 
-      const rawContent = result.result.choices[0].message.content;
+      const rawContent = result.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = JSON.parse(rawContent);
 
