@@ -1,76 +1,150 @@
-# Plan: Stop the app-wide freeze
+## Investigation findings
 
-## What is actually happening
+The current freeze is not the same attachment loop I previously fixed.
 
-Two symptoms, one root cause:
+I checked the reported note in the database:
 
-1. **Clicking "Notes" in the sidebar feels stuck.** The router URL is `/dashboard/notes/:noteId` (deep-linked from the last opened note), so the sidebar click re-mounts `NoteEditor` for that note. The freeze starts there, not in the sidebar code.
-2. **Clicking any specific note freezes completely.** Same `NoteEditor` mounts again for the new note, same effect runs, same lockup.
+- Note: `Streaming Server VPS`
+- Size: ~5.4k characters, ~153 lines
+- Attachments: 0 `data-attachment-name` placeholders, 0 images, 0 PDF iframes
+- Links: 23 URLs, 12 markdown links
 
-The browser tells the story:
-- DOMContentLoaded on `/dashboard/notes` is **11.6 s** and cumulative task time is **2.4 s** on a page that should be near-instant.
-- A Vite dep chunk returns **502** mid-load (`chunk-Y2G7AXWB.js`), consistent with the dev server being repeatedly hit while the main thread is busy.
-- No runtime exception is thrown — the tab is alive but unresponsive, which is the signature of a tight render/effect loop, not a crash.
+So this specific freeze is not caused by PDF/image signed-URL attachment resolution.
 
-## Which previous change caused it
+The new culprit is the Obsidian-style Notes folder/node tree that was added earlier to improve Notes navigation.
 
-The freeze was introduced in **my last fix to `src/components/notes/NoteEditor.tsx`** — the one in `.lovable/plan.md` that replaced the regex-based attachment detection with a `DOMParser` + `lastResolvedHtmlRef` guard inside the effect at lines 708–763.
+## What introduced this behavior
 
-Why that fix is wrong:
+The freezing path was introduced by the previous Obsidian-like navigation change that created `src/components/notes/NoteTree.tsx` and wired it into `src/pages/Notes.tsx`.
 
-- The effect's deps are `[editor, note.id, note.content, user?.id]`.
-- Inside the effect we read `editor.getHTML()` and compare against `lastResolvedHtmlRef.current`. After we call `editor.commands.setContent(resolved, { emitUpdate: false })`, **Tiptap re-parses and re-serializes**, so the next `editor.getHTML()` is not byte-equal to `resolved` (attribute order, whitespace, the `<div class="embed-pdf-wrapper">` wrapper around `<iframe data-type="pdf">`, the wikilink-span rewrites in `resolveWikilinks`). The cache key we stored therefore never matches the value we read next time.
-- The structural "needs resolution" check walks `[data-attachment-name]` elements. For PDFs, Tiptap's `PdfEmbed.renderHTML` always emits the iframe wrapped in a div, so a re-parse can re-introduce the wrapper and momentarily reset `src` to `"about:blank"` for one tick (the default in `renderHTML` when the attr round-trips through `mergeAttributes`). The check then says "needs = true" again.
-- `note.content` is in the deps. Every save (`updateNote.mutate` from `onUpdate`) invalidates the `notes` query, the parent re-renders with a new `note` object, `note.content` changes by reference, and the effect runs again — re-resolving, re-`setContent`-ing, scheduling another invalidation cascade through the autosave timer. On notes that contain `![[file.pdf]]` or `![[image.png]]`, this becomes a hot loop that monopolises the main thread. That is what looks like "the app froze".
+The problematic choices in that change are:
 
-The earlier symptom (the regex always reporting "needs resolution") was real, but the fix I shipped still has the same shape — an effect that writes to the editor it observes — and now it triggers on every save, not just initial mount.
+1. `FolderRow` and `NoteRow` are defined inside the `NoteTree` render function.
+   - Every `NoteTree` render creates new component types.
+   - React cannot preserve the row tree; it effectively remounts the visible folder/note tree repeatedly.
 
-The edge-function / LLM-config work from the earlier turns did not touch any frontend rendering path and is not implicated.
+2. Folder flattening is done inside every row render.
+   - `NoteRow` recomputes `tree.children.flatMap(flattenFolders)` for every visible note.
+   - `FolderRow` recomputes move targets for every folder.
+   - This turns one tree render into repeated full-tree traversals.
 
-## Clean fix
+3. Folder note counts are computed recursively during render.
+   - `countNestedNotes(node)` runs for every folder row.
+   - This repeats work that can be computed once when the tree is built.
 
-Stop treating attachment resolution as a reactive effect. Do it **once per note open**, before the editor ever sees the unresolved HTML, and never again from inside an effect that depends on editor content.
+4. The auto-expand effect always creates a new `Set`.
+   - The effect depends on the full `notes` array and `selectedId`.
+   - When a note is clicked, query/cache updates or route changes cause the effect to run.
+   - It returns a new `Set` even when nothing actually changed, forcing another full tree render.
 
-Concretely, in `src/components/notes/NoteEditor.tsx`:
+5. Selecting a note also mounts `NoteEditor`, which currently does synchronous markdown → HTML → wikilink resolution → TipTap parsing on the same click.
+   - That editor work is not the root cause for `Streaming Server VPS`, but it amplifies the perceived freeze after the tree has already blocked the main thread.
 
-1. **Delete the effect at lines 708–763** entirely. Also delete `lastResolvedHtmlRef` (line 389) — it only existed to paper over the loop.
-2. **Resolve at the source.** Wrap every `setContent(editorContent, …)` call that can introduce `data-attachment-name` placeholders with a small helper:
-   ```ts
-   const setEditorContentWithAttachments = (html: string) => {
-     if (!editor) return;
-     editor.commands.setContent(html, { emitUpdate: false });
-     if (!user?.id || !html.includes("data-attachment-name=")) return;
-     // Fire-and-forget; never re-enters because we don't observe getHTML().
-     resolveAttachmentImagesInHtml(html, user.id).then((resolved) => {
-       if (!editor || editor.isDestroyed || editor.isFocused) return;
-       if (resolved === html) return;
-       editor.commands.setContent(resolved, { emitUpdate: false });
-     }).catch(() => {/* ignore */});
-   };
-   ```
-   Use it at:
-   - the note-switch effect (lines 661 and 666),
-   - the `menerio:note-updated` handler (line 690),
-   - the source-mode round-trip (line 967).
-3. **Initial mount.** `useEditor`'s `content` is computed synchronously from `note.content`. Add a tiny `useEffect(() => { …same helper, but read note.content once… }, [editor])` that runs only when the editor instance is created — not when `note.content` changes. Subsequent prop changes are already covered by the note-switch effect above.
-4. **Save-driven re-renders are now safe.** Because no effect reads `editor.getHTML()` and writes back to it, the autosave → query-invalidate → prop-change cycle can no longer feed itself.
+## Why clicking `Streaming Server VPS` freezes
+
+Clicking the note triggers this chain:
+
+```text
+click note row
+→ set active folder
+→ set selected note
+→ route changes to /dashboard/notes/:id
+→ NoteTree rerenders/remounts rows
+→ NoteTree auto-expand effect forces another render
+→ NoteEditor mounts and synchronously converts/parses note content
+```
+
+On the main user account, the Notes page has roughly:
+
+- 202 active notes
+- 31 saved/distinct folders
+- ~1MB total note content
+- one very large note around 447k characters
+
+That data size makes the current tree/render pattern fragile. The selected note itself does not need to be large for the click to freeze, because the expensive work happens around the whole tree and editor selection pipeline.
+
+## Clean fix plan
+
+### 1. Refactor `NoteTree` so row rendering is stable
+
+In `src/components/notes/NoteTree.tsx`:
+
+- Move `FolderRow` and `NoteRow` out of the `NoteTree` component body.
+- Wrap rows with `React.memo` where appropriate.
+- Pass only stable props into rows.
+- Use `useCallback` for folder toggle, note click, move, and drag handlers where it prevents unnecessary row updates.
+
+Expected result: selecting a note no longer remounts the entire visible tree.
+
+### 2. Precompute folder metadata once per tree change
+
+In `NoteTree.tsx`:
+
+- Add nested note count directly to each `FolderNode` while building/sorting the tree, or build a `Map<folderPath, count>` in one `useMemo`.
+- Build `flatFolders` once in a `useMemo`.
+- Build move-target lists from that cached flat folder list instead of recomputing `flattenFolders` in every row.
+
+Expected result: render cost becomes closer to linear in visible rows instead of repeated full-tree traversal per row.
+
+### 3. Fix the auto-expand effect so it does not force redundant renders
+
+In `NoteTree.tsx`:
+
+- Compute `selectedFolderPath` once from `selectedId` and `notes`.
+- Make the expand effect depend on `activeFolderPath` and `selectedFolderPath`, not the entire `notes` array.
+- Inside `setExpanded`, return the current `Set` when no new folder key was added.
+
+Expected result: selecting a note does not cause a second full render unless the selected folder genuinely needs to be opened.
+
+### 4. Reduce synchronous editor work during note selection
+
+In `src/components/notes/NoteEditor.tsx`:
+
+- Short-circuit the note-sync effect before running markdown/HTML/wikilink conversion when the incoming `note.content` already matches the local editor state or a pending save.
+- Only run `contentToEditorHtml`, `resolveWikilinks`, `editor.getHTML`, and `normalizeEditorHtml` when:
+  - the selected note id actually changed, or
+  - a true remote content update arrives while the editor is not focused.
+- Keep the attachment resolver non-reactive, but add a stale-note guard/version guard so async attachment resolution cannot write into the wrong note after fast navigation.
+
+Expected result: note selection remains responsive, and query/cache refreshes do not repeatedly reprocess the same note content.
+
+### 5. Fix stale graph/connection navigation route
+
+There is still one legacy navigation path:
+
+- `src/components/notes/ConnectionsPanel.tsx` navigates to `/dashboard/notes?selected=<id>`.
+- The current Notes page uses `/dashboard/notes/:noteId` and does not read `?selected=`.
+
+Update this to `/dashboard/notes/:id` so all note navigation uses one route model.
+
+Expected result: graph/connection navigation cannot enter a partially synced selection state.
+
+## Verification plan
+
+After implementation, I will verify with browser profiling, not just code inspection:
+
+1. Open `/dashboard/notes`.
+2. Expand the Notes tree / Vault root.
+3. Click `Streaming Server VPS` or the closest available matching note in the authenticated preview context.
+4. Capture a CPU profile around the click.
+5. Confirm:
+   - no long main-thread lock after node click,
+   - no repeated `NoteTree` remount/render cascade,
+   - no attachment resolver loop,
+   - route updates to `/dashboard/notes/:id`,
+   - editor appears and remains interactive.
+6. Re-run with repeated note switching to ensure the freeze does not come back after cache/query updates.
 
 ## Files to change
 
-- `src/components/notes/NoteEditor.tsx` — remove the resolver effect (708–763) and the `lastResolvedHtmlRef`; add `setEditorContentWithAttachments`; route the four `setContent` call sites through it; add a one-shot `useEffect([editor])` for initial resolution.
-- `.lovable/plan.md` — replace the old plan describing the failed fix with this one.
+- `src/components/notes/NoteTree.tsx`
+- `src/components/notes/NoteEditor.tsx`
+- `src/components/notes/ConnectionsPanel.tsx`
+- `.lovable/plan.md` only if we want the internal plan document to reflect the corrected root cause
 
-No changes to `resolveAttachmentImagesInHtml`, `PdfEmbed`, `FileUploadHandler`, or any edge function.
+## What I will not do
 
-## Verification
-
-1. `/dashboard/notes` opens immediately; main thread idle within ~200 ms.
-2. Click any note in the tree, including notes with embedded PDFs and images — opens immediately, no spinner stuck.
-3. Type in a note with `![[image.png]]` — saves complete, no runaway CPU, signed URL still resolves once and the image stays visible.
-4. Switch between two attachment-bearing notes 5× in a row — flat CPU, no growing memory.
-5. `chunk-Y2G7AXWB.js` 502s stop reappearing once the main thread is no longer saturated.
-
-## Out of scope
-
-- The Vite 502 itself (dev-server artifact, will clear once the loop is gone).
-- The earlier LLM-config refactor across edge functions — unrelated to this freeze; leave as-is.
+- No database migration.
+- No changes to stored note content.
+- No rollback of the entire Notes tree feature.
+- No changes to attachment storage or Supabase Edge Functions for this specific freeze.

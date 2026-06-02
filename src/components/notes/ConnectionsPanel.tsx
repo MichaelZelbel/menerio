@@ -124,7 +124,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
               {data.connections.slice(0, 6).map((conn) => (
                 <button
                   key={conn.id}
-                  onClick={() => navigate(`/dashboard/notes?selected=${conn.id}`)}
+                  onClick={() => navigate(`/dashboard/notes/${conn.id}`)}
                   className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent transition-colors"
                 >
                   <FileText className="h-3 w-3 text-muted-foreground shrink-0" />

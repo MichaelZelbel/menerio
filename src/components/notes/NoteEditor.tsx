@@ -615,13 +615,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // any `data-attachment-name` placeholders. Fire-and-forget: this never
   // re-reads `editor.getHTML()` afterwards, so it cannot loop with the
   // autosave → invalidate → prop-change cycle that froze the app before.
-  const setEditorContentWithAttachments = useCallback((html: string) => {
+  const setEditorContentWithAttachments = useCallback((html: string, sourceNoteId = activeNoteIdRef.current) => {
     if (!editor) return;
     editor.commands.setContent(html, { emitUpdate: false });
     if (!user?.id || !html.includes("data-attachment-name=")) return;
     resolveAttachmentImagesInHtml(html, user.id)
       .then((resolved) => {
         if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (activeNoteIdRef.current !== sourceNoteId) return;
         if (resolved === html) return;
         editor.commands.setContent(resolved, { emitUpdate: false });
       })
@@ -664,22 +665,28 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
     }
+    const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
+    const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
     if (!editor) return;
+
+    if (!noteChanged && (incomingMatchesPendingSave || incomingMatchesLastLocal || pendingSaveContentRef.current || editor.isFocused)) {
+      if (incomingMatchesPendingSave || incomingMatchesLastLocal) pendingSaveContentRef.current = null;
+      editor.setEditable(!note.is_trashed && !note.is_external, false);
+      return;
+    }
 
     const editorContent = resolveWikilinks(contentToEditorHtml(note.content, note));
     const currentHtml = editor.getHTML();
     const incomingMatchesEditor = normalizeEditorHtml(editorContent) === normalizeEditorHtml(currentHtml);
-    const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
-    const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
 
     if (noteChanged) {
       if (!incomingMatchesEditor) {
-        setEditorContentWithAttachments(editorContent);
+        setEditorContentWithAttachments(editorContent, note.id);
       }
       lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
     } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
-      setEditorContentWithAttachments(editorContent);
+      setEditorContentWithAttachments(editorContent, note.id);
       lastLocalContentRef.current = note.content ?? "";
     }
     if (incomingMatchesPendingSave || incomingMatchesEditor) {
@@ -703,7 +710,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (error || !data) return;
         const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
-          setEditorContentWithAttachments(html);
+          setEditorContentWithAttachments(html, note.id);
           lastLocalContentRef.current = (data as any).content || "";
         }
         // Refresh the cached note in React Query so list/sidebar update too.
@@ -724,11 +731,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // `setEditorContentWithAttachments` directly at their `setContent` site.
   useEffect(() => {
     if (!editor || !user?.id) return;
+    const sourceNoteId = activeNoteIdRef.current;
     const html = editor.getHTML();
     if (!html.includes("data-attachment-name=")) return;
     resolveAttachmentImagesInHtml(html, user.id)
       .then((resolved) => {
         if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (activeNoteIdRef.current !== sourceNoteId) return;
         if (resolved === html) return;
         editor.commands.setContent(resolved, { emitUpdate: false });
       })
