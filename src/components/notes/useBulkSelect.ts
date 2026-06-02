@@ -41,6 +41,8 @@ export function useBulkSelect(orderedIds: string[]): UseBulkSelectResult {
 
   const clear = useCallback(() => setSelected(new Set()), []);
 
+  const isSelected = useCallback((id: string) => selected.has(id), [selected]);
+
   const handleClick = useCallback(
     (e: React.MouseEvent, id: string): boolean => {
       const isMod = e.metaKey || e.ctrlKey;
@@ -92,11 +94,11 @@ export function useBulkSelect(orderedIds: string[]): UseBulkSelectResult {
     [idIndex, orderedIds, selected.size]
   );
 
-  return {
+  return useMemo(() => ({
     selected,
     size: selected.size,
-    isSelected: (id) => selected.has(id),
+    isSelected,
     clear,
     handleClick,
-  };
+  }), [clear, handleClick, isSelected, selected]);
 }
