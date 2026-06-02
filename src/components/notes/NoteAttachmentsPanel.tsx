@@ -37,6 +37,10 @@ export function NoteAttachmentsPanel({ noteId }: Props) {
   const reanalyze = useReanalyzeMedia();
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
+  const thumbPathKey = useMemo(
+    () => [...new Set(entries.map((entry) => entry.storage_path))].sort().join("\u0000"),
+    [entries],
+  );
 
   // Group PDF pages by original file
   const groups: GroupedAttachment[] = useMemo(() => {
@@ -70,7 +74,7 @@ export function NoteAttachmentsPanel({ noteId }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const paths = [...new Set(groups.map((g) => g.entries[0].storage_path))];
+      const paths = thumbPathKey ? thumbPathKey.split("\u0000") : [];
       const out: Record<string, string> = {};
       await Promise.all(
         paths.map(async (path) => {
@@ -85,7 +89,7 @@ export function NoteAttachmentsPanel({ noteId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [groups]);
+  }, [thumbPathKey]);
 
   if (groups.length === 0) return null;
 
