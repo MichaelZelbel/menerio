@@ -686,7 +686,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor]);
+  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -715,7 +715,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     };
     window.addEventListener("menerio:note-updated", handler as EventListener);
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
-  }, [note.id, note.is_external, note.title, editor, queryClient]);
+  }, [note.id, note.is_external, note.title, editor, queryClient, setEditorContentWithAttachments]);
 
   // One-shot attachment resolution on editor mount. Replaces the previous
   // reactive effect, which fed itself through `note.content` → autosave →
@@ -938,7 +938,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })), { emitUpdate: false });
+      setEditorContentWithAttachments(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })));
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
