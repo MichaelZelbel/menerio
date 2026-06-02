@@ -1,54 +1,76 @@
-# Fix: Freeze when opening notes from the Note Tree
+# Plan: Stop the app-wide freeze
 
-## Root cause
+## What is actually happening
 
-In `src/components/notes/NoteEditor.tsx` (lines 707–734), the effect that resolves Obsidian-style attachment placeholders (`![[file.pdf]]`, `![[image.png]]`) decides whether resolution is needed using two position-sensitive regexes:
+Two symptoms, one root cause:
 
-```ts
-const imgNeeds    = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
-const iframeNeeds = /<iframe[^>]*\bsrc=("|"about:blank")[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc="(?!about:blank")[^"]+")/i.test(currentHtml);
-```
+1. **Clicking "Notes" in the sidebar feels stuck.** The router URL is `/dashboard/notes/:noteId` (deep-linked from the last opened note), so the sidebar click re-mounts `NoteEditor` for that note. The freeze starts there, not in the sidebar code.
+2. **Clicking any specific note freezes completely.** Same `NoteEditor` mounts again for the new note, same effect runs, same lockup.
 
-The second branch of each regex matches `data-attachment-name="…"` and then uses a **negative lookahead for `src=…` later in the same tag**. But Tiptap's `renderHTML` (in `PdfEmbed.ts` and the inline image extension) emits attributes in this order:
+The browser tells the story:
+- DOMContentLoaded on `/dashboard/notes` is **11.6 s** and cumulative task time is **2.4 s** on a page that should be near-instant.
+- A Vite dep chunk returns **502** mid-load (`chunk-Y2G7AXWB.js`), consistent with the dev server being repeatedly hit while the main thread is busy.
+- No runtime exception is thrown — the tab is alive but unresponsive, which is the signature of a tight render/effect loop, not a crash.
 
-```
-<iframe src="https://…signed-url…" frameborder="0" data-type="pdf" title="…" data-attachment-name="file.pdf"></iframe>
-```
+## Which previous change caused it
 
-`data-attachment-name` is always the **last** attribute, so there is never a `src=` after it. The negative lookahead therefore always succeeds, even after the URL has been resolved.
+The freeze was introduced in **my last fix to `src/components/notes/NoteEditor.tsx`** — the one in `.lovable/plan.md` that replaced the regex-based attachment detection with a `DOMParser` + `lastResolvedHtmlRef` guard inside the effect at lines 708–763.
 
-Result: every `setContent(resolved)` triggers the effect again → resolves → `setContent` → … an infinite loop that pegs the main thread and freezes the UI as soon as you click a note containing a PDF or attachment-backed image.
+Why that fix is wrong:
 
-This matches what you saw: clicking the note row, spinner appears, page never recovers.
+- The effect's deps are `[editor, note.id, note.content, user?.id]`.
+- Inside the effect we read `editor.getHTML()` and compare against `lastResolvedHtmlRef.current`. After we call `editor.commands.setContent(resolved, { emitUpdate: false })`, **Tiptap re-parses and re-serializes**, so the next `editor.getHTML()` is not byte-equal to `resolved` (attribute order, whitespace, the `<div class="embed-pdf-wrapper">` wrapper around `<iframe data-type="pdf">`, the wikilink-span rewrites in `resolveWikilinks`). The cache key we stored therefore never matches the value we read next time.
+- The structural "needs resolution" check walks `[data-attachment-name]` elements. For PDFs, Tiptap's `PdfEmbed.renderHTML` always emits the iframe wrapped in a div, so a re-parse can re-introduce the wrapper and momentarily reset `src` to `"about:blank"` for one tick (the default in `renderHTML` when the attr round-trips through `mergeAttributes`). The check then says "needs = true" again.
+- `note.content` is in the deps. Every save (`updateNote.mutate` from `onUpdate`) invalidates the `notes` query, the parent re-renders with a new `note` object, `note.content` changes by reference, and the effect runs again — re-resolving, re-`setContent`-ing, scheduling another invalidation cascade through the autosave timer. On notes that contain `![[file.pdf]]` or `![[image.png]]`, this becomes a hot loop that monopolises the main thread. That is what looks like "the app froze".
 
-## Fix
+The earlier symptom (the regex always reporting "needs resolution") was real, but the fix I shipped still has the same shape — an effect that writes to the editor it observes — and now it triggers on every save, not just initial mount.
 
-Replace the brittle regex-based detection with a structural check that doesn't depend on attribute order.
+The edge-function / LLM-config work from the earlier turns did not touch any frontend rendering path and is not implicated.
 
-In `src/components/notes/NoteEditor.tsx`, inside the effect at line 707:
+## Clean fix
 
-1. Parse `currentHtml` once with `DOMParser` into a detached document fragment.
-2. Iterate over `[data-attachment-name]` elements and decide "needs resolution" only when:
-   - `<img>`: missing `src` or `src=""`.
-   - `<a>`: missing `href` or `href="#"` / `href=""`.
-   - `<iframe>`: missing `src`, `src=""`, or `src="about:blank"`.
-3. Skip the async work entirely when none match — no more setContent thrash.
+Stop treating attachment resolution as a reactive effect. Do it **once per note open**, before the editor ever sees the unresolved HTML, and never again from inside an effect that depends on editor content.
 
-Also remove the now-unused `hasImg` / `hasIframe` / `imgNeeds` / `iframeNeeds` regexes.
+Concretely, in `src/components/notes/NoteEditor.tsx`:
 
-As a safety belt, add a `lastResolvedHtmlRef` so that if the same `currentHtml` was just resolved, the effect short-circuits even if a future bug were to mis-detect again.
+1. **Delete the effect at lines 708–763** entirely. Also delete `lastResolvedHtmlRef` (line 389) — it only existed to paper over the loop.
+2. **Resolve at the source.** Wrap every `setContent(editorContent, …)` call that can introduce `data-attachment-name` placeholders with a small helper:
+   ```ts
+   const setEditorContentWithAttachments = (html: string) => {
+     if (!editor) return;
+     editor.commands.setContent(html, { emitUpdate: false });
+     if (!user?.id || !html.includes("data-attachment-name=")) return;
+     // Fire-and-forget; never re-enters because we don't observe getHTML().
+     resolveAttachmentImagesInHtml(html, user.id).then((resolved) => {
+       if (!editor || editor.isDestroyed || editor.isFocused) return;
+       if (resolved === html) return;
+       editor.commands.setContent(resolved, { emitUpdate: false });
+     }).catch(() => {/* ignore */});
+   };
+   ```
+   Use it at:
+   - the note-switch effect (lines 661 and 666),
+   - the `menerio:note-updated` handler (line 690),
+   - the source-mode round-trip (line 967).
+3. **Initial mount.** `useEditor`'s `content` is computed synchronously from `note.content`. Add a tiny `useEffect(() => { …same helper, but read note.content once… }, [editor])` that runs only when the editor instance is created — not when `note.content` changes. Subsequent prop changes are already covered by the note-switch effect above.
+4. **Save-driven re-renders are now safe.** Because no effect reads `editor.getHTML()` and writes back to it, the autosave → query-invalidate → prop-change cycle can no longer feed itself.
 
 ## Files to change
 
-- `src/components/notes/NoteEditor.tsx` — rewrite the detection block (≈lines 707–734).
+- `src/components/notes/NoteEditor.tsx` — remove the resolver effect (708–763) and the `lastResolvedHtmlRef`; add `setEditorContentWithAttachments`; route the four `setContent` call sites through it; add a one-shot `useEffect([editor])` for initial resolution.
+- `.lovable/plan.md` — replace the old plan describing the failed fix with this one.
 
-## Out of scope
-
-- `PdfEmbed.ts` and `upload-attachment.ts` behavior is correct and stays as-is.
-- No change to navigation, NoteTree, or the LLM-config work from earlier turns.
+No changes to `resolveAttachmentImagesInHtml`, `PdfEmbed`, `FileUploadHandler`, or any edge function.
 
 ## Verification
 
-1. Open a note that contains an embedded PDF (`![[something.pdf]]`) from the Note Tree — should open immediately, no freeze.
-2. Open a note with embedded image attachments — image still appears via signed URL.
-3. Switch between two attachment-bearing notes repeatedly — no runaway CPU, no spinner stuck.
+1. `/dashboard/notes` opens immediately; main thread idle within ~200 ms.
+2. Click any note in the tree, including notes with embedded PDFs and images — opens immediately, no spinner stuck.
+3. Type in a note with `![[image.png]]` — saves complete, no runaway CPU, signed URL still resolves once and the image stays visible.
+4. Switch between two attachment-bearing notes 5× in a row — flat CPU, no growing memory.
+5. `chunk-Y2G7AXWB.js` 502s stop reappearing once the main thread is no longer saturated.
+
+## Out of scope
+
+- The Vite 502 itself (dev-server artifact, will clear once the loop is gone).
+- The earlier LLM-config refactor across edge functions — unrelated to this freeze; leave as-is.
