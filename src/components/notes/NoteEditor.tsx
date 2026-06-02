@@ -386,7 +386,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastResolvedHtmlRef = useRef<string | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
@@ -612,6 +611,23 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
+  // Set editor HTML and then asynchronously swap in resolved signed URLs for
+  // any `data-attachment-name` placeholders. Fire-and-forget: this never
+  // re-reads `editor.getHTML()` afterwards, so it cannot loop with the
+  // autosave → invalidate → prop-change cycle that froze the app before.
+  const setEditorContentWithAttachments = useCallback((html: string) => {
+    if (!editor) return;
+    editor.commands.setContent(html, { emitUpdate: false });
+    if (!user?.id || !html.includes("data-attachment-name=")) return;
+    resolveAttachmentImagesInHtml(html, user.id)
+      .then((resolved) => {
+        if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (resolved === html) return;
+        editor.commands.setContent(resolved, { emitUpdate: false });
+      })
+      .catch((err) => console.warn("attachment resolver failed", err));
+  }, [editor, user?.id]);
+
   // Cancel every pending timer when the editor unmounts so we don't fire
   // stale saves / sync calls / process triggers against a destroyed instance.
   useEffect(() => {
@@ -658,19 +674,19 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
     if (noteChanged) {
       if (!incomingMatchesEditor) {
-        editor.commands.setContent(editorContent, { emitUpdate: false });
+        setEditorContentWithAttachments(editorContent);
       }
       lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
     } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
-      editor.commands.setContent(editorContent, { emitUpdate: false });
+      setEditorContentWithAttachments(editorContent);
       lastLocalContentRef.current = note.content ?? "";
     }
     if (incomingMatchesPendingSave || incomingMatchesEditor) {
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor]);
+  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -687,7 +703,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (error || !data) return;
         const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
-          editor.commands.setContent(html, { emitUpdate: false });
+          setEditorContentWithAttachments(html);
           lastLocalContentRef.current = (data as any).content || "";
         }
         // Refresh the cached note in React Query so list/sidebar update too.
@@ -699,68 +715,26 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     };
     window.addEventListener("menerio:note-updated", handler as EventListener);
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
-  }, [note.id, note.is_external, note.title, editor, queryClient]);
+  }, [note.id, note.is_external, note.title, editor, queryClient, setEditorContentWithAttachments]);
 
-  // Resolve Obsidian wikilink-style attachment placeholders (`![[file.png]]`)
-  // to fresh signed URLs whenever the editor content changes. Runs after
-  // `setContent` so users see embedded images inline without ever exposing
-  // storage paths in the persisted Markdown.
+  // One-shot attachment resolution on editor mount. Replaces the previous
+  // reactive effect, which fed itself through `note.content` → autosave →
+  // query invalidate → prop change → effect re-runs, freezing the app.
+  // Subsequent note switches and external updates call
+  // `setEditorContentWithAttachments` directly at their `setContent` site.
   useEffect(() => {
     if (!editor || !user?.id) return;
-    let cancelled = false;
-    const currentHtml = editor.getHTML();
-    if (!currentHtml.includes("data-attachment-name=")) return;
-    if (lastResolvedHtmlRef.current === currentHtml) return;
-
-    // Structural detection — independent of attribute order. We only need
-    // to resolve when at least one attachment-bearing element still has
-    // an empty/placeholder src/href.
-    let needs = false;
-    try {
-      const doc = new DOMParser().parseFromString(`<div>${currentHtml}</div>`, "text/html");
-      const els = doc.querySelectorAll("[data-attachment-name]");
-      for (const el of Array.from(els)) {
-        const tag = el.tagName.toLowerCase();
-        if (tag === "img") {
-          const src = el.getAttribute("src") || "";
-          if (!src) { needs = true; break; }
-        } else if (tag === "iframe") {
-          const src = el.getAttribute("src") || "";
-          if (!src || src === "about:blank") { needs = true; break; }
-        } else if (tag === "a") {
-          const href = el.getAttribute("href") || "";
-          if (!href || href === "#") { needs = true; break; }
-        }
-      }
-    } catch {
-      // If parsing fails, fall through without scheduling — safer than looping.
-      return;
-    }
-    if (!needs) {
-      lastResolvedHtmlRef.current = currentHtml;
-      return;
-    }
-
-    void (async () => {
-      try {
-        const resolved = await resolveAttachmentImagesInHtml(currentHtml, user.id);
-        if (cancelled) return;
-        if (resolved === currentHtml) {
-          lastResolvedHtmlRef.current = currentHtml;
-          return;
-        }
-        if (editor.isDestroyed) return;
-        // Avoid clobbering user input mid-edit
-        if (editor.isFocused) return;
-        lastResolvedHtmlRef.current = resolved;
+    const html = editor.getHTML();
+    if (!html.includes("data-attachment-name=")) return;
+    resolveAttachmentImagesInHtml(html, user.id)
+      .then((resolved) => {
+        if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (resolved === html) return;
         editor.commands.setContent(resolved, { emitUpdate: false });
-      } catch (err) {
-        console.warn("attachment resolver failed", err);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [editor, note.id, note.content, user?.id]);
+      })
+      .catch((err) => console.warn("attachment resolver failed", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
 
   const checkDuplicateTitle = async (nextTitle: string) => {
     const cleanTitle = nextTitle.trim();
@@ -964,7 +938,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       setSourceMode(true);
     } else {
       // Source → Rich
-      editor.commands.setContent(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })), { emitUpdate: false });
+      setEditorContentWithAttachments(resolveWikilinks(contentToEditorHtml(sourceText, { ...note, is_external: false })));
       lastLocalContentRef.current = sourceText;
       pendingSaveContentRef.current = sourceText;
       // trigger save
