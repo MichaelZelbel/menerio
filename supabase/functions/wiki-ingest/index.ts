@@ -514,7 +514,7 @@ async function processIngest(
           .join("\n")
       : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
-    const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
+    const systemPrompt = await resolveSystemPrompt(db, "wiki-ingest.main", WIKI_INGEST_PROMPT, { existingPagesIndex: index });
     const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
 
     const { raw } = await callSynthesis(systemPrompt, userMessage);
