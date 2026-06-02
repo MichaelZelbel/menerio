@@ -710,7 +710,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (error || !data) return;
         const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
-          setEditorContentWithAttachments(html);
+          setEditorContentWithAttachments(html, note.id);
           lastLocalContentRef.current = (data as any).content || "";
         }
         // Refresh the cached note in React Query so list/sidebar update too.
@@ -731,11 +731,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // `setEditorContentWithAttachments` directly at their `setContent` site.
   useEffect(() => {
     if (!editor || !user?.id) return;
+    const sourceNoteId = activeNoteIdRef.current;
     const html = editor.getHTML();
     if (!html.includes("data-attachment-name=")) return;
     resolveAttachmentImagesInHtml(html, user.id)
       .then((resolved) => {
         if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (activeNoteIdRef.current !== sourceNoteId) return;
         if (resolved === html) return;
         editor.commands.setContent(resolved, { emitUpdate: false });
       })
