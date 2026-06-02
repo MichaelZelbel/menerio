@@ -674,12 +674,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
     if (noteChanged) {
       if (!incomingMatchesEditor) {
-        editor.commands.setContent(editorContent, { emitUpdate: false });
+        setEditorContentWithAttachments(editorContent);
       }
       lastLocalContentRef.current = note.content ?? "";
       pendingSaveContentRef.current = null;
     } else if (!incomingMatchesEditor && !incomingMatchesPendingSave && !incomingMatchesLastLocal && !pendingSaveContentRef.current && !editor.isFocused) {
-      editor.commands.setContent(editorContent, { emitUpdate: false });
+      setEditorContentWithAttachments(editorContent);
       lastLocalContentRef.current = note.content ?? "";
     }
     if (incomingMatchesPendingSave || incomingMatchesEditor) {
@@ -703,7 +703,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         if (error || !data) return;
         const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
         if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
-          editor.commands.setContent(html, { emitUpdate: false });
+          setEditorContentWithAttachments(html);
           lastLocalContentRef.current = (data as any).content || "";
         }
         // Refresh the cached note in React Query so list/sidebar update too.
