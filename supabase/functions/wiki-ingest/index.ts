@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,93 +97,9 @@ type SynthesisResult = {
   log_summary: string;
 };
 
-const WIKI_SYNTHESIS_AGENT_PROMPT = `=== BEGIN WIKI SYNTHESIS AGENT PROMPT ===
-
-You are the Lexicon maintainer for a personal knowledge base. You read ONE new note the user just captured or updated, and decide whether and how to update the Lexicon.
-
-# The most important rule: GROUND EVERY CLAIM AND EVERY LINK
-
-The Lexicon is failing because past synthesis runs invented relationships and added wikilinks that have nothing to do with the note. You must not do that.
-
-For every sentence you write and every \`[[slug]]\` you add, ask yourself:
-"Is this claim or this link DIRECTLY supported by the text of this note (or, for an update, by content already on the existing page)?"
-
-If the answer is "no" or "I'm filling in context from world knowledge" — DO NOT WRITE IT.
-
-# Never update a page about a different subject
-
-An \`update\` is only allowed if the page's exact subject (its title, or the words in its slug) is named in the note. Do not update a page just because the note's topic is in the same category. Two different AI agents, two different companies, two different products, two different people with similar roles are SEPARATE pages — even if they do similar things. If the note describes a new entity that doesn't have a page yet, prefer \`create\` (or do nothing) over twisting an existing page to fit. When in doubt, return empty actions.
-
-Concretely:
-
-- DO NOT add a wikilink to an entity, person, organization, product, place, or concept just because it is topically related. Only link to things that are explicitly named in the note (or already on the page you are updating).
-- DO NOT add "is integrated with X", "works at Y", "is a member of Z" unless the note says so in plain words.
-- DO NOT add background context, history, or framing that isn't in the note. The Lexicon is a record of what the user has captured, not an encyclopedia.
-- When in doubt, write LESS. An empty actions array is a perfectly good answer.
-
-# Page types
-
-Use exactly one of: \`entity\`, \`concept\`, \`source\`, \`overview\`, \`synthesis\`, \`person\`, \`group\`.
-
-# Conventions
-
-- Slugs are lowercase kebab-case. Stable. Never rename an existing slug. For updates, copy the slug exactly from the index.
-- Every page begins with one short paragraph summary, then sections.
-- Use short paragraphs and 2–4 sections like "## Known facts", "## Open questions", "## Related". Keep it readable.
-- Wikilinks use \`[[slug]]\` syntax. Be SPARING. Maximum 5 wikilinks per page action, and only for things explicitly named in the note.
-- For an UPDATE, return the FULL new markdown of the page in \`patch\`. Do not delete or rewrite existing sections unless the note clearly invalidates them. Prefer ADDITIVE updates: append a new bullet under "## Known facts", or add a "## Contradictions" section. Preserve everything else verbatim.
-- If the note contradicts the existing page, do NOT silently overwrite. Add a "## Contradictions" section with date and the conflicting claims.
-- Do not invent facts. If the note is ambiguous, say so on the page rather than picking a confident reading.
-- For every page you create or update, include the note_id in source_links.
-
-# When to do nothing
-
-Most notes do NOT need a Lexicon update. Return an empty actions array if:
-- The note is short, vague, a reminder, a shopping list, a passing thought.
-- The note is a transcript or chat log without clear new facts about a named entity.
-- The note only restates things already on existing pages.
-- The note mentions things in passing without saying anything substantive about them.
-
-# Existing Lexicon pages (index)
-
-slug | title | page_type | summary
-
-[EXISTING_PAGES_INDEX_HERE]
-
-# Output
-
-Return ONLY a JSON object, no surrounding text, no markdown code fences:
-
-{
-  "actions": [
-    {
-      "op": "create",
-      "slug": "kebab-case-slug",
-      "title": "Title",
-      "page_type": "entity|concept|source|overview|synthesis|person|group",
-      "summary": "One-line summary that will appear in the index.",
-      "content": "Full markdown content. Starts with the summary paragraph. Uses [[slug]] sparingly and only for things named in the note.",
-      "change_summary": "Short past-tense description: e.g. 'Created from note about Sarah Chen'."
-    },
-    {
-      "op": "update",
-      "slug": "existing-slug",
-      "summary": "Updated summary (only include if changing)",
-      "patch": "FULL new markdown content of the page after your edits. Mostly the same as the previous content with additive changes. Not a diff — the whole page.",
-      "change_summary": "Short past-tense description: e.g. 'Added contradiction note about Sarah's role'."
-    }
-  ],
-  "source_links": [
-    { "note_id": "uuid-of-the-note", "page_slugs": ["slug-supported-by-note"] }
-  ],
-  "log_summary": "One-line description of what happened."
-}
-
-If the note has no Lexicon-worthy content:
-
-{ "actions": [], "source_links": [], "log_summary": "Note had no Lexicon-worthy content." }
-
-=== END WIKI SYNTHESIS AGENT PROMPT ===`;
+// Synthesis system prompt resolved at runtime from llm_call_configs
+// (call_site: "wiki-ingest.main"). Placeholder: {{existingPagesIndex}}.
+// Falls back to WIKI_INGEST_PROMPT in llm-defaults.ts.
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -596,7 +514,7 @@ async function processIngest(
           .join("\n")
       : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
-    const systemPrompt = WIKI_SYNTHESIS_AGENT_PROMPT.replace("[EXISTING_PAGES_INDEX_HERE]", index);
+    const systemPrompt = await resolveSystemPrompt(db, "wiki-ingest.main", WIKI_INGEST_PROMPT, { existingPagesIndex: index });
     const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
 
     const { raw } = await callSynthesis(systemPrompt, userMessage);

@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { CONVERSATION_CHAT_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,14 +57,20 @@ Deno.serve(async (req) => {
     let longTermContext = "";
     if (personId) longTermContext = await searchLongTermMemory(supabase, apiKey, message, personId, user.id);
 
-    const systemPrompt = [
-      "You are Mira, Menerio's thoughtful personal memory assistant. Help the user reason about people, relationships, memories, notes, and next steps. Be practical, warm, concise, and use markdown.",
+    const personContext = [
       buildPersonContext(person, profileResult.data || [], relatedNotes, relatedMoments),
       buildShortTermMemoryContext(shortDocsResult.data || []),
       longTermContext,
       buildAttachmentContext(attachments),
       buildConversationContext(conversationContext),
     ].filter(Boolean).join("\n\n");
+
+    const systemPrompt = await resolveSystemPrompt(
+      supabase,
+      "conversation-chat.main",
+      CONVERSATION_CHAT_PROMPT,
+      { personContext },
+    );
 
     const history = (historyResult.data || []).reverse().map((m: any) => ({ role: m.role, content: m.content }));
     const gatewayResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { WIKI_CLEANUP_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,16 +77,8 @@ async function callLLM(system: string, user: string): Promise<string> {
   return data.choices?.[0]?.message?.content || "";
 }
 
-const REBUILD_PROMPT = `You are rebuilding ONE Lexicon page strictly from the user's source notes provided below. Every claim and every wikilink MUST be directly supported by those notes. Do not invent facts. Do not pull in world knowledge. Do not add background context.
-
-Rules:
-- Start with one short summary paragraph.
-- Use 2-4 short sections with ## headings such as "## Known facts", "## Open questions", "## Related".
-- Use [[slug]] wikilinks ONLY for things explicitly named in the source notes. Maximum 5 links total.
-- If the sources are thin, write a short page. It is fine to say "Limited information available."
-- Never write integrations, relationships, or roles unless the notes spell them out.
-
-Return ONLY JSON: {"title": "...", "summary": "one-line summary", "content": "full markdown of the page"}`;
+// Rebuild system prompt resolved at runtime from llm_call_configs (call_site: "wiki-cleanup.main").
+// Falls back to WIKI_CLEANUP_PROMPT in llm-defaults.ts.
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -171,7 +165,8 @@ serve(async (req) => {
       }
 
       const userMsg = `Page slug: ${page.slug}\nPage type: ${page.page_type}\nCurrent title: ${page.title}\n\nSource notes:\n\n${noteBlocks}`;
-      const raw = await callLLM(REBUILD_PROMPT, userMsg);
+      const rebuildPrompt = await resolveSystemPrompt(db, "wiki-cleanup.main", WIKI_CLEANUP_PROMPT);
+      const raw = await callLLM(rebuildPrompt, userMsg);
       let parsed: { title?: string; summary?: string; content?: string };
       try {
         const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
