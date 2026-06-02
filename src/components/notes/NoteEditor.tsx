@@ -386,6 +386,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastResolvedHtmlRef = useRef<string | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
