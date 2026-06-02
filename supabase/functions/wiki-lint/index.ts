@@ -71,7 +71,7 @@ function extractJson(text: string) {
   }
 }
 
-async function callAuditor(userContent: string): Promise<{ result: AuditorResult; raw: string }> {
+async function callAuditor(systemPrompt: string, userContent: string): Promise<{ result: AuditorResult; raw: string }> {
   if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -83,7 +83,7 @@ async function callAuditor(userContent: string): Promise<{ result: AuditorResult
     body: JSON.stringify({
       model: OPENROUTER_MODEL,
       messages: [
-        { role: "system", content: DRIFT_AND_CONTRADICTION_AUDITOR_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
       ],
       temperature: 0.1,
@@ -242,7 +242,8 @@ serve(async (req) => {
     let llmError: string | null = null;
     const pagesForAudit = allPages.slice(0, 20);
     try {
-      const audited = await callAuditor(formatPagesForAudit(pagesForAudit));
+      const auditorPrompt = await resolveSystemPrompt(db, "wiki-lint.main", WIKI_LINT_PROMPT);
+      const audited = await callAuditor(auditorPrompt, formatPagesForAudit(pagesForAudit));
       auditor = audited.result;
     } catch (error) {
       llmError = error instanceof Error ? error.message : String(error);
