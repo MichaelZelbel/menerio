@@ -427,8 +427,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             messages: [
               {
                 role: "system",
-                content:
-                  "You compress chat transcripts into a concise running summary (max ~150 words). Capture topics discussed, decisions made, key facts about the user's notes, and open questions. Use neutral third-person.",
+                content: await resolveSystemPrompt(db, "note-chat.summarize", NOTE_CHAT_SUMMARIZE_PROMPT),
               },
               {
                 role: "user",
@@ -511,27 +510,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       systemMessage = {
         role: "system",
-        content: SYSTEM_PROMPT + noteContext,
+        content: await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext }),
       };
       activeTools = TOOLS;
     } else {
       // General knowledge base mode — search-only tools
-      const GENERAL_SYSTEM_PROMPT = `You are an AI assistant for Menerio (also known as "Open Brain"), a personal knowledge management application. You help the user explore and search their knowledge base.
-
-You have access to tools to:
-1. Search the user's notes semantically (vector search) or by text (ILIKE)
-2. Search across OCR-extracted text and descriptions from images and PDFs in all notes
-
-Guidelines:
-- When the user asks about their notes or knowledge, use search tools to find relevant information
-- Use semantic search for conceptual queries, text search for specific names/phrases
-- Keep responses concise and helpful
-- You can chain multiple search tool calls if needed
-- Present search results in a clear, organized way`;
-
       systemMessage = {
         role: "system",
-        content: GENERAL_SYSTEM_PROMPT,
+        content: await resolveSystemPrompt(db, "note-chat.general", NOTE_CHAT_GENERAL_MODE_PROMPT),
       };
 
       const SEARCH_TOOL_NAMES = ["search_notes_semantic", "search_notes_text", "search_media_text"];
