@@ -1,4 +1,4 @@
-import { memo, type DragEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, type Dispatch, type DragEvent, type MouseEvent, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import {
@@ -153,8 +153,8 @@ interface FolderRowProps {
   onDeleteNotePermanently?: (noteId: string) => void;
   onDrop: (path: string, event: DragEvent) => void;
   onDuplicateNote: (note: Note | SemanticSearchResult) => Promise<void>;
-  setDragOverPath: React.Dispatch<React.SetStateAction<string | null>>;
-  setDraggingKey: React.Dispatch<React.SetStateAction<string | null>>;
+  setDragOverPath: Dispatch<SetStateAction<string | null>>;
+  setDraggingKey: Dispatch<SetStateAction<string | null>>;
 }
 
 const FolderRow = memo(function FolderRow({
@@ -376,8 +376,8 @@ interface NoteRowProps {
   onRestoreNote?: (noteId: string) => void;
   onDeleteNotePermanently?: (noteId: string) => void;
   onDuplicateNote: (note: Note | SemanticSearchResult) => Promise<void>;
-  setDragOverPath: React.Dispatch<React.SetStateAction<string | null>>;
-  setDraggingKey: React.Dispatch<React.SetStateAction<string | null>>;
+  setDragOverPath: Dispatch<SetStateAction<string | null>>;
+  setDraggingKey: Dispatch<SetStateAction<string | null>>;
 }
 
 const NoteRow = memo(function NoteRow({
@@ -456,7 +456,7 @@ const NoteRow = memo(function NoteRow({
                 checked={isMultiSelected}
                 onCheckedChange={() =>
                   bulk.handleClick(
-                    { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as React.MouseEvent,
+                    { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent,
                     note.id,
                   )
                 }
