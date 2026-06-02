@@ -1,93 +1,54 @@
-## Goal
+# Fix: Freeze when opening notes from the Note Tree
 
-Make every call site's system prompt fully editable in the Admin dialog using n8n-style `{{placeholders}}` for runtime context (date, note content, wiki index, etc.). Admin sees & edits the real prompt; runtime values are substituted before sending. Admin UI strings switched to English.
+## Root cause
 
-## Why placeholders (vs. splitting into two messages)
-
-- Works identically across OpenAI / Anthropic / Gemini / OpenRouter — pure string interpolation, no model-specific quirks.
-- Matches the n8n mental model the user already knows.
-- Single editable field; nothing read-only.
-- Trivial to implement: `replace(/\{\{(\w+)\}\}/g, ...)` in the router.
-
-## Implementation
-
-### 1. Router: placeholder interpolation
-
-`supabase/functions/_shared/llm-router.ts`
-
-- Add `templateVars?: Record<string, string>` to `runChat` args and `CallDefaults`.
-- New helper `interpolate(prompt, vars)` that replaces `{{key}}` with `vars[key]` (missing key → empty string, log a warning).
-- Apply interpolation to `effective.system_prompt` before calling `buildMessagesWithSystem`.
-- Also interpolate the caller-supplied `defaults.systemPrompt` (so fallback path behaves the same).
-
-### 2. Seed full defaults for ALL call sites
-
-`supabase/functions/admin-llm-config/index.ts`
-
-- Replace `PROCESS_NOTE_DEFAULTS` with `ALL_CALL_SITE_DEFAULTS` covering every entry currently in `llm_call_configs`:
-  - `ai-moderate-content.main`, `analyze-media.ocr/text/vision`, `conversation-chat.main`, `daily-digest.main`, `draft-event.main`, `embeddings.default`, `extract-event.main`, `find-connections.main`, `generate-profile-suggestions.main`, `group-ai.briefing/next_step/suggest_members`, `ingest-thought.metadata`, `note-chat.main`, `process-note.metadata/profile_extraction`, `quick-capture.metadata`, `suggest-connections.main`, `weekly-review.main`, `wiki-cleanup.main`, `wiki-ingest.main`, `wiki-lint.main`.
-- Each entry includes the **full** prompt as it currently lives in the edge function, with dynamic spots converted to `{{placeholders}}`.
-- `description` set to a short English sentence per call site.
-- Since user has not edited any prompts yet, change sync to **plain `upsert` with `onConflict: "call_site"`** that DOES overwrite `system_prompt`. This brings every existing empty row up to date in one shot. After this rollout, change sync back to "insert-only / fill empty fields" so future Admin edits aren't clobbered (one-line guard with a `FORCE_RESEED` flag we flip off after first run).
-- `analyze-media.ocr` and `embeddings.default` are not chat endpoints — keep them in the list but mark `system_prompt: null` and hide the prompt field for them in the UI (already partially handled).
-
-### 3. Refactor each edge function to use placeholders
-
-For every call site whose prompt is currently built with string concatenation, change:
+In `src/components/notes/NoteEditor.tsx` (lines 707–734), the effect that resolves Obsidian-style attachment placeholders (`![[file.pdf]]`, `![[image.png]]`) decides whether resolution is needed using two position-sensitive regexes:
 
 ```ts
-// before
-const sys = SYSTEM_PROMPT + `\nToday: ${today}\nPeople: ${peopleList}`;
-chatWithCredits(..., [{ role: "system", content: sys }, ...]);
+const imgNeeds    = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
+const iframeNeeds = /<iframe[^>]*\bsrc=("|"about:blank")[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc="(?!about:blank")[^"]+")/i.test(currentHtml);
 ```
 
-to:
+The second branch of each regex matches `data-attachment-name="…"` and then uses a **negative lookahead for `src=…` later in the same tag**. But Tiptap's `renderHTML` (in `PdfEmbed.ts` and the inline image extension) emits attributes in this order:
 
-```ts
-// after — caller provides templateVars; router does the substitution
-runChat({
-  ...,
-  defaults: { provider, model, systemPrompt: SYSTEM_PROMPT_WITH_PLACEHOLDERS },
-  templateVars: { currentDate: today, people: peopleList },
-  messages: [{ role: "user", content: ... }],
-});
+```
+<iframe src="https://…signed-url…" frameborder="0" data-type="pdf" title="…" data-attachment-name="file.pdf"></iframe>
 ```
 
-Affected functions (confirmed by grep):
-- `note-chat` — `{{noteContext}}` (or `{{noteTitle}}`, `{{noteBody}}` if useful); General-mode prompt becomes its own call site default.
-- `draft-event` — `{{currentDate}}`, `{{peopleContext}}`.
-- `wiki-ingest` — `{{existingPagesIndex}}` (replaces today's `.replace("[EXISTING_PAGES_INDEX_HERE]", index)`).
-- `conversation-chat` — `{{personName}}`, `{{personContext}}`, etc.
-- `generate-profile-suggestions` — currently builds prompt as user message; move the constant analyst instruction to the system prompt with placeholders for category list and stats.
-- `extract-event`, `find-connections`, `suggest-connections`, `daily-digest`, `weekly-review`, `wiki-cleanup`, `wiki-lint`, `quick-capture`, `ingest-thought`, `group-ai.*`, `ai-moderate-content`, `process-note.*`, `analyze-media.text/vision` — review each; most are already static, just need the call-site key passed through `runChat`/`chatWithCredits` so the DB row is consulted.
+`data-attachment-name` is always the **last** attribute, so there is never a `src=` after it. The negative lookahead therefore always succeeds, even after the URL has been resolved.
 
-Helpers `chatWithCredits` / `chatWithCreditsStream` in `_shared/llm-credits.ts` need to accept and forward `templateVars` to the router (already routes through `runChat` for the configurable path — extend the same signature).
+Result: every `setContent(resolved)` triggers the effect again → resolves → `setContent` → … an infinite loop that pegs the main thread and freezes the UI as soon as you click a note containing a PDF or attachment-backed image.
 
-### 4. Admin UI — English + placeholder hint
+This matches what you saw: clicking the note row, spinner appears, page never recovers.
 
-`src/components/admin/LLMConfigPanel.tsx`
+## Fix
 
-- Translate all German strings: "Provider", "Model", "System Prompt", "Active", "Test Run", "Save & Test", "Save", "Cancel", "Edit", "OpenRouter-Default", "Code-Default", etc.
-- Replace placeholder text "(leer = der hartkodierte Default in der Edge Function wird verwendet)" with: `"Leave empty to use the code default. Use {{placeholders}} for runtime context."`.
-- Below the textarea, render a small "Available placeholders:" list per call site (hard-coded mapping `callSite → string[]`), e.g. for `note-chat.main`: `{{noteContext}}`.
-- For non-chat call sites (`embeddings.default`, `analyze-media.ocr`) hide the prompt + temperature fields and show a note: `"This endpoint is not a chat call — only provider and model apply."`
+Replace the brittle regex-based detection with a structural check that doesn't depend on attribute order.
 
-### 5. Documentation note in dialog
+In `src/components/notes/NoteEditor.tsx`, inside the effect at line 707:
 
-Tiny info banner at the top of the edit dialog (English):
-> "Changes apply immediately for the next call to this call site. Runtime context (dates, note content, etc.) is inserted via `{{placeholder}}` substitution."
+1. Parse `currentHtml` once with `DOMParser` into a detached document fragment.
+2. Iterate over `[data-attachment-name]` elements and decide "needs resolution" only when:
+   - `<img>`: missing `src` or `src=""`.
+   - `<a>`: missing `href` or `href="#"` / `href=""`.
+   - `<iframe>`: missing `src`, `src=""`, or `src="about:blank"`.
+3. Skip the async work entirely when none match — no more setContent thrash.
+
+Also remove the now-unused `hasImg` / `hasIframe` / `imgNeeds` / `iframeNeeds` regexes.
+
+As a safety belt, add a `lastResolvedHtmlRef` so that if the same `currentHtml` was just resolved, the effect short-circuits even if a future bug were to mis-detect again.
+
+## Files to change
+
+- `src/components/notes/NoteEditor.tsx` — rewrite the detection block (≈lines 707–734).
 
 ## Out of scope
 
-- No DB migration (schema unchanged).
-- No change to the credits / usage logging path.
-- We keep "OCR" and "embeddings" rows visible in the table for transparency but do not pretend they have prompts.
+- `PdfEmbed.ts` and `upload-attachment.ts` behavior is correct and stays as-is.
+- No change to navigation, NoteTree, or the LLM-config work from earlier turns.
 
 ## Verification
 
-1. Open Admin → each call site's dialog shows the real prompt prefilled (no more "(empty = hardcoded)").
-2. Edit `note-chat.main` to prepend "Always reply in German." → in-app note chat replies in German AND still references the open note (proves `{{noteContext}}` interpolation works).
-3. Edit `draft-event.main` and check the log: `{{currentDate}}` is replaced with today's ISO date.
-4. Set `wiki-ingest.main` system prompt to empty → router falls back to the code default; pipeline still works.
-5. Re-open dialog after save → edited value persists.
-6. Admin dialog is fully in English; no German strings remain in `LLMConfigPanel.tsx`.
+1. Open a note that contains an embedded PDF (`![[something.pdf]]`) from the Note Tree — should open immediately, no freeze.
+2. Open a note with embedded image attachments — image still appears via signed URL.
+3. Switch between two attachment-bearing notes repeatedly — no runaway CPU, no spinner stuck.
