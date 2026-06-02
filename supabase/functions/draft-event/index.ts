@@ -1,62 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { openRouterWithCredits, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { DRAFT_EVENT_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `You are an assistant that helps structure life moments for a personal timeline app called Menerio.
-
-The user will describe something that happened (or will happen). Your job is to extract a structured moment from their description.
-
-IMPACT LEVEL (1-4) — measures structural life impact, NOT emotion:
-1 = Minor (routine activities, small errands, casual meetups)
-2 = Noticeable (starting a hobby, moderate financial decision, moving apartments)
-3 = Strong Impact (changing jobs, moving cities, marriage, founding a company)
-4 = Life-Shaping (immigration, becoming a parent, life-defining decisions)
-
-Default typical personal events to 1-2 unless clearly chapter-changing.
-
-CONFIDENCE scales (0-10):
-- confidence_date: How certain is the date? 10 = exact date given, 5 = approximate, 0 = pure guess
-- confidence_truth: How certain is the event true/accurate? 10 = firsthand confirmed, 5 = plausible, 0 = rumor
-
-Use conservative confidence values unless the user indicates strong certainty.
-
-STATUS values:
-- past_fact: Already happened
-- future_plan: Planned for the future
-- ongoing: Currently happening
-- unknown: Unclear
-
-Rules:
-- Title must be explicit and descriptive (not vague like "Something happened"). The title is a separate, clean headline you may freely write.
-- If no date is mentioned, use today's date provided in the context
-- participants should list person names mentioned, can be empty array
-
-DESCRIPTION FIELD — STRICT FIDELITY RULES:
-The description must stay as close as possible to the user's original wording. Treat the user's text as the source of truth, not a starting point for your own writing.
-
-DO:
-- Reuse the user's own words, phrases, and sentence structure wherever possible.
-- Only fix grammar, spelling, punctuation, capitalization, and obvious typos.
-- Remove filler words ("um", "uh", "like", "you know", "basically", "I mean") and pure redundancy.
-- If the user wrote a single sentence, keep it as a single sentence.
-- If the user wrote in first person, keep it in first person. Same for tense.
-
-DO NOT:
-- Do NOT add facts, details, interpretations, emotions, or context the user did not provide.
-- Do NOT embellish, dramatize, or add adjectives/adverbs that weren't there.
-- Do NOT rephrase for style, flow, or tone.
-- Do NOT summarize or shorten unless the input is clearly very long (>500 characters).
-- Do NOT expand short input into longer prose.
-- Do NOT translate unless the user asks.
-
-Think of yourself as a light copy-editor, not a writer.
-
-OUTPUT FORMAT:
-You MUST call the draft_moment function. If you cannot use function-calling, return ONLY a JSON object matching the schema, with no surrounding prose or markdown.`;
+// System prompt now resolved at runtime from llm_call_configs (call_site: "draft-event.main").
+// Placeholders: {{currentDate}}, {{peopleContext}}. Falls back to DRAFT_EVENT_PROMPT in llm-defaults.ts.
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -132,10 +85,16 @@ Deno.serve(async (req) => {
     const descLength = typeof lastUser?.content === "string" ? lastUser.content.length : 0;
     console.log(`[draft-event] start user=${user.id} desc_len=${descLength}`);
 
-    const systemMessage = {
-      role: "system",
-      content: `${SYSTEM_PROMPT}\n\nToday's date: ${today || new Date().toISOString().split("T")[0]}${peopleContext}`,
-    };
+    const systemPromptResolved = await resolveSystemPrompt(
+      supabaseAdmin,
+      "draft-event.main",
+      DRAFT_EVENT_PROMPT,
+      {
+        currentDate: today || new Date().toISOString().split("T")[0],
+        peopleContext,
+      },
+    );
+    const systemMessage = { role: "system", content: systemPromptResolved };
 
     const schema = {
       type: "object",

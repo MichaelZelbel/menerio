@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const classification = await classifyContent(item.content_snapshot, lovableKey);
+        const classification = await classifyContent(admin, item.content_snapshot, lovableKey);
 
         if (!classification) {
           // AI call failed
@@ -161,15 +161,16 @@ Deno.serve(async (req) => {
   }
 });
 
-async function classifyContent(content: string, apiKey: string): Promise<{ is_violation: boolean; category?: string; confidence: number; reason: string } | null> {
+async function classifyContent(admin: any, content: string, apiKey: string): Promise<{ is_violation: boolean; category?: string; confidence: number; reason: string } | null> {
   try {
+    const systemPrompt = await resolveSystemPrompt(admin, "ai-moderate-content.main", AI_MODERATE_CONTENT_PROMPT);
     const resp = await fetch(AI_GATEWAY, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: `Classify this shared note content:\n\n${content.slice(0, 5000)}` },
         ],
         tools: [CLASSIFY_TOOL],
