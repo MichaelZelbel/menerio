@@ -386,7 +386,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastResolvedHtmlRef = useRef<string | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const lastLocalContentRef = useRef(note.content ?? "");
@@ -701,66 +700,24 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient]);
 
-  // Resolve Obsidian wikilink-style attachment placeholders (`![[file.png]]`)
-  // to fresh signed URLs whenever the editor content changes. Runs after
-  // `setContent` so users see embedded images inline without ever exposing
-  // storage paths in the persisted Markdown.
+  // One-shot attachment resolution on editor mount. Replaces the previous
+  // reactive effect, which fed itself through `note.content` → autosave →
+  // query invalidate → prop change → effect re-runs, freezing the app.
+  // Subsequent note switches and external updates call
+  // `setEditorContentWithAttachments` directly at their `setContent` site.
   useEffect(() => {
     if (!editor || !user?.id) return;
-    let cancelled = false;
-    const currentHtml = editor.getHTML();
-    if (!currentHtml.includes("data-attachment-name=")) return;
-    if (lastResolvedHtmlRef.current === currentHtml) return;
-
-    // Structural detection — independent of attribute order. We only need
-    // to resolve when at least one attachment-bearing element still has
-    // an empty/placeholder src/href.
-    let needs = false;
-    try {
-      const doc = new DOMParser().parseFromString(`<div>${currentHtml}</div>`, "text/html");
-      const els = doc.querySelectorAll("[data-attachment-name]");
-      for (const el of Array.from(els)) {
-        const tag = el.tagName.toLowerCase();
-        if (tag === "img") {
-          const src = el.getAttribute("src") || "";
-          if (!src) { needs = true; break; }
-        } else if (tag === "iframe") {
-          const src = el.getAttribute("src") || "";
-          if (!src || src === "about:blank") { needs = true; break; }
-        } else if (tag === "a") {
-          const href = el.getAttribute("href") || "";
-          if (!href || href === "#") { needs = true; break; }
-        }
-      }
-    } catch {
-      // If parsing fails, fall through without scheduling — safer than looping.
-      return;
-    }
-    if (!needs) {
-      lastResolvedHtmlRef.current = currentHtml;
-      return;
-    }
-
-    void (async () => {
-      try {
-        const resolved = await resolveAttachmentImagesInHtml(currentHtml, user.id);
-        if (cancelled) return;
-        if (resolved === currentHtml) {
-          lastResolvedHtmlRef.current = currentHtml;
-          return;
-        }
-        if (editor.isDestroyed) return;
-        // Avoid clobbering user input mid-edit
-        if (editor.isFocused) return;
-        lastResolvedHtmlRef.current = resolved;
+    const html = editor.getHTML();
+    if (!html.includes("data-attachment-name=")) return;
+    resolveAttachmentImagesInHtml(html, user.id)
+      .then((resolved) => {
+        if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (resolved === html) return;
         editor.commands.setContent(resolved, { emitUpdate: false });
-      } catch (err) {
-        console.warn("attachment resolver failed", err);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [editor, note.id, note.content, user?.id]);
+      })
+      .catch((err) => console.warn("attachment resolver failed", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
 
   const checkDuplicateTitle = async (nextTitle: string) => {
     const cleanTitle = nextTitle.trim();
