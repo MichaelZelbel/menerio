@@ -4,6 +4,12 @@ import {
   openRouterWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
+import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import {
+  NOTE_CHAT_NOTE_MODE_PROMPT,
+  NOTE_CHAT_GENERAL_MODE_PROMPT,
+  NOTE_CHAT_SUMMARIZE_PROMPT,
+} from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -166,26 +172,9 @@ const TOOLS = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are an AI assistant embedded in a note-taking application called Menerio (also known as "Open Brain"). You help the user work with their current note and their broader knowledge base.
-
-You have access to tools to:
-1. Search the user's notes semantically (vector search) or by text (ILIKE)
-2. Search across OCR-extracted text and descriptions from images and PDFs in all notes
-3. Append text to the current note
-4. Update note metadata (topics, type, sentiment, people, summary, action_items, dates_mentioned)
-5. Update note tags
-6. Add wikilinks to connect the current note to other notes
-
-Guidelines:
-- When the user asks about their notes or knowledge, use search tools to find relevant information
-- Use semantic search for conceptual queries, text search for specific names/phrases
-- The current note's media analysis (OCR text, image descriptions) is included in the context below — check it before searching
-- Use search_media_text to find text in images/PDFs across OTHER notes
-- When modifying the note, confirm what you did
-- Keep responses concise and helpful
-- You can chain multiple tool calls if needed (e.g., search then link)
-- When adding text, use proper markdown formatting
-- The note content provided to you is the current state of the note`;
+// System prompts now resolved at runtime from llm_call_configs
+// (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
+// Falls back to constants in llm-defaults.ts.
 
 // Execute tool calls
 async function executeTool(
