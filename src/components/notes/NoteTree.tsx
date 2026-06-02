@@ -90,14 +90,13 @@ function sortFolder(
   sortField: NoteTreeSortField,
   sortDirection: NoteTreeSortDirection,
 ) {
-  // Folder names always alphabetical — sorting them by date doesn't apply.
   node.children.sort((a, b) => a.name.localeCompare(b.name));
 
   const dir = sortDirection === "asc" ? 1 : -1;
   node.notes.sort((a, b) => {
     const aPinned = a.is_pinned ? 1 : 0;
     const bPinned = b.is_pinned ? 1 : 0;
-    if (aPinned !== bPinned) return bPinned - aPinned; // pinned always first
+    if (aPinned !== bPinned) return bPinned - aPinned;
 
     if (sortField === "title") {
       return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
@@ -122,6 +121,416 @@ function collectAncestorPaths(path: string | null) {
   const parts = path.split("/").filter(Boolean);
   return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
 }
+
+function flattenFolders(node: FolderNode): FolderNode[] {
+  return [node, ...node.children.flatMap(flattenFolders)];
+}
+
+interface FolderRowProps {
+  node: FolderNode;
+  depth: number;
+  expanded: Set<string>;
+  activeFolderPath: string | null;
+  dragOverPath: string | null;
+  draggingKey: string | null;
+  depthStep: number;
+  noteBasePad: number;
+  folderOptions: FolderNode[];
+  selectedId: string | null;
+  multiActive: boolean;
+  selectedIds: string[];
+  bulk: UseBulkSelectResult;
+  onToggleFolder: (path: string) => void;
+  onSelectFolder: (path: string | null) => void;
+  onSelectNote: (id: string) => void;
+  onCreateNoteInFolder: (path: string) => void;
+  onCreateFolderInFolder: (path: string) => void;
+  onMoveNote: (noteId: string, path: string) => void;
+  onRenameFolder?: (path: string) => void;
+  onMoveFolder?: (sourcePath: string, targetParentPath: string) => void;
+  onDeleteFolder?: (path: string) => void;
+  onRestoreNote?: (noteId: string) => void;
+  onDeleteNotePermanently?: (noteId: string) => void;
+  onDrop: (path: string, event: DragEvent) => void;
+  onDuplicateNote: (note: Note | SemanticSearchResult) => Promise<void>;
+  setDragOverPath: React.Dispatch<React.SetStateAction<string | null>>;
+  setDraggingKey: React.Dispatch<React.SetStateAction<string | null>>;
+}
+
+const FolderRow = memo(function FolderRow({
+  node,
+  depth,
+  expanded,
+  activeFolderPath,
+  dragOverPath,
+  draggingKey,
+  depthStep,
+  noteBasePad,
+  folderOptions,
+  selectedId,
+  multiActive,
+  selectedIds,
+  bulk,
+  onToggleFolder,
+  onSelectFolder,
+  onSelectNote,
+  onCreateNoteInFolder,
+  onCreateFolderInFolder,
+  onMoveNote,
+  onRenameFolder,
+  onMoveFolder,
+  onDeleteFolder,
+  onRestoreNote,
+  onDeleteNotePermanently,
+  onDrop,
+  onDuplicateNote,
+  setDragOverPath,
+  setDraggingKey,
+}: FolderRowProps) {
+  const key = node.path || "__root__";
+  const isOpen = expanded.has(key);
+  const isActive = activeFolderPath === (node.path || "");
+  const isRoot = !node.path;
+  const moveTargets = folderOptions.filter((n) => n.path !== node.path && !n.path.startsWith(node.path + "/"));
+
+  return (
+    <div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            draggable={!isRoot}
+            onDragStart={(event) => {
+              if (isRoot) return;
+              event.dataTransfer.setData("application/x-folder-path", node.path);
+              event.dataTransfer.effectAllowed = "move";
+              const el = event.currentTarget;
+              setTimeout(() => el.classList.add("opacity-40"), 0);
+              setDraggingKey(`folder:${node.path}`);
+            }}
+            onDragEnd={(event) => {
+              event.currentTarget.classList.remove("opacity-40");
+              setDraggingKey(null);
+              setDragOverPath(null);
+            }}
+            onClick={() => {
+              onSelectFolder(node.path);
+              if (!isOpen) onToggleFolder(node.path);
+            }}
+            onDoubleClick={() => onToggleFolder(node.path)}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (dragOverPath !== node.path) setDragOverPath(node.path);
+            }}
+            onDragLeave={(event) => {
+              const next = event.relatedTarget as Node | null;
+              if (next && event.currentTarget.contains(next)) return;
+              setDragOverPath((current) => (current === node.path ? null : current));
+            }}
+            onDrop={(event) => onDrop(node.path, event)}
+            className={cn(
+              "flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60",
+              !isRoot && "cursor-grab active:cursor-grabbing",
+              isActive && "bg-accent text-accent-foreground",
+              dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
+              draggingKey === `folder:${node.path}` && "opacity-40"
+            )}
+            style={{ paddingLeft: `${8 + depth * depthStep}px` }}
+          >
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleFolder(node.path);
+              }}
+              className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            >
+              {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </span>
+            {isOpen ? <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />}
+            <span className="min-w-0 flex-1 truncate">{isRoot ? "Vault root" : node.name}</span>
+            <span className="text-[10px] text-muted-foreground">{node.noteCount}</span>
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-52">
+          <ContextMenuItem onClick={() => onCreateNoteInFolder(node.path)}>
+            <FilePlus className="mr-2 h-3.5 w-3.5" /> New note here
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onCreateFolderInFolder(node.path)}>
+            <FolderPlus className="mr-2 h-3.5 w-3.5" /> New folder here
+          </ContextMenuItem>
+          {!isRoot && (onRenameFolder || onMoveFolder || onDeleteFolder) && <ContextMenuSeparator />}
+          {!isRoot && onRenameFolder && (
+            <ContextMenuItem onClick={() => onRenameFolder(node.path)}>
+              <Pencil className="mr-2 h-3.5 w-3.5" /> Rename folder…
+            </ContextMenuItem>
+          )}
+          {!isRoot && onMoveFolder && (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Folder className="mr-2 h-3.5 w-3.5" /> Move to
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+                <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
+                  <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+                </ContextMenuItem>
+                {moveTargets.length > 0 && <ContextMenuSeparator />}
+                {moveTargets.map((t) => (
+                  <ContextMenuItem key={t.path} onClick={() => onMoveFolder(node.path, t.path)}>
+                    <Folder className="mr-2 h-3.5 w-3.5" /> {t.path}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          )}
+          {!isRoot && onDeleteFolder && (
+            <ContextMenuItem
+              onClick={() => onDeleteFolder(node.path)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete folder…
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      {isOpen && (
+        <div>
+          {node.children.map((child) => (
+            <FolderRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              activeFolderPath={activeFolderPath}
+              dragOverPath={dragOverPath}
+              draggingKey={draggingKey}
+              depthStep={depthStep}
+              noteBasePad={noteBasePad}
+              folderOptions={folderOptions}
+              selectedId={selectedId}
+              multiActive={multiActive}
+              selectedIds={selectedIds}
+              bulk={bulk}
+              onToggleFolder={onToggleFolder}
+              onSelectFolder={onSelectFolder}
+              onSelectNote={onSelectNote}
+              onCreateNoteInFolder={onCreateNoteInFolder}
+              onCreateFolderInFolder={onCreateFolderInFolder}
+              onMoveNote={onMoveNote}
+              onRenameFolder={onRenameFolder}
+              onMoveFolder={onMoveFolder}
+              onDeleteFolder={onDeleteFolder}
+              onRestoreNote={onRestoreNote}
+              onDeleteNotePermanently={onDeleteNotePermanently}
+              onDrop={onDrop}
+              onDuplicateNote={onDuplicateNote}
+              setDragOverPath={setDragOverPath}
+              setDraggingKey={setDraggingKey}
+            />
+          ))}
+          {node.notes.map((note) => (
+            <NoteRow
+              key={note.id}
+              note={note}
+              depth={depth + 1}
+              noteBasePad={noteBasePad}
+              depthStep={depthStep}
+              folderOptions={folderOptions}
+              selectedId={selectedId}
+              multiActive={multiActive}
+              selectedIds={selectedIds}
+              bulk={bulk}
+              draggingKey={draggingKey}
+              onSelectFolder={onSelectFolder}
+              onSelectNote={onSelectNote}
+              onMoveNote={onMoveNote}
+              onRestoreNote={onRestoreNote}
+              onDeleteNotePermanently={onDeleteNotePermanently}
+              onDuplicateNote={onDuplicateNote}
+              setDragOverPath={setDragOverPath}
+              setDraggingKey={setDraggingKey}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
+interface NoteRowProps {
+  note: Note | SemanticSearchResult;
+  depth: number;
+  noteBasePad: number;
+  depthStep: number;
+  folderOptions: FolderNode[];
+  selectedId: string | null;
+  multiActive: boolean;
+  selectedIds: string[];
+  bulk: UseBulkSelectResult;
+  draggingKey: string | null;
+  onSelectFolder: (path: string | null) => void;
+  onSelectNote: (id: string) => void;
+  onMoveNote: (noteId: string, path: string) => void;
+  onRestoreNote?: (noteId: string) => void;
+  onDeleteNotePermanently?: (noteId: string) => void;
+  onDuplicateNote: (note: Note | SemanticSearchResult) => Promise<void>;
+  setDragOverPath: React.Dispatch<React.SetStateAction<string | null>>;
+  setDraggingKey: React.Dispatch<React.SetStateAction<string | null>>;
+}
+
+const NoteRow = memo(function NoteRow({
+  note,
+  depth,
+  noteBasePad,
+  depthStep,
+  folderOptions,
+  selectedId,
+  multiActive,
+  selectedIds,
+  bulk,
+  draggingKey,
+  onSelectFolder,
+  onSelectNote,
+  onMoveNote,
+  onRestoreNote,
+  onDeleteNotePermanently,
+  onDuplicateNote,
+  setDragOverPath,
+  setDraggingKey,
+}: NoteRowProps) {
+  const isMultiSelected = bulk.isSelected(note.id);
+  const canDrag = !multiActive || isMultiSelected;
+  const applyMove = (path: string) => {
+    if (multiActive && isMultiSelected && selectedIds.length > 1) {
+      selectedIds.forEach((id) => onMoveNote(id, path));
+      bulk.clear();
+    } else {
+      onMoveNote(note.id, path);
+    }
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <a
+          href={`/dashboard/notes/${note.id}`}
+          draggable={canDrag}
+          onDragStart={(event) => {
+            if (multiActive && isMultiSelected && selectedIds.length > 1) {
+              event.dataTransfer.setData("application/x-note-ids", JSON.stringify(selectedIds));
+            }
+            event.dataTransfer.setData("text/plain", note.id);
+            event.dataTransfer.effectAllowed = "move";
+            const el = event.currentTarget;
+            setTimeout(() => el.classList.add("opacity-40"), 0);
+            setDraggingKey(`note:${note.id}`);
+          }}
+          onDragEnd={(event) => {
+            event.currentTarget.classList.remove("opacity-40");
+            setDraggingKey(null);
+            setDragOverPath(null);
+          }}
+          onClick={(event) => {
+            const consumed = bulk.handleClick(event, note.id);
+            if (consumed) return;
+            if (event.button === 0) {
+              event.preventDefault();
+              onSelectFolder(normalizePath(note.folder_path));
+              onSelectNote(note.id);
+            }
+          }}
+          className={cn(
+            "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
+            canDrag && "cursor-grab active:cursor-grabbing",
+            selectedId === note.id && !multiActive && "bg-accent text-accent-foreground",
+            isMultiSelected && "bg-primary/10 hover:bg-primary/15",
+            draggingKey === `note:${note.id}` && "opacity-40"
+          )}
+          style={{ paddingLeft: `${noteBasePad + depth * depthStep}px` }}
+        >
+          {multiActive && (
+            <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+              <Checkbox
+                checked={isMultiSelected}
+                onCheckedChange={() =>
+                  bulk.handleClick(
+                    { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as React.MouseEvent,
+                    note.id,
+                  )
+                }
+                aria-label="Select note"
+                className="h-3.5 w-3.5"
+              />
+            </span>
+          )}
+          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{note.title || "Untitled"}</span>
+          <span className="hidden text-[10px] text-muted-foreground group-hover:inline">
+            {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
+          </span>
+          {note.is_pinned && <Pin className="h-3 w-3 shrink-0 text-primary" />}
+          {note.is_favorite && <Star className="h-3 w-3 shrink-0 fill-warning text-warning" />}
+          {note.is_trashed && <Trash2 className="h-3 w-3 shrink-0 text-destructive" />}
+        </a>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-56">
+        <ContextMenuItem
+          onClick={() => {
+            navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`);
+            showToast.copied();
+          }}
+        >
+          <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
+        </ContextMenuItem>
+        {!note.is_trashed && (
+          <ContextMenuItem onClick={() => onDuplicateNote(note)}>
+            <Copy className="mr-2 h-3.5 w-3.5" /> Make a copy
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        {note.is_trashed ? (
+          <>
+            {onRestoreNote && (
+              <ContextMenuItem onClick={() => onRestoreNote(note.id)}>
+                <RotateCcw className="mr-2 h-3.5 w-3.5" /> Restore note
+              </ContextMenuItem>
+            )}
+            {onDeleteNotePermanently && (
+              <ContextMenuItem
+                onClick={() => onDeleteNotePermanently(note.id)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete permanently…
+              </ContextMenuItem>
+            )}
+          </>
+        ) : (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              {multiActive && isMultiSelected && selectedIds.length > 1
+                ? `Move ${selectedIds.length} notes to`
+                : "Move to"}
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+              <ContextMenuItem onClick={() => applyMove("")}>
+                <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+              </ContextMenuItem>
+              {folderOptions.length > 0 && <ContextMenuSeparator />}
+              {folderOptions.map((node) => (
+                <ContextMenuItem key={node.path} onClick={() => applyMove(node.path)}>
+                  <Folder className="mr-2 h-3.5 w-3.5" />
+                  {node.path}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
 
 export function NoteTree({
   notes,
@@ -151,7 +560,7 @@ export function NoteTree({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   const tree = useMemo(() => {
-    const root: FolderNode = { name: "Vault root", path: "", children: [], notes: [] };
+    const root: FolderNode = { name: "Vault root", path: "", children: [], notes: [], noteCount: 0 };
     const allFolderPaths = new Set<string>();
 
     folderPaths.forEach((path) => {
@@ -175,8 +584,8 @@ export function NoteTree({
     return root;
   }, [folderPaths, notes, sortField, sortDirection]);
 
-  // Flat list of visible note ids (DFS, respecting expanded folders) — used
-  // for shift+click range selection.
+  const folderOptions = useMemo(() => tree.children.flatMap(flattenFolders), [tree]);
+
   const visibleNoteIds = useMemo(() => {
     const out: string[] = [];
     const walk = (node: FolderNode) => {
@@ -192,19 +601,30 @@ export function NoteTree({
   const bulk = useBulkSelect(visibleNoteIds);
   const multiActive = bulk.size > 0;
   const selectedIds = useMemo(() => Array.from(bulk.selected), [bulk.selected]);
+  const selectedFolderPath = useMemo(() => {
+    const selected = notes.find((note) => note.id === selectedId);
+    return normalizePath(selected?.folder_path);
+  }, [notes, selectedId]);
 
   useEffect(() => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      next.add("__root__");
-      collectAncestorPaths(activeFolderPath).forEach((path) => next.add(path));
-      const selected = notes.find((note) => note.id === selectedId);
-      collectAncestorPaths(normalizePath(selected?.folder_path)).forEach((path) => next.add(path));
-      return next;
-    });
-  }, [activeFolderPath, notes, selectedId]);
+    const requiredKeys = new Set<string>(["__root__"]);
+    collectAncestorPaths(activeFolderPath).forEach((path) => requiredKeys.add(path));
+    collectAncestorPaths(selectedFolderPath).forEach((path) => requiredKeys.add(path));
 
-  const toggleFolder = (path: string) => {
+    setExpanded((current) => {
+      let changed = false;
+      const next = new Set(current);
+      requiredKeys.forEach((key) => {
+        if (!next.has(key)) {
+          next.add(key);
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [activeFolderPath, selectedFolderPath]);
+
+  const toggleFolder = useCallback((path: string) => {
     const key = path || "__root__";
     setExpanded((current) => {
       const next = new Set(current);
@@ -212,9 +632,9 @@ export function NoteTree({
       else next.add(key);
       return next;
     });
-  };
+  }, []);
 
-  const handleDrop = (path: string, event: DragEvent) => {
+  const handleDrop = useCallback((path: string, event: DragEvent) => {
     event.preventDefault();
     setDragOverPath(null);
     const folderPath = event.dataTransfer.getData("application/x-folder-path");
@@ -237,280 +657,18 @@ export function NoteTree({
     }
     const noteId = event.dataTransfer.getData("text/plain");
     if (noteId) onMoveNote(noteId, path);
-  };
+  }, [bulk, onMoveFolder, onMoveNote]);
 
-  const FolderRow = ({ node, depth }: { node: FolderNode; depth: number }) => {
-    const key = node.path || "__root__";
-    const isOpen = expanded.has(key);
-    const isActive = activeFolderPath === (node.path || "");
-    const isRoot = !node.path;
-    const count = countNestedNotes(node);
-    const moveTargets = tree.children
-      .flatMap((c) => flattenFolders(c))
-      .filter((n) => n.path !== node.path && !n.path.startsWith(node.path + "/"));
-
-    return (
-      <div>
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <button
-              type="button"
-              draggable={!isRoot}
-              onDragStart={(event) => {
-                if (isRoot) return;
-                event.dataTransfer.setData("application/x-folder-path", node.path);
-                event.dataTransfer.effectAllowed = "move";
-                const el = event.currentTarget;
-                // Defer so the browser captures the drag ghost first, then dim source
-                setTimeout(() => el.classList.add("opacity-40"), 0);
-                setDraggingKey(`folder:${node.path}`);
-              }}
-              onDragEnd={(event) => {
-                event.currentTarget.classList.remove("opacity-40");
-                setDraggingKey(null);
-                setDragOverPath(null);
-              }}
-              onClick={() => {
-                onSelectFolder(node.path);
-                if (!isOpen) toggleFolder(node.path);
-              }}
-              onDoubleClick={() => toggleFolder(node.path)}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                if (dragOverPath !== node.path) setDragOverPath(node.path);
-              }}
-              onDragLeave={(event) => {
-                // Ignore leave events when moving onto descendants
-                const next = event.relatedTarget as Node | null;
-                if (next && event.currentTarget.contains(next)) return;
-                setDragOverPath((current) => (current === node.path ? null : current));
-              }}
-              onDrop={(event) => handleDrop(node.path, event)}
-              className={cn(
-                "flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60",
-                !isRoot && "cursor-grab active:cursor-grabbing",
-                isActive && "bg-accent text-accent-foreground",
-                dragOverPath === node.path && draggingKey !== `folder:${node.path}` && "ring-2 ring-primary ring-inset bg-primary/10",
-                draggingKey === `folder:${node.path}` && "opacity-40"
-              )}
-              style={{ paddingLeft: `${8 + depth * depthStep}px` }}
-            >
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleFolder(node.path);
-                }}
-                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-              >
-                {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              </span>
-              {isOpen ? <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              <span className="min-w-0 flex-1 truncate">{isRoot ? "Vault root" : node.name}</span>
-              <span className="text-[10px] text-muted-foreground">{count}</span>
-            </button>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-52">
-            <ContextMenuItem onClick={() => onCreateNoteInFolder(node.path)}>
-              <FilePlus className="mr-2 h-3.5 w-3.5" /> New note here
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCreateFolderInFolder(node.path)}>
-              <FolderPlus className="mr-2 h-3.5 w-3.5" /> New folder here
-            </ContextMenuItem>
-            {!isRoot && (onRenameFolder || onMoveFolder || onDeleteFolder) && (
-              <ContextMenuSeparator />
-            )}
-            {!isRoot && onRenameFolder && (
-              <ContextMenuItem onClick={() => onRenameFolder(node.path)}>
-                <Pencil className="mr-2 h-3.5 w-3.5" /> Rename folder…
-              </ContextMenuItem>
-            )}
-            {!isRoot && onMoveFolder && (
-              <ContextMenuSub>
-                <ContextMenuSubTrigger>
-                  <Folder className="mr-2 h-3.5 w-3.5" /> Move to
-                </ContextMenuSubTrigger>
-                <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-                  <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
-                    <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
-                  </ContextMenuItem>
-                  {moveTargets.length > 0 && <ContextMenuSeparator />}
-                  {moveTargets.map((t) => (
-                    <ContextMenuItem key={t.path} onClick={() => onMoveFolder(node.path, t.path)}>
-                      <Folder className="mr-2 h-3.5 w-3.5" /> {t.path}
-                    </ContextMenuItem>
-                  ))}
-                </ContextMenuSubContent>
-              </ContextMenuSub>
-            )}
-            {!isRoot && onDeleteFolder && (
-              <ContextMenuItem
-                onClick={() => onDeleteFolder(node.path)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete folder…
-              </ContextMenuItem>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>
-        {isOpen && (
-          <div>
-            {node.children.map((child) => <FolderRow key={child.path} node={child} depth={depth + 1} />)}
-            {node.notes.map((note) => <NoteRow key={note.id} note={note} depth={depth + 1} />)}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const NoteRow = ({ note, depth }: { note: Note | SemanticSearchResult; depth: number }) => {
-    const folderOptions = tree.children.flatMap((node) => flattenFolders(node));
-    const isMultiSelected = bulk.isSelected(note.id);
-    const canDrag = !multiActive || isMultiSelected;
-    const applyMove = (path: string) => {
-      if (multiActive && isMultiSelected && selectedIds.length > 1) {
-        selectedIds.forEach((id) => onMoveNote(id, path));
-        bulk.clear();
-      } else {
-        onMoveNote(note.id, path);
-      }
-    };
-    return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <a
-            href={`/dashboard/notes/${note.id}`}
-            draggable={canDrag}
-            onDragStart={(event) => {
-              if (multiActive && isMultiSelected && selectedIds.length > 1) {
-                event.dataTransfer.setData(
-                  "application/x-note-ids",
-                  JSON.stringify(selectedIds),
-                );
-              }
-              event.dataTransfer.setData("text/plain", note.id);
-              event.dataTransfer.effectAllowed = "move";
-              const el = event.currentTarget;
-              setTimeout(() => el.classList.add("opacity-40"), 0);
-              setDraggingKey(`note:${note.id}`);
-            }}
-            onDragEnd={(event) => {
-              event.currentTarget.classList.remove("opacity-40");
-              setDraggingKey(null);
-              setDragOverPath(null);
-            }}
-            onClick={(event) => {
-              const consumed = bulk.handleClick(event, note.id);
-              if (consumed) return;
-              if (event.button === 0) {
-                event.preventDefault();
-                onSelectFolder(normalizePath(note.folder_path));
-                onSelectNote(note.id);
-              }
-            }}
-            className={cn(
-              "group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm transition-colors hover:bg-accent/60",
-              canDrag && "cursor-grab active:cursor-grabbing",
-              selectedId === note.id && !multiActive && "bg-accent text-accent-foreground",
-              isMultiSelected && "bg-primary/10 hover:bg-primary/15",
-              draggingKey === `note:${note.id}` && "opacity-40"
-            )}
-            style={{ paddingLeft: `${noteBasePad + depth * depthStep}px` }}
-          >
-            {multiActive && (
-              <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                <Checkbox
-                  checked={isMultiSelected}
-                  onCheckedChange={() =>
-                    bulk.handleClick(
-                      { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as React.MouseEvent,
-                      note.id,
-                    )
-                  }
-                  aria-label="Select note"
-                  className="h-3.5 w-3.5"
-                />
-              </span>
-            )}
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate">{note.title || "Untitled"}</span>
-            <span className="hidden text-[10px] text-muted-foreground group-hover:inline">
-              {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true })}
-            </span>
-            {note.is_pinned && <Pin className="h-3 w-3 shrink-0 text-primary" />}
-            {note.is_favorite && <Star className="h-3 w-3 shrink-0 fill-warning text-warning" />}
-            {note.is_trashed && <Trash2 className="h-3 w-3 shrink-0 text-destructive" />}
-          </a>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-56">
-          <ContextMenuItem
-            onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`);
-              showToast.copied();
-            }}
-          >
-            <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
-          </ContextMenuItem>
-          {!note.is_trashed && (
-            <ContextMenuItem
-              onClick={async () => {
-                try {
-                  const created = await duplicateNote.mutateAsync(note.id);
-                  onSelectFolder(normalizePath(created.folder_path));
-                  onSelectNote(created.id);
-                  navigate(`/dashboard/notes/${created.id}`);
-                } catch {
-                  /* handled by hook */
-                }
-              }}
-            >
-              <Copy className="mr-2 h-3.5 w-3.5" /> Make a copy
-            </ContextMenuItem>
-          )}
-          <ContextMenuSeparator />
-          {note.is_trashed ? (
-            <>
-              {onRestoreNote && (
-                <ContextMenuItem onClick={() => onRestoreNote(note.id)}>
-                  <RotateCcw className="mr-2 h-3.5 w-3.5" /> Restore note
-                </ContextMenuItem>
-              )}
-              {onDeleteNotePermanently && (
-                <ContextMenuItem
-                  onClick={() => onDeleteNotePermanently(note.id)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete permanently…
-                </ContextMenuItem>
-              )}
-            </>
-          ) : (
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                {multiActive && isMultiSelected && selectedIds.length > 1
-                  ? `Move ${selectedIds.length} notes to`
-                  : "Move to"}
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-                <ContextMenuItem onClick={() => applyMove("")}>
-                  <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
-                </ContextMenuItem>
-                {folderOptions.length > 0 && <ContextMenuSeparator />}
-                {folderOptions.map((node) => (
-                  <ContextMenuItem key={node.path} onClick={() => applyMove(node.path)}>
-                    <Folder className="mr-2 h-3.5 w-3.5" />
-                    {node.path}
-                  </ContextMenuItem>
-                ))}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-          )}
-        </ContextMenuContent>
-      </ContextMenu>
-    );
-  };
+  const handleDuplicateNote = useCallback(async (note: Note | SemanticSearchResult) => {
+    try {
+      const created = await duplicateNote.mutateAsync(note.id);
+      onSelectFolder(normalizePath(created.folder_path));
+      onSelectNote(created.id);
+      navigate(`/dashboard/notes/${created.id}`);
+    } catch {
+      /* handled by hook */
+    }
+  }, [duplicateNote, navigate, onSelectFolder, onSelectNote]);
 
   if (notes.length === 0 && folderPaths.length === 0) {
     return (
@@ -523,15 +681,40 @@ export function NoteTree({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 overflow-y-auto p-2">
-        <FolderRow node={tree} depth={0} />
+        <FolderRow
+          node={tree}
+          depth={0}
+          expanded={expanded}
+          activeFolderPath={activeFolderPath}
+          dragOverPath={dragOverPath}
+          draggingKey={draggingKey}
+          depthStep={depthStep}
+          noteBasePad={noteBasePad}
+          folderOptions={folderOptions}
+          selectedId={selectedId}
+          multiActive={multiActive}
+          selectedIds={selectedIds}
+          bulk={bulk}
+          onToggleFolder={toggleFolder}
+          onSelectFolder={onSelectFolder}
+          onSelectNote={onSelectNote}
+          onCreateNoteInFolder={onCreateNoteInFolder}
+          onCreateFolderInFolder={onCreateFolderInFolder}
+          onMoveNote={onMoveNote}
+          onRenameFolder={onRenameFolder}
+          onMoveFolder={onMoveFolder}
+          onDeleteFolder={onDeleteFolder}
+          onRestoreNote={onRestoreNote}
+          onDeleteNotePermanently={onDeleteNotePermanently}
+          onDrop={handleDrop}
+          onDuplicateNote={handleDuplicateNote}
+          setDragOverPath={setDragOverPath}
+          setDraggingKey={setDraggingKey}
+        />
       </div>
       {multiActive && (
         <BulkActionBar selectedIds={selectedIds} notes={notes} onClear={bulk.clear} />
       )}
     </div>
   );
-}
-
-function flattenFolders(node: FolderNode): FolderNode[] {
-  return [node, ...node.children.flatMap(flattenFolders)];
 }
