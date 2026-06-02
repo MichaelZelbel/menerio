@@ -709,21 +709,49 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     let cancelled = false;
     const currentHtml = editor.getHTML();
     if (!currentHtml.includes("data-attachment-name=")) return;
-    // Only swap when at least one img/iframe placeholder still has an empty/missing src.
-    const hasImg = /<img[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml);
-    const hasIframe = /<iframe[^>]*data-attachment-name="[^"]+"[^>]*>/i.test(currentHtml);
-    if (!hasImg && !hasIframe) return;
-    const imgNeeds = /<img[^>]*\bsrc=""[^>]*data-attachment-name=|<img[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc=")/i.test(currentHtml);
-    const iframeNeeds = /<iframe[^>]*\bsrc=("|"about:blank")[^>]*data-attachment-name=|<iframe[^>]*data-attachment-name="[^"]+"(?![^>]*\bsrc="(?!about:blank")[^"]+")/i.test(currentHtml);
-    if (!imgNeeds && !iframeNeeds) return;
+    if (lastResolvedHtmlRef.current === currentHtml) return;
+
+    // Structural detection — independent of attribute order. We only need
+    // to resolve when at least one attachment-bearing element still has
+    // an empty/placeholder src/href.
+    let needs = false;
+    try {
+      const doc = new DOMParser().parseFromString(`<div>${currentHtml}</div>`, "text/html");
+      const els = doc.querySelectorAll("[data-attachment-name]");
+      for (const el of Array.from(els)) {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "img") {
+          const src = el.getAttribute("src") || "";
+          if (!src) { needs = true; break; }
+        } else if (tag === "iframe") {
+          const src = el.getAttribute("src") || "";
+          if (!src || src === "about:blank") { needs = true; break; }
+        } else if (tag === "a") {
+          const href = el.getAttribute("href") || "";
+          if (!href || href === "#") { needs = true; break; }
+        }
+      }
+    } catch {
+      // If parsing fails, fall through without scheduling — safer than looping.
+      return;
+    }
+    if (!needs) {
+      lastResolvedHtmlRef.current = currentHtml;
+      return;
+    }
 
     void (async () => {
       try {
         const resolved = await resolveAttachmentImagesInHtml(currentHtml, user.id);
-        if (cancelled || resolved === currentHtml) return;
+        if (cancelled) return;
+        if (resolved === currentHtml) {
+          lastResolvedHtmlRef.current = currentHtml;
+          return;
+        }
         if (editor.isDestroyed) return;
         // Avoid clobbering user input mid-edit
         if (editor.isFocused) return;
+        lastResolvedHtmlRef.current = resolved;
         editor.commands.setContent(resolved, { emitUpdate: false });
       } catch (err) {
         console.warn("attachment resolver failed", err);
