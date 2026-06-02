@@ -1,4 +1,4 @@
-import { type DragEvent, useEffect, useMemo, useState } from "react";
+import { memo, type DragEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import {
@@ -32,7 +32,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useBulkSelect } from "./useBulkSelect";
+import { useBulkSelect, type UseBulkSelectResult } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
 import { CaptureEmptyState } from "./CaptureEmptyState";
 
@@ -63,6 +63,7 @@ interface FolderNode {
   path: string;
   children: FolderNode[];
   notes: (Note | SemanticSearchResult)[];
+  noteCount: number;
 }
 
 const normalizePath = (path: string | null | undefined) =>
@@ -76,7 +77,7 @@ function ensureFolder(root: FolderNode, path: string) {
     const nextPath = parts.slice(0, index + 1).join("/");
     let child = cursor.children.find((node) => node.path === nextPath);
     if (!child) {
-      child = { name: part, path: nextPath, children: [], notes: [] };
+      child = { name: part, path: nextPath, children: [], notes: [], noteCount: 0 };
       cursor.children.push(child);
     }
     cursor = child;
@@ -108,11 +109,12 @@ function sortFolder(
     return dir * (aTs - bTs);
   });
 
-  node.children.forEach((child) => sortFolder(child, sortField, sortDirection));
-}
-
-function countNestedNotes(node: FolderNode): number {
-  return node.notes.length + node.children.reduce((sum, child) => sum + countNestedNotes(child), 0);
+  let nestedCount = node.notes.length;
+  node.children.forEach((child) => {
+    sortFolder(child, sortField, sortDirection);
+    nestedCount += child.noteCount;
+  });
+  node.noteCount = nestedCount;
 }
 
 function collectAncestorPaths(path: string | null) {
