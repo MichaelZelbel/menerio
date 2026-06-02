@@ -611,6 +611,23 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
+  // Set editor HTML and then asynchronously swap in resolved signed URLs for
+  // any `data-attachment-name` placeholders. Fire-and-forget: this never
+  // re-reads `editor.getHTML()` afterwards, so it cannot loop with the
+  // autosave → invalidate → prop-change cycle that froze the app before.
+  const setEditorContentWithAttachments = useCallback((html: string) => {
+    if (!editor) return;
+    editor.commands.setContent(html, { emitUpdate: false });
+    if (!user?.id || !html.includes("data-attachment-name=")) return;
+    resolveAttachmentImagesInHtml(html, user.id)
+      .then((resolved) => {
+        if (!editor || editor.isDestroyed || editor.isFocused) return;
+        if (resolved === html) return;
+        editor.commands.setContent(resolved, { emitUpdate: false });
+      })
+      .catch((err) => console.warn("attachment resolver failed", err));
+  }, [editor, user?.id]);
+
   // Cancel every pending timer when the editor unmounts so we don't fire
   // stale saves / sync calls / process triggers against a destroyed instance.
   useEffect(() => {
