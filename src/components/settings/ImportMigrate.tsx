@@ -371,14 +371,15 @@ export function ImportMigrate() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Sparkles className="h-4 w-4 text-primary" />
-          Enrich people profiles from past notes
+          Enrich people profiles from notes & timeline
         </CardTitle>
         <CardDescription>
-          Re-analyzes your most recent ~200 notes to extract biographical facts
-          about the people you've mentioned (job, city, relationships, etc.)
-          and populate their profiles. Existing entries are preserved — duplicates
-          are skipped automatically.
+          Re-analyzes your most recent ~200 notes and timeline moments to
+          extract biographical facts about the people you've mentioned (job,
+          city, life events, relationships, etc.) and populate their profiles.
+          Existing entries are preserved — duplicates are skipped automatically.
         </CardDescription>
+
       </CardHeader>
       <CardContent>
         <Button onClick={runProfileBackfill} disabled={profileBackfillLoading}>
