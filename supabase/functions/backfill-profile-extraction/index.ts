@@ -30,7 +30,7 @@ type Body = {
 async function runBackfill(userId: string, authHeader: string, body: Body) {
   const limit = Math.min(Math.max(body.limit ?? 200, 1), 500);
 
-  let query = supabase
+  const query = supabase
     .from("notes")
     .select("id, metadata, created_at")
     .eq("user_id", userId)
