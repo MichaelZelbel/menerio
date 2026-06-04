@@ -732,8 +732,9 @@ function deriveCanonicalFacts(
         }
       }
 
-      // Otherwise: drop the fact rather than store unstructured text in a singleton field.
-      console.log(`[profile-extract] dropping malformed birthday fact: "${value}"`);
+      // Couldn't derive a clean ISO date — keep the fact under a non-singleton
+      // "Birthday" label so the user sees it in review and can decide.
+      out.push({ ...f, label: "Birthday", value });
       continue;
     }
 
@@ -743,13 +744,8 @@ function deriveCanonicalFacts(
   return out;
 }
 
-// Sources that are structurally NOT first-person observation. Profile extraction
-// should be skipped for these to avoid mining biographical "facts" out of
-// third-party content (prompt libraries, web clips, public repos, etc.).
-const NON_BIOGRAPHICAL_SOURCES = new Set([
-  "querino", "github", "singlefile", "web-clip", "webclip",
-  "slack-public-channel",
-]);
+// Removed: NON_BIOGRAPHICAL_SOURCES blanket skip. Use SOFT_SIGNAL_SOURCES
+// below instead — extraction still runs but confidence is capped.
 
 const MAX_FACTS_PER_CONTACT_PER_NOTE = 8;
 
