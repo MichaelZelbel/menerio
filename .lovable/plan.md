@@ -1,99 +1,73 @@
-## Goal
-Make People profile enrichment understand high-confidence human relationships from all Menerio evidence, not just isolated note snippets, and stop creating duplicate/mirrored relationship rows.
+## Root cause — why the AI doesn't know you're married to Xihui
 
-## Findings
-- The Xihui profile has two stored Rick↔Xihui `lover` rows in opposite directions. The current unique index only prevents exact same-direction duplicates, not symmetric duplicates.
-- The correct fact already exists in the Lexicon: Xihui is Michael’s wife / spouse and married Michael on Jan 23, 2006.
-- The profile enrichment button currently runs note + timeline backfills only. It does not consume Lexicon pages.
-- Timeline extraction currently skips `me`/self relationships, so a wedding/marriage moment cannot create `Xihui ↔ me = spouse`.
-- Note extraction can discard relationship-only results because it returns early when no profile facts are extracted.
-- Relationship dedupe uses raw labels/titles (`lover`, `partner`, `spouse`, `wife`) instead of canonical relationship semantics.
+I verified this against your actual database. The wiki page is not the bottleneck. The real chain of failures is:
 
-## Plan
+**1. Relationship facts are extracted only once, per note, at ingest time.**
+Profile/relationship extraction lives inside `process-note` and only runs when a note is first ingested. Old notes are never re-extracted, even after we improve the prompt or switch models. Your richest evidence is in notes ingested months ago (long before the relationship-extraction prompt existed in its current form).
 
-### 1. Add canonical relationship utilities
-Create shared relationship helpers for edge functions and frontend logic:
-- Normalize labels:
-  - `wife`, `husband`, `married`, `marriage`, `life partner` → canonical `spouse`
-  - `girlfriend`, `boyfriend`, `lover` → canonical `partner` or keep `lover` as a separate romantic label only where explicit
-- Mark symmetric labels (`spouse`, `partner`, `lover`, `friend`, `sibling`, etc.) so A→B and B→A are treated as the same relationship.
-- Generate a stable pair key for `(user, source entity, target entity, canonical label)` independent of direction for symmetric relationships.
+**2. Extraction is gated by `metadata.people` from a single early LLM call.**
+If that first metadata pass doesn't list "Xihui" in `metadata.people`, the whole profile/relationship extraction is skipped for that note. I confirmed this in your DB:
 
-### 2. Fix relationship insertion/deduping everywhere
-Update these paths to use the canonical pair key before inserting or suggesting:
-- Review Queue accept relationship
-- `process-note` profile relationship extraction
-- `moment-profile-extraction` timeline relationship extraction
-- manual relationship save in `useContactRelationships`
+- `Marriage Papers Xihui and Michael` → `matched_people = null`. The note is mostly an image of the certificate plus the line "Wedding day 2006-01-23, Düsseldorf". The metadata pass didn't tag Xihui, so extraction never ran.
+- `Love & Relationships Strategy` ("his wife, Xihui, and two online girlfriends…") → `matched_people = null` as well.
+- `Love & Relationships` ("My wife [[Xihui]]") → Xihui *is* matched, but the note was processed before today's relationship logic and was never re-run.
 
-Behavior:
-- Do not create a mirror review item for symmetric labels.
-- Before inserting, check existing rows in both directions.
-- If a semantically equivalent row exists, mark the suggestion as kept/already-existing instead of inserting another row.
-- Display should still be perspective-aware, but the DB should not need two rows for symmetric relationships.
+**3. "Self" is almost never recognised as a participant.**
+`metadata.people` rarely contains "me"/"Michael"/"I", so `is_self` is not set, and self-↔-contact relationships ("my wife Xihui") are filtered out before they ever reach the relationship extractor.
 
-### 3. Let note extraction keep relationship-only evidence
-Fix `process-note` so relationship extraction still runs when there are zero profile facts.
+**4. There is no person-level synthesis pass.**
+Nothing in the system ever asks: *"Given everything we know about Xihui (all notes, attachments, moments, lexicon), what relationship does she have to the user?"* Each note is treated in isolation; nothing aggregates evidence across the corpus.
 
-Current problem:
-- If the note says only `My wife [[Xihui]]`, the model can return a relationship but no profile fact, and the function exits before creating a relationship suggestion.
+**5. The Review Queue history confirms it.**
+Across your entire history there has never been a single `add_relationship` suggestion for spouse/wife between you and Xihui — only the Rick "lover" ones (which came from a Moment, not from notes).
 
-New behavior:
-- Process facts and relationships independently.
-- Relationship-only evidence creates an `add_relationship` suggestion or auto-applies when confidence/prefs allow it.
+So the AI doesn't "fail to comprehend" — it never reads the evidence together in the first place.
 
-### 4. Add self-aware relationship extraction for timeline moments
-Update `moment-profile-extraction` so timeline evidence can create self relationships.
+## The fix — person-level evidence synthesis
 
-Behavior:
-- Include the current profile display name (`michael`) as self context.
-- Accept `me`, `I`, `my`, `Michael`, and the profile display name as self aliases.
-- Allow relationships where one side is self and the other side is a participant.
-- Add deterministic marriage rules:
-  - `X and I got married`
-  - `my wife X`
-  - `Xihui and my wedding day`
-  - `wedding anniversary with X`
-  all produce `self ↔ X = spouse` with high confidence when names are clear.
+Instead of patching one note at a time, add a real **person enrichment pass** that aggregates *all* evidence about a contact and asks an LLM to infer profile facts and relationships, including self-↔-contact ones. Then keep the per-note path as a cheap incremental signal.
 
-### 5. Add Lexicon evidence to person enrichment
-Add a lightweight Lexicon enrichment pass to the existing “Enrich from notes & timeline” action.
+### 1. Replace the current "Enrich from notes & timeline" with a true synthesis function
 
-Implementation approach:
-- Create/reuse an edge function that gathers for one contact:
-  - the person’s Lexicon page (`wiki_pages.page_type = 'person'`)
-  - related wiki pages mentioning that person
-  - current profile entries
-  - current relationships
-  - timeline moments and note snippets already used by existing enrichers
-- Ask the LLM to extract only supported profile facts and relationships from this evidence bundle.
-- Run deterministic post-processing on the result:
-  - canonicalize `wife/husband/married` to `spouse`
-  - dedupe against existing rows and queued suggestions
-  - prefer stronger labels (`spouse` outranks `partner`/`lover`) when the evidence explicitly says married/wife/husband
+Rewrite `enrich-person-from-lexicon` into `enrich-person` that, for a given contact:
 
-### 6. Clean up the current Xihui data
-Add a migration/data repair for the current duplicate and missing relationship:
-- Remove one of the duplicate Rick↔Xihui `lover` rows, preserving the older accepted relationship/suggestion history.
-- Insert one relationship row between `self` and Xihui Wei with canonical label `spouse` if it does not already exist.
-- Optionally add a Xihui profile entry in `Relationships & Family`: `Spouse: Michael` if the category exists and no equivalent entry exists.
+- Pulls the **full evidence bundle**:
+  - All notes where the contact is matched OR whose title/content contains the contact's name or aliases (regex/ILIKE, not only `matched_people`) — this catches the Marriage Papers note.
+  - All Moments referencing the contact.
+  - All Media OCR/extracted_text from attachments in those notes (you already have `media_analysis.extracted_text`) — this catches the actual marriage certificate image.
+  - Lexicon/wiki pages linked to the contact.
+  - The user's own self-context (preferred name, aliases) so "me/my wife" can be resolved.
+- Sends one structured LLM call with the **whole bundle** plus instructions:
+  - "You are reasoning about <Contact>. The note author is <Self/aliases>. Extract profile facts and relationships, including self-↔-contact ones. A note titled 'Marriage Papers' or text 'my wife X' or a 'Wedding day' moment is direct evidence of a spouse relationship."
+- Returns: facts (categorised) + relationships with confidence.
 
-### 7. Add database-level protection for future duplicates
-Add a DB helper/index strategy to prevent symmetric duplicates from returning:
-- Store or compute a normalized relationship key.
-- Enforce uniqueness on canonicalized direction-independent pairs for symmetric labels.
-- Keep existing exact-direction uniqueness for asymmetric labels like `employee/employer`, `parent/child`, `mentor/mentee`.
+### 2. Auto-apply high-confidence facts, queue the rest
 
-### 8. Verify with Xihui as the regression case
-After implementation:
-- Run the enrichment for Xihui.
-- Confirm the profile shows:
-  - one Rick relationship, not two
-  - `spouse`/wife relationship to Michael/self
-- Confirm the Review Queue does not generate a duplicate mirror suggestion.
-- Check edge function logs for skipped/inserted relationship counts.
+- For `spouse`/`partner`/`parent`/`child` style relationships with confidence ≥ 0.85 and grounded in ≥ 2 distinct pieces of evidence (e.g. a marriage-papers note + a wedding moment), **insert directly** into `contact_relationships` (using the canonical pair-key we already added) and log a Review Queue entry marked "auto-applied, click to undo".
+- Lower-confidence ones go to the queue as today.
 
-## Technical notes
-- No change to the selected model/provider is required for this fix.
-- The main improvement is not more model intelligence alone; it is giving the model the right evidence and enforcing deterministic relationship semantics after the model responds.
-- Sensitive/intimate notes should still be processed through the existing sensitivity controls; this plan avoids quoting sensitive content into UI messages unnecessarily.
+### 3. Fix the metadata gate in `process-note`
+
+- Remove the hard dependency on `metadata.people`. After the metadata pass, also do a deterministic scan of the note for wikilinks `[[Name]]`, exact contact-name matches, and alias matches; merge into `matchedPeople`. This means the Marriage Papers note alone would have triggered relationship extraction.
+- Always include "self" in `matchedPeople` when the note contains first-person language (`I`, `my`, `me`, `mein`, `ich`) or the user's preferred name.
+
+### 4. Backfill once for the existing corpus
+
+A one-shot job (`backfill-person-enrichment`) iterates every contact and runs the new synthesis function. After this runs, Xihui's spouse relationship — and many similar ones for other people — will appear without manual action.
+
+### 5. Repair the immediate state
+
+Verify the manual `spouse` row we inserted for you + Xihui is still there and surfaces on her profile after the new enrichment runs (it will naturally re-create it if missing).
+
+### Out of scope on purpose
+
+- No new tables.
+- No changes to the wiki pipeline beyond *reading* lexicon pages as one more evidence source.
+- The per-note suggestion flow stays as a cheap incremental signal; the synthesis function is the authoritative path.
+
+### Technical notes
+
+- Reuse `relationship-canonical.ts` and the symmetric unique index already in place.
+- LLM: keep DeepSeek v4 Flash via OpenRouter; the bundle is small enough (notes truncated to first ~2k chars each, max ~20 notes, plus media extracted_text).
+- Self-context already exists via `loadSelfContext` — reuse it.
+- Cost control: the synthesis call only runs on explicit user trigger ("Enrich from notes & timeline") and during the one-shot backfill; not on every note edit.

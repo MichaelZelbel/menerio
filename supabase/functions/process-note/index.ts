@@ -955,6 +955,7 @@ async function generateProfileSuggestions(
   context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown>; note_created_at?: string | null },
 ) {
   const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
+  const selfEntry = matchedPeople.find((p) => p.is_self);
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
@@ -985,7 +986,10 @@ async function generateProfileSuggestions(
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
     const cleanContent = stripHtmlIfNeeded(noteContent);
     const noteDateLine = noteDateISO ? `\nNote date: ${noteDateISO}` : "";
-    const userPrompt = `People mentioned: ${peopleList}${noteDateLine}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
+    const selfLine = selfEntry?.canonical_name
+      ? `\nNote author (refer to as "me" / "myself" in relationships): ${selfEntry.canonical_name}`
+      : "";
+    const userPrompt = `People mentioned: ${peopleList}${selfLine}${noteDateLine}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
 
     let extractedFacts: Array<{
       contact_name: string;
@@ -1275,9 +1279,10 @@ async function generateProfileSuggestions(
         seenKeys.add(relationshipPairKey(userId, a, b, p.label));
       }
 
+      const selfCtxRel = await loadSelfContext(userId);
       for (const rel of extractedRelationships) {
-        const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a);
-        const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b);
+        const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_a, selfCtxRel.aliases));
+        const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_b, selfCtxRel.aliases));
 
         let contactA: { id: string; name: string } | null = null;
         let contactB: { id: string; name: string } | null = null;
@@ -1537,15 +1542,74 @@ async function processInBackground(noteId: string, authHeader: string) {
         }
         // decision.kind === "skip" → no action; "Add to People" flow handles unknown names.
       }
-      if (matchedPeople.length > 0) {
-        metadata.matched_people = matchedPeople;
-      }
-
       // Build contact map for action items
       for (const [name, contact] of nameToContact) {
         contactMap[name] = contact.id;
       }
     }
+
+    // Deterministic name scan: always run, even when metadata.people was empty
+    // or when the metadata LLM missed a person. This catches notes like
+    // "Marriage Papers Xihui and Michael" where the metadata pass produced no
+    // `people` field, and ensures wikilinks/exact-name occurrences are picked
+    // up regardless of LLM choices.
+    try {
+      const { data: allContactsScan } = await supabase
+        .from("contacts")
+        .select("id, name, aliases")
+        .eq("user_id", note.user_id)
+        .is("merged_into", null);
+
+      const alreadyMatchedIds = new Set(matchedPeople.filter((p) => p.contact_id).map((p) => p.contact_id!));
+      const noteLower = noteFullText.toLowerCase();
+      const wikilinkSlugs = new Set<string>();
+      for (const m of noteFullText.matchAll(/\[\[([^\]\|]+?)(?:\|[^\]]+)?\]\]/g)) {
+        const slug = (m[1] || "").trim().toLowerCase();
+        if (slug) wikilinkSlugs.add(slug);
+      }
+
+      for (const c of (allContactsScan || []) as any[]) {
+        if (alreadyMatchedIds.has(c.id)) continue;
+        const names: string[] = [c.name, ...((c.aliases as string[] | null) || [])].filter(Boolean);
+        let hit: string | null = null;
+        for (const n of names) {
+          const nLower = n.toLowerCase();
+          if (wikilinkSlugs.has(nLower)) { hit = n; break; }
+          // Word-boundary match against full text for full names and aliases
+          const escaped = nLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+          if (re.test(noteLower)) { hit = n; break; }
+        }
+        if (hit) {
+          matchedPeople.push({ name: hit, contact_id: c.id, canonical_name: c.name });
+          alreadyMatchedIds.add(c.id);
+        }
+      }
+
+      // Self-inclusion: detect first-person language or user's own name/aliases.
+      const hasSelf = matchedPeople.some((p) => p.is_self);
+      if (!hasSelf && selfCtx.enabled) {
+        const firstPersonRe = /\b(i|i'm|i've|i'll|my|mine|me|myself|mein|meine|meinem|meinen|meiner|ich|mir|mich)\b/i;
+        let selfHit = firstPersonRe.test(noteFullText);
+        if (!selfHit) {
+          for (const alias of selfCtx.aliases) {
+            const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+            if (re.test(noteLower)) { selfHit = true; break; }
+          }
+        }
+        if (selfHit) {
+          matchedPeople.push({ name: selfCtx.preferredName || "me", is_self: true, canonical_name: selfCtx.preferredName || "Me" });
+        }
+      }
+
+      if (matchedPeople.length > 0) {
+        metadata.matched_people = matchedPeople;
+      }
+    } catch (scanErr) {
+      console.error("[process-note] deterministic name scan error:", scanErr);
+    }
+
 
     // Surface ambiguous self/contact collisions for user review
     if (ambiguousMentions.length > 0) {

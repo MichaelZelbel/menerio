@@ -46,18 +46,17 @@ const PROFILE_CATEGORY_SLUGS = [
   "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
 ];
 
-const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, and notes).
+const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, notes, and attachment OCR text).
 
 Return a JSON object with two keys:
 1. "facts": array of { contact_name, category_slug (one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}), label, value }
 2. "relationships": array of { person_a, person_b, label_a_to_b, label_b_to_a }
 
-Rules:
-- Only extract facts/relationships explicitly stated or strongly implied across multiple sources.
-- Use "me"/"myself" for the note author when the evidence refers to them in first person or by their display name.
-- Marriage cues — "wife", "husband", "married", "wedding day", "spouse", "anniversary" — imply a SPOUSE relationship.
-- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband", emit "spouse".
-- If the evidence contradicts itself, prefer the most-recent and most-document-backed evidence.
+Reasoning rules — apply common sense across ALL evidence, not just one source:
+- Marriage cues anywhere in the evidence — "wife", "husband", "married", "wedding day", "spouse", "anniversary", "Marriage Papers", "Heirat", "Hochzeit", "Ehefrau", "Ehemann" — imply a SPOUSE relationship between the named people. A note titled "Marriage Papers X and Y" plus a wedding-day moment is direct proof.
+- Use "me"/"myself" for the note author when the evidence refers to them in first person ("my wife X") or by their display name.
+- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband"/"married", emit "spouse" (not "lover" or "partner").
+- If multiple sources independently support a relationship, you should still emit it once.
 - Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Do NOT invent facts. If unsure, skip.
 - Return empty arrays if nothing qualifies.`;
@@ -110,19 +109,57 @@ async function loadEvidence(userId: string, contactId: string) {
     moments = data || [];
   }
 
-  // Notes that mention them (via metadata.matched_people)
-  const { data: candidateNotes } = await supabase
+  // Notes that mention them — broadened: by metadata.matched_people OR by
+  // ILIKE on title/content for any of the names/aliases. This catches notes
+  // like "Marriage Papers Xihui and Michael" where matched_people was never
+  // populated by the metadata pass at ingest time.
+  const orClauses = names.flatMap((n: string) => [
+    `title.ilike.%${n}%`,
+    `content.ilike.%${n}%`,
+  ]).join(",");
+  const { data: nameMatchedNotes } = await supabase
     .from("notes")
-    .select("title, content, metadata, created_at")
+    .select("id, title, content, metadata, created_at")
+    .eq("user_id", userId)
+    .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
+    .or(orClauses)
+    .order("created_at", { ascending: false })
+    .limit(60);
+
+  const { data: matchedPeopleNotes } = await supabase
+    .from("notes")
+    .select("id, title, content, metadata, created_at")
     .eq("user_id", userId)
     .eq("is_trashed", false)
     .eq("ai_visibility", "visible")
     .order("created_at", { ascending: false })
     .limit(200);
-  const notes = (candidateNotes || []).filter((n: any) => {
+  const filteredByMatched = (matchedPeopleNotes || []).filter((n: any) => {
     const matched = Array.isArray(n.metadata?.matched_people) ? n.metadata.matched_people : [];
     return matched.some((m: any) => m.contact_id === contactId);
-  }).slice(0, 30);
+  });
+
+  const noteMap = new Map<string, any>();
+  for (const n of [...(nameMatchedNotes || []), ...filteredByMatched]) {
+    if (!noteMap.has(n.id)) noteMap.set(n.id, n);
+  }
+  const notes = Array.from(noteMap.values()).slice(0, 30);
+  const noteIds = notes.map((n) => n.id);
+
+  // Media OCR / extracted text for attachments in those notes — catches things
+  // like the actual marriage certificate image.
+  let mediaTexts: Array<{ note_id: string; description: string | null; extracted_text: string | null; original_filename: string | null }> = [];
+  if (noteIds.length > 0) {
+    const { data: media } = await supabase
+      .from("media_analysis")
+      .select("note_id, description, extracted_text, original_filename")
+      .in("note_id", noteIds)
+      .eq("user_id", userId)
+      .eq("analysis_status", "complete")
+      .limit(40);
+    mediaTexts = (media || []) as any[];
+  }
 
   // Existing profile entries (dedup) + categories + relationships
   const { data: existingEntries } = await supabase
@@ -154,6 +191,7 @@ async function loadEvidence(userId: string, contactId: string) {
     otherPages: (otherPages || []).filter((p: any) => !((personPages || []).some((pp: any) => pp.title === p.title))),
     moments,
     notes,
+    mediaTexts,
     existingEntries: existingEntries || [],
     existingCategories: existingCategories || [],
     existingRels: existingRels || [],
@@ -194,11 +232,45 @@ function buildPrompt(evidence: NonNullable<Awaited<ReturnType<typeof loadEvidenc
   }
   if (evidence.notes.length) {
     parts.push(`\n=== Notes mentioning ${evidence.contact.name} ===`);
-    for (const n of evidence.notes.slice(0, 15)) {
-      parts.push(`# ${n.title}\n${truncate(n.content || "", 600)}`);
+    for (const n of evidence.notes.slice(0, 20)) {
+      parts.push(`# ${n.title}\n${truncate(n.content || "", 800)}`);
+    }
+  }
+  if ((evidence as any).mediaTexts?.length) {
+    parts.push(`\n=== Attachments (OCR / extracted text) in notes about ${evidence.contact.name} ===`);
+    for (const m of (evidence as any).mediaTexts.slice(0, 20)) {
+      const label = m.original_filename || "attachment";
+      const body = [m.description, m.extracted_text].filter(Boolean).join("\n");
+      if (body) parts.push(`# ${label}\n${truncate(body, 800)}`);
     }
   }
   return parts.join("\n");
+}
+
+/**
+ * Count distinct pieces of evidence that strongly suggest a spouse/marriage
+ * relationship between the target person and the note author. Used to boost
+ * confidence of an LLM-emitted "spouse" suggestion to auto-apply territory.
+ */
+function countSpouseEvidence(evidence: NonNullable<Awaited<ReturnType<typeof loadEvidence>>>): number {
+  const cues = /(\bwife\b|\bhusband\b|\bspouse\b|\bmarried\b|\bmarriage\b|\bwedding\b|\banniversary\b|\bheirat|\bhochzeit|\behefrau|\behemann|\bgattin|\bgatte)/i;
+  let count = 0;
+  for (const p of evidence.personPages) {
+    if (cues.test(`${(p as any).title || ""}\n${(p as any).summary || ""}\n${(p as any).content || ""}`)) count++;
+  }
+  for (const p of evidence.otherPages) {
+    if (cues.test(`${(p as any).title || ""}\n${(p as any).content || ""}`)) count++;
+  }
+  for (const m of evidence.moments) {
+    if (cues.test(`${m.title || ""}\n${m.description || ""}\n${m.category || ""}`)) count++;
+  }
+  for (const n of evidence.notes) {
+    if (cues.test(`${n.title || ""}\n${n.content || ""}`)) count++;
+  }
+  for (const m of ((evidence as any).mediaTexts || [])) {
+    if (cues.test(`${m.original_filename || ""}\n${m.description || ""}\n${m.extracted_text || ""}`)) count++;
+  }
+  return count;
 }
 
 async function getPrefs(userId: string) {
@@ -394,9 +466,51 @@ async function run(userId: string, contactId: string) {
       target_entity_type: "relationship",
       source_title: "Lexicon & timeline enrichment",
       extracted_value: `${nameA} ${canonical} ${nameB}`,
-      confidence_score: 0.85,
+      confidence_score: (canonical === "spouse" || canonical === "partner") && countSpouseEvidence(evidence) >= 2 ? 0.95 : 0.85,
       is_sensitive: false,
     });
+  }
+
+  // Evidence-only fallback: if the LLM didn't emit a spouse relationship but
+  // we have multiple strong pieces of evidence (marriage papers + wedding
+  // moment, etc.) AND the note author is involved, synthesize one. This is the
+  // "common sense" pass that prevents the AI from missing what a human would
+  // immediately see.
+  const hasSpouseSuggestion = suggestions.some(
+    (s) => s.suggestion_type === "add_relationship" && (s.payload?.label === "spouse" || s.payload?.label === "partner"),
+  );
+  const hasExistingSpouse = Array.from(relSeen).some((k) => k.includes("|spouse|") || k.includes("|partner|"));
+  if (!hasSpouseSuggestion && !hasExistingSpouse && countSpouseEvidence(evidence) >= 2) {
+    const aRef: EntityRef = { type: "self", id: null };
+    const bRef: EntityRef = { type: "contact", id: evidence.contact.id };
+    const pairKey = relationshipPairKey(userId, aRef, bRef, "spouse");
+    if (!relSeen.has(pairKey)) {
+      relSeen.add(pairKey);
+      suggestions.push({
+        user_id: userId,
+        source_note_id: null,
+        suggestion_type: "add_relationship",
+        title: `Add relationship: ${evidence.selfDisplayName} → ${evidence.contact.name} (spouse)`,
+        description: `Multiple notes / moments reference a marriage between ${evidence.selfDisplayName} and ${evidence.contact.name}.`,
+        payload: {
+          source_type: aRef.type,
+          source_id: aRef.id,
+          target_type: bRef.type,
+          target_id: bRef.id,
+          label: "spouse",
+          inverse_label: null,
+          contact_name_a: evidence.selfDisplayName,
+          contact_name_b: evidence.contact.name,
+          source: "evidence_synthesis",
+        },
+        status: "pending_review",
+        target_entity_type: "relationship",
+        source_title: "Lexicon & timeline enrichment",
+        extracted_value: `${evidence.selfDisplayName} spouse ${evidence.contact.name}`,
+        confidence_score: 0.95,
+        is_sensitive: false,
+      });
+    }
   }
 
   if (suggestions.length === 0) return { ok: true, suggestions_created: 0, auto_applied: 0 };
