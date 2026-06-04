@@ -5,6 +5,13 @@ import {
 } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
+import {
+  canonicalLabel,
+  inverseLabel,
+  isSymmetricLabel,
+  relationshipPairKey,
+  type EntityRef,
+} from "../_shared/relationship-canonical.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
