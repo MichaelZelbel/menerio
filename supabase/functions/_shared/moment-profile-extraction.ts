@@ -304,6 +304,15 @@ export async function extractProfileFromMoment(
     return { ...empty, skipped_reason: "ai_hidden" };
   }
 
+  // Pre-filter: skip moments whose title is dominated by event-only verbs
+  // (e.g. "Yumei adds Michael to her Discord banner"). Saves an LLM call and
+  // prevents the model from hallucinating ongoing attributes from one-time
+  // actions.
+  if (isLikelyEventOnlyMoment((moment as any).title, (moment as any).description)) {
+    console.log(`[moment-extract] pre-filter skipped: event-only verb (moment ${momentId}, title="${(moment as any).title}")`);
+    return { ...empty, skipped_reason: "event_only_moment" };
+  }
+
   const userId = (moment as any).user_id as string;
 
   const { data: participantRows } = await supabase
