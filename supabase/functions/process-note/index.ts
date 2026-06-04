@@ -450,7 +450,7 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
 }
 
 async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
-  const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
+  const threshold = thresholdFor(suggestion.suggestion_type, preferences.sensitivity);
   const confidence = suggestion.confidence_score ?? 0;
   // Never auto-apply add_contact — creating a new person is an identity decision the user should confirm.
   if (suggestion.suggestion_type === "add_contact") {
@@ -566,10 +566,23 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
   exploratory: 0.55,
 };
 
+// Per-suggestion-type thresholds. Profile entries are low-risk and reversible,
+// so they get a more permissive policy than identity-altering actions.
+const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
+  add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
+  add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+};
+
+function thresholdFor(suggestionType: string, sensitivity: string): number {
+  const perType = AUTO_APPLY_THRESHOLDS[suggestionType];
+  if (perType && perType[sensitivity] !== undefined) return perType[sensitivity];
+  return SENSITIVITY_THRESHOLDS[sensitivity] ?? SENSITIVITY_THRESHOLDS.balanced;
+}
+
 const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_contact: 0.8,
   add_alias: 0.78,
-  add_profile_entry: 0.74,
+  add_profile_entry: 0.80,
   add_relationship: 0.72,
 };
 
@@ -734,7 +747,17 @@ const NON_BIOGRAPHICAL_SOURCES = new Set([
   "slack-public-channel",
 ]);
 
-const MAX_FACTS_PER_CONTACT_PER_NOTE = 3;
+const MAX_FACTS_PER_CONTACT_PER_NOTE = 8;
+
+// Sources where extraction still runs but confidence is capped so facts require
+// user review rather than auto-applying. These often contain mixed signal
+// (web clips, GitHub READMEs, etc.) — biographical facts can appear but
+// shouldn't be trusted blindly.
+const SOFT_SIGNAL_SOURCES = new Set([
+  "querino", "github", "singlefile", "web-clip", "webclip",
+  "slack-public-channel",
+]);
+const SOFT_SIGNAL_CONFIDENCE_CAP = 0.7;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
