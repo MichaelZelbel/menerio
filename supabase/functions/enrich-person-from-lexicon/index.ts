@@ -233,11 +233,45 @@ function buildPrompt(evidence: NonNullable<Awaited<ReturnType<typeof loadEvidenc
   }
   if (evidence.notes.length) {
     parts.push(`\n=== Notes mentioning ${evidence.contact.name} ===`);
-    for (const n of evidence.notes.slice(0, 15)) {
-      parts.push(`# ${n.title}\n${truncate(n.content || "", 600)}`);
+    for (const n of evidence.notes.slice(0, 20)) {
+      parts.push(`# ${n.title}\n${truncate(n.content || "", 800)}`);
+    }
+  }
+  if ((evidence as any).mediaTexts?.length) {
+    parts.push(`\n=== Attachments (OCR / extracted text) in notes about ${evidence.contact.name} ===`);
+    for (const m of (evidence as any).mediaTexts.slice(0, 20)) {
+      const label = m.original_filename || "attachment";
+      const body = [m.description, m.extracted_text].filter(Boolean).join("\n");
+      if (body) parts.push(`# ${label}\n${truncate(body, 800)}`);
     }
   }
   return parts.join("\n");
+}
+
+/**
+ * Count distinct pieces of evidence that strongly suggest a spouse/marriage
+ * relationship between the target person and the note author. Used to boost
+ * confidence of an LLM-emitted "spouse" suggestion to auto-apply territory.
+ */
+function countSpouseEvidence(evidence: NonNullable<Awaited<ReturnType<typeof loadEvidence>>>): number {
+  const cues = /(\bwife\b|\bhusband\b|\bspouse\b|\bmarried\b|\bmarriage\b|\bwedding\b|\banniversary\b|\bheirat|\bhochzeit|\behefrau|\behemann|\bgattin|\bgatte)/i;
+  let count = 0;
+  for (const p of evidence.personPages) {
+    if (cues.test(`${(p as any).title || ""}\n${(p as any).summary || ""}\n${(p as any).content || ""}`)) count++;
+  }
+  for (const p of evidence.otherPages) {
+    if (cues.test(`${(p as any).title || ""}\n${(p as any).content || ""}`)) count++;
+  }
+  for (const m of evidence.moments) {
+    if (cues.test(`${m.title || ""}\n${m.description || ""}\n${m.category || ""}`)) count++;
+  }
+  for (const n of evidence.notes) {
+    if (cues.test(`${n.title || ""}\n${n.content || ""}`)) count++;
+  }
+  for (const m of ((evidence as any).mediaTexts || [])) {
+    if (cues.test(`${m.original_filename || ""}\n${m.description || ""}\n${m.extracted_text || ""}`)) count++;
+  }
+  return count;
 }
 
 async function getPrefs(userId: string) {
