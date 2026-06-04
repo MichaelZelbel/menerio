@@ -33,7 +33,78 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
 
 // Moments without document provenance can't be fully trusted (often free-form
 // user input), so cap confidence to force user review under conservative.
-const MANUAL_MOMENT_CONFIDENCE_CAP = 0.7;
+// Lowered from 0.7 → 0.6 so manual moments never auto-apply at balanced (0.65).
+const MANUAL_MOMENT_CONFIDENCE_CAP = 0.6;
+
+// Labels that the LLM is allowed to emit, grouped by category slug. Anything
+// outside this allowlist is dropped post-LLM. Lowercase, normalized.
+const ALLOWED_PROFILE_LABELS: Record<string, string[]> = {
+  identity: ["date of birth", "pronouns", "nationality", "languages", "full name", "nickname"],
+  location: ["current city", "current country", "hometown", "home address", "neighborhood"],
+  professional: ["job title", "company", "employer", "industry", "started role", "previous company", "previous job title"],
+  education: ["school", "university", "degree", "field of study", "graduation year"],
+  relationships: ["partner", "spouse", "children", "siblings", "parents"],
+  communication: ["preferred channel", "email", "phone", "timezone"],
+  personality: ["traits", "communication style"],
+  principles: ["values", "beliefs"],
+  health: ["allergies", "dietary restrictions", "conditions"],
+  hobbies: ["hobbies", "interests", "sports"],
+  food: ["favorite cuisine", "dietary preference", "favorite restaurant", "allergies"],
+  entertainment: ["favorite music", "favorite movies", "favorite books", "favorite shows"],
+  travel: ["bucket list", "visited countries", "favorite destination"],
+  digital: ["website", "github", "linkedin", "twitter", "instagram"],
+  financial: ["currency"],
+  goals: ["short-term goals", "long-term goals"],
+  preferences: ["gift preferences", "coffee order", "drink preference"],
+};
+
+const ALLOWED_LABEL_SET = new Set<string>(
+  Object.values(ALLOWED_PROFILE_LABELS).flat().map((l) => l.toLowerCase()),
+);
+
+// Verbs that signal a one-time activity/event rather than an ongoing attribute.
+const EVENT_ONLY_VERBS = [
+  "adds", "added", "posts", "posted", "mentions", "mentioned", "tags", "tagged",
+  "likes", "liked", "comments", "commented", "replies", "replied",
+  "shares", "shared", "follows", "followed", "dms", "dmed",
+  "messages", "messaged", "texts", "texted", "calls", "called",
+  "visits", "visited", "meets", "met", "hangs", "hung",
+  "sees", "saw", "watched", "played", "attended", "pings", "pinged",
+];
+
+// Phrases that mean an ongoing biographical fact IS being asserted, even if
+// the title also has an event-like verb. If any match → don't pre-filter.
+const BIO_MARKERS = [
+  "moved to", "moves to", "lives in", "now lives", "works at", "now works",
+  "joined", "promoted to", "promotion to", "married", "got married", "engaged",
+  "divorced", "born on", "birthday", "graduated", "founded", "co-founded",
+  "started at", "left ", "hired at", "relocated to",
+];
+
+function isLikelyEventOnlyMoment(title: string, description: string | null | undefined): boolean {
+  const t = (title || "").toLowerCase();
+  const d = (description || "").toLowerCase();
+  const combined = `${t} ${d}`;
+  if (BIO_MARKERS.some((m) => combined.includes(m))) return false;
+  const verbRegex = new RegExp(`\\b(${EVENT_ONLY_VERBS.join("|")})\\b`, "i");
+  return verbRegex.test(t);
+}
+
+function valueAppearsInSource(value: string, label: string, source: string): boolean {
+  const v = value.toLowerCase().trim();
+  const s = source.toLowerCase();
+  if (!v) return false;
+  // Birthday computed from "Nth birthday" — accept ISO date if source mentions birthday/born.
+  if (label.toLowerCase() === "date of birth" && /\d{4}-\d{2}-\d{2}/.test(v) && /birthday|born/.test(s)) {
+    return true;
+  }
+  if (s.includes(v)) return true;
+  // Fuzzy: ≥80% of value tokens (len ≥ 3) appear in source.
+  const tokens = v.split(/\s+/).filter((tok) => tok.length >= 3);
+  if (tokens.length === 0) return false;
+  const hits = tokens.filter((tok) => s.includes(tok)).length;
+  return hits / tokens.length >= 0.8;
+}
 
 const SENSITIVE_TERMS = [
   "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
@@ -58,27 +129,39 @@ Return a JSON object with two keys:
 1. "facts": an array of profile fact objects, each with:
    - "contact_name": the person's name exactly as provided
    - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-   - "label": a short label (e.g. "Milestone", "Current city", "Job title", "Date of birth")
-   - "value": the actual value (e.g. "Moved to Lisbon", "Berlin", "Head of Design at Notion", "1990-05-12")
+   - "label": MUST be one of the allowed labels listed below for the chosen category. Pick the closest match. If none fits, skip the fact.
+   - "value": the actual value (e.g. "Lisbon", "Head of Design at Notion", "1990-05-12")
+
+Allowed labels per category (lowercase, use exactly these strings):
+${Object.entries(ALLOWED_PROFILE_LABELS).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n")}
 
 2. "relationships": an array of relationship objects, each with:
    - "person_a", "person_b" ("me"/"myself" if author)
    - "label_a_to_b", "label_b_to_a"
 
-DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
-- Moment "Sarah moved to Lisbon" with participant Sarah → {contact_name: "Sarah", category_slug: "location", label: "Current city", value: "Lisbon"}
-- Moment "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "Job title", value: "Head of Design at Notion"}
-- Moment "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "Date of birth", value: "1994-03-12"}
-- Moment "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+HARD RULES (violations cause the fact to be dropped):
+- The "value" MUST appear verbatim (case-insensitive) somewhere in the moment title or description, OR be an ISO date computed from an explicit Nth-birthday phrase. If you cannot point to the exact substring, return an empty facts array.
+- The "label" MUST be from the allowed list above.
+- If the moment describes a one-time action by or about a participant (verbs like: adds, posts, tags, mentions, likes, comments, messages, called, visited, met, hung out, watched, played, attended, shared, followed, replied), return empty arrays UNLESS the same moment ALSO contains an explicit ongoing-attribute clause (e.g. "Tom, now Head of Design at Notion, posted ...").
+- Do not invent attributes that are merely plausible. Only extract what is explicitly stated.
 
-DO NOT EXTRACT when:
-- The moment is a meeting/call/hangout with no biographical fact about the participant ("Coffee with Sarah" → no facts).
-- The fact would be a one-time activity rather than an ongoing attribute ("Sarah visited Paris" → not a profile fact; "Sarah lives in Paris" → IS a fact).
-- The participant is only incidentally tagged (e.g. a group photo moment listing 10 people).
+DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
+- "Sarah moved to Lisbon" with Sarah → {contact_name: "Sarah", category_slug: "location", label: "current city", value: "Lisbon"}
+- "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "job title", value: "Head of Design at Notion"}
+- "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "date of birth", value: "1994-03-12"}
+- "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+
+Examples that DO NOT QUALIFY (return empty arrays):
+- "Yumei adds Michael to her Discord banner" → {facts: [], relationships: []}
+- "Tom posted about his vacation" → {facts: [], relationships: []}
+- "Anna tagged me in a photo" → {facts: [], relationships: []}
+- "Karim mentioned Lina in his story" → {facts: [], relationships: []}
+- "Coffee with Sarah" → {facts: [], relationships: []}
+- "Sarah visited Paris" → not a profile fact (one-time activity).
 
 Rules:
-- For dates of birth: if the moment is a Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
-- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+- For dates of birth: if the moment is an Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Return empty arrays if nothing qualifies.`;
 
 type Suggestion = {
@@ -219,6 +302,15 @@ export async function extractProfileFromMoment(
   }
   if ((moment as any).ai_visibility === "hidden") {
     return { ...empty, skipped_reason: "ai_hidden" };
+  }
+
+  // Pre-filter: skip moments whose title is dominated by event-only verbs
+  // (e.g. "Yumei adds Michael to her Discord banner"). Saves an LLM call and
+  // prevents the model from hallucinating ongoing attributes from one-time
+  // actions.
+  if (isLikelyEventOnlyMoment((moment as any).title, (moment as any).description)) {
+    console.log(`[moment-extract] pre-filter skipped: event-only verb (moment ${momentId}, title="${(moment as any).title}")`);
+    return { ...empty, skipped_reason: "event_only_moment" };
   }
 
   const userId = (moment as any).user_id as string;
@@ -365,6 +457,20 @@ export async function extractProfileFromMoment(
     if (!contact) continue;
 
     const labelLower = label.toLowerCase();
+
+    // Post-filter: label must be in the allowlist.
+    if (!ALLOWED_LABEL_SET.has(labelLower)) {
+      console.log(`[moment-extract] post-filter dropped: label not in allowlist (label="${label}", moment ${momentId})`);
+      continue;
+    }
+
+    // Post-filter: value must appear in source text (with birthday exception).
+    const sourceText = `${(moment as any).title} ${(moment as any).description || ""}`;
+    if (!valueAppearsInSource(value, label, sourceText)) {
+      console.log(`[moment-extract] post-filter dropped: value not in source (label="${label}", value="${value}", moment ${momentId})`);
+      continue;
+    }
+
     const dedupKey = `${contact.contact_id}|${labelLower}|${value.toLowerCase()}`;
     if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
     const singletonKey = `${contact.contact_id}|${labelLower}`;
