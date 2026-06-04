@@ -1279,9 +1279,10 @@ async function generateProfileSuggestions(
         seenKeys.add(relationshipPairKey(userId, a, b, p.label));
       }
 
+      const selfCtxRel = await loadSelfContext(userId);
       for (const rel of extractedRelationships) {
-        const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a);
-        const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b);
+        const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_a, selfCtxRel.aliases));
+        const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_b, selfCtxRel.aliases));
 
         let contactA: { id: string; name: string } | null = null;
         let contactB: { id: string; name: string } | null = null;
