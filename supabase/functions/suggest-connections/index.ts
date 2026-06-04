@@ -138,7 +138,7 @@ Don't suggest links just because notes share a common word. The connection shoul
       messages: [{ role: "user", content: prompt }],
       defaults: {
         provider: "openrouter",
-        model: "openai/gpt-4o-mini",
+        model: "deepseek/deepseek-v4-flash",
         systemPrompt: SUGGEST_CONNECTIONS_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },

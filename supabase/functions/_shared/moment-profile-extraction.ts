@@ -378,7 +378,7 @@ export async function extractProfileFromMoment(
       messages: [{ role: "user", content: userPrompt }],
       defaults: {
         provider: "openrouter",
-        model: "openai/gpt-4o-mini",
+        model: "deepseek/deepseek-v4-flash",
         systemPrompt: MOMENT_PROFILE_EXTRACTION_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },

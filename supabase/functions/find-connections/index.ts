@@ -182,7 +182,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           messages: [{ role: "user", content: insightContext }],
           defaults: {
             provider: "openrouter",
-            model: "openai/gpt-4o-mini",
+            model: "deepseek/deepseek-v4-flash",
             systemPrompt: FIND_CONNECTIONS_PROMPT,
           },
         });

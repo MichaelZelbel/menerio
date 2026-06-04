@@ -12,7 +12,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_MODEL = "openai/gpt-4o-mini";
+const OPENROUTER_MODEL = "deepseek/deepseek-v4-flash";
 
 // Auditor system prompt resolved at runtime from llm_call_configs (call_site: "wiki-lint.main").
 // Falls back to WIKI_LINT_PROMPT in llm-defaults.ts.

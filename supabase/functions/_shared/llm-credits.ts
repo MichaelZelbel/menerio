@@ -6,7 +6,7 @@
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const FALLBACK_TOKENS: Record<string, number> = {
-  "openai/gpt-4o-mini": 500,
+  "deepseek/deepseek-v4-flash": 500,
   "openai/text-embedding-3-small": 100,
   "google/gemini-3-flash-preview": 500,
 };
@@ -202,7 +202,7 @@ export async function chatWithCredits(
 ): Promise<{ result: any; credits: CreditInfo }> {
   return openRouterWithCredits(
     db, apiKey, userId, `${feature}:chat`, "chat/completions",
-    { model: "openai/gpt-4o-mini", messages, ...options }
+    { model: "deepseek/deepseek-v4-flash", messages, ...options }
   );
 }
 

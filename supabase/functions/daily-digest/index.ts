@@ -55,7 +55,7 @@ Return a JSON array of strings, each a single bullet point. Example: ["bullet 1"
       messages: [{ role: "user", content: prompt }],
       defaults: {
         provider: "openrouter",
-        model: "openai/gpt-4o-mini",
+        model: "deepseek/deepseek-v4-flash",
         systemPrompt: DAILY_DIGEST_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },

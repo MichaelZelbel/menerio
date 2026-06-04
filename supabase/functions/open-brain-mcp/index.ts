@@ -128,7 +128,7 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
+      model: "deepseek/deepseek-v4-flash",
       response_format: { type: "json_object" },
       messages: [
         {
@@ -2246,7 +2246,7 @@ server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step
       supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", getCurrentUserId()).eq("contact_id", (membership as any).contact_id).order("interaction_date", { ascending: false }).limit(5),
       supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", getCurrentUserId()).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_next_step", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_next_step", "chat/completions", { model: "deepseek/deepseek-v4-flash", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
     const parsed = JSON.parse(result?.choices?.[0]?.message?.content || "{}");
     return jsonTool({ title: String(parsed.title || "Follow up"), due_date_offset_days: Number(parsed.due_date_offset_days || 3), priority: ["low", "normal", "high", "urgent"].includes(parsed.priority) ? parsed.priority : "normal", reasoning: String(parsed.reasoning || ""), credits });
   } catch (err: unknown) {
@@ -2264,7 +2264,7 @@ server.registerTool("generate_group_briefing", { title: "Generate Group Briefing
       supabase.from("contact_interactions").select("interaction_date, type, summary, contact_id, group_id").eq("user_id", getCurrentUserId()).eq("group_id", group.id).gte("interaction_date", since).order("interaction_date", { ascending: false }),
       supabase.from("action_items").select("content, status, priority, due_date, contact_id, metadata").eq("user_id", getCurrentUserId()).eq("metadata->>group_id", group.id).order("created_at", { ascending: false }),
     ]);
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_briefing", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.25, messages: [{ role: "system", content: "Generate a concise weekly group briefing in Markdown with these exact sections: ## Movement, ## Stale Members, ## Top Priorities for Next Week, ## Goals Progress. Ground every claim in provided data." }, { role: "user", content: JSON.stringify({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], action_items: actions || [] }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_briefing", "chat/completions", { model: "deepseek/deepseek-v4-flash", temperature: 0.25, messages: [{ role: "system", content: "Generate a concise weekly group briefing in Markdown with these exact sections: ## Movement, ## Stale Members, ## Top Priorities for Next Week, ## Goals Progress. Ground every claim in provided data." }, { role: "user", content: JSON.stringify({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], action_items: actions || [] }) }] });
     const briefing = String(result?.choices?.[0]?.message?.content || "").trim();
     const generatedAt = new Date().toISOString();
     const { error } = await supabase.from("group_briefings").insert({ user_id: getCurrentUserId(), group_id: group.id, period_days: days, briefing_markdown: briefing, generated_at: generatedAt });
@@ -2287,7 +2287,7 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
     if (structuredImport) return jsonTool({ ok: true, mode: "structured_import", ...structuredImport });
     const existingIds = new Set((memberships || []).map((m: any) => m.contact_id));
     const candidates = (contacts || []).filter((contact: any) => !existingIds.has(contact.id));
-    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_member_suggestions", "chat/completions", { model: "openai/gpt-4o-mini", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
+    const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_member_suggestions", "chat/completions", { model: "deepseek/deepseek-v4-flash", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest contacts to add to this group. Return JSON: { suggestions: [{ contact_id, contact_name, reasoning, confidence }] }. Use only provided contact_id values. confidence is 0-1." }, { role: "user", content: JSON.stringify({ group, existing_members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, recent_notes: (notes || []).map(noteText) }) }] });
     const suggestions = Array.isArray(result?.choices?.[0]?.message?.content) ? [] : JSON.parse(result?.choices?.[0]?.message?.content || "{}").suggestions || [];
     const candidateIds = new Set(candidates.map((contact: any) => contact.id));
     const defaultStatus = Array.isArray(group.stages) ? group.stages[0]?.id : null;
