@@ -129,27 +129,39 @@ Return a JSON object with two keys:
 1. "facts": an array of profile fact objects, each with:
    - "contact_name": the person's name exactly as provided
    - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-   - "label": a short label (e.g. "Milestone", "Current city", "Job title", "Date of birth")
-   - "value": the actual value (e.g. "Moved to Lisbon", "Berlin", "Head of Design at Notion", "1990-05-12")
+   - "label": MUST be one of the allowed labels listed below for the chosen category. Pick the closest match. If none fits, skip the fact.
+   - "value": the actual value (e.g. "Lisbon", "Head of Design at Notion", "1990-05-12")
+
+Allowed labels per category (lowercase, use exactly these strings):
+${Object.entries(ALLOWED_PROFILE_LABELS).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n")}
 
 2. "relationships": an array of relationship objects, each with:
    - "person_a", "person_b" ("me"/"myself" if author)
    - "label_a_to_b", "label_b_to_a"
 
-DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
-- Moment "Sarah moved to Lisbon" with participant Sarah → {contact_name: "Sarah", category_slug: "location", label: "Current city", value: "Lisbon"}
-- Moment "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "Job title", value: "Head of Design at Notion"}
-- Moment "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "Date of birth", value: "1994-03-12"}
-- Moment "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+HARD RULES (violations cause the fact to be dropped):
+- The "value" MUST appear verbatim (case-insensitive) somewhere in the moment title or description, OR be an ISO date computed from an explicit Nth-birthday phrase. If you cannot point to the exact substring, return an empty facts array.
+- The "label" MUST be from the allowed list above.
+- If the moment describes a one-time action by or about a participant (verbs like: adds, posts, tags, mentions, likes, comments, messages, called, visited, met, hung out, watched, played, attended, shared, followed, replied), return empty arrays UNLESS the same moment ALSO contains an explicit ongoing-attribute clause (e.g. "Tom, now Head of Design at Notion, posted ...").
+- Do not invent attributes that are merely plausible. Only extract what is explicitly stated.
 
-DO NOT EXTRACT when:
-- The moment is a meeting/call/hangout with no biographical fact about the participant ("Coffee with Sarah" → no facts).
-- The fact would be a one-time activity rather than an ongoing attribute ("Sarah visited Paris" → not a profile fact; "Sarah lives in Paris" → IS a fact).
-- The participant is only incidentally tagged (e.g. a group photo moment listing 10 people).
+DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
+- "Sarah moved to Lisbon" with Sarah → {contact_name: "Sarah", category_slug: "location", label: "current city", value: "Lisbon"}
+- "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "job title", value: "Head of Design at Notion"}
+- "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "date of birth", value: "1994-03-12"}
+- "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+
+Examples that DO NOT QUALIFY (return empty arrays):
+- "Yumei adds Michael to her Discord banner" → {facts: [], relationships: []}
+- "Tom posted about his vacation" → {facts: [], relationships: []}
+- "Anna tagged me in a photo" → {facts: [], relationships: []}
+- "Karim mentioned Lina in his story" → {facts: [], relationships: []}
+- "Coffee with Sarah" → {facts: [], relationships: []}
+- "Sarah visited Paris" → not a profile fact (one-time activity).
 
 Rules:
-- For dates of birth: if the moment is a Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
-- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+- For dates of birth: if the moment is an Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Return empty arrays if nothing qualifies.`;
 
 type Suggestion = {
