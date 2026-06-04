@@ -731,9 +731,18 @@ export default function ReviewQueue() {
                         <FileText className="h-3 w-3" />
                         {item.source_note.title}
                       </Link>
+                    ) : typeof item.payload?.source === "string" && item.payload.source.startsWith("moment:") ? (
+                      <Link
+                        to={`/dashboard/timeline?moment=${String(item.payload.source).slice("moment:".length)}`}
+                        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      >
+                        <Calendar className="h-3 w-3" />
+                        From timeline{item.payload?.moment_title ? `: ${String(item.payload.moment_title)}` : ""}
+                      </Link>
                     ) : (
                       <span />
                     )}
+
                     <div className="flex gap-2">
                       <Button
                         size="sm"
