@@ -13,6 +13,8 @@ import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { useContactProfile } from "@/hooks/useContactProfile";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
+import { LifeEventsStrip } from "@/components/people/LifeEventsStrip";
+
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
