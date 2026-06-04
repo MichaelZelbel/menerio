@@ -535,35 +535,72 @@ export async function extractProfileFromMoment(
     if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
   }
 
-  // Relationships (between two matched participants only — skip "me").
-  const { data: existingRelQueue } = await supabase
-    .from("review_queue")
-    .select("title, status")
-    .eq("user_id", userId)
-    .eq("suggestion_type", "add_relationship")
-    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
-  const relTitleSet = new Set((existingRelQueue || []).map((q: any) => q.title));
+  // Relationships — now supports self ↔ contact (e.g. "my wife Xihui").
+  const [{ data: existingRels }, { data: existingRelQueue }] = await Promise.all([
+    supabase
+      .from("contact_relationships")
+      .select("source_type, source_id, target_type, target_id, label")
+      .eq("user_id", userId),
+    supabase
+      .from("review_queue")
+      .select("payload, status")
+      .eq("user_id", userId)
+      .eq("suggestion_type", "add_relationship")
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]),
+  ]);
+
+  const relSeenKeys = new Set<string>();
+  for (const r of existingRels || []) {
+    const a: EntityRef = { type: (r as any).source_type, id: (r as any).source_id };
+    const b: EntityRef = { type: (r as any).target_type, id: (r as any).target_id };
+    relSeenKeys.add(relationshipPairKey(userId, a, b, (r as any).label));
+  }
+  for (const q of existingRelQueue || []) {
+    const p = (q as any).payload || {};
+    if (!p.source_type || !p.target_type || !p.label) continue;
+    const a: EntityRef = { type: p.source_type, id: p.source_id || null };
+    const b: EntityRef = { type: p.target_type, id: p.target_id || null };
+    relSeenKeys.add(relationshipPairKey(userId, a, b, p.label));
+  }
 
   for (const rel of rawRels) {
-    const labelAB = String(rel?.label_a_to_b || "").trim().toLowerCase();
-    const labelBA = String(rel?.label_b_to_a || labelAB).trim().toLowerCase();
-    if (!labelAB) continue;
-    const a = nameToContact.get(String(rel?.person_a || "").toLowerCase());
-    const b = nameToContact.get(String(rel?.person_b || "").toLowerCase());
-    if (!a || !b || a.contact_id === b.contact_id) continue;
+    const rawA = String(rel?.person_a || "").trim();
+    const rawB = String(rel?.person_b || "").trim();
+    if (!rawA || !rawB) continue;
 
-    const title = `Add relationship: ${a.canonical_name} → ${b.canonical_name} (${labelAB})`;
-    if (relTitleSet.has(title)) continue;
+    const isSelfA = isSelfName(rawA, selfAliases);
+    const isSelfB = isSelfName(rawB, selfAliases);
+    if (isSelfA && isSelfB) continue;
+
+    const a = isSelfA ? null : nameToContact.get(rawA.toLowerCase());
+    const b = isSelfB ? null : nameToContact.get(rawB.toLowerCase());
+    if (!isSelfA && !a) continue;
+    if (!isSelfB && !b) continue;
+    if (a && b && a.contact_id === b.contact_id) continue;
+
+    const canonical = canonicalLabel(rel?.label_a_to_b);
+    if (!canonical) continue;
+    const inverse = canonicalLabel(rel?.label_b_to_a) || inverseLabel(canonical);
+
+    const aRef: EntityRef = { type: isSelfA ? "self" : "contact", id: isSelfA ? null : a!.contact_id };
+    const bRef: EntityRef = { type: isSelfB ? "self" : "contact", id: isSelfB ? null : b!.contact_id };
+    const pairKey = relationshipPairKey(userId, aRef, bRef, canonical);
+    if (relSeenKeys.has(pairKey)) continue;
+    relSeenKeys.add(pairKey);
+
+    const nameA = isSelfA ? selfDisplayName : a!.canonical_name;
+    const nameB = isSelfB ? selfDisplayName : b!.canonical_name;
+    const title = `Add relationship: ${nameA} → ${nameB} (${canonical})`;
 
     const payload: Record<string, unknown> = {
-      source_type: "contact",
-      source_id: a.contact_id,
-      target_type: "contact",
-      target_id: b.contact_id,
-      label: labelAB,
-      inverse_label: labelBA,
-      contact_name_a: a.canonical_name,
-      contact_name_b: b.canonical_name,
+      source_type: aRef.type,
+      source_id: aRef.id,
+      target_type: bRef.type,
+      target_id: bRef.id,
+      label: canonical,
+      inverse_label: isSymmetricLabel(canonical) ? null : inverse,
+      contact_name_a: nameA,
+      contact_name_b: nameB,
       source: `moment:${momentId}`,
       moment_id: momentId,
       moment_title: (moment as any).title,
@@ -574,19 +611,18 @@ export async function extractProfileFromMoment(
       source_note_id: null,
       suggestion_type: "add_relationship",
       title,
-      description: `${a.canonical_name} is ${labelAB} of ${b.canonical_name}`,
+      description: `${nameA} is ${canonical} of ${nameB}`,
       payload,
       status: "pending_review",
       target_entity_type: "relationship",
       source_title: noteTitleLike,
-      extracted_value: `${a.canonical_name} ${labelAB} ${b.canonical_name}`,
+      extracted_value: `${nameA} ${canonical} ${nameB}`,
       confidence_score: isManualSource
         ? Math.min(MANUAL_MOMENT_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_relationship)
         : DEFAULT_CONFIDENCE.add_relationship,
       is_sensitive: isSensitive("add_relationship", payload, `${(moment as any).title} ${(moment as any).description || ""}`),
-      suppression_key: buildSuppressionKey("add_relationship", "relationship", null, `${a.canonical_name}:${labelAB}:${b.canonical_name}`),
+      suppression_key: buildSuppressionKey("add_relationship", "relationship", null, pairKey),
     });
-    relTitleSet.add(title);
   }
 
   if (suggestions.length === 0) {
