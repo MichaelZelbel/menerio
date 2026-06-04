@@ -64,10 +64,12 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const runEnrich = async () => {
     setEnriching(true);
     try {
-      const { error } = await supabase.functions.invoke("backfill-profile-extraction", {
-        body: { limit: 200, contact_id: contactId },
-      });
-      if (error) throw error;
+      const [notes, moments] = await Promise.all([
+        supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
+        supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
+      ]);
+      if (notes.error) throw notes.error;
+      if (moments.error) throw moments.error;
       showToast.success("Enrichment started — new facts will appear shortly.");
     } catch (err: any) {
       showToast.error(err.message ?? "Enrichment failed");
@@ -75,6 +77,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
       setEnriching(false);
     }
   };
+
 
   // Auto-seed defaults on first visit
   useEffect(() => {
