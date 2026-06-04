@@ -101,10 +101,25 @@ export function useContactRelationships(contactId: string | null) {
     }) => {
       if (!user) throw new Error("Not authenticated");
 
-      const row = {
-        ...data,
-        user_id: user.id,
-      };
+      const canonical = canonicalLabel(data.label) || data.label;
+      const aRef: EntityRef = { type: data.source_type as "contact" | "self", id: data.source_id };
+      const bRef: EntityRef = { type: data.target_type as "contact" | "self", id: data.target_id };
+      const pairKey = relationshipPairKey(user.id, aRef, bRef, canonical);
+
+      // Symmetric dedup against existing rows (skip on update of same row).
+      const { data: existing } = await supabase
+        .from("contact_relationships")
+        .select("id, source_type, source_id, target_type, target_id, label")
+        .eq("user_id", user.id);
+      const dup = (existing || []).find((r: any) => {
+        if (data.id && r.id === data.id) return false;
+        const ra: EntityRef = { type: r.source_type, id: r.source_id };
+        const rb: EntityRef = { type: r.target_type, id: r.target_id };
+        return relationshipPairKey(user.id, ra, rb, r.label) === pairKey;
+      });
+      if (dup) throw new Error("uq_contact_relationship: equivalent relationship already exists");
+
+      const row = { ...data, label: canonical, user_id: user.id };
 
       if (data.id) {
         const { error } = await supabase
