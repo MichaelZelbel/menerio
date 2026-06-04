@@ -110,19 +110,57 @@ async function loadEvidence(userId: string, contactId: string) {
     moments = data || [];
   }
 
-  // Notes that mention them (via metadata.matched_people)
-  const { data: candidateNotes } = await supabase
+  // Notes that mention them — broadened: by metadata.matched_people OR by
+  // ILIKE on title/content for any of the names/aliases. This catches notes
+  // like "Marriage Papers Xihui and Michael" where matched_people was never
+  // populated by the metadata pass at ingest time.
+  const orClauses = names.flatMap((n: string) => [
+    `title.ilike.%${n}%`,
+    `content.ilike.%${n}%`,
+  ]).join(",");
+  const { data: nameMatchedNotes } = await supabase
     .from("notes")
-    .select("title, content, metadata, created_at")
+    .select("id, title, content, metadata, created_at")
+    .eq("user_id", userId)
+    .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
+    .or(orClauses)
+    .order("created_at", { ascending: false })
+    .limit(60);
+
+  const { data: matchedPeopleNotes } = await supabase
+    .from("notes")
+    .select("id, title, content, metadata, created_at")
     .eq("user_id", userId)
     .eq("is_trashed", false)
     .eq("ai_visibility", "visible")
     .order("created_at", { ascending: false })
     .limit(200);
-  const notes = (candidateNotes || []).filter((n: any) => {
+  const filteredByMatched = (matchedPeopleNotes || []).filter((n: any) => {
     const matched = Array.isArray(n.metadata?.matched_people) ? n.metadata.matched_people : [];
     return matched.some((m: any) => m.contact_id === contactId);
-  }).slice(0, 30);
+  });
+
+  const noteMap = new Map<string, any>();
+  for (const n of [...(nameMatchedNotes || []), ...filteredByMatched]) {
+    if (!noteMap.has(n.id)) noteMap.set(n.id, n);
+  }
+  const notes = Array.from(noteMap.values()).slice(0, 30);
+  const noteIds = notes.map((n) => n.id);
+
+  // Media OCR / extracted text for attachments in those notes — catches things
+  // like the actual marriage certificate image.
+  let mediaTexts: Array<{ note_id: string; description: string | null; extracted_text: string | null; original_filename: string | null }> = [];
+  if (noteIds.length > 0) {
+    const { data: media } = await supabase
+      .from("media_analysis")
+      .select("note_id, description, extracted_text, original_filename")
+      .in("note_id", noteIds)
+      .eq("user_id", userId)
+      .eq("analysis_status", "complete")
+      .limit(40);
+    mediaTexts = (media || []) as any[];
+  }
 
   // Existing profile entries (dedup) + categories + relationships
   const { data: existingEntries } = await supabase
@@ -154,6 +192,7 @@ async function loadEvidence(userId: string, contactId: string) {
     otherPages: (otherPages || []).filter((p: any) => !((personPages || []).some((pp: any) => pp.title === p.title))),
     moments,
     notes,
+    mediaTexts,
     existingEntries: existingEntries || [],
     existingCategories: existingCategories || [],
     existingRels: existingRels || [],
