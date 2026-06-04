@@ -955,6 +955,7 @@ async function generateProfileSuggestions(
   context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown>; note_created_at?: string | null },
 ) {
   const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
+  const selfEntry = matchedPeople.find((p) => p.is_self);
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
@@ -985,7 +986,10 @@ async function generateProfileSuggestions(
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
     const cleanContent = stripHtmlIfNeeded(noteContent);
     const noteDateLine = noteDateISO ? `\nNote date: ${noteDateISO}` : "";
-    const userPrompt = `People mentioned: ${peopleList}${noteDateLine}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
+    const selfLine = selfEntry?.canonical_name
+      ? `\nNote author (refer to as "me" / "myself" in relationships): ${selfEntry.canonical_name}`
+      : "";
+    const userPrompt = `People mentioned: ${peopleList}${selfLine}${noteDateLine}\n\nNote title: ${noteTitle}\nNote content:\n${cleanContent}`;
 
     let extractedFacts: Array<{
       contact_name: string;
