@@ -609,21 +609,25 @@ Return a JSON object with two keys:
 
 CRITICAL — DO NOT EXTRACT FACTS WHEN:
 - The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
-- The person is the subject of a third-party article, prompt template, course, product description, or job posting. The role described in the content belongs to the content, NOT to the person.
-- The note is a prompt library, template, documentation, code snippet, or generic reference rather than a first-person observation about the person.
+- The person is the subject of a third-party article, prompt template, course, product description, or job posting where the role described belongs to the content, NOT to the person.
+- The note is a prompt library, template, documentation, code snippet, or generic reference where the person is only tangentially named.
 - A fact would be inferred only from indirect mentions, quotes, or generic context.
 
-Only extract a Job title / Company / Current city / etc. when the note text contains an EXPLICIT first-person-style statement: "X is a Y", "X works as Y at Z", "X lives in Y", "X's role is Y", "I met X who is a Y". Vague mentions, authorship, and topic descriptions do NOT qualify.
+DO EXTRACT when the note describes the person directly, whether in first OR third person. Examples that QUALIFY:
+- "Met Sarah for coffee — she just moved to Lisbon and is loving it."
+- "Tom started a new role as Head of Design at Notion last week."
+- "Nate works as a knowledge architect at Acme."
+- "Anna's birthday is May 12."
+- "Karim is vegetarian and allergic to peanuts."
 
-Examples:
-- ✓ "Nate works as a knowledge architect at Acme." → {contact_name: "Nate", category_slug: "professional", label: "Job title", value: "knowledge architect at Acme"}
-- ✗ "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
-- ✗ "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
+Examples that DO NOT qualify:
+- "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
+- "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
-- Only extract facts/relationships clearly stated about the person themselves
-- Do NOT invent or assume
-- Skip vague, third-party, or authorship-only mentions
+- Extract facts/relationships clearly stated or strongly implied about the person themselves
+- Do NOT invent or assume — if unsure, skip
+- Skip authorship-only and topic-only mentions
 - Return empty arrays if nothing qualifies
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
 
