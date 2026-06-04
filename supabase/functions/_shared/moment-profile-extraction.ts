@@ -33,7 +33,78 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
 
 // Moments without document provenance can't be fully trusted (often free-form
 // user input), so cap confidence to force user review under conservative.
-const MANUAL_MOMENT_CONFIDENCE_CAP = 0.7;
+// Lowered from 0.7 → 0.6 so manual moments never auto-apply at balanced (0.65).
+const MANUAL_MOMENT_CONFIDENCE_CAP = 0.6;
+
+// Labels that the LLM is allowed to emit, grouped by category slug. Anything
+// outside this allowlist is dropped post-LLM. Lowercase, normalized.
+const ALLOWED_PROFILE_LABELS: Record<string, string[]> = {
+  identity: ["date of birth", "pronouns", "nationality", "languages", "full name", "nickname"],
+  location: ["current city", "current country", "hometown", "home address", "neighborhood"],
+  professional: ["job title", "company", "employer", "industry", "started role", "previous company", "previous job title"],
+  education: ["school", "university", "degree", "field of study", "graduation year"],
+  relationships: ["partner", "spouse", "children", "siblings", "parents"],
+  communication: ["preferred channel", "email", "phone", "timezone"],
+  personality: ["traits", "communication style"],
+  principles: ["values", "beliefs"],
+  health: ["allergies", "dietary restrictions", "conditions"],
+  hobbies: ["hobbies", "interests", "sports"],
+  food: ["favorite cuisine", "dietary preference", "favorite restaurant", "allergies"],
+  entertainment: ["favorite music", "favorite movies", "favorite books", "favorite shows"],
+  travel: ["bucket list", "visited countries", "favorite destination"],
+  digital: ["website", "github", "linkedin", "twitter", "instagram"],
+  financial: ["currency"],
+  goals: ["short-term goals", "long-term goals"],
+  preferences: ["gift preferences", "coffee order", "drink preference"],
+};
+
+const ALLOWED_LABEL_SET = new Set<string>(
+  Object.values(ALLOWED_PROFILE_LABELS).flat().map((l) => l.toLowerCase()),
+);
+
+// Verbs that signal a one-time activity/event rather than an ongoing attribute.
+const EVENT_ONLY_VERBS = [
+  "adds", "added", "posts", "posted", "mentions", "mentioned", "tags", "tagged",
+  "likes", "liked", "comments", "commented", "replies", "replied",
+  "shares", "shared", "follows", "followed", "dms", "dmed",
+  "messages", "messaged", "texts", "texted", "calls", "called",
+  "visits", "visited", "meets", "met", "hangs", "hung",
+  "sees", "saw", "watched", "played", "attended", "pings", "pinged",
+];
+
+// Phrases that mean an ongoing biographical fact IS being asserted, even if
+// the title also has an event-like verb. If any match → don't pre-filter.
+const BIO_MARKERS = [
+  "moved to", "moves to", "lives in", "now lives", "works at", "now works",
+  "joined", "promoted to", "promotion to", "married", "got married", "engaged",
+  "divorced", "born on", "birthday", "graduated", "founded", "co-founded",
+  "started at", "left ", "hired at", "relocated to",
+];
+
+function isLikelyEventOnlyMoment(title: string, description: string | null | undefined): boolean {
+  const t = (title || "").toLowerCase();
+  const d = (description || "").toLowerCase();
+  const combined = `${t} ${d}`;
+  if (BIO_MARKERS.some((m) => combined.includes(m))) return false;
+  const verbRegex = new RegExp(`\\b(${EVENT_ONLY_VERBS.join("|")})\\b`, "i");
+  return verbRegex.test(t);
+}
+
+function valueAppearsInSource(value: string, label: string, source: string): boolean {
+  const v = value.toLowerCase().trim();
+  const s = source.toLowerCase();
+  if (!v) return false;
+  // Birthday computed from "Nth birthday" — accept ISO date if source mentions birthday/born.
+  if (label.toLowerCase() === "date of birth" && /\d{4}-\d{2}-\d{2}/.test(v) && /birthday|born/.test(s)) {
+    return true;
+  }
+  if (s.includes(v)) return true;
+  // Fuzzy: ≥80% of value tokens (len ≥ 3) appear in source.
+  const tokens = v.split(/\s+/).filter((tok) => tok.length >= 3);
+  if (tokens.length === 0) return false;
+  const hits = tokens.filter((tok) => s.includes(tok)).length;
+  return hits / tokens.length >= 0.8;
+}
 
 const SENSITIVE_TERMS = [
   "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
