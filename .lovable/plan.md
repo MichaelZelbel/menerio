@@ -1,150 +1,79 @@
-## Investigation findings
+## Diagnosis
 
-The current freeze is not the same attachment loop I previously fixed.
+I checked your account (`208 notes`, `165 contacts`) and found the smoking gun:
 
-I checked the reported note in the database:
+- You have **77 profile-fact suggestions** generated from notes, but only **17 entries** actually landed in contacts' profiles.
+- Your AI suggestion preferences are: `mode=auto`, `sensitivity=conservative`, `auto_add_sensitive=true`.
+- The `conservative` threshold is **0.85**, but the default confidence for `add_profile_entry` is **0.74**. That means **profile facts can literally never auto-apply for you** — every single one is forced into the Review Queue, where most sit as "kept" without ever being written to the profile.
 
-- Note: `Streaming Server VPS`
-- Size: ~5.4k characters, ~153 lines
-- Attachments: 0 `data-attachment-name` placeholders, 0 images, 0 PDF iframes
-- Links: 23 URLs, 12 markdown links
+On top of that:
+1. `MAX_FACTS_PER_CONTACT_PER_NOTE = 3` caps how many facts can be extracted per note.
+2. The extraction prompt is very strict (requires explicit first-person statements like "X is a Y at Z"), so plausible facts in narrative notes get dropped.
+3. There's no way to re-mine past notes — only newly-ingested notes go through extraction, so your backlog of 208 notes never gets re-analyzed when the rules change.
+4. Several sources (`querino`, `github`, `singlefile`, web clips) are blanket-skipped as "non-biographical", even when they contain real biographical content.
 
-So this specific freeze is not caused by PDF/image signed-URL attachment resolution.
+Result: it feels like nothing ends up in profiles, because for your settings, nothing does.
 
-The new culprit is the Obsidian-style Notes folder/node tree that was added earlier to improve Notes navigation.
+## Plan
 
-## What introduced this behavior
+### 1. Per-suggestion-type confidence policy (`process-note/index.ts`)
 
-The freezing path was introduced by the previous Obsidian-like navigation change that created `src/components/notes/NoteTree.tsx` and wired it into `src/pages/Notes.tsx`.
+Profile entries are low-risk and easy to undo, so they shouldn't share the same threshold as creating new contacts.
 
-The problematic choices in that change are:
+- Introduce `AUTO_APPLY_THRESHOLDS` keyed by suggestion type:
+  - `add_profile_entry`: conservative=0.78, balanced=0.65, exploratory=0.5
+  - `add_relationship`: conservative=0.80, balanced=0.7, exploratory=0.55
+  - `add_alias`: keep current (it changes identity)
+  - `add_contact`: stays manual (already the case)
+- Raise `DEFAULT_CONFIDENCE.add_profile_entry` from `0.74` → `0.80` so high-quality facts clear `conservative` automatically.
+- Update `prepareSuggestionForInsert` to use the per-type threshold.
 
-1. `FolderRow` and `NoteRow` are defined inside the `NoteTree` render function.
-   - Every `NoteTree` render creates new component types.
-   - React cannot preserve the row tree; it effectively remounts the visible folder/note tree repeatedly.
+### 2. Loosen the per-note cap
 
-2. Folder flattening is done inside every row render.
-   - `NoteRow` recomputes `tree.children.flatMap(flattenFolders)` for every visible note.
-   - `FolderRow` recomputes move targets for every folder.
-   - This turns one tree render into repeated full-tree traversals.
+- Bump `MAX_FACTS_PER_CONTACT_PER_NOTE` from 3 → 8. Keeps a guardrail against floods, but lets a meaty meeting note actually populate a profile.
 
-3. Folder note counts are computed recursively during render.
-   - `countNestedNotes(node)` runs for every folder row.
-   - This repeats work that can be computed once when the tree is built.
+### 3. Relax the extraction prompt
 
-4. The auto-expand effect always creates a new `Set`.
-   - The effect depends on the full `notes` array and `selectedId`.
-   - When a note is clicked, query/cache updates or route changes cause the effect to run.
-   - It returns a new `Set` even when nothing actually changed, forcing another full tree render.
+- Edit `PROFILE_EXTRACTION_PROMPT` to allow facts when the note clearly describes the person in third person ("Sarah just moved to Lisbon"), not only "explicit first-person statements". Keep the hard rules against authorship/bylines and prompt/article topic-as-attribute.
+- Remove the unconditional "drop malformed birthday" silent skip; instead, keep the fact with `category=identity, label=Birthday, value=<raw>` when we can't derive a full ISO date, so the user at least sees the suggestion.
 
-5. Selecting a note also mounts `NoteEditor`, which currently does synchronous markdown → HTML → wikilink resolution → TipTap parsing on the same click.
-   - That editor work is not the root cause for `Streaming Server VPS`, but it amplifies the perceived freeze after the tree has already blocked the main thread.
+### 4. Stop blanket-skipping `singlefile` / `github` / `querino`
 
-## Why clicking `Streaming Server VPS` freezes
+- Replace `NON_BIOGRAPHICAL_SOURCES` blanket skip with a **soft signal**: still run extraction, but cap confidence at `0.7` for those sources so they require user review under conservative. Keep the metadata-`type` skip for `prompt`/`template`/`code`/`snippet`.
 
-Clicking the note triggers this chain:
+### 5. Backfill action: "Enrich profiles from past notes"
 
-```text
-click note row
-→ set active folder
-→ set selected note
-→ route changes to /dashboard/notes/:id
-→ NoteTree rerenders/remounts rows
-→ NoteTree auto-expand effect forces another render
-→ NoteEditor mounts and synchronously converts/parses note content
-```
+New button in **Settings → AI** (and on the Person detail's profile tab):
 
-On the main user account, the Notes page has roughly:
+- Calls a new edge function `backfill-profile-extraction` that:
+  - For a given `user_id` (and optional `contact_id` filter), iterates recent ~200 notes that haven't been re-scanned with the new rules.
+  - For each note, re-runs the matched-people + profile-fact extraction pipeline (reusing `generateProfileSuggestions`).
+  - Respects existing dedup logic (won't create duplicates).
+  - Returns counts (`scanned`, `new_suggestions`, `auto_applied`).
+- UI shows a progress toast and a "X new suggestions, Y added to profiles" result.
 
-- 202 active notes
-- 31 saved/distinct folders
-- ~1MB total note content
-- one very large note around 447k characters
+### 6. Visibility nudge in the UI
 
-That data size makes the current tree/render pattern fragile. The selected note itself does not need to be large for the click to freeze, because the expensive work happens around the whole tree and editor selection pipeline.
+- Add a small badge on the People list and on each Person header: **"N profile suggestions pending"**, linking to the Review Queue filtered to that person. So even when something needs review, you can't miss it.
 
-## Clean fix plan
+### 7. Backfill the analytics
 
-### 1. Refactor `NoteTree` so row rendering is stable
+After the changes ship, run the new backfill once for your account so the existing 208 notes get re-processed under the new rules.
 
-In `src/components/notes/NoteTree.tsx`:
+## Technical details
 
-- Move `FolderRow` and `NoteRow` out of the `NoteTree` component body.
-- Wrap rows with `React.memo` where appropriate.
-- Pass only stable props into rows.
-- Use `useCallback` for folder toggle, note click, move, and drag handlers where it prevents unnecessary row updates.
+Files to change:
+- `supabase/functions/process-note/index.ts` — thresholds, default confidence, prompt, cap, soft-signal sources, malformed birthday handling.
+- `supabase/functions/backfill-profile-extraction/index.ts` — **new** edge function.
+- `src/components/settings/` — new "Enrich profiles" button (next to existing backfill controls).
+- `src/components/people/ContactProfileTab.tsx` / `People.tsx` — pending-suggestions badge + per-person enrich trigger.
+- `src/hooks/useReviewQueue.ts` — small helper to count pending profile suggestions per `contact_id` for the badge.
 
-Expected result: selecting a note no longer remounts the entire visible tree.
+No DB schema changes needed; everything reuses existing `review_queue`, `profile_entries`, `profile_categories`, `ai_suggestion_preferences`.
 
-### 2. Precompute folder metadata once per tree change
+## Verification
 
-In `NoteTree.tsx`:
-
-- Add nested note count directly to each `FolderNode` while building/sorting the tree, or build a `Map<folderPath, count>` in one `useMemo`.
-- Build `flatFolders` once in a `useMemo`.
-- Build move-target lists from that cached flat folder list instead of recomputing `flattenFolders` in every row.
-
-Expected result: render cost becomes closer to linear in visible rows instead of repeated full-tree traversal per row.
-
-### 3. Fix the auto-expand effect so it does not force redundant renders
-
-In `NoteTree.tsx`:
-
-- Compute `selectedFolderPath` once from `selectedId` and `notes`.
-- Make the expand effect depend on `activeFolderPath` and `selectedFolderPath`, not the entire `notes` array.
-- Inside `setExpanded`, return the current `Set` when no new folder key was added.
-
-Expected result: selecting a note does not cause a second full render unless the selected folder genuinely needs to be opened.
-
-### 4. Reduce synchronous editor work during note selection
-
-In `src/components/notes/NoteEditor.tsx`:
-
-- Short-circuit the note-sync effect before running markdown/HTML/wikilink conversion when the incoming `note.content` already matches the local editor state or a pending save.
-- Only run `contentToEditorHtml`, `resolveWikilinks`, `editor.getHTML`, and `normalizeEditorHtml` when:
-  - the selected note id actually changed, or
-  - a true remote content update arrives while the editor is not focused.
-- Keep the attachment resolver non-reactive, but add a stale-note guard/version guard so async attachment resolution cannot write into the wrong note after fast navigation.
-
-Expected result: note selection remains responsive, and query/cache refreshes do not repeatedly reprocess the same note content.
-
-### 5. Fix stale graph/connection navigation route
-
-There is still one legacy navigation path:
-
-- `src/components/notes/ConnectionsPanel.tsx` navigates to `/dashboard/notes?selected=<id>`.
-- The current Notes page uses `/dashboard/notes/:noteId` and does not read `?selected=`.
-
-Update this to `/dashboard/notes/:id` so all note navigation uses one route model.
-
-Expected result: graph/connection navigation cannot enter a partially synced selection state.
-
-## Verification plan
-
-After implementation, I will verify with browser profiling, not just code inspection:
-
-1. Open `/dashboard/notes`.
-2. Expand the Notes tree / Vault root.
-3. Click `Streaming Server VPS` or the closest available matching note in the authenticated preview context.
-4. Capture a CPU profile around the click.
-5. Confirm:
-   - no long main-thread lock after node click,
-   - no repeated `NoteTree` remount/render cascade,
-   - no attachment resolver loop,
-   - route updates to `/dashboard/notes/:id`,
-   - editor appears and remains interactive.
-6. Re-run with repeated note switching to ensure the freeze does not come back after cache/query updates.
-
-## Files to change
-
-- `src/components/notes/NoteTree.tsx`
-- `src/components/notes/NoteEditor.tsx`
-- `src/components/notes/ConnectionsPanel.tsx`
-- `.lovable/plan.md` only if we want the internal plan document to reflect the corrected root cause
-
-## What I will not do
-
-- No database migration.
-- No changes to stored note content.
-- No rollback of the entire Notes tree feature.
-- No changes to attachment storage or Supabase Edge Functions for this specific freeze.
+1. Run the backfill on `peter@pro.com`/the main account.
+2. Confirm `profile_entries` count for contacts grows significantly (expect dozens of new auto-applied entries).
+3. Confirm the Review Queue shows only the genuinely ambiguous cases.
+4. Open a few Person pages and confirm Identity/Location/Professional fields are now populated where the notes contain the info.
