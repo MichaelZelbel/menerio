@@ -1001,7 +1001,7 @@ async function generateProfileSuggestions(
         messages: [{ role: "user", content: userPrompt }],
         defaults: {
           provider: "openrouter",
-          model: "openai/gpt-4o-mini",
+          model: "deepseek/deepseek-v4-flash",
           systemPrompt: PROFILE_EXTRACTION_PROMPT,
         },
         callOptions: { response_format: { type: "json_object" } },
@@ -1405,7 +1405,7 @@ async function processInBackground(noteId: string, authHeader: string) {
         messages: [{ role: "user", content: fullText.slice(0, 24000) }],
         defaults: {
           provider: "openrouter",
-          model: "openai/gpt-4o-mini",
+          model: "deepseek/deepseek-v4-flash",
           systemPrompt: METADATA_SYSTEM_PROMPT,
         },
         callOptions: { response_format: { type: "json_object" } },

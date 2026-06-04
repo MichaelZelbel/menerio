@@ -45,7 +45,7 @@ export interface RunChatResult {
 }
 
 const FALLBACK_TOKENS: Record<string, number> = {
-  "openai/gpt-4o-mini": 500,
+  "deepseek/deepseek-v4-flash": 500,
   "google/gemini-2.5-flash": 500,
   "google/gemini-3-flash-preview": 500,
 };

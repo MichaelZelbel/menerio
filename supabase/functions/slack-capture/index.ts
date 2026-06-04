@@ -55,7 +55,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             messages: [{ role: "user", content: messageText }],
             defaults: {
               provider: "openrouter",
-              model: "openai/gpt-4o-mini",
+              model: "deepseek/deepseek-v4-flash",
               systemPrompt: INGEST_THOUGHT_METADATA_PROMPT,
             },
             callOptions: { response_format: { type: "json_object" } },

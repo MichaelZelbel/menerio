@@ -166,7 +166,7 @@ Only suggest things you're reasonably confident about. Return 5-15 suggestions m
       messages: [{ role: "user", content: prompt }],
       defaults: {
         provider: "openrouter",
-        model: "openai/gpt-4o-mini",
+        model: "deepseek/deepseek-v4-flash",
         systemPrompt: GENERATE_PROFILE_SUGGESTIONS_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },

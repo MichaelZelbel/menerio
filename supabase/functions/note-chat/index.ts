@@ -423,7 +423,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           "note-chat:summarize",
           "chat/completions",
           {
-            model: "openai/gpt-4o-mini",
+            model: "deepseek/deepseek-v4-flash",
             messages: [
               {
                 role: "system",

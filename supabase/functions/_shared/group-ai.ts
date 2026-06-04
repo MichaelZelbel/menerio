@@ -11,7 +11,7 @@ export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 export const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 export const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-export const MODEL = "openai/gpt-4o-mini";
+export const MODEL = "deepseek/deepseek-v4-flash";
 
 export function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });

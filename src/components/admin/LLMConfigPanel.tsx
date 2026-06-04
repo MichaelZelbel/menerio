@@ -57,6 +57,7 @@ const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
     { value: "openai/gpt-5-nano", label: "GPT-5 Nano" },
   ],
   openrouter: [
+    { value: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
     { value: "openrouter/auto", label: "Auto (OpenRouter chooses)" },
     { value: "openai/gpt-4o-mini", label: "OpenAI GPT-4o Mini" },
     { value: "openai/gpt-4o", label: "OpenAI GPT-4o" },
