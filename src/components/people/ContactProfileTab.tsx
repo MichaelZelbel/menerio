@@ -115,6 +115,23 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   return (
     <div className="space-y-3">
       <RelationshipsSection contactId={contactId} contactName={contactName} />
+
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {pendingCount > 0 && (
+            <Link to={`/dashboard/review?contact_id=${contactId}`}>
+              <Badge variant="secondary" className="cursor-pointer">
+                {pendingCount} pending profile suggestion{pendingCount === 1 ? "" : "s"}
+              </Badge>
+            </Link>
+          )}
+        </div>
+        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
+          {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+          Enrich from notes
+        </Button>
+      </div>
+
       <ProfileCompleteness categories={categories} entries={entries} />
 
       {categories.map((cat) => (
