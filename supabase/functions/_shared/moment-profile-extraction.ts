@@ -1,0 +1,491 @@
+// Shared pipeline that turns a timeline `moment` (with participants) into
+// `add_profile_entry` and `add_relationship` review_queue suggestions, reusing
+// the same prompt + auto-apply thresholds as the note-based extractor in
+// `process-note/index.ts`. Designed to be called from both the live edge
+// function (`extract-moment-profile`) and the backfill function
+// (`backfill-moment-profile-extraction`).
+
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { checkBalance } from "./llm-credits.ts";
+import { runChat } from "./llm-router.ts";
+
+const PROFILE_CATEGORY_SLUGS = [
+  "identity", "location", "professional", "education", "relationships",
+  "communication", "personality", "principles", "health", "hobbies",
+  "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
+];
+
+const SENSITIVITY_THRESHOLDS: Record<string, number> = {
+  conservative: 0.85,
+  balanced: 0.7,
+  exploratory: 0.55,
+};
+
+const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
+  add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
+  add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+};
+
+const DEFAULT_CONFIDENCE: Record<string, number> = {
+  add_profile_entry: 0.80,
+  add_relationship: 0.72,
+};
+
+// Moments without document provenance can't be fully trusted (often free-form
+// user input), so cap confidence to force user review under conservative.
+const MANUAL_MOMENT_CONFIDENCE_CAP = 0.7;
+
+const SENSITIVE_TERMS = [
+  "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
+  "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
+  "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
+];
+
+const SINGLETON_PROFILE_LABELS = new Set([
+  "job title", "current job title", "role", "title",
+  "company", "current company", "employer",
+  "current city", "city", "location",
+  "birthday", "date of birth", "dob", "geburtstag", "geburtsdatum",
+  "pronouns", "nationality",
+  "partner", "spouse",
+]);
+
+const MOMENT_PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal life-timeline "moment" (an event or milestone the user recorded).
+
+The moment has a title, optional description, a date, optional category, and a list of named participants (people who were involved).
+
+Return a JSON object with two keys:
+1. "facts": an array of profile fact objects, each with:
+   - "contact_name": the person's name exactly as provided
+   - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
+   - "label": a short label (e.g. "Milestone", "Current city", "Job title", "Date of birth")
+   - "value": the actual value (e.g. "Moved to Lisbon", "Berlin", "Head of Design at Notion", "1990-05-12")
+
+2. "relationships": an array of relationship objects, each with:
+   - "person_a", "person_b" ("me"/"myself" if author)
+   - "label_a_to_b", "label_b_to_a"
+
+DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
+- Moment "Sarah moved to Lisbon" with participant Sarah → {contact_name: "Sarah", category_slug: "location", label: "Current city", value: "Lisbon"}
+- Moment "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "Job title", value: "Head of Design at Notion"}
+- Moment "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "Date of birth", value: "1994-03-12"}
+- Moment "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+
+DO NOT EXTRACT when:
+- The moment is a meeting/call/hangout with no biographical fact about the participant ("Coffee with Sarah" → no facts).
+- The fact would be a one-time activity rather than an ongoing attribute ("Sarah visited Paris" → not a profile fact; "Sarah lives in Paris" → IS a fact).
+- The participant is only incidentally tagged (e.g. a group photo moment listing 10 people).
+
+Rules:
+- For dates of birth: if the moment is a Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+- Return empty arrays if nothing qualifies.`;
+
+type Suggestion = {
+  user_id: string;
+  source_note_id: string | null;
+  suggestion_type: string;
+  title: string;
+  description: string;
+  payload: Record<string, unknown>;
+  status: string;
+  target_entity_type?: string | null;
+  target_entity_id?: string | null;
+  source_title?: string | null;
+  extracted_value?: string | null;
+  confidence_score?: number | null;
+  is_sensitive?: boolean;
+  applied_at?: string | null;
+  suppression_key?: string | null;
+};
+
+function normalize(v: unknown) {
+  return String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildSuppressionKey(type: string, targetType: string | null, targetId: string | null, value: unknown) {
+  return [type, targetType || "none", targetId || "none", normalize(value)].join(":");
+}
+
+function isSensitive(type: string, payload: Record<string, unknown>, text = "") {
+  const hay = `${type} ${text} ${Object.values(payload).join(" ")}`.toLowerCase();
+  return SENSITIVE_TERMS.some((t) => hay.includes(t));
+}
+
+function thresholdFor(type: string, sensitivity: string): number {
+  const perType = AUTO_APPLY_THRESHOLDS[type];
+  if (perType && perType[sensitivity] !== undefined) return perType[sensitivity];
+  return SENSITIVITY_THRESHOLDS[sensitivity] ?? SENSITIVITY_THRESHOLDS.balanced;
+}
+
+async function getPrefs(supabase: SupabaseClient, userId: string) {
+  const { data } = await supabase
+    .from("ai_suggestion_preferences")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return {
+    mode: (data as any)?.suggestion_mode || "auto",
+    sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    autoAddSensitive: (data as any)?.auto_add_sensitive === true,
+  };
+}
+
+async function prepareForInsert(
+  supabase: SupabaseClient,
+  s: Suggestion,
+  prefs: { mode: string; sensitivity: string; autoAddSensitive: boolean },
+): Promise<Suggestion> {
+  const threshold = thresholdFor(s.suggestion_type, prefs.sensitivity);
+  const confidence = s.confidence_score ?? 0;
+  const canAuto = prefs.mode === "auto" && confidence >= threshold && (!s.is_sensitive || prefs.autoAddSensitive);
+  if (!canAuto) return { ...s, status: "pending_review" };
+
+  try {
+    if (s.suggestion_type === "add_profile_entry") {
+      const contactId = s.payload.contact_id as string | undefined;
+      const categoryId = s.payload.category_id as string | null | undefined;
+      const label = String(s.payload.label || "").trim();
+      const value = String(s.payload.value || "").trim();
+      if (!contactId || !categoryId || !label || !value) return { ...s, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("profile_entries")
+        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
+        .select("id")
+        .single();
+      if (error || !data) return { ...s, status: "pending_review" };
+      return { ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() };
+    }
+    if (s.suggestion_type === "add_relationship") {
+      const p = s.payload as Record<string, string | null>;
+      if (!p.source_type || !p.target_type || !p.label) return { ...s, status: "pending_review" };
+      const { data, error } = await supabase
+        .from("contact_relationships")
+        .insert({
+          user_id: s.user_id,
+          source_type: p.source_type,
+          source_id: p.source_id || null,
+          target_type: p.target_type,
+          target_id: p.target_id || null,
+          label: p.label,
+          custom_label: p.custom_label || null,
+        })
+        .select("id")
+        .single();
+      if (error || !data) return { ...s, status: "pending_review" };
+      return { ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() };
+    }
+  } catch (err) {
+    console.error("[moment-extract] auto-apply failed:", err);
+  }
+  return { ...s, status: "pending_review" };
+}
+
+async function filterSuppressed(supabase: SupabaseClient, userId: string, suggestions: Suggestion[]) {
+  if (suggestions.length === 0) return suggestions;
+  const keys = suggestions.map((s) => s.suppression_key).filter(Boolean) as string[];
+  if (keys.length === 0) return suggestions;
+  const { data } = await supabase
+    .from("ai_suggestion_suppressions")
+    .select("suppression_key")
+    .eq("user_id", userId)
+    .in("suppression_key", keys);
+  const blocked = new Set((data || []).map((r: any) => r.suppression_key));
+  return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
+}
+
+export type MomentExtractionResult = {
+  scanned: number;
+  suggestions_created: number;
+  auto_applied: number;
+  skipped_reason?: string;
+};
+
+export async function extractProfileFromMoment(
+  supabase: SupabaseClient,
+  momentId: string,
+): Promise<MomentExtractionResult> {
+  const empty = { scanned: 0, suggestions_created: 0, auto_applied: 0 };
+
+  // 1. Load moment + participants + provenance.
+  const { data: moment, error: momentErr } = await supabase
+    .from("moments")
+    .select("id, user_id, title, description, happened_at, happened_end, category, status, source, ai_visibility, person_id")
+    .eq("id", momentId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (momentErr || !moment) {
+    return { ...empty, skipped_reason: "moment_not_found" };
+  }
+  if ((moment as any).ai_visibility === "hidden") {
+    return { ...empty, skipped_reason: "ai_hidden" };
+  }
+
+  const userId = (moment as any).user_id as string;
+
+  const { data: participantRows } = await supabase
+    .from("moment_participants")
+    .select("person_id")
+    .eq("moment_id", momentId);
+  const participantIds: string[] = [];
+  for (const row of (participantRows || []) as any[]) {
+    if (row.person_id) participantIds.push(row.person_id);
+  }
+  if ((moment as any).person_id && !participantIds.includes((moment as any).person_id)) {
+    participantIds.push((moment as any).person_id);
+  }
+  if (participantIds.length === 0) {
+    return { ...empty, skipped_reason: "no_participants" };
+  }
+
+  const { data: contacts } = await supabase
+    .from("contacts")
+    .select("id, name")
+    .eq("user_id", userId)
+    .in("id", participantIds)
+    .is("merged_into", null);
+  const matchedPeople = (contacts || []).map((c: any) => ({
+    contact_id: c.id as string,
+    canonical_name: c.name as string,
+  }));
+  if (matchedPeople.length === 0) return { ...empty, skipped_reason: "no_matched_contacts" };
+
+  // 2. Provenance — affects confidence cap.
+  const { count: provenanceCount } = await supabase
+    .from("moment_provenance")
+    .select("id", { count: "exact", head: true })
+    .eq("moment_id", momentId);
+  const isDocumentBacked = (provenanceCount || 0) > 0;
+  const isManualSource = ((moment as any).source || "manual") === "manual" && !isDocumentBacked;
+
+  // 3. Prefs + balance.
+  const prefs = await getPrefs(supabase, userId);
+  if (prefs.mode === "off") return { ...empty, skipped_reason: "suggestions_off" };
+
+  const balance = await checkBalance(supabase as any, userId);
+  if (!balance.allowed) return { ...empty, skipped_reason: "insufficient_credits" };
+
+  // 4. Build prompt text from the moment.
+  const lines = [
+    `Moment title: ${(moment as any).title}`,
+    `Date: ${(moment as any).happened_at}${(moment as any).happened_end ? ` → ${(moment as any).happened_end}` : ""}`,
+    `Status: ${(moment as any).status}`,
+  ];
+  if ((moment as any).category) lines.push(`Category: ${(moment as any).category}`);
+  if ((moment as any).description) lines.push(`Description: ${(moment as any).description}`);
+  lines.push(`Participants: ${matchedPeople.map((p) => p.canonical_name).join(", ")}`);
+  const userPrompt = lines.join("\n");
+
+  // 5. LLM call.
+  let parsed: any;
+  try {
+    const result = await runChat({
+      db: supabase as any,
+      userId,
+      callSite: "extract-moment-profile",
+      messages: [{ role: "user", content: userPrompt }],
+      defaults: {
+        provider: "openrouter",
+        model: "openai/gpt-4o-mini",
+        systemPrompt: MOMENT_PROFILE_EXTRACTION_PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    parsed = JSON.parse(result.content);
+  } catch (err: any) {
+    if (err?.message === "INSUFFICIENT_CREDITS") return { ...empty, skipped_reason: "insufficient_credits" };
+    console.error("[moment-extract] LLM error:", err);
+    return { ...empty, skipped_reason: "llm_error" };
+  }
+
+  const rawFacts: Array<any> = Array.isArray(parsed?.facts) ? parsed.facts : (Array.isArray(parsed) ? parsed : []);
+  const rawRels: Array<any> = Array.isArray(parsed?.relationships) ? parsed.relationships : [];
+
+  const nameToContact = new Map(matchedPeople.map((p) => [p.canonical_name.toLowerCase(), p]));
+
+  // 6. Load existing entries / queue items for dedup.
+  const contactIds = matchedPeople.map((p) => p.contact_id);
+  const { data: existingEntries } = await supabase
+    .from("profile_entries")
+    .select("contact_id, label, value")
+    .eq("user_id", userId)
+    .in("contact_id", contactIds);
+  const entrySet = new Set(
+    (existingEntries || []).map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}|${(e.value || "").toLowerCase()}`),
+  );
+  const singletonEntrySet = new Set(
+    (existingEntries || [])
+      .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
+      .map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}`),
+  );
+
+  const { data: existingQueue } = await supabase
+    .from("review_queue")
+    .select("payload, status")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "add_profile_entry")
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
+  const queueSet = new Set(
+    (existingQueue || []).map((q: any) =>
+      `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}|${(q.payload?.value || "").toLowerCase()}`
+    ),
+  );
+  const singletonQueueSet = new Set(
+    (existingQueue || [])
+      .filter((q: any) =>
+        SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
+        ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
+      )
+      .map((q: any) => `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}`),
+  );
+
+  // 7. Load profile_categories so we can map slug → id for auto-apply.
+  const { data: categories } = await supabase
+    .from("profile_categories")
+    .select("id, slug, contact_id")
+    .eq("user_id", userId)
+    .in("contact_id", contactIds);
+
+  const noteTitleLike = `Timeline: ${(moment as any).title}`;
+  const baseConfidence = isManualSource
+    ? Math.min(MANUAL_MOMENT_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
+    : DEFAULT_CONFIDENCE.add_profile_entry;
+
+  // 8. Build suggestions.
+  const suggestions: Suggestion[] = [];
+
+  for (const rawFact of rawFacts) {
+    const contactName = String(rawFact?.contact_name || "").trim();
+    const categorySlug = String(rawFact?.category_slug || "").trim().toLowerCase();
+    const label = String(rawFact?.label || "").trim();
+    const value = String(rawFact?.value || "").trim();
+    if (!contactName || !categorySlug || !label || !value) continue;
+    if (!PROFILE_CATEGORY_SLUGS.includes(categorySlug)) continue;
+    const contact = nameToContact.get(contactName.toLowerCase());
+    if (!contact) continue;
+
+    const labelLower = label.toLowerCase();
+    const dedupKey = `${contact.contact_id}|${labelLower}|${value.toLowerCase()}`;
+    if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
+    const singletonKey = `${contact.contact_id}|${labelLower}`;
+    if (SINGLETON_PROFILE_LABELS.has(labelLower) && (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey))) {
+      continue;
+    }
+
+    const catRow = (categories || []).find((c: any) => c.slug === categorySlug && c.contact_id === contact.contact_id);
+
+    const payload: Record<string, unknown> = {
+      contact_id: contact.contact_id,
+      contact_name: contact.canonical_name,
+      category_slug: categorySlug,
+      category_id: catRow?.id || null,
+      label,
+      value,
+      source: `moment:${momentId}`,
+      moment_id: momentId,
+      moment_title: (moment as any).title,
+    };
+
+    suggestions.push({
+      user_id: userId,
+      source_note_id: null,
+      suggestion_type: "add_profile_entry",
+      title: `Add to ${contact.canonical_name}'s profile: ${label}`,
+      description: `"${value}" — extracted from timeline moment "${(moment as any).title}"`,
+      payload,
+      status: "pending_review",
+      target_entity_type: "profile_entry",
+      source_title: noteTitleLike,
+      extracted_value: `${label}: ${value}`,
+      confidence_score: baseConfidence,
+      is_sensitive: isSensitive("add_profile_entry", payload, `${(moment as any).title} ${(moment as any).description || ""}`),
+      suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${label}:${value}`),
+    });
+
+    queueSet.add(dedupKey);
+    if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
+  }
+
+  // Relationships (between two matched participants only — skip "me").
+  const { data: existingRelQueue } = await supabase
+    .from("review_queue")
+    .select("title, status")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "add_relationship")
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
+  const relTitleSet = new Set((existingRelQueue || []).map((q: any) => q.title));
+
+  for (const rel of rawRels) {
+    const labelAB = String(rel?.label_a_to_b || "").trim().toLowerCase();
+    const labelBA = String(rel?.label_b_to_a || labelAB).trim().toLowerCase();
+    if (!labelAB) continue;
+    const a = nameToContact.get(String(rel?.person_a || "").toLowerCase());
+    const b = nameToContact.get(String(rel?.person_b || "").toLowerCase());
+    if (!a || !b || a.contact_id === b.contact_id) continue;
+
+    const title = `Add relationship: ${a.canonical_name} → ${b.canonical_name} (${labelAB})`;
+    if (relTitleSet.has(title)) continue;
+
+    const payload: Record<string, unknown> = {
+      source_type: "contact",
+      source_id: a.contact_id,
+      target_type: "contact",
+      target_id: b.contact_id,
+      label: labelAB,
+      inverse_label: labelBA,
+      contact_name_a: a.canonical_name,
+      contact_name_b: b.canonical_name,
+      source: `moment:${momentId}`,
+      moment_id: momentId,
+      moment_title: (moment as any).title,
+    };
+
+    suggestions.push({
+      user_id: userId,
+      source_note_id: null,
+      suggestion_type: "add_relationship",
+      title,
+      description: `${a.canonical_name} is ${labelAB} of ${b.canonical_name}`,
+      payload,
+      status: "pending_review",
+      target_entity_type: "relationship",
+      source_title: noteTitleLike,
+      extracted_value: `${a.canonical_name} ${labelAB} ${b.canonical_name}`,
+      confidence_score: isManualSource
+        ? Math.min(MANUAL_MOMENT_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_relationship)
+        : DEFAULT_CONFIDENCE.add_relationship,
+      is_sensitive: isSensitive("add_relationship", payload, `${(moment as any).title} ${(moment as any).description || ""}`),
+      suppression_key: buildSuppressionKey("add_relationship", "relationship", null, `${a.canonical_name}:${labelAB}:${b.canonical_name}`),
+    });
+    relTitleSet.add(title);
+  }
+
+  if (suggestions.length === 0) {
+    return { ...empty, scanned: 1 };
+  }
+
+  // 9. Filter suppressed + prepare + insert.
+  const unsuppressed = await filterSuppressed(supabase, userId, suggestions);
+  const prepared = await Promise.all(unsuppressed.map((s) => prepareForInsert(supabase, s, prefs)));
+  if (prepared.length === 0) return { ...empty, scanned: 1 };
+
+  const { error: insErr } = await supabase.from("review_queue").insert(prepared);
+  if (insErr) {
+    console.error("[moment-extract] insert error:", insErr);
+    return { ...empty, scanned: 1, skipped_reason: "insert_error" };
+  }
+
+  const autoApplied = prepared.filter((s) => s.status === "auto_applied_unreviewed").length;
+  return {
+    scanned: 1,
+    suggestions_created: prepared.length,
+    auto_applied: autoApplied,
+  };
+}
+
+export function createServiceClient() {
+  return createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+}
