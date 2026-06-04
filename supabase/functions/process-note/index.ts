@@ -1246,35 +1246,49 @@ async function generateProfileSuggestions(
     if (extractedRelationships.length > 0) {
       const relSuggestions: typeof suggestions = [];
 
-      // Check existing relationship review queue items
-      const { data: existingRelQueue } = await supabase
-        .from("review_queue")
-        .select("title, status")
-        .eq("user_id", userId)
-        .eq("suggestion_type", "add_relationship")
-        .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
+      // Load existing relationships AND queue items so we can dedupe by
+      // canonical pair key (direction-independent for symmetric labels).
+      const [{ data: existingRels }, { data: existingRelQueue }] = await Promise.all([
+        supabase
+          .from("contact_relationships")
+          .select("source_type, source_id, target_type, target_id, label")
+          .eq("user_id", userId),
+        supabase
+          .from("review_queue")
+          .select("payload, status")
+          .eq("user_id", userId)
+          .eq("suggestion_type", "add_relationship")
+          .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]),
+      ]);
 
-      const relQueueSet = new Set(
-        (existingRelQueue || []).map((q: any) => q.title)
-      );
+      const seenKeys = new Set<string>();
+      for (const r of existingRels || []) {
+        const a: EntityRef = { type: (r as any).source_type, id: (r as any).source_id };
+        const b: EntityRef = { type: (r as any).target_type, id: (r as any).target_id };
+        seenKeys.add(relationshipPairKey(userId, a, b, (r as any).label));
+      }
+      for (const q of existingRelQueue || []) {
+        const p = (q as any).payload || {};
+        if (!p.source_type || !p.target_type || !p.label) continue;
+        const a: EntityRef = { type: p.source_type, id: p.source_id || null };
+        const b: EntityRef = { type: p.target_type, id: p.target_id || null };
+        seenKeys.add(relationshipPairKey(userId, a, b, p.label));
+      }
 
       for (const rel of extractedRelationships) {
-        // Resolve person_a and person_b to contacts
-        const isSelfA = /^(me|myself|i)$/i.test(rel.person_a);
-        const isSelfB = /^(me|myself|i)$/i.test(rel.person_b);
+        const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a);
+        const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b);
 
         let contactA: { id: string; name: string } | null = null;
         let contactB: { id: string; name: string } | null = null;
 
         if (!isSelfA) {
-          // Find contact for person_a
           const matchA = nameToContact.get(rel.person_a.toLowerCase());
-          if (matchA) contactA = { id: matchA.contact_id, name: matchA.canonical_name };
+          if (matchA) contactA = { id: matchA.contact_id!, name: matchA.canonical_name! };
           else {
-            // Fuzzy match
             for (const [key, c] of nameToContact) {
               if (isFuzzyMatch(rel.person_a, key)) {
-                contactA = { id: c.contact_id, name: c.canonical_name };
+                contactA = { id: c.contact_id!, name: c.canonical_name! };
                 break;
               }
             }
@@ -1287,11 +1301,11 @@ async function generateProfileSuggestions(
 
         if (!isSelfB) {
           const matchB = nameToContact.get(rel.person_b.toLowerCase());
-          if (matchB) contactB = { id: matchB.contact_id, name: matchB.canonical_name };
+          if (matchB) contactB = { id: matchB.contact_id!, name: matchB.canonical_name! };
           else {
             for (const [key, c] of nameToContact) {
               if (isFuzzyMatch(rel.person_b, key)) {
-                contactB = { id: c.contact_id, name: c.canonical_name };
+                contactB = { id: c.contact_id!, name: c.canonical_name! };
                 break;
               }
             }
@@ -1302,28 +1316,36 @@ async function generateProfileSuggestions(
           }
         }
 
-        // Can't have both be self
         if (isSelfA && isSelfB) continue;
+
+        const canonical = canonicalLabel(rel.label_a_to_b);
+        const inverse = canonicalLabel(rel.label_b_to_a) || inverseLabel(canonical);
+        if (!canonical) continue;
+
+        const aRef: EntityRef = { type: isSelfA ? "self" : "contact", id: isSelfA ? null : contactA!.id };
+        const bRef: EntityRef = { type: isSelfB ? "self" : "contact", id: isSelfB ? null : contactB!.id };
+        const pairKey = relationshipPairKey(userId, aRef, bRef, canonical);
+        if (seenKeys.has(pairKey)) continue;
+        seenKeys.add(pairKey);
 
         const nameA = isSelfA ? "Me" : contactA!.name;
         const nameB = isSelfB ? "Me" : contactB!.name;
-        const title = `Add relationship: ${nameA} → ${nameB} (${rel.label_a_to_b})`;
-
-        if (relQueueSet.has(title)) continue;
+        const title = `Add relationship: ${nameA} → ${nameB} (${canonical})`;
 
         relSuggestions.push({
           user_id: userId,
           source_note_id: noteId,
           suggestion_type: "add_relationship",
           title,
-          description: `${nameA} is ${rel.label_a_to_b} of ${nameB}`,
+          description: `${nameA} is ${canonical} of ${nameB}`,
           payload: {
-            source_type: isSelfA ? "self" : "contact",
-            source_id: isSelfA ? null : contactA!.id,
-            target_type: isSelfB ? "self" : "contact",
-            target_id: isSelfB ? null : contactB!.id,
-            label: rel.label_a_to_b,
-            inverse_label: rel.label_b_to_a,
+            source_type: aRef.type,
+            source_id: aRef.id,
+            target_type: bRef.type,
+            target_id: bRef.id,
+            label: canonical,
+            // Only suggest a mirror for asymmetric labels
+            inverse_label: isSymmetricLabel(canonical) ? null : inverse,
             inverse_source_type: isSelfB ? "self" : "contact",
             inverse_source_id: isSelfB ? null : contactB!.id,
             inverse_target_type: isSelfA ? "self" : "contact",
@@ -1334,19 +1356,21 @@ async function generateProfileSuggestions(
           status: "pending_review",
           target_entity_type: "relationship",
           source_title: noteTitle,
-          extracted_value: `${nameA} ${rel.label_a_to_b} ${nameB}`,
+          extracted_value: `${nameA} ${canonical} ${nameB}`,
           confidence_score: DEFAULT_CONFIDENCE.add_relationship,
           is_sensitive: isSensitiveSuggestion("add_relationship", { ...rel, nameA, nameB }, noteContent),
-          suppression_key: buildSuppressionKey("add_relationship", "relationship", null, `${nameA}:${rel.label_a_to_b}:${nameB}`),
+          suppression_key: buildSuppressionKey("add_relationship", "relationship", null, pairKey),
         });
-        relQueueSet.add(title);
       }
 
       if (relSuggestions.length > 0) {
         const unsuppressed = await filterSuppressedSuggestions(userId, relSuggestions);
-        const { error } = await supabase.from("review_queue").insert(unsuppressed);
+        const preparedRels = await Promise.all(
+          unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)),
+        );
+        const { error } = await supabase.from("review_queue").insert(preparedRels);
         if (error) console.error("Relationship suggestion insert error:", error);
-        else console.log(`Created ${relSuggestions.length} relationship suggestions for note ${noteId}`);
+        else console.log(`Created ${preparedRels.length} relationship suggestions for note ${noteId}`);
       }
     }
   } catch (err) {
