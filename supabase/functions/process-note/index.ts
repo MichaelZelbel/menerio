@@ -951,14 +951,18 @@ async function generateProfileSuggestions(
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
-  // Skip extraction for non-biographical sources (prompt libraries, web clips, etc.)
+  // Skip extraction only for note types that are structurally never biographical
+  // (prompt libraries, code snippets, generic docs). Web clips / GitHub / etc.
+  // still run but with capped confidence (SOFT_SIGNAL_SOURCES) so facts require
+  // user review under conservative sensitivity.
   const sourceApp = (context?.source_app || "").toLowerCase();
   const metaType = String((context?.metadata as any)?.type || "").toLowerCase();
-  const nonBiographicalType = ["prompt", "template", "article", "documentation", "doc", "code", "snippet"].includes(metaType);
-  if (NON_BIOGRAPHICAL_SOURCES.has(sourceApp) || nonBiographicalType) {
-    console.log(`[profile-extract] skipping note ${noteId}: source=${sourceApp || "none"} type=${metaType || "none"} not first-person`);
+  const nonBiographicalType = ["prompt", "template", "code", "snippet"].includes(metaType);
+  if (nonBiographicalType) {
+    console.log(`[profile-extract] skipping note ${noteId}: type=${metaType} not biographical`);
     return;
   }
+  const isSoftSignal = SOFT_SIGNAL_SOURCES.has(sourceApp);
 
   try {
       const preferences = await getSuggestionPreferences(userId);
