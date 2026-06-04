@@ -8,6 +8,15 @@
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance } from "./llm-credits.ts";
 import { runChat } from "./llm-router.ts";
+import {
+  canonicalLabel,
+  inverseLabel,
+  isSymmetricLabel,
+  relationshipPairKey,
+  buildSelfAliases,
+  isSelfName,
+  type EntityRef,
+} from "./relationship-canonical.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
