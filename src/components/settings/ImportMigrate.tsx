@@ -62,6 +62,7 @@ export function ImportMigrate() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [backfillLoading, setBackfillLoading] = useState(false);
+  const [profileBackfillLoading, setProfileBackfillLoading] = useState(false);
 
   const runWikilinkBackfill = async () => {
     setBackfillLoading(true);
@@ -76,6 +77,22 @@ export function ImportMigrate() {
       toast({ title: "Backfill failed", description: err?.message ?? "Unknown error", variant: "destructive" });
     } finally {
       setBackfillLoading(false);
+    }
+  };
+
+  const runProfileBackfill = async () => {
+    setProfileBackfillLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200 } });
+      if (error) throw error;
+      toast({
+        title: "Profile enrichment started",
+        description: data?.message ?? "Re-analyzing your recent notes. New profile facts and suggestions will appear over the next few minutes.",
+      });
+    } catch (err: any) {
+      toast({ title: "Enrichment failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setProfileBackfillLoading(false);
     }
   };
 
@@ -341,6 +358,27 @@ export function ImportMigrate() {
         <Button onClick={runWikilinkBackfill} disabled={backfillLoading}>
           {backfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Rebuild now
+        </Button>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="h-4 w-4 text-primary" />
+          Enrich people profiles from past notes
+        </CardTitle>
+        <CardDescription>
+          Re-analyzes your most recent ~200 notes to extract biographical facts
+          about the people you've mentioned (job, city, relationships, etc.)
+          and populate their profiles. Existing entries are preserved — duplicates
+          are skipped automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={runProfileBackfill} disabled={profileBackfillLoading}>
+          {profileBackfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Enrich profiles now
         </Button>
       </CardContent>
     </Card>

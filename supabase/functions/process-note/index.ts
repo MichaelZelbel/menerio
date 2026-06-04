@@ -450,7 +450,7 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
 }
 
 async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) {
-  const threshold = SENSITIVITY_THRESHOLDS[preferences.sensitivity] || SENSITIVITY_THRESHOLDS.balanced;
+  const threshold = thresholdFor(suggestion.suggestion_type, preferences.sensitivity);
   const confidence = suggestion.confidence_score ?? 0;
   // Never auto-apply add_contact — creating a new person is an identity decision the user should confirm.
   if (suggestion.suggestion_type === "add_contact") {
@@ -566,10 +566,23 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
   exploratory: 0.55,
 };
 
+// Per-suggestion-type thresholds. Profile entries are low-risk and reversible,
+// so they get a more permissive policy than identity-altering actions.
+const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
+  add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
+  add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+};
+
+function thresholdFor(suggestionType: string, sensitivity: string): number {
+  const perType = AUTO_APPLY_THRESHOLDS[suggestionType];
+  if (perType && perType[sensitivity] !== undefined) return perType[sensitivity];
+  return SENSITIVITY_THRESHOLDS[sensitivity] ?? SENSITIVITY_THRESHOLDS.balanced;
+}
+
 const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_contact: 0.8,
   add_alias: 0.78,
-  add_profile_entry: 0.74,
+  add_profile_entry: 0.80,
   add_relationship: 0.72,
 };
 
@@ -596,21 +609,25 @@ Return a JSON object with two keys:
 
 CRITICAL — DO NOT EXTRACT FACTS WHEN:
 - The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
-- The person is the subject of a third-party article, prompt template, course, product description, or job posting. The role described in the content belongs to the content, NOT to the person.
-- The note is a prompt library, template, documentation, code snippet, or generic reference rather than a first-person observation about the person.
+- The person is the subject of a third-party article, prompt template, course, product description, or job posting where the role described belongs to the content, NOT to the person.
+- The note is a prompt library, template, documentation, code snippet, or generic reference where the person is only tangentially named.
 - A fact would be inferred only from indirect mentions, quotes, or generic context.
 
-Only extract a Job title / Company / Current city / etc. when the note text contains an EXPLICIT first-person-style statement: "X is a Y", "X works as Y at Z", "X lives in Y", "X's role is Y", "I met X who is a Y". Vague mentions, authorship, and topic descriptions do NOT qualify.
+DO EXTRACT when the note describes the person directly, whether in first OR third person. Examples that QUALIFY:
+- "Met Sarah for coffee — she just moved to Lisbon and is loving it."
+- "Tom started a new role as Head of Design at Notion last week."
+- "Nate works as a knowledge architect at Acme."
+- "Anna's birthday is May 12."
+- "Karim is vegetarian and allergic to peanuts."
 
-Examples:
-- ✓ "Nate works as a knowledge architect at Acme." → {contact_name: "Nate", category_slug: "professional", label: "Job title", value: "knowledge architect at Acme"}
-- ✗ "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
-- ✗ "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
+Examples that DO NOT qualify:
+- "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
+- "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
-- Only extract facts/relationships clearly stated about the person themselves
-- Do NOT invent or assume
-- Skip vague, third-party, or authorship-only mentions
+- Extract facts/relationships clearly stated or strongly implied about the person themselves
+- Do NOT invent or assume — if unsure, skip
+- Skip authorship-only and topic-only mentions
 - Return empty arrays if nothing qualifies
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
 
@@ -715,8 +732,9 @@ function deriveCanonicalFacts(
         }
       }
 
-      // Otherwise: drop the fact rather than store unstructured text in a singleton field.
-      console.log(`[profile-extract] dropping malformed birthday fact: "${value}"`);
+      // Couldn't derive a clean ISO date — keep the fact under a non-singleton
+      // "Birthday" label so the user sees it in review and can decide.
+      out.push({ ...f, label: "Birthday", value });
       continue;
     }
 
@@ -726,15 +744,20 @@ function deriveCanonicalFacts(
   return out;
 }
 
-// Sources that are structurally NOT first-person observation. Profile extraction
-// should be skipped for these to avoid mining biographical "facts" out of
-// third-party content (prompt libraries, web clips, public repos, etc.).
-const NON_BIOGRAPHICAL_SOURCES = new Set([
+// Removed: NON_BIOGRAPHICAL_SOURCES blanket skip. Use SOFT_SIGNAL_SOURCES
+// below instead — extraction still runs but confidence is capped.
+
+const MAX_FACTS_PER_CONTACT_PER_NOTE = 8;
+
+// Sources where extraction still runs but confidence is capped so facts require
+// user review rather than auto-applying. These often contain mixed signal
+// (web clips, GitHub READMEs, etc.) — biographical facts can appear but
+// shouldn't be trusted blindly.
+const SOFT_SIGNAL_SOURCES = new Set([
   "querino", "github", "singlefile", "web-clip", "webclip",
   "slack-public-channel",
 ]);
-
-const MAX_FACTS_PER_CONTACT_PER_NOTE = 3;
+const SOFT_SIGNAL_CONFIDENCE_CAP = 0.7;
 
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
@@ -928,14 +951,18 @@ async function generateProfileSuggestions(
   matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
   if (matchedPeople.length === 0) return;
 
-  // Skip extraction for non-biographical sources (prompt libraries, web clips, etc.)
+  // Skip extraction only for note types that are structurally never biographical
+  // (prompt libraries, code snippets, generic docs). Web clips / GitHub / etc.
+  // still run but with capped confidence (SOFT_SIGNAL_SOURCES) so facts require
+  // user review under conservative sensitivity.
   const sourceApp = (context?.source_app || "").toLowerCase();
   const metaType = String((context?.metadata as any)?.type || "").toLowerCase();
-  const nonBiographicalType = ["prompt", "template", "article", "documentation", "doc", "code", "snippet"].includes(metaType);
-  if (NON_BIOGRAPHICAL_SOURCES.has(sourceApp) || nonBiographicalType) {
-    console.log(`[profile-extract] skipping note ${noteId}: source=${sourceApp || "none"} type=${metaType || "none"} not first-person`);
+  const nonBiographicalType = ["prompt", "template", "code", "snippet"].includes(metaType);
+  if (nonBiographicalType) {
+    console.log(`[profile-extract] skipping note ${noteId}: type=${metaType} not biographical`);
     return;
   }
+  const isSoftSignal = SOFT_SIGNAL_SOURCES.has(sourceApp);
 
   try {
       const preferences = await getSuggestionPreferences(userId);
@@ -1187,7 +1214,9 @@ async function generateProfileSuggestions(
         target_entity_type: "profile_entry",
         source_title: noteTitle,
         extracted_value: `${fact.label}: ${fact.value}`,
-        confidence_score: DEFAULT_CONFIDENCE.add_profile_entry,
+        confidence_score: isSoftSignal
+          ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
+          : DEFAULT_CONFIDENCE.add_profile_entry,
         is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
         suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
       });

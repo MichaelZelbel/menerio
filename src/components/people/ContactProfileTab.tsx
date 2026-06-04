@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Sparkles, Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { CategorySection } from "@/components/profile/CategorySection";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
@@ -10,6 +13,9 @@ import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { useContactProfile } from "@/hooks/useContactProfile";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { showToast } from "@/lib/toast";
 
 interface ContactProfileTabProps {
   contactId: string;
@@ -17,6 +23,7 @@ interface ContactProfileTabProps {
 }
 
 export function ContactProfileTab({ contactId, contactName }: ContactProfileTabProps) {
+  const { user } = useAuth();
   const {
     categories,
     entries,
@@ -33,6 +40,38 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
+  const [enriching, setEnriching] = useState(false);
+
+  // Count pending profile suggestions for this contact
+  const { data: pendingCount = 0 } = useQuery({
+    queryKey: ["pending-profile-suggestions", user?.id, contactId],
+    enabled: !!user?.id && !!contactId,
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("review_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user!.id)
+        .eq("suggestion_type", "add_profile_entry")
+        .eq("status", "pending_review")
+        .contains("payload", { contact_id: contactId });
+      return count ?? 0;
+    },
+  });
+
+  const runEnrich = async () => {
+    setEnriching(true);
+    try {
+      const { error } = await supabase.functions.invoke("backfill-profile-extraction", {
+        body: { limit: 200, contact_id: contactId },
+      });
+      if (error) throw error;
+      showToast.success("Enrichment started — new facts will appear shortly.");
+    } catch (err: any) {
+      showToast.error(err.message ?? "Enrichment failed");
+    } finally {
+      setEnriching(false);
+    }
+  };
 
   // Auto-seed defaults on first visit
   useEffect(() => {
@@ -76,6 +115,23 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   return (
     <div className="space-y-3">
       <RelationshipsSection contactId={contactId} contactName={contactName} />
+
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {pendingCount > 0 && (
+            <Link to={`/dashboard/review-queue?contact_id=${contactId}`}>
+              <Badge variant="secondary" className="cursor-pointer">
+                {pendingCount} pending profile suggestion{pendingCount === 1 ? "" : "s"}
+              </Badge>
+            </Link>
+          )}
+        </div>
+        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
+          {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+          Enrich from notes
+        </Button>
+      </div>
+
       <ProfileCompleteness categories={categories} entries={entries} />
 
       {categories.map((cat) => (
