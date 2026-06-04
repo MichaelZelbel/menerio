@@ -64,12 +64,14 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const runEnrich = async () => {
     setEnriching(true);
     try {
-      const [notes, moments] = await Promise.all([
+      const [notes, moments, lexicon] = await Promise.all([
         supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
         supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
+        supabase.functions.invoke("enrich-person-from-lexicon", { body: { contact_id: contactId } }),
       ]);
       if (notes.error) throw notes.error;
       if (moments.error) throw moments.error;
+      if (lexicon.error) throw lexicon.error;
       showToast.success("Enrichment started — new facts will appear shortly.");
     } catch (err: any) {
       showToast.error(err.message ?? "Enrichment failed");

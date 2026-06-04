@@ -20,6 +20,7 @@ import {
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
+import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import {
   UserPlus,
   Link2,
@@ -326,33 +327,54 @@ export default function ReviewQueue() {
     const { source_type, source_id, target_type, target_id, label, custom_label, inverse_label, inverse_source_type, inverse_source_id, inverse_target_type, inverse_target_id, contact_name_a, contact_name_b } = item.payload as any;
 
     try {
-      // Insert the relationship
-      const { data: inserted, error } = await supabase
-        .from("contact_relationships")
-        .insert({
-          user_id: user!.id,
-          source_type,
-          source_id: source_id || null,
-          target_type,
-          target_id: target_id || null,
-          label,
-          custom_label: custom_label || null,
-        })
-        .select("id")
-        .single();
+      const canonical = canonicalLabel(label) || String(label || "").trim().toLowerCase();
+      const aRef: EntityRef = { type: source_type, id: source_id || null };
+      const bRef: EntityRef = { type: target_type, id: target_id || null };
+      const pairKey = relationshipPairKey(user!.id, aRef, bRef, canonical);
 
-      if (error) {
-        if (error.message?.includes("uq_contact_relationship")) {
-          showToast.info("This relationship already exists");
-          updateStatus.mutate({ id: item.id, status: "kept" });
+      // Symmetric dedup: check if any existing row (either direction) matches.
+      const { data: existingRels } = await supabase
+        .from("contact_relationships")
+        .select("id, source_type, source_id, target_type, target_id, label")
+        .eq("user_id", user!.id);
+      const dup = (existingRels || []).find((r: any) => {
+        const ra: EntityRef = { type: r.source_type, id: r.source_id };
+        const rb: EntityRef = { type: r.target_type, id: r.target_id };
+        return relationshipPairKey(user!.id, ra, rb, r.label) === pairKey;
+      });
+
+      let insertedId: string | null = dup?.id ?? null;
+      if (!dup) {
+        const { data: inserted, error } = await supabase
+          .from("contact_relationships")
+          .insert({
+            user_id: user!.id,
+            source_type,
+            source_id: source_id || null,
+            target_type,
+            target_id: target_id || null,
+            label: canonical,
+            custom_label: custom_label || null,
+          })
+          .select("id")
+          .single();
+
+        if (error) {
+          if (error.message?.includes("uq_contact_relationship")) {
+            showToast.info("This relationship already exists");
+            updateStatus.mutate({ id: item.id, status: "kept" });
+            return;
+          }
+          showToast.error("Failed to add relationship: " + error.message);
           return;
         }
-        showToast.error("Failed to add relationship: " + error.message);
-        return;
+        insertedId = inserted?.id ?? null;
+      } else {
+        showToast.info("This relationship already exists");
       }
 
-      // Create inverse suggestion in the review queue (suggested mirror)
-      if (inverse_label) {
+      // Only create a mirror suggestion for asymmetric labels.
+      if (inverse_label && !isSymmetricLabel(canonical)) {
         const inverseTitle = `Add relationship: ${contact_name_b || "?"} → ${contact_name_a || "?"} (${inverse_label})`;
         await supabase.from("review_queue").insert({
           user_id: user!.id,
@@ -368,15 +390,18 @@ export default function ReviewQueue() {
             label: inverse_label,
             contact_name_a: contact_name_b,
             contact_name_b: contact_name_a,
-            // No inverse_label here — it's the final record, no further mirroring
           },
           status: "pending_review",
         });
       }
 
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
-      updateStatus.mutate({ id: item.id, status: "kept" });
-      showToast.success(`Relationship added: ${contact_name_a} → ${label} → ${contact_name_b}`);
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: insertedId ? { target_entity_type: "relationship", target_entity_id: insertedId, applied_at: new Date().toISOString() } : undefined,
+      });
+      showToast.success(`Relationship added: ${contact_name_a} → ${canonical} → ${contact_name_b}`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }

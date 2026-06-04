@@ -1,0 +1,477 @@
+// Enrich a single person/contact using ALL available evidence:
+// - their Lexicon page (wiki_pages where page_type='person' and title matches)
+// - other Lexicon pages that mention them
+// - timeline moments where they are a participant
+// - notes that mention them
+// - existing profile entries and relationships (for dedup)
+//
+// Produces add_profile_entry and add_relationship review_queue suggestions
+// (or auto-applies them when prefs allow), with canonical labels and
+// symmetric-pair deduplication so we never create duplicate spouse/lover/etc.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import { runChat } from "../_shared/llm-router.ts";
+import {
+  canonicalLabel,
+  inverseLabel,
+  isSymmetricLabel,
+  relationshipPairKey,
+  buildSelfAliases,
+  isSelfName,
+  type EntityRef,
+} from "../_shared/relationship-canonical.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const PROFILE_CATEGORY_SLUGS = [
+  "identity", "location", "professional", "education", "relationships",
+  "communication", "personality", "principles", "health", "hobbies",
+  "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
+];
+
+const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, and notes).
+
+Return a JSON object with two keys:
+1. "facts": array of { contact_name, category_slug (one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}), label, value }
+2. "relationships": array of { person_a, person_b, label_a_to_b, label_b_to_a }
+
+Rules:
+- Only extract facts/relationships explicitly stated or strongly implied across multiple sources.
+- Use "me"/"myself" for the note author when the evidence refers to them in first person or by their display name.
+- Marriage cues — "wife", "husband", "married", "wedding day", "spouse", "anniversary" — imply a SPOUSE relationship.
+- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband", emit "spouse".
+- If the evidence contradicts itself, prefer the most-recent and most-document-backed evidence.
+- Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
+- Do NOT invent facts. If unsure, skip.
+- Return empty arrays if nothing qualifies.`;
+
+async function loadEvidence(userId: string, contactId: string) {
+  const { data: contact } = await supabase
+    .from("contacts")
+    .select("id, name, aliases")
+    .eq("id", contactId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!contact) return null;
+
+  const names = [contact.name, ...((contact as any).aliases || [])].filter(Boolean);
+
+  // Lexicon page(s) for this person
+  const slugCandidates = names.map((n: string) => n.toLowerCase().replace(/\s+/g, "-"));
+  const { data: personPages } = await supabase
+    .from("wiki_pages")
+    .select("title, page_type, summary, content")
+    .eq("user_id", userId)
+    .or(`page_type.eq.person,page_type.eq.entity`)
+    .or(names.map((n: string) => `title.ilike.%${n}%`).join(","))
+    .limit(5);
+
+  // Other lexicon pages mentioning the name
+  const { data: otherPages } = await supabase
+    .from("wiki_pages")
+    .select("title, page_type, summary, content")
+    .eq("user_id", userId)
+    .or(names.map((n: string) => `content.ilike.%${n}%`).join(","))
+    .limit(10);
+
+  // Timeline moments where they participate
+  const { data: participantRows } = await supabase
+    .from("moment_participants")
+    .select("moment_id")
+    .eq("person_id", contactId);
+  const momentIds = (participantRows || []).map((r: any) => r.moment_id);
+  let moments: any[] = [];
+  if (momentIds.length > 0) {
+    const { data } = await supabase
+      .from("moments")
+      .select("title, description, happened_at, status, category")
+      .in("id", momentIds)
+      .is("deleted_at", null)
+      .eq("ai_visibility", "visible")
+      .order("happened_at", { ascending: false })
+      .limit(40);
+    moments = data || [];
+  }
+
+  // Notes that mention them (via metadata.matched_people)
+  const { data: candidateNotes } = await supabase
+    .from("notes")
+    .select("title, content, metadata, created_at")
+    .eq("user_id", userId)
+    .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  const notes = (candidateNotes || []).filter((n: any) => {
+    const matched = Array.isArray(n.metadata?.matched_people) ? n.metadata.matched_people : [];
+    return matched.some((m: any) => m.contact_id === contactId);
+  }).slice(0, 30);
+
+  // Existing profile entries (dedup) + categories + relationships
+  const { data: existingEntries } = await supabase
+    .from("profile_entries")
+    .select("contact_id, label, value, category_id")
+    .eq("user_id", userId)
+    .eq("contact_id", contactId);
+  const { data: existingCategories } = await supabase
+    .from("profile_categories")
+    .select("id, slug, contact_id")
+    .eq("user_id", userId)
+    .eq("contact_id", contactId);
+  const { data: existingRels } = await supabase
+    .from("contact_relationships")
+    .select("source_type, source_id, target_type, target_id, label")
+    .eq("user_id", userId);
+
+  // Self display name for self-aliases
+  const { data: selfProfile } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return {
+    contact,
+    names,
+    personPages: personPages || [],
+    otherPages: (otherPages || []).filter((p: any) => !((personPages || []).some((pp: any) => pp.title === p.title))),
+    moments,
+    notes,
+    existingEntries: existingEntries || [],
+    existingCategories: existingCategories || [],
+    existingRels: existingRels || [],
+    selfDisplayName: ((selfProfile as any)?.display_name as string | undefined) || "Me",
+  };
+}
+
+function truncate(s: string, n: number) {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function buildPrompt(evidence: NonNullable<Awaited<ReturnType<typeof loadEvidence>>>) {
+  const parts: string[] = [];
+  parts.push(`Target person: ${evidence.contact.name}`);
+  if ((evidence.contact as any).aliases?.length) {
+    parts.push(`Aliases: ${(evidence.contact as any).aliases.join(", ")}`);
+  }
+  parts.push(`Note author (self / "me" / "I"): ${evidence.selfDisplayName}`);
+
+  if (evidence.personPages.length) {
+    parts.push(`\n=== Lexicon pages about this person ===`);
+    for (const p of evidence.personPages) {
+      parts.push(`# ${p.title}\n${truncate((p as any).summary || "", 400)}\n${truncate((p as any).content || "", 1500)}`);
+    }
+  }
+  if (evidence.otherPages.length) {
+    parts.push(`\n=== Related Lexicon pages mentioning ${evidence.contact.name} ===`);
+    for (const p of evidence.otherPages.slice(0, 6)) {
+      parts.push(`# ${p.title}\n${truncate((p as any).summary || "", 200)}\n${truncate((p as any).content || "", 500)}`);
+    }
+  }
+  if (evidence.moments.length) {
+    parts.push(`\n=== Timeline moments with ${evidence.contact.name} ===`);
+    for (const m of evidence.moments.slice(0, 20)) {
+      parts.push(`- ${m.happened_at?.slice(0, 10)} [${m.status}] ${m.title}${m.description ? ` — ${truncate(m.description, 200)}` : ""}`);
+    }
+  }
+  if (evidence.notes.length) {
+    parts.push(`\n=== Notes mentioning ${evidence.contact.name} ===`);
+    for (const n of evidence.notes.slice(0, 15)) {
+      parts.push(`# ${n.title}\n${truncate(n.content || "", 600)}`);
+    }
+  }
+  return parts.join("\n");
+}
+
+async function getPrefs(userId: string) {
+  const { data } = await supabase
+    .from("ai_suggestion_preferences")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return {
+    mode: (data as any)?.suggestion_mode || "auto",
+    sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    autoAddSensitive: (data as any)?.auto_add_sensitive === true,
+  };
+}
+
+const AUTO_APPLY: Record<string, Record<string, number>> = {
+  add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
+  add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+};
+
+function threshold(type: string, sensitivity: string) {
+  return AUTO_APPLY[type]?.[sensitivity] ?? 0.7;
+}
+
+async function run(userId: string, contactId: string) {
+  const balance = await checkBalance(supabase as any, userId);
+  if (!balance.allowed) return { ok: false, reason: "insufficient_credits" };
+
+  const evidence = await loadEvidence(userId, contactId);
+  if (!evidence) return { ok: false, reason: "contact_not_found" };
+
+  const prefs = await getPrefs(userId);
+  if (prefs.mode === "off") return { ok: false, reason: "suggestions_off" };
+
+  const userPrompt = buildPrompt(evidence);
+  let parsed: any;
+  try {
+    const result = await runChat({
+      db: supabase as any,
+      userId,
+      callSite: "enrich-person-from-lexicon",
+      messages: [{ role: "user", content: userPrompt }],
+      defaults: {
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4-flash",
+        systemPrompt: PROMPT,
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    parsed = JSON.parse(result.content);
+  } catch (err: any) {
+    if (err?.message === "INSUFFICIENT_CREDITS") return { ok: false, reason: "insufficient_credits" };
+    console.error("[enrich-person] LLM error", err);
+    return { ok: false, reason: "llm_error" };
+  }
+
+  const rawFacts: any[] = Array.isArray(parsed?.facts) ? parsed.facts : [];
+  const rawRels: any[] = Array.isArray(parsed?.relationships) ? parsed.relationships : [];
+
+  const selfAliases = buildSelfAliases([evidence.selfDisplayName]);
+
+  // Dedup keys for existing rels
+  const relSeen = new Set<string>();
+  for (const r of evidence.existingRels) {
+    const a: EntityRef = { type: (r as any).source_type, id: (r as any).source_id };
+    const b: EntityRef = { type: (r as any).target_type, id: (r as any).target_id };
+    relSeen.add(relationshipPairKey(userId, a, b, (r as any).label));
+  }
+  const { data: queueRels } = await supabase
+    .from("review_queue")
+    .select("payload, status")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "add_relationship")
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]);
+  for (const q of queueRels || []) {
+    const p = (q as any).payload || {};
+    if (!p.source_type || !p.target_type || !p.label) continue;
+    const a: EntityRef = { type: p.source_type, id: p.source_id || null };
+    const b: EntityRef = { type: p.target_type, id: p.target_id || null };
+    relSeen.add(relationshipPairKey(userId, a, b, p.label));
+  }
+
+  const entrySeen = new Set<string>(
+    evidence.existingEntries.map((e: any) => `${(e.label || "").toLowerCase()}|${(e.value || "").toLowerCase()}`),
+  );
+  const singletonEntry = new Set<string>(
+    evidence.existingEntries.map((e: any) => (e.label || "").toLowerCase()),
+  );
+
+  const targetNameLower = evidence.contact.name.toLowerCase();
+  const aliasLowerSet = new Set<string>(
+    [evidence.contact.name, ...((evidence.contact as any).aliases || [])].map((n: string) => n.toLowerCase()),
+  );
+
+  const suggestions: any[] = [];
+
+  // Build profile facts (only for this contact)
+  for (const f of rawFacts) {
+    const name = String(f?.contact_name || "").trim().toLowerCase();
+    const slug = String(f?.category_slug || "").trim().toLowerCase();
+    const label = String(f?.label || "").trim();
+    const value = String(f?.value || "").trim();
+    if (!name || !slug || !label || !value) continue;
+    if (!PROFILE_CATEGORY_SLUGS.includes(slug)) continue;
+    // Only accept facts about THIS person (alias-aware)
+    if (!aliasLowerSet.has(name) && name !== targetNameLower) continue;
+    const key = `${label.toLowerCase()}|${value.toLowerCase()}`;
+    if (entrySeen.has(key)) continue;
+
+    const catRow = evidence.existingCategories.find((c: any) => c.slug === slug);
+    suggestions.push({
+      user_id: userId,
+      source_note_id: null,
+      suggestion_type: "add_profile_entry",
+      title: `Add to ${evidence.contact.name}'s profile: ${label}`,
+      description: `"${value}" — extracted via Lexicon-aware enrichment`,
+      payload: {
+        contact_id: evidence.contact.id,
+        contact_name: evidence.contact.name,
+        category_slug: slug,
+        category_id: catRow?.id || null,
+        label,
+        value,
+        source: "lexicon_enrichment",
+      },
+      status: "pending_review",
+      target_entity_type: "profile_entry",
+      source_title: "Lexicon & timeline enrichment",
+      extracted_value: `${label}: ${value}`,
+      confidence_score: 0.82,
+      is_sensitive: false,
+    });
+    entrySeen.add(key);
+    singletonEntry.add(label.toLowerCase());
+  }
+
+  // Relationships (allow self↔contact)
+  for (const rel of rawRels) {
+    const rawA = String(rel?.person_a || "").trim();
+    const rawB = String(rel?.person_b || "").trim();
+    if (!rawA || !rawB) continue;
+    const isSelfA = isSelfName(rawA, selfAliases);
+    const isSelfB = isSelfName(rawB, selfAliases);
+    if (isSelfA && isSelfB) continue;
+
+    const matchEntity = (name: string): { type: "contact"; id: string; name: string } | null => {
+      const lower = name.toLowerCase();
+      if (aliasLowerSet.has(lower) || lower === targetNameLower) {
+        return { type: "contact", id: evidence.contact.id, name: evidence.contact.name };
+      }
+      return null;
+    };
+    const a = isSelfA ? null : matchEntity(rawA);
+    const b = isSelfB ? null : matchEntity(rawB);
+    // Require at least the target person to be involved (the one we're enriching)
+    if (!isSelfA && !a) continue;
+    if (!isSelfB && !b) continue;
+    if (a && b && a.id === b.id) continue;
+    const targetInvolved = (a && a.id === evidence.contact.id) || (b && b.id === evidence.contact.id);
+    if (!targetInvolved) continue;
+
+    const canonical = canonicalLabel(rel?.label_a_to_b);
+    if (!canonical) continue;
+    const inverse = canonicalLabel(rel?.label_b_to_a) || inverseLabel(canonical);
+
+    const aRef: EntityRef = { type: isSelfA ? "self" : "contact", id: isSelfA ? null : a!.id };
+    const bRef: EntityRef = { type: isSelfB ? "self" : "contact", id: isSelfB ? null : b!.id };
+    const pairKey = relationshipPairKey(userId, aRef, bRef, canonical);
+    if (relSeen.has(pairKey)) continue;
+    relSeen.add(pairKey);
+
+    const nameA = isSelfA ? evidence.selfDisplayName : a!.name;
+    const nameB = isSelfB ? evidence.selfDisplayName : b!.name;
+
+    suggestions.push({
+      user_id: userId,
+      source_note_id: null,
+      suggestion_type: "add_relationship",
+      title: `Add relationship: ${nameA} → ${nameB} (${canonical})`,
+      description: `${nameA} is ${canonical} of ${nameB} — extracted via Lexicon-aware enrichment`,
+      payload: {
+        source_type: aRef.type,
+        source_id: aRef.id,
+        target_type: bRef.type,
+        target_id: bRef.id,
+        label: canonical,
+        inverse_label: isSymmetricLabel(canonical) ? null : inverse,
+        contact_name_a: nameA,
+        contact_name_b: nameB,
+        source: "lexicon_enrichment",
+      },
+      status: "pending_review",
+      target_entity_type: "relationship",
+      source_title: "Lexicon & timeline enrichment",
+      extracted_value: `${nameA} ${canonical} ${nameB}`,
+      confidence_score: 0.85,
+      is_sensitive: false,
+    });
+  }
+
+  if (suggestions.length === 0) return { ok: true, suggestions_created: 0, auto_applied: 0 };
+
+  // Auto-apply where confidence + prefs allow
+  let autoApplied = 0;
+  const prepared: any[] = [];
+  for (const s of suggestions) {
+    const t = threshold(s.suggestion_type, prefs.sensitivity);
+    const canAuto = prefs.mode === "auto" && (s.confidence_score ?? 0) >= t && (!s.is_sensitive || prefs.autoAddSensitive);
+    if (!canAuto) { prepared.push({ ...s, status: "pending_review" }); continue; }
+    try {
+      if (s.suggestion_type === "add_profile_entry") {
+        if (!s.payload.category_id) { prepared.push({ ...s, status: "pending_review" }); continue; }
+        const { data, error } = await supabase
+          .from("profile_entries")
+          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: s.payload.label, value: s.payload.value, sort_order: 0 })
+          .select("id")
+          .single();
+        if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }
+        prepared.push({ ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() });
+        autoApplied++;
+      } else if (s.suggestion_type === "add_relationship") {
+        const p = s.payload;
+        const { data, error } = await supabase
+          .from("contact_relationships")
+          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: p.label })
+          .select("id")
+          .single();
+        if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }
+        prepared.push({ ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() });
+        autoApplied++;
+      } else {
+        prepared.push({ ...s, status: "pending_review" });
+      }
+    } catch (err) {
+      console.error("[enrich-person] auto-apply error", err);
+      prepared.push({ ...s, status: "pending_review" });
+    }
+  }
+
+  const { error: insErr } = await supabase.from("review_queue").insert(prepared);
+  if (insErr) console.error("[enrich-person] review_queue insert error", insErr);
+
+  return { ok: true, suggestions_created: prepared.length, auto_applied: autoApplied };
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "unauthorized" }, 401);
+
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser(authHeader.replace("Bearer ", ""));
+    if (authErr || !user) return json({ error: "unauthorized" }, 401);
+
+    const body = await req.json().catch(() => ({} as any));
+    const contactId = typeof body?.contact_id === "string" ? body.contact_id : null;
+    if (!contactId) return json({ error: "contact_id required" }, 400);
+
+    // @ts-expect-error EdgeRuntime is a Supabase global
+    EdgeRuntime.waitUntil(
+      run(user.id, contactId).then((r) => console.log("[enrich-person] result", r)).catch((err) => {
+        if (err?.message === "INSUFFICIENT_CREDITS") return;
+        console.error("[enrich-person] error", err);
+      }),
+    );
+
+    return json({ ok: true, started: true, message: "Person enrichment running in background." });
+  } catch (err) {
+    console.error("enrich-person-from-lexicon error:", err);
+    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
+  }
+});
