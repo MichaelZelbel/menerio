@@ -44,7 +44,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const [newCatScope, setNewCatScope] = useState("all");
   const [enriching, setEnriching] = useState(false);
 
-  // Count pending profile suggestions for this contact
+  // Count pending profile suggestions for this contact (from notes OR moments).
   const { data: pendingCount = 0 } = useQuery({
     queryKey: ["pending-profile-suggestions", user?.id, contactId],
     enabled: !!user?.id && !!contactId,
@@ -53,12 +53,13 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
         .from("review_queue")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user!.id)
-        .eq("suggestion_type", "add_profile_entry")
-        .eq("status", "pending_review")
+        .in("suggestion_type", ["add_profile_entry", "add_relationship"])
+        .in("status", ["pending_review", "pending", "auto_applied_unreviewed"])
         .contains("payload", { contact_id: contactId });
       return count ?? 0;
     },
   });
+
 
   const runEnrich = async () => {
     setEnriching(true);
