@@ -13,6 +13,8 @@ import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { useContactProfile } from "@/hooks/useContactProfile";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
+import { LifeEventsStrip } from "@/components/people/LifeEventsStrip";
+
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -42,7 +44,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
   const [newCatScope, setNewCatScope] = useState("all");
   const [enriching, setEnriching] = useState(false);
 
-  // Count pending profile suggestions for this contact
+  // Count pending profile suggestions for this contact (from notes OR moments).
   const { data: pendingCount = 0 } = useQuery({
     queryKey: ["pending-profile-suggestions", user?.id, contactId],
     enabled: !!user?.id && !!contactId,
@@ -51,20 +53,23 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
         .from("review_queue")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user!.id)
-        .eq("suggestion_type", "add_profile_entry")
-        .eq("status", "pending_review")
+        .in("suggestion_type", ["add_profile_entry", "add_relationship"])
+        .in("status", ["pending_review", "pending", "auto_applied_unreviewed"])
         .contains("payload", { contact_id: contactId });
       return count ?? 0;
     },
   });
 
+
   const runEnrich = async () => {
     setEnriching(true);
     try {
-      const { error } = await supabase.functions.invoke("backfill-profile-extraction", {
-        body: { limit: 200, contact_id: contactId },
-      });
-      if (error) throw error;
+      const [notes, moments] = await Promise.all([
+        supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
+        supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200, contact_id: contactId } }),
+      ]);
+      if (notes.error) throw notes.error;
+      if (moments.error) throw moments.error;
       showToast.success("Enrichment started — new facts will appear shortly.");
     } catch (err: any) {
       showToast.error(err.message ?? "Enrichment failed");
@@ -72,6 +77,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
       setEnriching(false);
     }
   };
+
 
   // Auto-seed defaults on first visit
   useEffect(() => {
@@ -114,6 +120,8 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
 
   return (
     <div className="space-y-3">
+      <LifeEventsStrip contactId={contactId} />
+
       <RelationshipsSection contactId={contactId} contactName={contactName} />
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -128,9 +136,10 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
         </div>
         <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
           {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
-          Enrich from notes
+          Enrich from notes & timeline
         </Button>
       </div>
+
 
       <ProfileCompleteness categories={categories} entries={entries} />
 

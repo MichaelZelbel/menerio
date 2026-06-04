@@ -237,9 +237,15 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         if (error) throw error;
       }
 
+      // Fire-and-forget: extract profile facts about participants from this moment.
+      if (momentId) {
+        supabase.functions.invoke("extract-moment-profile", { body: { moment_id: momentId } }).catch(() => {});
+      }
+
       toast({ title: isEditMode ? "Moment updated" : "Moment created" });
       setOpen(false);
       onCreated();
+
     } catch (err: any) {
       toast({ title: isEditMode ? "Failed to update moment" : "Failed to create moment", description: err?.message, variant: "destructive" });
     } finally {
