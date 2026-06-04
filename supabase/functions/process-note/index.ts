@@ -1073,8 +1073,8 @@ async function generateProfileSuggestions(
       return;
     }
 
-    if (extractedFacts.length === 0) {
-      console.log(`No profile facts extracted from note ${noteId} (0 after parsing)`);
+    if (extractedFacts.length === 0 && extractedRelationships.length === 0) {
+      console.log(`No profile facts or relationships extracted from note ${noteId}`);
       return;
     }
 
