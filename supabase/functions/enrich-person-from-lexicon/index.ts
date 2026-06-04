@@ -480,7 +480,7 @@ async function run(userId: string, contactId: string) {
   const hasSpouseSuggestion = suggestions.some(
     (s) => s.suggestion_type === "add_relationship" && (s.payload?.label === "spouse" || s.payload?.label === "partner"),
   );
-  const hasExistingSpouse = Array.from(relSeen).some((k) => k.endsWith("|spouse") || k.endsWith("|partner"));
+  const hasExistingSpouse = Array.from(relSeen).some((k) => k.includes("|spouse|") || k.includes("|partner|"));
   if (!hasSpouseSuggestion && !hasExistingSpouse && countSpouseEvidence(evidence) >= 2) {
     const aRef: EntityRef = { type: "self", id: null };
     const bRef: EntityRef = { type: "contact", id: evidence.contact.id };
