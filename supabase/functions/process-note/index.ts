@@ -1110,7 +1110,7 @@ async function generateProfileSuggestions(
 
     console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
 
-    if (validFacts.length === 0) {
+    if (validFacts.length === 0 && extractedRelationships.length === 0) {
       return;
     }
 
