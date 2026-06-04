@@ -457,6 +457,20 @@ export async function extractProfileFromMoment(
     if (!contact) continue;
 
     const labelLower = label.toLowerCase();
+
+    // Post-filter: label must be in the allowlist.
+    if (!ALLOWED_LABEL_SET.has(labelLower)) {
+      console.log(`[moment-extract] post-filter dropped: label not in allowlist (label="${label}", moment ${momentId})`);
+      continue;
+    }
+
+    // Post-filter: value must appear in source text (with birthday exception).
+    const sourceText = `${(moment as any).title} ${(moment as any).description || ""}`;
+    if (!valueAppearsInSource(value, label, sourceText)) {
+      console.log(`[moment-extract] post-filter dropped: value not in source (label="${label}", value="${value}", moment ${momentId})`);
+      continue;
+    }
+
     const dedupKey = `${contact.contact_id}|${labelLower}|${value.toLowerCase()}`;
     if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
     const singletonKey = `${contact.contact_id}|${labelLower}`;
