@@ -46,18 +46,17 @@ const PROFILE_CATEGORY_SLUGS = [
   "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
 ];
 
-const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, and notes).
+const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, notes, and attachment OCR text).
 
 Return a JSON object with two keys:
 1. "facts": array of { contact_name, category_slug (one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}), label, value }
 2. "relationships": array of { person_a, person_b, label_a_to_b, label_b_to_a }
 
-Rules:
-- Only extract facts/relationships explicitly stated or strongly implied across multiple sources.
-- Use "me"/"myself" for the note author when the evidence refers to them in first person or by their display name.
-- Marriage cues — "wife", "husband", "married", "wedding day", "spouse", "anniversary" — imply a SPOUSE relationship.
-- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband", emit "spouse".
-- If the evidence contradicts itself, prefer the most-recent and most-document-backed evidence.
+Reasoning rules — apply common sense across ALL evidence, not just one source:
+- Marriage cues anywhere in the evidence — "wife", "husband", "married", "wedding day", "spouse", "anniversary", "Marriage Papers", "Heirat", "Hochzeit", "Ehefrau", "Ehemann" — imply a SPOUSE relationship between the named people. A note titled "Marriage Papers X and Y" plus a wedding-day moment is direct proof.
+- Use "me"/"myself" for the note author when the evidence refers to them in first person ("my wife X") or by their display name.
+- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband"/"married", emit "spouse" (not "lover" or "partner").
+- If multiple sources independently support a relationship, you should still emit it once.
 - Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Do NOT invent facts. If unsure, skip.
 - Return empty arrays if nothing qualifies.`;
