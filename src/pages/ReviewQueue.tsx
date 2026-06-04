@@ -20,6 +20,7 @@ import {
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
+import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import {
   UserPlus,
   Link2,
