@@ -1214,7 +1214,9 @@ async function generateProfileSuggestions(
         target_entity_type: "profile_entry",
         source_title: noteTitle,
         extracted_value: `${fact.label}: ${fact.value}`,
-        confidence_score: DEFAULT_CONFIDENCE.add_profile_entry,
+        confidence_score: isSoftSignal
+          ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
+          : DEFAULT_CONFIDENCE.add_profile_entry,
         is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
         suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
       });
