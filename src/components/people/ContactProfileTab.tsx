@@ -119,7 +119,7 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           {pendingCount > 0 && (
-            <Link to={`/dashboard/review?contact_id=${contactId}`}>
+            <Link to={`/dashboard/review-queue?contact_id=${contactId}`}>
               <Badge variant="secondary" className="cursor-pointer">
                 {pendingCount} pending profile suggestion{pendingCount === 1 ? "" : "s"}
               </Badge>
