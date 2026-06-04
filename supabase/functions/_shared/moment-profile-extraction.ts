@@ -366,15 +366,29 @@ export async function extractProfileFromMoment(
   const balance = await checkBalance(supabase as any, userId);
   if (!balance.allowed) return { ...empty, skipped_reason: "insufficient_credits" };
 
+  // Self context — used so the model can extract self↔participant relationships
+  // (e.g. "Xihui and my wedding day" ⇒ self ↔ Xihui = spouse).
+  const { data: selfProfile } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", userId)
+    .maybeSingle();
+  const selfDisplayName = ((selfProfile as any)?.display_name as string | undefined) || "Me";
+  const selfAliases = buildSelfAliases([selfDisplayName, "me", "i", "my", "myself"]);
+
   // 4. Build prompt text from the moment.
   const lines = [
     `Moment title: ${(moment as any).title}`,
     `Date: ${(moment as any).happened_at}${(moment as any).happened_end ? ` → ${(moment as any).happened_end}` : ""}`,
     `Status: ${(moment as any).status}`,
+    `Note author (self / "me" / "I"): ${selfDisplayName}`,
   ];
   if ((moment as any).category) lines.push(`Category: ${(moment as any).category}`);
   if ((moment as any).description) lines.push(`Description: ${(moment as any).description}`);
   lines.push(`Participants: ${matchedPeople.map((p) => p.canonical_name).join(", ")}`);
+  lines.push(
+    `When extracting relationships, you may use "me" / "myself" for the note author (${selfDisplayName}). Marriage cues (wife, husband, married, wedding day, anniversary) imply spouse.`,
+  );
   const userPrompt = lines.join("\n");
 
   // 5. LLM call.
