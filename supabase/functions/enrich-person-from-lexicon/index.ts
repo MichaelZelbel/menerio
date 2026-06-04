@@ -467,9 +467,51 @@ async function run(userId: string, contactId: string) {
       target_entity_type: "relationship",
       source_title: "Lexicon & timeline enrichment",
       extracted_value: `${nameA} ${canonical} ${nameB}`,
-      confidence_score: 0.85,
+      confidence_score: (canonical === "spouse" || canonical === "partner") && countSpouseEvidence(evidence) >= 2 ? 0.95 : 0.85,
       is_sensitive: false,
     });
+  }
+
+  // Evidence-only fallback: if the LLM didn't emit a spouse relationship but
+  // we have multiple strong pieces of evidence (marriage papers + wedding
+  // moment, etc.) AND the note author is involved, synthesize one. This is the
+  // "common sense" pass that prevents the AI from missing what a human would
+  // immediately see.
+  const hasSpouseSuggestion = suggestions.some(
+    (s) => s.suggestion_type === "add_relationship" && (s.payload?.label === "spouse" || s.payload?.label === "partner"),
+  );
+  const hasExistingSpouse = Array.from(relSeen).some((k) => k.endsWith("|spouse") || k.endsWith("|partner"));
+  if (!hasSpouseSuggestion && !hasExistingSpouse && countSpouseEvidence(evidence) >= 2) {
+    const aRef: EntityRef = { type: "self", id: null };
+    const bRef: EntityRef = { type: "contact", id: evidence.contact.id };
+    const pairKey = relationshipPairKey(userId, aRef, bRef, "spouse");
+    if (!relSeen.has(pairKey)) {
+      relSeen.add(pairKey);
+      suggestions.push({
+        user_id: userId,
+        source_note_id: null,
+        suggestion_type: "add_relationship",
+        title: `Add relationship: ${evidence.selfDisplayName} → ${evidence.contact.name} (spouse)`,
+        description: `Multiple notes / moments reference a marriage between ${evidence.selfDisplayName} and ${evidence.contact.name}.`,
+        payload: {
+          source_type: aRef.type,
+          source_id: aRef.id,
+          target_type: bRef.type,
+          target_id: bRef.id,
+          label: "spouse",
+          inverse_label: null,
+          contact_name_a: evidence.selfDisplayName,
+          contact_name_b: evidence.contact.name,
+          source: "evidence_synthesis",
+        },
+        status: "pending_review",
+        target_entity_type: "relationship",
+        source_title: "Lexicon & timeline enrichment",
+        extracted_value: `${evidence.selfDisplayName} spouse ${evidence.contact.name}`,
+        confidence_score: 0.95,
+        is_sensitive: false,
+      });
+    }
   }
 
   if (suggestions.length === 0) return { ok: true, suggestions_created: 0, auto_applied: 0 };
