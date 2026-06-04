@@ -83,11 +83,15 @@ export function ImportMigrate() {
   const runProfileBackfill = async () => {
     setProfileBackfillLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200 } });
-      if (error) throw error;
+      const [notes, moments] = await Promise.all([
+        supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200 } }),
+        supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200 } }),
+      ]);
+      if (notes.error) throw notes.error;
+      if (moments.error) throw moments.error;
       toast({
         title: "Profile enrichment started",
-        description: data?.message ?? "Re-analyzing your recent notes. New profile facts and suggestions will appear over the next few minutes.",
+        description: "Re-analyzing your recent notes and timeline moments. New profile facts and suggestions will appear over the next few minutes.",
       });
     } catch (err: any) {
       toast({ title: "Enrichment failed", description: err?.message ?? "Unknown error", variant: "destructive" });
@@ -95,6 +99,7 @@ export function ImportMigrate() {
       setProfileBackfillLoading(false);
     }
   };
+
 
   // AI Memory import
   const [aiText, setAiText] = useState("");
