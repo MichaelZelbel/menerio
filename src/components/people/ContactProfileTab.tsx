@@ -120,6 +120,8 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
 
   return (
     <div className="space-y-3">
+      <LifeEventsStrip contactId={contactId} />
+
       <RelationshipsSection contactId={contactId} contactName={contactName} />
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -134,9 +136,10 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
         </div>
         <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
           {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
-          Enrich from notes
+          Enrich from notes & timeline
         </Button>
       </div>
+
 
       <ProfileCompleteness categories={categories} entries={entries} />
 
