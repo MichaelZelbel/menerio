@@ -58,7 +58,14 @@ const LABEL_CANONICAL: Record<string, string> = {
   flatmate: "roommate",
   // Work hierarchy (asymmetric — keep as-is)
   manager: "manager",
+  "line manager": "manager",
+  "reporting manager": "manager",
+  "reports to": "manager",
+  boss: "manager",
+  supervisor: "manager",
   report: "report",
+  "direct report": "report",
+  manages: "report",
   employee: "employee",
   employer: "employer",
   mentor: "mentor",
@@ -138,7 +145,13 @@ export function relationshipPairKey(
     const [x, y] = [refKey(a), refKey(b)].sort();
     return `${userId}|sym|${c}|${x}|${y}`;
   }
-  return `${userId}|dir|${c}|${refKey(a)}|${refKey(b)}`;
+  // Asymmetric: "a is L of b" ⇔ "b is inverseL of a". Build a direction-
+  // independent key from the unordered set { (a, L), (b, inverseL) }.
+  const inv = inverseLabel(c);
+  const aSide = `${refKey(a)}:${c}`;
+  const bSide = `${refKey(b)}:${inv}`;
+  const [x, y] = [aSide, bSide].sort();
+  return `${userId}|asym|${x}|${y}`;
 }
 
 /**

@@ -48,7 +48,14 @@ const LABEL_CANONICAL: Record<string, string> = {
   roommate: "roommate",
   flatmate: "roommate",
   manager: "manager",
+  "line manager": "manager",
+  "reporting manager": "manager",
+  "reports to": "manager",
+  boss: "manager",
+  supervisor: "manager",
   report: "report",
+  "direct report": "report",
+  manages: "report",
   employee: "employee",
   employer: "employer",
   mentor: "mentor",
@@ -57,6 +64,27 @@ const LABEL_CANONICAL: Record<string, string> = {
   student: "student",
   client: "client",
   provider: "provider",
+};
+
+const INVERSE_LABEL: Record<string, string> = {
+  mother: "child",
+  father: "child",
+  parent: "child",
+  child: "parent",
+  son: "parent",
+  daughter: "parent",
+  brother: "sibling",
+  sister: "sibling",
+  employer: "employee",
+  employee: "employer",
+  manager: "report",
+  report: "manager",
+  mentor: "mentee",
+  mentee: "mentor",
+  teacher: "student",
+  student: "teacher",
+  client: "provider",
+  provider: "client",
 };
 
 const SYMMETRIC_LABELS = new Set<string>([
@@ -71,6 +99,12 @@ export function canonicalLabel(label: string | null | undefined): string {
 
 export function isSymmetricLabel(label: string): boolean {
   return SYMMETRIC_LABELS.has(canonicalLabel(label));
+}
+
+export function inverseLabel(label: string): string {
+  const c = canonicalLabel(label);
+  if (isSymmetricLabel(c)) return c;
+  return INVERSE_LABEL[c] || c;
 }
 
 function refKey(ref: EntityRef): string {
@@ -88,5 +122,9 @@ export function relationshipPairKey(
     const [x, y] = [refKey(a), refKey(b)].sort();
     return `${userId}|sym|${c}|${x}|${y}`;
   }
-  return `${userId}|dir|${c}|${refKey(a)}|${refKey(b)}`;
+  const inv = inverseLabel(c);
+  const aSide = `${refKey(a)}:${c}`;
+  const bSide = `${refKey(b)}:${inv}`;
+  const [x, y] = [aSide, bSide].sort();
+  return `${userId}|asym|${x}|${y}`;
 }
