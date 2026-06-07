@@ -1563,7 +1563,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       const alreadyMatchedIds = new Set(matchedPeople.filter((p) => p.contact_id).map((p) => p.contact_id!));
       const noteLower = noteFullText.toLowerCase();
       const wikilinkSlugs = new Set<string>();
-      for (const m of noteFullText.matchAll(/\[\[([^\]\|]+?)(?:\|[^\]]+)?\]\]/g)) {
+      for (const m of noteFullText.matchAll(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g)) {
         const slug = (m[1] || "").trim().toLowerCase();
         if (slug) wikilinkSlugs.add(slug);
       }
