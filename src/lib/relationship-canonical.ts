@@ -101,6 +101,12 @@ export function isSymmetricLabel(label: string): boolean {
   return SYMMETRIC_LABELS.has(canonicalLabel(label));
 }
 
+export function inverseLabel(label: string): string {
+  const c = canonicalLabel(label);
+  if (isSymmetricLabel(c)) return c;
+  return INVERSE_LABEL[c] || c;
+}
+
 function refKey(ref: EntityRef): string {
   return `${ref.type}:${ref.id || "self"}`;
 }
@@ -116,5 +122,9 @@ export function relationshipPairKey(
     const [x, y] = [refKey(a), refKey(b)].sort();
     return `${userId}|sym|${c}|${x}|${y}`;
   }
-  return `${userId}|dir|${c}|${refKey(a)}|${refKey(b)}`;
+  const inv = inverseLabel(c);
+  const aSide = `${refKey(a)}:${c}`;
+  const bSide = `${refKey(b)}:${inv}`;
+  const [x, y] = [aSide, bSide].sort();
+  return `${userId}|asym|${x}|${y}`;
 }
