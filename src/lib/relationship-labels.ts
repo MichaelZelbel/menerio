@@ -89,12 +89,16 @@ export function getRelationshipDisplay(params: {
     (viewingContactId === null && sourceType === "self") ||
     (viewingContactId !== null && sourceType === "contact" && sourceId === viewingContactId);
 
+  // Display rule: always show "[role-of-the-other-person] OtherName" from the
+  // viewer's perspective. Storage convention is "source is [label] of target",
+  // so when the viewer IS the source, the other person's role is the INVERSE
+  // of the stored label. When the viewer is the target, the stored label
+  // already describes the other person's role. For symmetric labels (spouse,
+  // friend, …) inverseLabel === label so this collapses naturally.
   if (viewingIsSource) {
-    // Viewing source's profile → show target with the forward label
-    return { otherName: targetName, displayLabel: effectiveLabel };
+    const inverse = customLabel ? customLabel : getInverseLabel(label);
+    return { otherName: targetName, displayLabel: inverse };
   } else {
-    // Viewing target's profile → show source with the inverse label
-    const inverseLabel = customLabel ? customLabel : getInverseLabel(label);
-    return { otherName: sourceName, displayLabel: inverseLabel };
+    return { otherName: sourceName, displayLabel: effectiveLabel };
   }
 }
