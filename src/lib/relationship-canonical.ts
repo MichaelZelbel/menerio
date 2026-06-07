@@ -48,7 +48,14 @@ const LABEL_CANONICAL: Record<string, string> = {
   roommate: "roommate",
   flatmate: "roommate",
   manager: "manager",
+  "line manager": "manager",
+  "reporting manager": "manager",
+  "reports to": "manager",
+  boss: "manager",
+  supervisor: "manager",
   report: "report",
+  "direct report": "report",
+  manages: "report",
   employee: "employee",
   employer: "employer",
   mentor: "mentor",
@@ -57,6 +64,27 @@ const LABEL_CANONICAL: Record<string, string> = {
   student: "student",
   client: "client",
   provider: "provider",
+};
+
+const INVERSE_LABEL: Record<string, string> = {
+  mother: "child",
+  father: "child",
+  parent: "child",
+  child: "parent",
+  son: "parent",
+  daughter: "parent",
+  brother: "sibling",
+  sister: "sibling",
+  employer: "employee",
+  employee: "employer",
+  manager: "report",
+  report: "manager",
+  mentor: "mentee",
+  mentee: "mentor",
+  teacher: "student",
+  student: "teacher",
+  client: "provider",
+  provider: "client",
 };
 
 const SYMMETRIC_LABELS = new Set<string>([
