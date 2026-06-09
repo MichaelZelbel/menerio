@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
 type ChatMessage = PersistedChatMessage;
 
@@ -297,7 +298,7 @@ export function GlobalAIChatFAB() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:mb-1 [&>p:last-child]:mb-0">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={chatMarkdownPlugins} components={chatMarkdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
                       <p className="whitespace-pre-wrap">{msg.content}</p>

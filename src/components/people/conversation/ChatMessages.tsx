@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -34,7 +35,7 @@ export function ChatMessages({ messages, loading, loadingHistory }: ChatMessages
             )}
             {message.role === "assistant" ? (
               <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={chatMarkdownPlugins} components={chatMarkdownComponents}>{message.content}</ReactMarkdown>
               </div>
             ) : (
               <p className="whitespace-pre-wrap">{message.content}</p>

@@ -1,71 +1,43 @@
-## What's actually wrong (verified against your DB)
+## Problem
 
-Three real bugs are stacked on top of each other:
+The note-editor chat ("Mira") returns GitHub-flavored Markdown tables, but they render as a single garbled line. Two root causes:
 
-**1. Three rows in the DB describe the same fact about Gunther.**
-- `self → Gunther` label `report` ("I am Gunther's report") ✓ correct
-- `Gunther → self` label `manager` ("Gunther is my manager") ✓ correct — same fact, opposite direction
-- `Gunther → self` label `reporting manager` (custom, non-canonical) — same fact again
+1. `ChatMessages.tsx` uses `react-markdown` without the `remark-gfm` plugin, so pipe-tables aren't parsed at all — they fall back to inline text and collapse onto one line.
+2. Even when parsed, a multi-column table won't fit in the narrow side-panel chat bubble, so we also need a width/scroll strategy and a prompt nudge.
 
-The dedup pair-key in `relationship-canonical.ts` only deduplicates *symmetric* labels (spouse, friend…). For asymmetric pairs (`manager`↔`report`, `parent`↔`child`, `employer`↔`employee`) it treats each direction as distinct, so the inverse pair slips through. And `"reporting manager"` isn't in the canonical map at all, so it bypasses dedup entirely.
+## Fix
 
-**2. The "report Gunther" label reads as "Gunther is my report".**
-The row `self → Gunther / label: report` is technically "self is Gunther's report", but `RelationshipsSection` shows it as `[report] Gunther` when viewing self's profile, which any reader parses as "Gunther = report". The forward label is correct in storage but wrong as a *display label from self's perspective*. From self's perspective we should show the **inverse** (`manager`) so it reads `[manager] Gunther`.
+### 1. Parse tables (and other GFM) in chat
+- Add `remark-gfm` to `react-markdown` in:
+  - `src/components/people/conversation/ChatMessages.tsx` (Mira / person chat)
+  - `src/components/notes/...` note-chat message renderer (the one used by the in-editor chat — will confirm exact file during build; likely `NoteChatPanel` / `NoteChatMessages`)
+  - `src/pages/SharedNote.tsx` for consistency
+- Tables (and task lists, strikethrough, autolinks) will then render as real `<table>`.
 
-**3. Yumei → michael (partner) doesn't show on My Profile because "michael" is a separate contact, not self.**
-There's a contact row `michael` (id `ca58bf73…`) sitting next to your real user. The Yumei↔Rick "lover" you mentioned, and Yumei↔michael partner, are all stored as `contact↔contact` between Yumei and that ghost contact. Self-recognition never folded that ghost into self, so My Profile never sees the relationship. Same root cause as the Xihui issue from before — extraction created a `michael` contact instead of resolving to self.
+### 2. Make tables readable in a narrow bubble
+- Wrap rendered tables in a horizontally scrollable container and give them compact styling via a custom `components={{ table, th, td }}` map passed to `ReactMarkdown`:
+  - `<div class="overflow-x-auto -mx-1 my-2">` around `<table class="w-full text-xs border-collapse">`
+  - `th/td`: `border border-border px-2 py-1 text-left align-top`
+- This works inside the existing `prose` wrapper without fighting Tailwind Typography.
 
-## The fix
-
-### A. Direction-independent dedup for asymmetric inverse pairs
-
-In `supabase/functions/_shared/relationship-canonical.ts` (+ frontend mirror):
-
-- Extend `relationshipPairKey` so that when a label has a known `INVERSE_LABEL`, the key is built from a canonical `(min, max)` ordering of (refKey + label, refKey_other + inverse_label). Result: `self→Gunther/report` and `Gunther→self/manager` collapse to one key.
-- Add `"reporting manager"`, `"line manager"`, `"direct report"`, `"reports to"`, `"manages"` to `LABEL_CANONICAL` so custom phrasings collapse to `manager`/`report`.
-- Apply the same logic everywhere we currently call `relationshipPairKey`: the upsert hook (`useContactRelationships.ts`), the suggestion-apply path in `enrich-person-from-lexicon`, and the Review Queue apply.
-
-### B. One-shot cleanup migration
-
-Walk existing `contact_relationships`, group by the new pair key, keep the oldest row per group, delete the rest. This will collapse the three Gunther rows into one.
-
-### C. Perspective-aware display label
-
-In `src/lib/relationship-labels.ts` / `RelationshipsSection.tsx`:
-
-- When viewing entity X and the stored row is `X → Y / label: L`, currently we show `[L] Y`. Change to: show `[inverseLabel(L)] Y` when `L` has a registered inverse (asymmetric). Symmetric labels stay as-is.
-- Net effect on your profile: `[manager] Gunther Reinhard` instead of `[report] Gunther Reinhard`. And on Gunther's profile it reads `[report] Michael`.
-- Keep `custom_label` rendering verbatim only when there's no canonical mapping; once `"reporting manager"` is canonicalized to `manager`, it'll render correctly from both sides.
-
-### D. Self-recognition: auto-merge ghost "michael" contact into self
-
-The deeper bug behind Yumei's invisible relationship. Add to `enrich-person-from-lexicon` (and run once as part of the cleanup):
-
-- For every contact whose name or alias matches a self-alias (`michael`, `Michael`, `MichaelZelbel`, `me`, `I`), and where the contact has no independent evidence of being a distinct person (no email, no phone, no externally-sourced profile), automatically:
-  - Rewrite all `contact_relationships` where this contact is source/target to point at `self`.
-  - Rewrite `matched_people`, `notes.contact_id` refs, moments, etc. (reuse the existing `merge-contacts` function, but with `target = self`).
-  - Delete the ghost contact.
-- Surface the action in the Review Queue as "auto-merged ghost self-contact, click to undo" rather than silently doing it, so you can audit.
-
-After D runs, Yumei↔michael becomes Yumei↔self with label `partner`, and it appears on My Profile correctly (and bidirectionally, because `partner` is symmetric).
-
-### E. Optional: separate "Work" section vs. "Relationships"
-
-You raised that a reporting manager isn't really a "relationship". Add a lightweight grouping in `RelationshipsSection`: split rendered rows into **Personal** (spouse/partner/family/friend/lover/neighbor/roommate) and **Work** (manager/report/employer/employee/co-worker/mentor/mentee/client/provider). Same data model, just two subheadings, with Work collapsed by default. No new tables.
-
-## Why this will actually hold up
-
-- The dedup fix removes the *class* of bug, not just the Gunther instance — every future asymmetric pair (parent/child, employer/employee, mentor/mentee, teacher/student) is protected.
-- The display fix means the AI's storage stays semantically correct (`source is L of target`) while the UI always reads from the viewer's perspective.
-- The ghost-self merge closes the loop that's been making partner/lover relationships disappear from My Profile for months. It's the same root cause we hit on Xihui.
-
-## Out of scope
-
-- No changes to the LLM prompt for this round — the AI is already producing reasonable rows; the failures are in dedup, display, and self-resolution.
-- No new tables.
+### 3. Nudge the bot away from wide tables
+- Update the note-chat system prompt (in the corresponding edge function, likely `supabase/functions/note-chat/index.ts`) with a short instruction:
+  > "You are rendered in a narrow side-panel chat (~320px). Prefer concise bullet lists over Markdown tables. Only use a table when it has ≤3 columns and short cells; otherwise use a list."
+- Keep tables allowed (since we now render them), but discourage the 5-column case in the example.
 
 ## Technical notes
 
-- Files touched: `supabase/functions/_shared/relationship-canonical.ts`, `src/lib/relationship-canonical.ts`, `src/lib/relationship-labels.ts`, `src/components/people/RelationshipsSection.tsx`, `src/hooks/useContactRelationships.ts`, `supabase/functions/enrich-person-from-lexicon/index.ts`, `supabase/functions/merge-contacts/index.ts` (allow `target=self`), one cleanup migration.
-- The cleanup migration is idempotent; safe to re-run.
-- Ghost-self merge logs every rewrite to the Review Queue with full undo payload.
+- `remark-gfm` is the standard companion to `react-markdown` for tables; it's tree-shakeable and already common in this codebase pattern.
+- No DB / schema changes. No edge-function logic changes besides the system-prompt string.
+- The existing `prose prose-sm` classes already style tables reasonably; the custom component overrides above are just to guarantee horizontal scroll on overflow inside the bubble.
+
+## Out of scope
+- Rewriting the chat UI with AI Elements.
+- Persisting/streaming changes.
+
+## Files to touch
+- `src/components/people/conversation/ChatMessages.tsx`
+- `src/components/notes/<note-chat message renderer>` (exact path confirmed at build time)
+- `src/pages/SharedNote.tsx`
+- `supabase/functions/note-chat/index.ts` (system prompt string only)
+- `package.json` — add `remark-gfm`
