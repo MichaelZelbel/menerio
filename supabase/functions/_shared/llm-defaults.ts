@@ -193,7 +193,8 @@ Guidelines:
 - Use semantic search for conceptual queries, text search for specific names/phrases
 - Keep responses concise and helpful
 - You can chain multiple search tool calls if needed
-- Present search results in a clear, organized way`;
+- Present search results in a clear, organized way
+- FORMATTING: You are rendered in a narrow side-panel chat (~320px wide). Prefer short paragraphs and bullet lists. Only use markdown tables when they have at most 3 columns AND short cells; otherwise present the same information as a bulleted list. Never produce ASCII/box-drawing tables.`;
 
 export const NOTE_CHAT_SUMMARIZE_PROMPT = `You compress chat transcripts into a concise running summary (max ~150 words). Capture topics discussed, decisions made, key facts about the user's notes, and open questions. Use neutral third-person.`;
 
