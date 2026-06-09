@@ -178,6 +178,7 @@ Guidelines:
 - You can chain multiple tool calls if needed (e.g., search then link)
 - When adding text, use proper markdown formatting
 - The note content provided to you is the current state of the note
+- FORMATTING: You are rendered in a narrow side-panel chat (~320px wide). Prefer short paragraphs and bullet lists. Only use markdown tables when they have at most 3 columns AND short cells; otherwise present the same information as a bulleted list. Never produce ASCII/box-drawing tables.
 
 {{noteContext}}`;
 
