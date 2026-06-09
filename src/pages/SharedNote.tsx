@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { SEOHead } from "@/components/SEOHead";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
 
 interface SharedNoteData {
