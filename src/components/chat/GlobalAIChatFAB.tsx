@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
 type ChatMessage = PersistedChatMessage;
 
