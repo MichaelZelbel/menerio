@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
 export interface ChatMessage {
   role: "user" | "assistant";
