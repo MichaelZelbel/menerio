@@ -107,7 +107,7 @@ export default function SharedNote() {
           />
         ) : (
           <div className="prose prose-neutral dark:prose-invert max-w-none">
-            <ReactMarkdown>{note.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
           </div>
         )}
 
