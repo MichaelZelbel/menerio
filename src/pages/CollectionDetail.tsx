@@ -2147,7 +2147,13 @@ export default function CollectionDetail() {
         .select("*")
         .eq("user_id", user.id)
         .eq("collection_id", current.id)
-        .limit(query.trim() ? 200 : PAGE_SIZE + 1);
+        .limit(
+          clientSideMode
+            ? FILTER_FETCH_LIMIT
+            : query.trim()
+              ? 200
+              : PAGE_SIZE + 1,
+        );
       const cursor = cursorStack.at(-1);
       if (sort === "updated")
         request = request
@@ -2161,7 +2167,7 @@ export default function CollectionDetail() {
         request = request
           .order("title", { ascending: true, nullsFirst: false })
           .order("id", { ascending: true });
-      if (cursor && sort === "updated" && !query.trim())
+      if (!clientSideMode && cursor && sort === "updated" && !query.trim())
         request = request.or(
           `updated_at.lt.${cursor.updated_at},and(updated_at.eq.${cursor.updated_at},id.lt.${cursor.id})`,
         );
@@ -2171,11 +2177,12 @@ export default function CollectionDetail() {
         toast.error("Could not load items", {
           description: itemsError.message,
         });
-      const searchableFields = parseSchema(current.field_schema).filter(
-        (field) => ["text", "longtext"].includes(field.type),
+      const schema = parseSchema(current.field_schema);
+      const searchableFields = schema.filter((field) =>
+        ["text", "longtext"].includes(field.type),
       );
       const needle = query.trim().toLowerCase();
-      const filtered = needle
+      let filtered: CollectionItem[] = needle
         ? (rows ?? []).filter((item) =>
             [
               item.title,
@@ -2187,23 +2194,78 @@ export default function CollectionDetail() {
             ),
           )
         : (rows ?? []);
-      const page = filtered.slice(0, PAGE_SIZE);
-      setItems(page);
-      setNextCursor(
-        !needle && sort === "updated" && filtered.length > PAGE_SIZE
-          ? {
-              updated_at: page.at(-1)?.updated_at ?? "",
-              id: page.at(-1)?.id ?? "",
+
+      if (clientSideMode) {
+        // Apply column filters
+        filtered = filtered.filter((item) => {
+          return Object.entries(columnFilters).every(([key, filter]) => {
+            if (!isFilterActive(filter)) return true;
+            let fieldType: string;
+            let value: unknown;
+            if (key === TITLE_KEY) {
+              fieldType = "text";
+              value = item.title ?? "";
+            } else if (key === UPDATED_KEY) {
+              fieldType = "updated";
+              value = item.updated_at;
+            } else {
+              const f = schema.find((s) => s.key === key);
+              if (!f) return true;
+              fieldType = f.type;
+              value = asData(item.data)[key];
             }
-          : null,
-      );
+            return matchesFilter(fieldType, value, filter);
+          });
+        });
+        // Apply column sort
+        if (columnSort) {
+          const { key, dir } = columnSort;
+          let fieldType: string;
+          if (key === TITLE_KEY) fieldType = "text";
+          else if (key === UPDATED_KEY) fieldType = "updated";
+          else
+            fieldType = schema.find((s) => s.key === key)?.type ?? "text";
+          const sign = dir === "asc" ? 1 : -1;
+          filtered = [...filtered].sort((a, b) => {
+            let av: unknown;
+            let bv: unknown;
+            if (key === TITLE_KEY) {
+              av = a.title ?? "";
+              bv = b.title ?? "";
+            } else if (key === UPDATED_KEY) {
+              av = a.updated_at;
+              bv = b.updated_at;
+            } else {
+              av = asData(a.data)[key];
+              bv = asData(b.data)[key];
+            }
+            return sign * compareValues(av, bv, fieldType);
+          });
+        }
+        setItems(filtered);
+        setNextCursor(null);
+        setTruncatedByLimit((rows ?? []).length >= FILTER_FETCH_LIMIT);
+      } else {
+        const page = filtered.slice(0, PAGE_SIZE);
+        setItems(page);
+        setNextCursor(
+          !needle && sort === "updated" && filtered.length > PAGE_SIZE
+            ? {
+                updated_at: page.at(-1)?.updated_at ?? "",
+                id: page.at(-1)?.id ?? "",
+              }
+            : null,
+        );
+        setTruncatedByLimit(false);
+      }
       setIsLoading(false);
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, cursorStack]);
+  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters]);
+
 
   useEffect(() => {
     if (!user || items.length === 0) {
