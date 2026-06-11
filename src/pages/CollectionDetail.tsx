@@ -1983,6 +1983,46 @@ function EditCollectionDialog({
   );
 }
 
+function SortableHeader({
+  label,
+  sortKey,
+  align,
+  sort,
+  onToggle,
+}: {
+  label: string;
+  sortKey: string;
+  align?: "left" | "right";
+  sort: ColumnSort;
+  onToggle: (key: string) => void;
+}) {
+  const active = sort?.key === sortKey;
+  const Icon = active
+    ? sort?.dir === "asc"
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(sortKey)}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-sm px-1 -mx-1 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors",
+        align === "right" && "justify-end",
+        active && "text-foreground",
+      )}
+    >
+      <span>{label}</span>
+      <Icon
+        className={cn(
+          "h-3 w-3 shrink-0",
+          active ? "opacity-100" : "opacity-40",
+        )}
+      />
+    </button>
+  );
+}
+
 export default function CollectionDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { user } = useAuth();
