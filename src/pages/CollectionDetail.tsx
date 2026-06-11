@@ -156,6 +156,150 @@ const emptyLinkValidity = (): LinkValidity => ({
 });
 
 const PAGE_SIZE = 50;
+const FILTER_FETCH_LIMIT = 500;
+const TITLE_KEY = "__title__";
+const UPDATED_KEY = "__updated__";
+
+type ColumnSort = { key: string; dir: "asc" | "desc" } | null;
+type ColumnFilter =
+  | { type: "text"; value: string }
+  | { type: "number"; min: number | null; max: number | null }
+  | { type: "date"; from: string | null; to: string | null }
+  | { type: "boolean"; value: true | false | null }
+  | { type: "set"; values: string[] };
+type ColumnFilters = Record<string, ColumnFilter>;
+
+function isFilterActive(filter: ColumnFilter | undefined): boolean {
+  if (!filter) return false;
+  if (filter.type === "text") return filter.value.trim() !== "";
+  if (filter.type === "number")
+    return filter.min !== null || filter.max !== null;
+  if (filter.type === "date") return !!filter.from || !!filter.to;
+  if (filter.type === "boolean") return filter.value !== null;
+  if (filter.type === "set") return filter.values.length > 0;
+  return false;
+}
+
+function countActiveFilters(filters: ColumnFilters): number {
+  return Object.values(filters).filter(isFilterActive).length;
+}
+
+function getCellValue(
+  field: SchemaField | { key: string; type: "title" | "updated" | "created" },
+  item: CollectionItem,
+): unknown {
+  if (field.type === "title") return item.title ?? "";
+  if (field.type === "updated") return item.updated_at;
+  if (field.type === "created") return item.created_at;
+  return asData(item.data)[field.key];
+}
+
+function numericValue(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function dateMs(value: unknown): number | null {
+  const d = parseDate(value);
+  return d ? d.getTime() : null;
+}
+
+function stringifyForCompare(field: SchemaField | { type: string }, value: unknown): string {
+  if (value == null) return "";
+  if (isLinkValue(value)) return value.label.toLowerCase();
+  if (Array.isArray(value)) return value.map(String).join(", ").toLowerCase();
+  return String(value).toLowerCase();
+}
+
+function isEmptyCell(value: unknown): boolean {
+  if (value == null || value === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+}
+
+function compareValues(
+  a: unknown,
+  b: unknown,
+  fieldType: string,
+): number {
+  const aEmpty = isEmptyCell(a);
+  const bEmpty = isEmptyCell(b);
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1; // empties last
+  if (bEmpty) return -1;
+  if (["number", "currency"].includes(fieldType)) {
+    const an = numericValue(a) ?? 0;
+    const bn = numericValue(b) ?? 0;
+    return an - bn;
+  }
+  if (["date", "datetime", "updated", "created"].includes(fieldType)) {
+    const am = dateMs(a) ?? 0;
+    const bm = dateMs(b) ?? 0;
+    return am - bm;
+  }
+  if (fieldType === "boolean") {
+    return (a ? 1 : 0) - (b ? 1 : 0);
+  }
+  return stringifyForCompare({ type: fieldType }, a).localeCompare(
+    stringifyForCompare({ type: fieldType }, b),
+  );
+}
+
+function matchesFilter(
+  fieldType: string,
+  value: unknown,
+  filter: ColumnFilter,
+): boolean {
+  if (!isFilterActive(filter)) return true;
+  if (filter.type === "text") {
+    const needle = filter.value.trim().toLowerCase();
+    return stringifyForCompare({ type: fieldType }, value).includes(needle);
+  }
+  if (filter.type === "number") {
+    const n = numericValue(value);
+    if (n === null) return false;
+    if (filter.min !== null && n < filter.min) return false;
+    if (filter.max !== null && n > filter.max) return false;
+    return true;
+  }
+  if (filter.type === "date") {
+    const ms = dateMs(value);
+    if (ms === null) return false;
+    if (filter.from) {
+      const fromMs = dateMs(filter.from);
+      if (fromMs !== null && ms < fromMs) return false;
+    }
+    if (filter.to) {
+      const toMs = dateMs(filter.to);
+      // Include the entire "to" day
+      if (toMs !== null && ms > toMs + 24 * 60 * 60 * 1000 - 1) return false;
+    }
+    return true;
+  }
+  if (filter.type === "boolean") {
+    return Boolean(value) === filter.value;
+  }
+  if (filter.type === "set") {
+    if (Array.isArray(value))
+      return value.some((v) => filter.values.includes(String(v)));
+    return filter.values.includes(String(value ?? ""));
+  }
+  return true;
+}
+
+function defaultFilterFor(fieldType: string): ColumnFilter {
+  if (["number", "currency"].includes(fieldType))
+    return { type: "number", min: null, max: null };
+  if (["date", "datetime", "updated", "created"].includes(fieldType))
+    return { type: "date", from: null, to: null };
+  if (fieldType === "boolean") return { type: "boolean", value: null };
+  if (["select", "multiselect"].includes(fieldType))
+    return { type: "set", values: [] };
+  return { type: "text", value: "" };
+}
+
+
 const emojiOptions = [
   "📚",
   "🏠",
