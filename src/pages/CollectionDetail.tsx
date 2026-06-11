@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format, formatDistanceToNow, isValid, parseISO } from "date-fns";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CalendarIcon,
   Check,
   ChevronLeft,
@@ -10,6 +13,7 @@ import {
   DollarSign,
   ExternalLink,
   FileText,
+  Filter,
   LayoutGrid,
   Link as LinkIcon,
   Mail,
@@ -152,6 +156,150 @@ const emptyLinkValidity = (): LinkValidity => ({
 });
 
 const PAGE_SIZE = 50;
+const FILTER_FETCH_LIMIT = 500;
+const TITLE_KEY = "__title__";
+const UPDATED_KEY = "__updated__";
+
+type ColumnSort = { key: string; dir: "asc" | "desc" } | null;
+type ColumnFilter =
+  | { type: "text"; value: string }
+  | { type: "number"; min: number | null; max: number | null }
+  | { type: "date"; from: string | null; to: string | null }
+  | { type: "boolean"; value: true | false | null }
+  | { type: "set"; values: string[] };
+type ColumnFilters = Record<string, ColumnFilter>;
+
+function isFilterActive(filter: ColumnFilter | undefined): boolean {
+  if (!filter) return false;
+  if (filter.type === "text") return filter.value.trim() !== "";
+  if (filter.type === "number")
+    return filter.min !== null || filter.max !== null;
+  if (filter.type === "date") return !!filter.from || !!filter.to;
+  if (filter.type === "boolean") return filter.value !== null;
+  if (filter.type === "set") return filter.values.length > 0;
+  return false;
+}
+
+function countActiveFilters(filters: ColumnFilters): number {
+  return Object.values(filters).filter(isFilterActive).length;
+}
+
+function getCellValue(
+  field: SchemaField | { key: string; type: "title" | "updated" | "created" },
+  item: CollectionItem,
+): unknown {
+  if (field.type === "title") return item.title ?? "";
+  if (field.type === "updated") return item.updated_at;
+  if (field.type === "created") return item.created_at;
+  return asData(item.data)[field.key];
+}
+
+function numericValue(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function dateMs(value: unknown): number | null {
+  const d = parseDate(value);
+  return d ? d.getTime() : null;
+}
+
+function stringifyForCompare(field: SchemaField | { type: string }, value: unknown): string {
+  if (value == null) return "";
+  if (isLinkValue(value)) return value.label.toLowerCase();
+  if (Array.isArray(value)) return value.map(String).join(", ").toLowerCase();
+  return String(value).toLowerCase();
+}
+
+function isEmptyCell(value: unknown): boolean {
+  if (value == null || value === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+}
+
+function compareValues(
+  a: unknown,
+  b: unknown,
+  fieldType: string,
+): number {
+  const aEmpty = isEmptyCell(a);
+  const bEmpty = isEmptyCell(b);
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1; // empties last
+  if (bEmpty) return -1;
+  if (["number", "currency"].includes(fieldType)) {
+    const an = numericValue(a) ?? 0;
+    const bn = numericValue(b) ?? 0;
+    return an - bn;
+  }
+  if (["date", "datetime", "updated", "created"].includes(fieldType)) {
+    const am = dateMs(a) ?? 0;
+    const bm = dateMs(b) ?? 0;
+    return am - bm;
+  }
+  if (fieldType === "boolean") {
+    return (a ? 1 : 0) - (b ? 1 : 0);
+  }
+  return stringifyForCompare({ type: fieldType }, a).localeCompare(
+    stringifyForCompare({ type: fieldType }, b),
+  );
+}
+
+function matchesFilter(
+  fieldType: string,
+  value: unknown,
+  filter: ColumnFilter,
+): boolean {
+  if (!isFilterActive(filter)) return true;
+  if (filter.type === "text") {
+    const needle = filter.value.trim().toLowerCase();
+    return stringifyForCompare({ type: fieldType }, value).includes(needle);
+  }
+  if (filter.type === "number") {
+    const n = numericValue(value);
+    if (n === null) return false;
+    if (filter.min !== null && n < filter.min) return false;
+    if (filter.max !== null && n > filter.max) return false;
+    return true;
+  }
+  if (filter.type === "date") {
+    const ms = dateMs(value);
+    if (ms === null) return false;
+    if (filter.from) {
+      const fromMs = dateMs(filter.from);
+      if (fromMs !== null && ms < fromMs) return false;
+    }
+    if (filter.to) {
+      const toMs = dateMs(filter.to);
+      // Include the entire "to" day
+      if (toMs !== null && ms > toMs + 24 * 60 * 60 * 1000 - 1) return false;
+    }
+    return true;
+  }
+  if (filter.type === "boolean") {
+    return Boolean(value) === filter.value;
+  }
+  if (filter.type === "set") {
+    if (Array.isArray(value))
+      return value.some((v) => filter.values.includes(String(v)));
+    return filter.values.includes(String(value ?? ""));
+  }
+  return true;
+}
+
+function defaultFilterFor(fieldType: string): ColumnFilter {
+  if (["number", "currency"].includes(fieldType))
+    return { type: "number", min: null, max: null };
+  if (["date", "datetime", "updated", "created"].includes(fieldType))
+    return { type: "date", from: null, to: null };
+  if (fieldType === "boolean") return { type: "boolean", value: null };
+  if (["select", "multiselect"].includes(fieldType))
+    return { type: "set", values: [] };
+  return { type: "text", value: "" };
+}
+
+
 const emojiOptions = [
   "📚",
   "🏠",
@@ -1835,6 +1983,185 @@ function EditCollectionDialog({
   );
 }
 
+function FilterRow({
+  label,
+  fieldType,
+  options,
+  filter,
+  onChange,
+}: {
+  label: string;
+  fieldType: string;
+  options?: string[];
+  filter: ColumnFilter;
+  onChange: (filter: ColumnFilter) => void;
+}) {
+  const isNumeric = ["number", "currency"].includes(fieldType);
+  const isDate = ["date", "datetime", "updated", "created"].includes(fieldType);
+  const isBoolean = fieldType === "boolean";
+  const isSet = ["select", "multiselect"].includes(fieldType) && (options?.length ?? 0) > 0;
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {isNumeric && filter.type === "number" && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            placeholder="Min"
+            value={filter.min ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "number",
+                min: e.target.value === "" ? null : Number(e.target.value),
+                max: filter.max,
+              })
+            }
+            className="h-8"
+          />
+          <Input
+            type="number"
+            placeholder="Max"
+            value={filter.max ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "number",
+                min: filter.min,
+                max: e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
+            className="h-8"
+          />
+        </div>
+      )}
+      {isDate && filter.type === "date" && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={filter.from ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "date",
+                from: e.target.value || null,
+                to: filter.to,
+              })
+            }
+            className="h-8"
+          />
+          <Input
+            type="date"
+            value={filter.to ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "date",
+                from: filter.from,
+                to: e.target.value || null,
+              })
+            }
+            className="h-8"
+          />
+        </div>
+      )}
+      {isBoolean && filter.type === "boolean" && (
+        <Select
+          value={filter.value === null ? "any" : filter.value ? "yes" : "no"}
+          onValueChange={(v) =>
+            onChange({
+              type: "boolean",
+              value: v === "any" ? null : v === "yes",
+            })
+          }
+        >
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="yes">Yes</SelectItem>
+            <SelectItem value="no">No</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {isSet && filter.type === "set" && (
+        <div className="flex flex-wrap gap-1.5">
+          {options!.map((option) => {
+            const checked = filter.values.includes(option);
+            return (
+              <button
+                type="button"
+                key={option}
+                onClick={() =>
+                  onChange({
+                    type: "set",
+                    values: checked
+                      ? filter.values.filter((v) => v !== option)
+                      : [...filter.values, option],
+                  })
+                }
+                className={cn(
+                  "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                  checked
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {!isNumeric && !isDate && !isBoolean && !isSet && filter.type === "text" && (
+        <Input
+          placeholder="Contains…"
+          value={filter.value}
+          onChange={(e) => onChange({ type: "text", value: e.target.value })}
+          className="h-8"
+        />
+      )}
+    </div>
+  );
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  align,
+  sort,
+  onToggle,
+}: {
+  label: string;
+  sortKey: string;
+  align?: "left" | "right";
+  sort: ColumnSort;
+  onToggle: (key: string) => void;
+}) {
+  const active = sort?.key === sortKey;
+  const Icon = active
+    ? sort?.dir === "asc"
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(sortKey)}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-sm px-1 -mx-1 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors",
+        align === "right" && "justify-end",
+        active && "text-foreground",
+      )}
+    >
+      <span>{label}</span>
+      <Icon
+        className={cn(
+          "h-3 w-3 shrink-0",
+          active ? "opacity-100" : "opacity-40",
+        )}
+      />
+    </button>
+  );
+}
+
 export default function CollectionDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { user } = useAuth();
@@ -1845,6 +2172,10 @@ export default function CollectionDetail() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
   const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
+  const [columnSort, setColumnSort] = useState<ColumnSort>(null);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
@@ -1862,16 +2193,67 @@ export default function CollectionDetail() {
   const visibleFields = nonPrimaryFields.filter((field) =>
     visibleKeys.includes(field.key),
   );
+  const fieldByKey = useMemo(() => {
+    const map = new Map<string, SchemaField>();
+    fields.forEach((f) => map.set(f.key, f));
+    return map;
+  }, [fields]);
+  const activeFilterCount = countActiveFilters(columnFilters);
+  const clientSideMode = columnSort !== null || activeFilterCount > 0;
 
   useEffect(() => {
     if (visibleKeys.length || nonPrimaryFields.length === 0) return;
     setVisibleKeys(nonPrimaryFields.slice(0, 5).map((field) => field.key));
   }, [nonPrimaryFields, visibleKeys.length]);
 
+  // Restore persisted view per collection
+  useEffect(() => {
+    if (!slug) return;
+    try {
+      const raw = localStorage.getItem(`collection:${slug}:view`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.sort) setSort(parsed.sort);
+      if (parsed.columnSort !== undefined) setColumnSort(parsed.columnSort);
+      if (parsed.columnFilters) setColumnFilters(parsed.columnFilters);
+      if (Array.isArray(parsed.visibleKeys)) setVisibleKeys(parsed.visibleKeys);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  useEffect(() => {
+    if (!slug) return;
+    try {
+      localStorage.setItem(
+        `collection:${slug}:view`,
+        JSON.stringify({ sort, columnSort, columnFilters, visibleKeys }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [slug, sort, columnSort, columnFilters, visibleKeys]);
+
   useEffect(() => {
     setCursorStack([]);
     setNextCursor(null);
-  }, [query, sort, slug]);
+  }, [query, sort, slug, clientSideMode]);
+
+  const toggleColumnSort = (key: string) => {
+    setColumnSort((current) => {
+      if (!current || current.key !== key) return { key, dir: "asc" };
+      if (current.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const setColumnFilter = (key: string, filter: ColumnFilter) => {
+    setColumnFilters((current) => ({ ...current, [key]: filter }));
+  };
+
+  const clearColumnFilters = () => setColumnFilters({});
+
 
   useEffect(() => {
     if (!user || !slug) return;
@@ -1904,7 +2286,13 @@ export default function CollectionDetail() {
         .select("*")
         .eq("user_id", user.id)
         .eq("collection_id", current.id)
-        .limit(query.trim() ? 200 : PAGE_SIZE + 1);
+        .limit(
+          clientSideMode
+            ? FILTER_FETCH_LIMIT
+            : query.trim()
+              ? 200
+              : PAGE_SIZE + 1,
+        );
       const cursor = cursorStack.at(-1);
       if (sort === "updated")
         request = request
@@ -1918,7 +2306,7 @@ export default function CollectionDetail() {
         request = request
           .order("title", { ascending: true, nullsFirst: false })
           .order("id", { ascending: true });
-      if (cursor && sort === "updated" && !query.trim())
+      if (!clientSideMode && cursor && sort === "updated" && !query.trim())
         request = request.or(
           `updated_at.lt.${cursor.updated_at},and(updated_at.eq.${cursor.updated_at},id.lt.${cursor.id})`,
         );
@@ -1928,11 +2316,12 @@ export default function CollectionDetail() {
         toast.error("Could not load items", {
           description: itemsError.message,
         });
-      const searchableFields = parseSchema(current.field_schema).filter(
-        (field) => ["text", "longtext"].includes(field.type),
+      const schema = parseSchema(current.field_schema);
+      const searchableFields = schema.filter((field) =>
+        ["text", "longtext"].includes(field.type),
       );
       const needle = query.trim().toLowerCase();
-      const filtered = needle
+      let filtered: CollectionItem[] = needle
         ? (rows ?? []).filter((item) =>
             [
               item.title,
@@ -1944,23 +2333,78 @@ export default function CollectionDetail() {
             ),
           )
         : (rows ?? []);
-      const page = filtered.slice(0, PAGE_SIZE);
-      setItems(page);
-      setNextCursor(
-        !needle && sort === "updated" && filtered.length > PAGE_SIZE
-          ? {
-              updated_at: page.at(-1)?.updated_at ?? "",
-              id: page.at(-1)?.id ?? "",
+
+      if (clientSideMode) {
+        // Apply column filters
+        filtered = filtered.filter((item) => {
+          return Object.entries(columnFilters).every(([key, filter]) => {
+            if (!isFilterActive(filter)) return true;
+            let fieldType: string;
+            let value: unknown;
+            if (key === TITLE_KEY) {
+              fieldType = "text";
+              value = item.title ?? "";
+            } else if (key === UPDATED_KEY) {
+              fieldType = "updated";
+              value = item.updated_at;
+            } else {
+              const f = schema.find((s) => s.key === key);
+              if (!f) return true;
+              fieldType = f.type;
+              value = asData(item.data)[key];
             }
-          : null,
-      );
+            return matchesFilter(fieldType, value, filter);
+          });
+        });
+        // Apply column sort
+        if (columnSort) {
+          const { key, dir } = columnSort;
+          let fieldType: string;
+          if (key === TITLE_KEY) fieldType = "text";
+          else if (key === UPDATED_KEY) fieldType = "updated";
+          else
+            fieldType = schema.find((s) => s.key === key)?.type ?? "text";
+          const sign = dir === "asc" ? 1 : -1;
+          filtered = [...filtered].sort((a, b) => {
+            let av: unknown;
+            let bv: unknown;
+            if (key === TITLE_KEY) {
+              av = a.title ?? "";
+              bv = b.title ?? "";
+            } else if (key === UPDATED_KEY) {
+              av = a.updated_at;
+              bv = b.updated_at;
+            } else {
+              av = asData(a.data)[key];
+              bv = asData(b.data)[key];
+            }
+            return sign * compareValues(av, bv, fieldType);
+          });
+        }
+        setItems(filtered);
+        setNextCursor(null);
+        setTruncatedByLimit((rows ?? []).length >= FILTER_FETCH_LIMIT);
+      } else {
+        const page = filtered.slice(0, PAGE_SIZE);
+        setItems(page);
+        setNextCursor(
+          !needle && sort === "updated" && filtered.length > PAGE_SIZE
+            ? {
+                updated_at: page.at(-1)?.updated_at ?? "",
+                id: page.at(-1)?.id ?? "",
+              }
+            : null,
+        );
+        setTruncatedByLimit(false);
+      }
       setIsLoading(false);
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, cursorStack]);
+  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters]);
+
 
   useEffect(() => {
     if (!user || items.length === 0) {
@@ -2237,10 +2681,14 @@ export default function CollectionDetail() {
                 className="pl-9"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Select
-                value={sort}
-                onValueChange={(value) => setSort(value as SortKey)}
+                value={columnSort ? "custom" : sort}
+                onValueChange={(value) => {
+                  if (value === "custom") return;
+                  setColumnSort(null);
+                  setSort(value as SortKey);
+                }}
               >
                 <SelectTrigger className="w-44">
                   <SelectValue />
@@ -2249,11 +2697,72 @@ export default function CollectionDetail() {
                   <SelectItem value="updated">Recently updated</SelectItem>
                   <SelectItem value="created">Recently added</SelectItem>
                   <SelectItem value="alpha">Alphabetical</SelectItem>
-                  <SelectItem value="custom" disabled>
-                    Custom
-                  </SelectItem>
+                  {columnSort && (
+                    <SelectItem value="custom">
+                      Custom: {columnSort.key === TITLE_KEY
+                        ? "Title"
+                        : columnSort.key === UPDATED_KEY
+                          ? "Updated"
+                          : fieldByKey.get(columnSort.key)?.label ?? columnSort.key}
+                      {" "}({columnSort.dir})
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Filter className="h-4 w-4" />
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <Badge variant="secondary" className="h-5 px-1.5">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[22rem] max-h-[70vh] overflow-y-auto">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Filters</span>
+                      {activeFilterCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearColumnFilters}
+                          className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+                        >
+                          Clear all
+                        </button>
+                      )}
+                    </div>
+                    {/* Title filter */}
+                    <FilterRow
+                      label="Title"
+                      fieldType="text"
+                      filter={columnFilters[TITLE_KEY] ?? defaultFilterFor("text")}
+                      onChange={(f) => setColumnFilter(TITLE_KEY, f)}
+                    />
+                    {nonPrimaryFields.map((field) => (
+                      <FilterRow
+                        key={field.key}
+                        label={field.label}
+                        fieldType={field.type}
+                        options={field.options}
+                        filter={
+                          columnFilters[field.key] ?? defaultFilterFor(field.type)
+                        }
+                        onChange={(f) => setColumnFilter(field.key, f)}
+                      />
+                    ))}
+                    <FilterRow
+                      label="Updated"
+                      fieldType="date"
+                      filter={columnFilters[UPDATED_KEY] ?? defaultFilterFor("date")}
+                      onChange={(f) => setColumnFilter(UPDATED_KEY, f)}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
               {nonPrimaryFields.length > 5 && (
                 <Popover>
                   <PopoverTrigger asChild>
@@ -2285,11 +2794,23 @@ export default function CollectionDetail() {
               )}
             </div>
           </div>
+          {clientSideMode && truncatedByLimit && (
+            <p className="text-xs text-muted-foreground">
+              Showing first {FILTER_FETCH_LIMIT} items matching your filters / sort.
+            </p>
+          )}
           <div className="overflow-hidden rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Title</TableHead>
+                  <TableHead>
+                    <SortableHeader
+                      label="Title"
+                      sortKey={TITLE_KEY}
+                      sort={columnSort}
+                      onToggle={toggleColumnSort}
+                    />
+                  </TableHead>
                   {visibleFields.map((field) => (
                     <TableHead
                       key={field.key}
@@ -2298,10 +2819,27 @@ export default function CollectionDetail() {
                           "text-right",
                       )}
                     >
-                      {field.label}
+                      <SortableHeader
+                        label={field.label}
+                        sortKey={field.key}
+                        align={
+                          ["number", "currency"].includes(field.type)
+                            ? "right"
+                            : "left"
+                        }
+                        sort={columnSort}
+                        onToggle={toggleColumnSort}
+                      />
                     </TableHead>
                   ))}
-                  <TableHead>Updated</TableHead>
+                  <TableHead>
+                    <SortableHeader
+                      label="Updated"
+                      sortKey={UPDATED_KEY}
+                      sort={columnSort}
+                      onToggle={toggleColumnSort}
+                    />
+                  </TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
