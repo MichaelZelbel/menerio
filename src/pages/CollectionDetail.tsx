@@ -1983,6 +1983,145 @@ function EditCollectionDialog({
   );
 }
 
+function FilterRow({
+  label,
+  fieldType,
+  options,
+  filter,
+  onChange,
+}: {
+  label: string;
+  fieldType: string;
+  options?: string[];
+  filter: ColumnFilter;
+  onChange: (filter: ColumnFilter) => void;
+}) {
+  const isNumeric = ["number", "currency"].includes(fieldType);
+  const isDate = ["date", "datetime", "updated", "created"].includes(fieldType);
+  const isBoolean = fieldType === "boolean";
+  const isSet = ["select", "multiselect"].includes(fieldType) && (options?.length ?? 0) > 0;
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {isNumeric && filter.type === "number" && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            placeholder="Min"
+            value={filter.min ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "number",
+                min: e.target.value === "" ? null : Number(e.target.value),
+                max: filter.max,
+              })
+            }
+            className="h-8"
+          />
+          <Input
+            type="number"
+            placeholder="Max"
+            value={filter.max ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "number",
+                min: filter.min,
+                max: e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
+            className="h-8"
+          />
+        </div>
+      )}
+      {isDate && filter.type === "date" && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={filter.from ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "date",
+                from: e.target.value || null,
+                to: filter.to,
+              })
+            }
+            className="h-8"
+          />
+          <Input
+            type="date"
+            value={filter.to ?? ""}
+            onChange={(e) =>
+              onChange({
+                type: "date",
+                from: filter.from,
+                to: e.target.value || null,
+              })
+            }
+            className="h-8"
+          />
+        </div>
+      )}
+      {isBoolean && filter.type === "boolean" && (
+        <Select
+          value={filter.value === null ? "any" : filter.value ? "yes" : "no"}
+          onValueChange={(v) =>
+            onChange({
+              type: "boolean",
+              value: v === "any" ? null : v === "yes",
+            })
+          }
+        >
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="yes">Yes</SelectItem>
+            <SelectItem value="no">No</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {isSet && filter.type === "set" && (
+        <div className="flex flex-wrap gap-1.5">
+          {options!.map((option) => {
+            const checked = filter.values.includes(option);
+            return (
+              <button
+                type="button"
+                key={option}
+                onClick={() =>
+                  onChange({
+                    type: "set",
+                    values: checked
+                      ? filter.values.filter((v) => v !== option)
+                      : [...filter.values, option],
+                  })
+                }
+                className={cn(
+                  "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                  checked
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {!isNumeric && !isDate && !isBoolean && !isSet && filter.type === "text" && (
+        <Input
+          placeholder="Contains…"
+          value={filter.value}
+          onChange={(e) => onChange({ type: "text", value: e.target.value })}
+          className="h-8"
+        />
+      )}
+    </div>
+  );
+}
+
 function SortableHeader({
   label,
   sortKey,
