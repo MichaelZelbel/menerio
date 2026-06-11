@@ -2033,6 +2033,10 @@ export default function CollectionDetail() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
   const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
+  const [columnSort, setColumnSort] = useState<ColumnSort>(null);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
@@ -2050,16 +2054,67 @@ export default function CollectionDetail() {
   const visibleFields = nonPrimaryFields.filter((field) =>
     visibleKeys.includes(field.key),
   );
+  const fieldByKey = useMemo(() => {
+    const map = new Map<string, SchemaField>();
+    fields.forEach((f) => map.set(f.key, f));
+    return map;
+  }, [fields]);
+  const activeFilterCount = countActiveFilters(columnFilters);
+  const clientSideMode = columnSort !== null || activeFilterCount > 0;
 
   useEffect(() => {
     if (visibleKeys.length || nonPrimaryFields.length === 0) return;
     setVisibleKeys(nonPrimaryFields.slice(0, 5).map((field) => field.key));
   }, [nonPrimaryFields, visibleKeys.length]);
 
+  // Restore persisted view per collection
+  useEffect(() => {
+    if (!slug) return;
+    try {
+      const raw = localStorage.getItem(`collection:${slug}:view`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.sort) setSort(parsed.sort);
+      if (parsed.columnSort !== undefined) setColumnSort(parsed.columnSort);
+      if (parsed.columnFilters) setColumnFilters(parsed.columnFilters);
+      if (Array.isArray(parsed.visibleKeys)) setVisibleKeys(parsed.visibleKeys);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  useEffect(() => {
+    if (!slug) return;
+    try {
+      localStorage.setItem(
+        `collection:${slug}:view`,
+        JSON.stringify({ sort, columnSort, columnFilters, visibleKeys }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [slug, sort, columnSort, columnFilters, visibleKeys]);
+
   useEffect(() => {
     setCursorStack([]);
     setNextCursor(null);
-  }, [query, sort, slug]);
+  }, [query, sort, slug, clientSideMode]);
+
+  const toggleColumnSort = (key: string) => {
+    setColumnSort((current) => {
+      if (!current || current.key !== key) return { key, dir: "asc" };
+      if (current.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const setColumnFilter = (key: string, filter: ColumnFilter) => {
+    setColumnFilters((current) => ({ ...current, [key]: filter }));
+  };
+
+  const clearColumnFilters = () => setColumnFilters({});
+
 
   useEffect(() => {
     if (!user || !slug) return;
