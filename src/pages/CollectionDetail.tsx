@@ -2542,10 +2542,14 @@ export default function CollectionDetail() {
                 className="pl-9"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Select
-                value={sort}
-                onValueChange={(value) => setSort(value as SortKey)}
+                value={columnSort ? "custom" : sort}
+                onValueChange={(value) => {
+                  if (value === "custom") return;
+                  setColumnSort(null);
+                  setSort(value as SortKey);
+                }}
               >
                 <SelectTrigger className="w-44">
                   <SelectValue />
@@ -2554,11 +2558,72 @@ export default function CollectionDetail() {
                   <SelectItem value="updated">Recently updated</SelectItem>
                   <SelectItem value="created">Recently added</SelectItem>
                   <SelectItem value="alpha">Alphabetical</SelectItem>
-                  <SelectItem value="custom" disabled>
-                    Custom
-                  </SelectItem>
+                  {columnSort && (
+                    <SelectItem value="custom">
+                      Custom: {columnSort.key === TITLE_KEY
+                        ? "Title"
+                        : columnSort.key === UPDATED_KEY
+                          ? "Updated"
+                          : fieldByKey.get(columnSort.key)?.label ?? columnSort.key}
+                      {" "}({columnSort.dir})
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Filter className="h-4 w-4" />
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <Badge variant="secondary" className="h-5 px-1.5">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[22rem] max-h-[70vh] overflow-y-auto">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Filters</span>
+                      {activeFilterCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearColumnFilters}
+                          className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+                        >
+                          Clear all
+                        </button>
+                      )}
+                    </div>
+                    {/* Title filter */}
+                    <FilterRow
+                      label="Title"
+                      fieldType="text"
+                      filter={columnFilters[TITLE_KEY] ?? defaultFilterFor("text")}
+                      onChange={(f) => setColumnFilter(TITLE_KEY, f)}
+                    />
+                    {nonPrimaryFields.map((field) => (
+                      <FilterRow
+                        key={field.key}
+                        label={field.label}
+                        fieldType={field.type}
+                        options={field.options}
+                        filter={
+                          columnFilters[field.key] ?? defaultFilterFor(field.type)
+                        }
+                        onChange={(f) => setColumnFilter(field.key, f)}
+                      />
+                    ))}
+                    <FilterRow
+                      label="Updated"
+                      fieldType="date"
+                      filter={columnFilters[UPDATED_KEY] ?? defaultFilterFor("date")}
+                      onChange={(f) => setColumnFilter(UPDATED_KEY, f)}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
               {nonPrimaryFields.length > 5 && (
                 <Popover>
                   <PopoverTrigger asChild>
@@ -2590,11 +2655,23 @@ export default function CollectionDetail() {
               )}
             </div>
           </div>
+          {clientSideMode && truncatedByLimit && (
+            <p className="text-xs text-muted-foreground">
+              Showing first {FILTER_FETCH_LIMIT} items matching your filters / sort.
+            </p>
+          )}
           <div className="overflow-hidden rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Title</TableHead>
+                  <TableHead>
+                    <SortableHeader
+                      label="Title"
+                      sortKey={TITLE_KEY}
+                      sort={columnSort}
+                      onToggle={toggleColumnSort}
+                    />
+                  </TableHead>
                   {visibleFields.map((field) => (
                     <TableHead
                       key={field.key}
@@ -2603,10 +2680,27 @@ export default function CollectionDetail() {
                           "text-right",
                       )}
                     >
-                      {field.label}
+                      <SortableHeader
+                        label={field.label}
+                        sortKey={field.key}
+                        align={
+                          ["number", "currency"].includes(field.type)
+                            ? "right"
+                            : "left"
+                        }
+                        sort={columnSort}
+                        onToggle={toggleColumnSort}
+                      />
                     </TableHead>
                   ))}
-                  <TableHead>Updated</TableHead>
+                  <TableHead>
+                    <SortableHeader
+                      label="Updated"
+                      sortKey={UPDATED_KEY}
+                      sort={columnSort}
+                      onToggle={toggleColumnSort}
+                    />
+                  </TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
