@@ -20,67 +20,69 @@ export interface AiFootprint {
   }>;
 }
 
+export async function fetchAiFootprint(noteId: string): Promise<AiFootprint> {
+  const id = noteId;
+  const [wikiRes, profileRes, connSrcRes, connTgtRes] = await Promise.all([
+    (supabase as any)
+      .from("wiki_page_sources")
+      .select("id, wiki_page_id, wiki_pages:wiki_page_id(id, title, slug)")
+      .eq("note_id", id),
+    (supabase as any)
+      .from("profile_entries")
+      .select("id, label, value, contact_id, contacts:contact_id(id, name)")
+      .eq("linked_note_id", id),
+    (supabase as any)
+      .from("note_connections")
+      .select("id, target_note_id, connection_type, target:target_note_id(id, title)")
+      .eq("source_note_id", id),
+    (supabase as any)
+      .from("note_connections")
+      .select("id, source_note_id, connection_type, source:source_note_id(id, title)")
+      .eq("target_note_id", id),
+  ]);
+
+  const wikiPages = (wikiRes.data ?? [])
+    .filter((r: any) => r.wiki_pages)
+    .map((r: any) => ({
+      id: r.wiki_pages.id,
+      title: r.wiki_pages.title,
+      slug: r.wiki_pages.slug,
+      sourceLinkId: r.id,
+    }));
+
+  const profileEntries = (profileRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    label: r.label,
+    value: r.value,
+    contactId: r.contact_id,
+    contactName: r.contacts?.name ?? null,
+  }));
+
+  const connections = [
+    ...(connSrcRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      otherNoteId: r.target_note_id,
+      otherNoteTitle: r.target?.title ?? null,
+      direction: "source" as const,
+      connectionType: r.connection_type,
+    })),
+    ...(connTgtRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      otherNoteId: r.source_note_id,
+      otherNoteTitle: r.source?.title ?? null,
+      direction: "target" as const,
+      connectionType: r.connection_type,
+    })),
+  ];
+
+  return { wikiPages, profileEntries, connections };
+}
+
 export function useAiFootprint(noteId: string | null, enabled = true) {
   return useQuery({
     queryKey: ["ai_footprint", noteId],
     enabled: !!noteId && enabled,
-    queryFn: async (): Promise<AiFootprint> => {
-      const id = noteId!;
-      const [wikiRes, profileRes, connSrcRes, connTgtRes] = await Promise.all([
-        (supabase as any)
-          .from("wiki_page_sources")
-          .select("id, wiki_page_id, wiki_pages:wiki_page_id(id, title, slug)")
-          .eq("note_id", id),
-        (supabase as any)
-          .from("profile_entries")
-          .select("id, label, value, contact_id, contacts:contact_id(id, name)")
-          .eq("linked_note_id", id),
-        (supabase as any)
-          .from("note_connections")
-          .select("id, target_note_id, connection_type, target:target_note_id(id, title)")
-          .eq("source_note_id", id),
-        (supabase as any)
-          .from("note_connections")
-          .select("id, source_note_id, connection_type, source:source_note_id(id, title)")
-          .eq("target_note_id", id),
-      ]);
-
-      const wikiPages = (wikiRes.data ?? [])
-        .filter((r: any) => r.wiki_pages)
-        .map((r: any) => ({
-          id: r.wiki_pages.id,
-          title: r.wiki_pages.title,
-          slug: r.wiki_pages.slug,
-          sourceLinkId: r.id,
-        }));
-
-      const profileEntries = (profileRes.data ?? []).map((r: any) => ({
-        id: r.id,
-        label: r.label,
-        value: r.value,
-        contactId: r.contact_id,
-        contactName: r.contacts?.name ?? null,
-      }));
-
-      const connections = [
-        ...(connSrcRes.data ?? []).map((r: any) => ({
-          id: r.id,
-          otherNoteId: r.target_note_id,
-          otherNoteTitle: r.target?.title ?? null,
-          direction: "source" as const,
-          connectionType: r.connection_type,
-        })),
-        ...(connTgtRes.data ?? []).map((r: any) => ({
-          id: r.id,
-          otherNoteId: r.source_note_id,
-          otherNoteTitle: r.source?.title ?? null,
-          direction: "target" as const,
-          connectionType: r.connection_type,
-        })),
-      ];
-
-      return { wikiPages, profileEntries, connections };
-    },
+    queryFn: () => fetchAiFootprint(noteId!),
   });
 }
 

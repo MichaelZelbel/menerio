@@ -3,6 +3,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { fetchAiFootprint } from "@/hooks/useAiFootprint";
 import {
   useToggleAiVisibility,
   useToggleSensitivePerson,
@@ -63,8 +64,20 @@ export function AiVisibilityButton({ kind, id, hidden, className, iconOnly = fal
         { id, visibility: next ? "hidden" : "visible" },
         {
           onError: () => setOptimistic(hidden),
-          onSuccess: () => {
-            if (next && kind === "note") setFootprintOpen(true);
+          onSuccess: async () => {
+            if (next && kind === "note") {
+              try {
+                const fp = await fetchAiFootprint(id);
+                const total =
+                  fp.wikiPages.length +
+                  fp.profileEntries.length +
+                  fp.connections.length;
+                if (total > 0) setFootprintOpen(true);
+              } catch {
+                // Silent: if the footprint check fails, skip the dialog
+                // rather than showing a misleading "nothing to clean up".
+              }
+            }
           },
         },
       );

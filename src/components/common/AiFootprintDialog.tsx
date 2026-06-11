@@ -43,9 +43,9 @@ export function AiFootprintDialog({ noteId, open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle>AI footprint of this note</DialogTitle>
           <DialogDescription>
-            This note is now hidden from AI. New pipelines will skip it, but
-            here is what AI already derived from it. Remove individual
-            contributions or wipe everything at once.
+            {total === 0
+              ? "This note is now hidden from AI. New pipelines will skip it."
+              : "This note is now hidden from AI. New pipelines will skip it, but here is what AI already derived from it. Remove individual contributions or wipe everything at once."}
           </DialogDescription>
         </DialogHeader>
 
