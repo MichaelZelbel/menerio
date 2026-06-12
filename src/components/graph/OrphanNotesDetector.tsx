@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import {
   FileText,
   Sparkles,
@@ -32,7 +32,7 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
     (n) => !dismissed.has(n.id),
   );
   const totalOrphans = allOrphans.length;
-  const orphanNotes = compact ? allOrphans.slice(0, 5) : allOrphans.slice(0, 200);
+  const orphanNotes = compact ? allOrphans.slice(0, 5) : allOrphans;
 
   const handleFindConnections = async (noteId: string) => {
     setComputing(noteId);
@@ -119,9 +119,8 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
           Notes with zero connections
         </p>
       </div>
-      <ScrollArea className="max-h-[500px]">
-        <div className="space-y-2">
-          {orphanNotes.map((note) => {
+      <div className="space-y-2">
+        {orphanNotes.map((note) => {
             const preview = getNotePreviewText(note.content ?? "");
             const meta = note.metadata as Record<string, unknown> | null;
             const type = typeof meta?.type === "string" ? meta.type : null;
