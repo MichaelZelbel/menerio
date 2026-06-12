@@ -1,9 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useGraphData } from "@/hooks/useGraphData";
-import { useNotes } from "@/hooks/useNotes";
+import { useOrphanNotes, type OrphanNote } from "@/hooks/useOrphanNotes";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,27 +23,16 @@ interface OrphanNotesDetectorProps {
 
 export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const queryClient = useQueryClient();
-  const { data: graphData } = useGraphData({ limit: 500 });
-  const { data: notes = [] } = useNotes("all");
+  const { data, isLoading } = useOrphanNotes();
   const [computing, setComputing] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
-  const orphanNotes = useMemo(() => {
-    if (!graphData || !notes.length) return [];
-    const connectedIds = new Set<string>();
-    for (const e of graphData.edges) {
-      connectedIds.add(e.source);
-      connectedIds.add(e.target);
-    }
-    // Also consider notes in graph nodes that have connections
-    return notes
-      .filter((n) => !n.is_trashed && !connectedIds.has(n.id) && !dismissed.has(n.id))
-      .slice(0, compact ? 5 : 50);
-  }, [graphData, notes, dismissed, compact]);
-
-  const totalOrphans = orphanNotes.length;
+  const allOrphans: OrphanNote[] = (data?.orphans ?? []).filter(
+    (n) => !dismissed.has(n.id),
+  );
+  const totalOrphans = allOrphans.length;
+  const orphanNotes = compact ? allOrphans.slice(0, 5) : allOrphans.slice(0, 200);
 
   const handleFindConnections = async (noteId: string) => {
     setComputing(noteId);
@@ -57,6 +44,7 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       queryClient.invalidateQueries({ queryKey: ["graph-data"] });
+      queryClient.invalidateQueries({ queryKey: ["orphan-notes"] });
       showToast.success("Connections computed");
     } catch {
       showToast.error("Failed to compute connections");
@@ -70,7 +58,15 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
     showToast.success("Marked as standalone");
   };
 
-  if (totalOrphans === 0) return null;
+  if (isLoading && totalOrphans === 0) return null;
+  if (!isLoading && totalOrphans === 0) {
+    if (compact) return null;
+    return (
+      <p className="text-sm text-muted-foreground">
+        No orphan notes — everything is connected.
+      </p>
+    );
+  }
 
   if (compact) {
     return (
@@ -103,7 +99,7 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
               variant="ghost"
               size="sm"
               className="w-full mt-2 text-xs"
-              onClick={() => navigate("/dashboard/graph")}
+              onClick={() => navigate("/dashboard/orphans")}
             >
               View all {totalOrphans} orphans
             </Button>
@@ -126,7 +122,7 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
       <ScrollArea className="max-h-[500px]">
         <div className="space-y-2">
           {orphanNotes.map((note) => {
-            const preview = getNotePreviewText(note.content);
+            const preview = getNotePreviewText(note.content ?? "");
             const meta = note.metadata as Record<string, unknown> | null;
             const type = typeof meta?.type === "string" ? meta.type : null;
             return (
