@@ -172,9 +172,8 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
                 </div>
               </Card>
             );
-          })}
-        </div>
-      </ScrollArea>
+        })}
+      </div>
     </div>
   );
 }
