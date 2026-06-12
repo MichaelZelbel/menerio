@@ -142,6 +142,7 @@ const App = () => (
 
                     <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />
+                    <Route path="orphans" element={<OrphanNotes />} />
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
                     <Route
