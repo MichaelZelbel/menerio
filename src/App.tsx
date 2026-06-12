@@ -58,6 +58,7 @@ const MediaLibrary = lazy(() => import("./pages/MediaLibrary"));
 const Profile = lazy(() => import("./pages/Profile"));
 const SharedNote = lazy(() => import("./pages/SharedNote"));
 const ReviewQueue = lazy(() => import("./pages/ReviewQueue"));
+const OrphanNotes = lazy(() => import("./pages/OrphanNotes"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -141,6 +142,7 @@ const App = () => (
 
                     <Route path="review-queue" element={<ReviewQueue />} />
                     <Route path="graph" element={<KnowledgeGraph />} />
+                    <Route path="orphans" element={<OrphanNotes />} />
                     <Route path="media" element={<MediaLibrary />} />
                     <Route path="profile" element={<Profile />} />
                     <Route
