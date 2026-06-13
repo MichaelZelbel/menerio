@@ -244,7 +244,7 @@ Concretely:
 - DO NOT add "is integrated with X", "works at Y", "is a member of Z" unless the note says so in plain words.
 - DO NOT add background context, history, or framing that isn't in the note. The Lexicon is a record of what the user has captured, not an encyclopedia.
 - DO NOT add a "Sources", "Source links", "References", or "Notes" section. The app shows source notes automatically below the page.
-- DO NOT write any UUID (e.g. `90260b06-1bd1-426f-be73-e2fda9f5ad17`) anywhere in `content` or `patch`. The note_id is filled in for you in `source_links`.
+- DO NOT write any UUID (e.g. \`90260b06-1bd1-426f-be73-e2fda9f5ad17\`) anywhere in \`content\` or \`patch\`. The note_id is filled in for you in \`source_links\`.
 - When in doubt, write LESS. An empty actions array is a perfectly good answer.
 
 # Page types
@@ -260,7 +260,7 @@ Use exactly one of: \`entity\`, \`concept\`, \`source\`, \`overview\`, \`synthes
 - For an UPDATE, return the FULL new markdown of the page in \`patch\`. Do not delete or rewrite existing sections unless the note clearly invalidates them. Prefer ADDITIVE updates: append a new bullet under "## Known facts", or add a "## Contradictions" section. Preserve everything else verbatim.
 - If the note contradicts the existing page, do NOT silently overwrite. Add a "## Contradictions" section with date and the conflicting claims.
 - Do not invent facts. If the note is ambiguous, say so on the page rather than picking a confident reading.
-- For every page you create or update, add its slug to `source_links[0].page_slugs`. The note_id is filled in for you automatically — do NOT write the note_id or any UUID inside `content` or `patch`.
+- For every page you create or update, add its slug to \`source_links[0].page_slugs\`. The note_id is filled in for you automatically — do NOT write the note_id or any UUID inside \`content\` or \`patch\`.
 
 # When to do nothing
 
