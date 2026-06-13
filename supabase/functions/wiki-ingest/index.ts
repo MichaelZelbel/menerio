@@ -569,7 +569,7 @@ async function processIngest(
       : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
     const systemPrompt = await resolveSystemPrompt(db, "wiki-ingest.main", WIKI_INGEST_PROMPT, { existingPagesIndex: index });
-    const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
+    const userMessage = `# ${note.title || "Untitled"}\n\n${contentText}`;
 
     const { raw } = await callSynthesis(systemPrompt, userMessage);
     let parsed: SynthesisResult;
@@ -585,12 +585,24 @@ async function processIngest(
       return;
     }
 
+    // Build the set of slugs that may legitimately be linked to: every existing page
+    // plus every slug being created in this same batch.
+    const plannedSlugs = new Set<string>(existingBySlug.keys());
+    for (const action of parsed.actions) plannedSlugs.add(action.slug);
+
     // Grounding validation pass.
-    const validationLog: Array<{ slug: string; outcome: string; reason?: string }> = [];
+    const validationLog: Array<{
+      slug: string;
+      outcome: string;
+      reason?: string;
+      stripped_links?: number;
+      stripped_uuids?: number;
+      removed_sections?: string[];
+    }> = [];
     const acceptedActions: WikiAction[] = [];
     for (const action of parsed.actions) {
       const existingMeta = existingBySlug.get(action.slug);
-      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null);
+      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null, plannedSlugs);
       if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
         continue;
@@ -598,15 +610,21 @@ async function processIngest(
 
       // Respect user-protected sections: never overwrite content the user has edited.
       const meta = existingBySlug.get(action.slug);
+      let outcome = "accepted";
       if (meta && meta.protected_sections.length > 0) {
         const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
         const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
         if ((result.action as any).content !== undefined) (result.action as any).content = merged;
         if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
-        validationLog.push({ slug: action.slug, outcome: "accepted_merged_protected" });
-      } else {
-        validationLog.push({ slug: action.slug, outcome: "accepted" });
+        outcome = "accepted_merged_protected";
       }
+      validationLog.push({
+        slug: action.slug,
+        outcome,
+        stripped_links: result.strippedLinks,
+        stripped_uuids: result.strippedUuids,
+        removed_sections: result.removedSections,
+      });
       acceptedActions.push(result.action);
     }
     parsed.actions = acceptedActions;
