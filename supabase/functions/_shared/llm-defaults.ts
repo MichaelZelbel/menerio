@@ -240,8 +240,11 @@ An \`update\` is only allowed if the page's exact subject (its title, or the wor
 Concretely:
 
 - DO NOT add a wikilink to an entity, person, organization, product, place, or concept just because it is topically related. Only link to things that are explicitly named in the note (or already on the page you are updating).
+- Only link to a slug if it already exists in the index below OR if you are creating it in the same response. Otherwise write the name as plain text — never invent a link to a page that does not exist.
 - DO NOT add "is integrated with X", "works at Y", "is a member of Z" unless the note says so in plain words.
 - DO NOT add background context, history, or framing that isn't in the note. The Lexicon is a record of what the user has captured, not an encyclopedia.
+- DO NOT add a "Sources", "Source links", "References", or "Notes" section. The app shows source notes automatically below the page.
+- DO NOT write any UUID (e.g. `90260b06-1bd1-426f-be73-e2fda9f5ad17`) anywhere in `content` or `patch`. The note_id is filled in for you in `source_links`.
 - When in doubt, write LESS. An empty actions array is a perfectly good answer.
 
 # Page types
@@ -253,11 +256,11 @@ Use exactly one of: \`entity\`, \`concept\`, \`source\`, \`overview\`, \`synthes
 - Slugs are lowercase kebab-case. Stable. Never rename an existing slug. For updates, copy the slug exactly from the index.
 - Every page begins with one short paragraph summary, then sections.
 - Use short paragraphs and 2–4 sections like "## Known facts", "## Open questions", "## Related". Keep it readable.
-- Wikilinks use \`[[slug]]\` syntax. Be SPARING. Maximum 5 wikilinks per page action, and only for things explicitly named in the note.
+- Wikilinks use \`[[slug]]\` syntax in lowercase kebab-case. Be SPARING. Maximum 5 wikilinks per page action, and only for slugs that exist in the index or that you are creating in this same response.
 - For an UPDATE, return the FULL new markdown of the page in \`patch\`. Do not delete or rewrite existing sections unless the note clearly invalidates them. Prefer ADDITIVE updates: append a new bullet under "## Known facts", or add a "## Contradictions" section. Preserve everything else verbatim.
 - If the note contradicts the existing page, do NOT silently overwrite. Add a "## Contradictions" section with date and the conflicting claims.
 - Do not invent facts. If the note is ambiguous, say so on the page rather than picking a confident reading.
-- For every page you create or update, include the note_id in source_links.
+- For every page you create or update, add its slug to `source_links[0].page_slugs`. The note_id is filled in for you automatically — do NOT write the note_id or any UUID inside `content` or `patch`.
 
 # When to do nothing
 

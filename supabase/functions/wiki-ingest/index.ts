@@ -188,9 +188,51 @@ function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResu
   return { actions, source_links, log_summary: result.log_summary || "Lexicon ingest completed." };
 }
 
+// Match wikilinks case-insensitively and with spaces/underscores so we can
+// normalize tokens like `[[OpenAI]]` or `[[Open AI]]` into `[[open-ai]]`.
+const WIKILINK_TOKEN_REGEX = /\[\[([A-Za-z0-9][A-Za-z0-9 _-]*)\]\]/g;
+
+function tokenToSlug(token: string): string {
+  return token
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeInlineWikilinks(markdown: string): string {
+  return markdown.replace(WIKILINK_TOKEN_REGEX, (_full, raw: string) => {
+    const slug = tokenToSlug(raw);
+    return slug ? `[[${slug}]]` : raw;
+  });
+}
+
 function extractWikilinks(markdown: string): string[] {
   const matches = markdown.matchAll(/\[\[([a-z0-9-]+)\]\]/g);
   return [...new Set([...matches].map((m) => m[1]))];
+}
+
+const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
+const DISALLOWED_SECTION_REGEX = /(^|\n)##\s*(source[\s-]?links?|sources?|references?|note[_\s-]?id)\s*\n[\s\S]*?(?=\n##\s|$)/gi;
+
+function sanitizeGeneratedContent(text: string): {
+  cleaned: string;
+  strippedUuids: number;
+  removedSections: string[];
+} {
+  let cleaned = text;
+  const removedSections: string[] = [];
+  cleaned = cleaned.replace(DISALLOWED_SECTION_REGEX, (_m, lead: string, heading: string) => {
+    removedSections.push(heading.trim().toLowerCase());
+    return lead || "";
+  });
+  const uuidMatches = cleaned.match(UUID_REGEX);
+  const strippedUuids = uuidMatches ? uuidMatches.length : 0;
+  cleaned = cleaned.replace(UUID_REGEX, "");
+  // Tidy stray bullets/lines left behind after stripping UUIDs.
+  cleaned = cleaned.replace(/^[ \t]*[-*][ \t]*$/gm, "");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { cleaned, strippedUuids, removedSections };
 }
 
 function slugToWords(slug: string): string {
@@ -216,16 +258,31 @@ function validateAction(
   noteText: string,
   existingContent: string | null,
   existingTitle: string | null,
-): { ok: true; action: WikiAction } | { ok: false; reason: string } {
+  plannedSlugs: Set<string>,
+):
+  | { ok: true; action: WikiAction; strippedLinks: number; strippedUuids: number; removedSections: string[] }
+  | { ok: false; reason: string } {
   const normalizedNote = normalizeForMatch(noteText + " " + (action.title || ""));
   const normalizedExisting = normalizeForMatch(existingContent || "");
-  const newContent = action.op === "update" ? (action.patch || action.content || "") : (action.content || "");
+  const rawContent = action.op === "update" ? (action.patch || action.content || "") : (action.content || "");
 
-  if (!newContent.trim()) return { ok: false, reason: "empty_content" };
+  if (!rawContent.trim()) return { ok: false, reason: "empty_content" };
+
+  // Normalize inline wikilink tokens first so `[[OpenAI]]` becomes `[[open-ai]]`
+  // and the grounding/existence passes can actually see them.
+  const normalizedLinks = normalizeInlineWikilinks(rawContent);
+
+  // Strip UUIDs and disallowed sections (Sources / Source links / References / note_id).
+  const { cleaned: sanitized, strippedUuids, removedSections } = sanitizeGeneratedContent(normalizedLinks);
+  let cleaned = sanitized;
+
+  if (!cleaned.trim() || cleaned.trim().length < 80) {
+    return { ok: false, reason: "empty_after_sanitize" };
+  }
 
   // Drift / overwrite protection on updates.
   if (action.op === "update" && existingContent && existingContent.length > 200) {
-    const lengthRatio = newContent.length / existingContent.length;
+    const lengthRatio = cleaned.length / existingContent.length;
     if (lengthRatio < (1 - MAX_DELETION_RATIO)) {
       return { ok: false, reason: "deletes_too_much_content" };
     }
@@ -240,7 +297,6 @@ function validateAction(
   }
 
   // For update: the existing page's subject (title OR slug words) must be named in the note.
-  // This blocks the model from re-using a topically-similar page for a different subject.
   if (action.op === "update") {
     const titleSubject = normalizeForMatch(existingTitle || "");
     const slugSubject = normalizeForMatch(slugToWords(action.slug));
@@ -251,10 +307,12 @@ function validateAction(
     }
   }
 
-  // Strip wikilinks that aren't grounded in the note OR in the previous page content.
-  const links = extractWikilinks(newContent);
-  let strippedCount = 0;
-  let cleaned = newContent;
+  // Strip wikilinks that aren't grounded in the note OR not in the planned-slugs set.
+  // A link is only kept when it is BOTH grounded (the slug words appear in the note
+  // or existed on the prior page) AND its target page exists or is being created in
+  // this same batch. Otherwise we replace the link with plain text.
+  const links = extractWikilinks(cleaned);
+  let strippedLinks = 0;
   for (const slug of links) {
     if (slug === action.slug) continue; // self-link is fine
     const slugWords = normalizeForMatch(slugToWords(slug));
@@ -262,25 +320,21 @@ function validateAction(
       normalizedNote.includes(slugWords) ||
       normalizedExisting.includes(`[[${slug}]]`) ||
       normalizedExisting.includes(slugWords);
-    if (!grounded) {
-      // Replace the wikilink with plain bracketed text so we don't wreck readability,
-      // but kill the link so we stop creating phantom relationships.
+    const targetExists = plannedSlugs.has(slug);
+    if (!grounded || !targetExists) {
       const pattern = new RegExp(`\\[\\[${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\]`, "g");
       cleaned = cleaned.replace(pattern, slugToWords(slug));
-      strippedCount += 1;
+      strippedLinks += 1;
     }
   }
 
-  if (strippedCount > MAX_UNGROUNDED_NEW_LINKS) {
-    // Keep the cleaned content (links stripped) instead of rejecting outright.
-    if (action.op === "update") {
-      return { ok: true, action: { ...action, patch: cleaned } };
-    }
-    return { ok: true, action: { ...action, content: cleaned } };
-  }
+  const nextAction: WikiAction = action.op === "update"
+    ? { ...action, patch: cleaned }
+    : { ...action, content: cleaned };
 
-  return { ok: true, action };
+  return { ok: true, action: nextAction, strippedLinks, strippedUuids, removedSections };
 }
+
 
 async function logWiki(db: any, userId: string, operation: string, details: Record<string, unknown>) {
   const { error } = await db.from("wiki_log").insert({ user_id: userId, operation, details });
@@ -515,7 +569,7 @@ async function processIngest(
       : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
     const systemPrompt = await resolveSystemPrompt(db, "wiki-ingest.main", WIKI_INGEST_PROMPT, { existingPagesIndex: index });
-    const userMessage = `note_id: ${noteId}\n\n# ${note.title || "Untitled"}\n\n${contentText}`;
+    const userMessage = `# ${note.title || "Untitled"}\n\n${contentText}`;
 
     const { raw } = await callSynthesis(systemPrompt, userMessage);
     let parsed: SynthesisResult;
@@ -531,12 +585,24 @@ async function processIngest(
       return;
     }
 
+    // Build the set of slugs that may legitimately be linked to: every existing page
+    // plus every slug being created in this same batch.
+    const plannedSlugs = new Set<string>(existingBySlug.keys());
+    for (const action of parsed.actions) plannedSlugs.add(action.slug);
+
     // Grounding validation pass.
-    const validationLog: Array<{ slug: string; outcome: string; reason?: string }> = [];
+    const validationLog: Array<{
+      slug: string;
+      outcome: string;
+      reason?: string;
+      stripped_links?: number;
+      stripped_uuids?: number;
+      removed_sections?: string[];
+    }> = [];
     const acceptedActions: WikiAction[] = [];
     for (const action of parsed.actions) {
       const existingMeta = existingBySlug.get(action.slug);
-      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null);
+      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null, plannedSlugs);
       if (!result.ok) {
         validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
         continue;
@@ -544,15 +610,21 @@ async function processIngest(
 
       // Respect user-protected sections: never overwrite content the user has edited.
       const meta = existingBySlug.get(action.slug);
+      let outcome = "accepted";
       if (meta && meta.protected_sections.length > 0) {
         const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
         const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
         if ((result.action as any).content !== undefined) (result.action as any).content = merged;
         if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
-        validationLog.push({ slug: action.slug, outcome: "accepted_merged_protected" });
-      } else {
-        validationLog.push({ slug: action.slug, outcome: "accepted" });
+        outcome = "accepted_merged_protected";
       }
+      validationLog.push({
+        slug: action.slug,
+        outcome,
+        stripped_links: result.strippedLinks,
+        stripped_uuids: result.strippedUuids,
+        removed_sections: result.removedSections,
+      });
       acceptedActions.push(result.action);
     }
     parsed.actions = acceptedActions;
