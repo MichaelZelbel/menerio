@@ -188,9 +188,51 @@ function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResu
   return { actions, source_links, log_summary: result.log_summary || "Lexicon ingest completed." };
 }
 
+// Match wikilinks case-insensitively and with spaces/underscores so we can
+// normalize tokens like `[[OpenAI]]` or `[[Open AI]]` into `[[open-ai]]`.
+const WIKILINK_TOKEN_REGEX = /\[\[([A-Za-z0-9][A-Za-z0-9 _-]*)\]\]/g;
+
+function tokenToSlug(token: string): string {
+  return token
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeInlineWikilinks(markdown: string): string {
+  return markdown.replace(WIKILINK_TOKEN_REGEX, (_full, raw: string) => {
+    const slug = tokenToSlug(raw);
+    return slug ? `[[${slug}]]` : raw;
+  });
+}
+
 function extractWikilinks(markdown: string): string[] {
   const matches = markdown.matchAll(/\[\[([a-z0-9-]+)\]\]/g);
   return [...new Set([...matches].map((m) => m[1]))];
+}
+
+const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
+const DISALLOWED_SECTION_REGEX = /(^|\n)##\s*(source[\s-]?links?|sources?|references?|note[_\s-]?id)\s*\n[\s\S]*?(?=\n##\s|$)/gi;
+
+function sanitizeGeneratedContent(text: string): {
+  cleaned: string;
+  strippedUuids: number;
+  removedSections: string[];
+} {
+  let cleaned = text;
+  const removedSections: string[] = [];
+  cleaned = cleaned.replace(DISALLOWED_SECTION_REGEX, (_m, lead: string, heading: string) => {
+    removedSections.push(heading.trim().toLowerCase());
+    return lead || "";
+  });
+  const uuidMatches = cleaned.match(UUID_REGEX);
+  const strippedUuids = uuidMatches ? uuidMatches.length : 0;
+  cleaned = cleaned.replace(UUID_REGEX, "");
+  // Tidy stray bullets/lines left behind after stripping UUIDs.
+  cleaned = cleaned.replace(/^[ \t]*[-*][ \t]*$/gm, "");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { cleaned, strippedUuids, removedSections };
 }
 
 function slugToWords(slug: string): string {
