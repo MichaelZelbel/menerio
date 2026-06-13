@@ -258,16 +258,31 @@ function validateAction(
   noteText: string,
   existingContent: string | null,
   existingTitle: string | null,
-): { ok: true; action: WikiAction } | { ok: false; reason: string } {
+  plannedSlugs: Set<string>,
+):
+  | { ok: true; action: WikiAction; strippedLinks: number; strippedUuids: number; removedSections: string[] }
+  | { ok: false; reason: string } {
   const normalizedNote = normalizeForMatch(noteText + " " + (action.title || ""));
   const normalizedExisting = normalizeForMatch(existingContent || "");
-  const newContent = action.op === "update" ? (action.patch || action.content || "") : (action.content || "");
+  const rawContent = action.op === "update" ? (action.patch || action.content || "") : (action.content || "");
 
-  if (!newContent.trim()) return { ok: false, reason: "empty_content" };
+  if (!rawContent.trim()) return { ok: false, reason: "empty_content" };
+
+  // Normalize inline wikilink tokens first so `[[OpenAI]]` becomes `[[open-ai]]`
+  // and the grounding/existence passes can actually see them.
+  const normalizedLinks = normalizeInlineWikilinks(rawContent);
+
+  // Strip UUIDs and disallowed sections (Sources / Source links / References / note_id).
+  const { cleaned: sanitized, strippedUuids, removedSections } = sanitizeGeneratedContent(normalizedLinks);
+  let cleaned = sanitized;
+
+  if (!cleaned.trim() || cleaned.trim().length < 80) {
+    return { ok: false, reason: "empty_after_sanitize" };
+  }
 
   // Drift / overwrite protection on updates.
   if (action.op === "update" && existingContent && existingContent.length > 200) {
-    const lengthRatio = newContent.length / existingContent.length;
+    const lengthRatio = cleaned.length / existingContent.length;
     if (lengthRatio < (1 - MAX_DELETION_RATIO)) {
       return { ok: false, reason: "deletes_too_much_content" };
     }
@@ -282,7 +297,6 @@ function validateAction(
   }
 
   // For update: the existing page's subject (title OR slug words) must be named in the note.
-  // This blocks the model from re-using a topically-similar page for a different subject.
   if (action.op === "update") {
     const titleSubject = normalizeForMatch(existingTitle || "");
     const slugSubject = normalizeForMatch(slugToWords(action.slug));
@@ -293,10 +307,12 @@ function validateAction(
     }
   }
 
-  // Strip wikilinks that aren't grounded in the note OR in the previous page content.
-  const links = extractWikilinks(newContent);
-  let strippedCount = 0;
-  let cleaned = newContent;
+  // Strip wikilinks that aren't grounded in the note OR not in the planned-slugs set.
+  // A link is only kept when it is BOTH grounded (the slug words appear in the note
+  // or existed on the prior page) AND its target page exists or is being created in
+  // this same batch. Otherwise we replace the link with plain text.
+  const links = extractWikilinks(cleaned);
+  let strippedLinks = 0;
   for (const slug of links) {
     if (slug === action.slug) continue; // self-link is fine
     const slugWords = normalizeForMatch(slugToWords(slug));
@@ -304,25 +320,21 @@ function validateAction(
       normalizedNote.includes(slugWords) ||
       normalizedExisting.includes(`[[${slug}]]`) ||
       normalizedExisting.includes(slugWords);
-    if (!grounded) {
-      // Replace the wikilink with plain bracketed text so we don't wreck readability,
-      // but kill the link so we stop creating phantom relationships.
+    const targetExists = plannedSlugs.has(slug);
+    if (!grounded || !targetExists) {
       const pattern = new RegExp(`\\[\\[${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\]`, "g");
       cleaned = cleaned.replace(pattern, slugToWords(slug));
-      strippedCount += 1;
+      strippedLinks += 1;
     }
   }
 
-  if (strippedCount > MAX_UNGROUNDED_NEW_LINKS) {
-    // Keep the cleaned content (links stripped) instead of rejecting outright.
-    if (action.op === "update") {
-      return { ok: true, action: { ...action, patch: cleaned } };
-    }
-    return { ok: true, action: { ...action, content: cleaned } };
-  }
+  const nextAction: WikiAction = action.op === "update"
+    ? { ...action, patch: cleaned }
+    : { ...action, content: cleaned };
 
-  return { ok: true, action };
+  return { ok: true, action: nextAction, strippedLinks, strippedUuids, removedSections };
 }
+
 
 async function logWiki(db: any, userId: string, operation: string, details: Record<string, unknown>) {
   const { error } = await db.from("wiki_log").insert({ user_id: userId, operation, details });
