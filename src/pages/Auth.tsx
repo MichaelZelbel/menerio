@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { MailCheck } from "lucide-react";
+import { MailCheck, AlertCircle } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -53,8 +53,8 @@ export default function Auth() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
   const defaultTab = searchParams.get("tab") === "signup" ? "signup" : "signin";
+  const [activeTab, setActiveTab] = useState(defaultTab);
 
-  // Redirect if already logged in
   if (session) {
     navigate(redirectTo, { replace: true });
     return null;
@@ -72,7 +72,7 @@ export default function Auth() {
         </div>
 
         <Card>
-          <Tabs defaultValue={defaultTab}>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <CardHeader className="pb-2">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="signin">Sign In</TabsTrigger>
@@ -118,7 +118,7 @@ export default function Auth() {
                 <SignInForm onSuccess={() => navigate(redirectTo, { replace: true })} />
               </TabsContent>
               <TabsContent value="signup" className="mt-0">
-                <SignUpForm />
+                <SignUpForm onSwitchToSignIn={() => setActiveTab("signin")} />
               </TabsContent>
             </CardContent>
           </Tabs>
@@ -208,8 +208,8 @@ function SignInForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-function SignUpForm() {
-  const { signUp } = useAuth();
+function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
+  const { signUp, resetPassword } = useAuth();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -217,7 +217,9 @@ function SignUpForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState<false | "success" | "exists">(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,8 +227,12 @@ function SignUpForm() {
     if (!accepted) return;
     setLoading(true);
     try {
-      await signUp(email, password, displayName);
-      setSubmitted(true);
+      const result = await signUp(email, password, displayName);
+      if (result.alreadyExists) {
+        setSubmitted("exists");
+      } else {
+        setSubmitted("success");
+      }
     } catch {
       // Error handled in context
     } finally {
@@ -234,7 +240,19 @@ function SignUpForm() {
     }
   };
 
-  if (submitted) {
+  const handleReset = async () => {
+    setResetLoading(true);
+    try {
+      await resetPassword(email);
+      setResetSent(true);
+    } catch {
+      // Error handled in context
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  if (submitted === "success") {
     return (
       <div className="flex flex-col items-center text-center py-6 space-y-4">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
@@ -249,6 +267,37 @@ function SignUpForm() {
         <div className="rounded-lg border bg-muted/50 p-3 text-xs text-muted-foreground space-y-1 max-w-xs">
           <p>Didn't receive it? Check your spam folder.</p>
           <p>The link expires after 24 hours.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (submitted === "exists") {
+    return (
+      <div className="flex flex-col items-center text-center py-6 space-y-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+          <AlertCircle className="h-7 w-7 text-primary" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-semibold font-display">Account already exists</h3>
+          <p className="text-sm text-muted-foreground max-w-xs">
+            An account with <span className="font-medium text-foreground">{email}</span> already exists.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <Button onClick={onSwitchToSignIn} className="w-full">Sign In</Button>
+          <Button
+            variant="outline"
+            onClick={handleReset}
+            disabled={resetLoading || resetSent}
+            className="w-full"
+          >
+            {resetLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {resetSent ? "Reset link sent — check your email" : "Send password reset link"}
+          </Button>
+          <Button variant="ghost" onClick={() => { setSubmitted(false); setResetSent(false); }} className="w-full">
+            Try another email
+          </Button>
         </div>
       </div>
     );
