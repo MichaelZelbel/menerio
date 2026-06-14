@@ -7,7 +7,7 @@ import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -32,10 +32,10 @@ import {
   Loader2,
   Trash2,
   X,
-  FileText,
+  
   Merge,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
