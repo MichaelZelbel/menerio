@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, Sparkles, Loader2 } from "lucide-react";
+import { FileText, Plus, Sparkles, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { CategorySection } from "@/components/profile/CategorySection";
@@ -22,9 +25,20 @@ import { showToast } from "@/lib/toast";
 interface ContactProfileTabProps {
   contactId: string;
   contactName: string;
+  notes?: string;
+  isEditingNotes?: boolean;
+  onChangeNotes?: (value: string) => void;
+  relatedNotes?: Array<{ id: string; title: string | null }>;
 }
 
-export function ContactProfileTab({ contactId, contactName }: ContactProfileTabProps) {
+export function ContactProfileTab({
+  contactId,
+  contactName,
+  notes,
+  isEditingNotes = false,
+  onChangeNotes,
+  relatedNotes = [],
+}: ContactProfileTabProps) {
   const { user } = useAuth();
   const {
     categories,
@@ -122,9 +136,55 @@ export function ContactProfileTab({ contactId, contactName }: ContactProfileTabP
 
   return (
     <div className="space-y-3">
+      <Card>
+        <CardContent className="pt-6">
+          {isEditingNotes ? (
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={notes ?? ""}
+                onChange={(e) => onChangeNotes?.(e.target.value)}
+                placeholder="Add private notes about this person..."
+                className="min-h-24"
+              />
+            </div>
+          ) : notes ? (
+            <p className="text-sm whitespace-pre-wrap">{notes}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No notes yet.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            Related Notes
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Automatically derived from notes that mention this person. Open a note to add or remove the mention.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {relatedNotes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No related notes found.</p>
+          ) : (
+            <div className="space-y-2">
+              {relatedNotes.map((note) => (
+                <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 hover:bg-accent">
+                  <p className="text-sm font-medium">{note.title || "Untitled"}</p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <LifeEventsStrip contactId={contactId} />
 
       <RelationshipsSection contactId={contactId} contactName={contactName} />
+
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">

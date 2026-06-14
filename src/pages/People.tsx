@@ -7,7 +7,7 @@ import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -32,10 +32,10 @@ import {
   Loader2,
   Trash2,
   X,
-  FileText,
+  
   Merge,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
@@ -75,7 +75,7 @@ export default function People() {
   const [newAlias, setNewAlias] = useState("");
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
-  const [activePersonTab, setActivePersonTab] = useState("overview");
+  const [activePersonTab, setActivePersonTab] = useState("profile");
   const [conversationContext, setConversationContext] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
@@ -267,7 +267,7 @@ export default function People() {
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); cancelEditing(); setActivePersonTab("overview"); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); cancelEditing(); setActivePersonTab("profile"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
@@ -373,90 +373,48 @@ export default function People() {
 
         <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
           <TabsList className="flex flex-wrap h-auto">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="groups">Groups</TabsTrigger>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
-            <TabsTrigger value="profile">Profile</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-6 mt-0">
-          <Card>
-            <CardContent className="pt-6">
-              {isEditing ? (
-                <div className="space-y-2">
-                  <Label>Notes</Label>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setEditingNotes(e.target.value)}
-                    placeholder="Add private notes about this person..."
-                    className="min-h-24"
-                  />
-                </div>
-              ) : notes ? (
-                <p className="text-sm whitespace-pre-wrap">{notes}</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">No notes yet.</p>
-              )}
-            </CardContent>
-          </Card>
+          <TabsContent value="profile" className="mt-0">
+            <ContactProfileTab
+              contactId={selectedPerson.id}
+              contactName={selectedPerson.name}
+              notes={notes}
+              isEditingNotes={isEditing}
+              onChangeNotes={(value) => setEditingNotes(value)}
+              relatedNotes={relatedNotes as Array<{ id: string; title: string | null }>}
+            />
+          </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                Related Notes
-              </CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Automatically derived from notes that mention this person. Open a note to add or remove the mention.
-              </p>
-            </CardHeader>
-            <CardContent>
-              {relatedNotes.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No related notes found.</p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedNotes.map((note: any) => (
-                    <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 hover:bg-accent">
-                      <p className="text-sm font-medium">{note.title || "Untitled"}</p>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+          <TabsContent value="groups" className="mt-0">
+            <PersonGroupsTab personId={selectedPerson.id} />
+          </TabsContent>
 
+          <TabsContent value="conversation" className="mt-0">
+            <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
+          </TabsContent>
 
-        <TabsContent value="groups" className="mt-0">
-          <PersonGroupsTab personId={selectedPerson.id} />
-        </TabsContent>
+          <TabsContent value="timeline" className="mt-0">
+            <PersonTimeline
+              personId={selectedPerson.id}
+              personName={selectedPerson.name}
+              people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
+              onAskMira={(context) => {
+                setConversationContext(context);
+                setActivePersonTab("conversation");
+              }}
+            />
+          </TabsContent>
 
-        <TabsContent value="conversation" className="mt-0">
-          <ConversationTab personId={selectedPerson.id} personName={selectedPerson.name} initialContext={conversationContext} />
-        </TabsContent>
-
-        <TabsContent value="timeline" className="mt-0">
-          <PersonTimeline
-            personId={selectedPerson.id}
-            personName={selectedPerson.name}
-            people={people.map((person) => ({ id: person.id, name: person.name, relationship: null }))}
-            onAskMira={(context) => {
-              setConversationContext(context);
-              setActivePersonTab("conversation");
-            }}
-          />
-        </TabsContent>
-
-        <TabsContent value="documents" className="mt-0">
-          <PersonDocuments personId={selectedPerson.id} personName={selectedPerson.name} />
-        </TabsContent>
-
-        <TabsContent value="profile" className="mt-0">
-          <ContactProfileTab contactId={selectedPerson.id} contactName={selectedPerson.name} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="documents" className="mt-0">
+            <PersonDocuments personId={selectedPerson.id} personName={selectedPerson.name} />
+          </TabsContent>
+        </Tabs>
 
       <MergePersonDialog
         open={mergeOpen}
