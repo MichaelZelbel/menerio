@@ -26,7 +26,7 @@ interface AuthContextType {
    */
   roleLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string) => Promise<boolean>;
+  signUp: (email: string, password: string, displayName: string) => Promise<{ success: boolean; alreadyExists?: boolean }>;
   signOut: () => Promise<void>;
   signInWithOAuth: (provider: "google" | "github") => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -65,8 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRole(data.role as AppRole);
       }
     } finally {
-      // Always release the gate, even on error / no-row, so route guards
-      // can make a decision rather than hanging on the skeleton forever.
       setRoleLoading(false);
     }
   }, []);
@@ -87,7 +85,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (newSession?.user) {
           setRoleLoading(true);
-          // Defer Supabase calls out of the auth callback to avoid deadlocks.
           setTimeout(() => {
             fetchProfile(newSession.user.id);
             fetchRole(newSession.user.id);
@@ -142,13 +139,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) { handleAuthError(error); throw error; }
   };
 
-  const signUp = async (email: string, password: string, displayName: string): Promise<boolean> => {
-    const { error } = await supabase.auth.signUp({
+  const signUp = async (email: string, password: string, displayName: string): Promise<{ success: boolean; alreadyExists?: boolean }> => {
+    const { data, error } = await supabase.auth.signUp({
       email, password,
       options: { emailRedirectTo: window.location.origin, data: { full_name: displayName } },
     });
     if (error) { handleAuthError(error); throw error; }
-    return true;
+    if (data.user?.identities?.length === 0) {
+      return { success: false, alreadyExists: true };
+    }
+    return { success: true };
   };
 
   const signOut = async () => {
