@@ -136,9 +136,55 @@ export function ContactProfileTab({
 
   return (
     <div className="space-y-3">
+      <Card>
+        <CardContent className="pt-6">
+          {isEditingNotes ? (
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={notes ?? ""}
+                onChange={(e) => onChangeNotes?.(e.target.value)}
+                placeholder="Add private notes about this person..."
+                className="min-h-24"
+              />
+            </div>
+          ) : notes ? (
+            <p className="text-sm whitespace-pre-wrap">{notes}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No notes yet.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            Related Notes
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Automatically derived from notes that mention this person. Open a note to add or remove the mention.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {relatedNotes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No related notes found.</p>
+          ) : (
+            <div className="space-y-2">
+              {relatedNotes.map((note) => (
+                <Link key={note.id} to={`/dashboard/notes/${note.id}`} className="block rounded-md border p-3 hover:bg-accent">
+                  <p className="text-sm font-medium">{note.title || "Untitled"}</p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <LifeEventsStrip contactId={contactId} />
 
       <RelationshipsSection contactId={contactId} contactName={contactName} />
+
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
