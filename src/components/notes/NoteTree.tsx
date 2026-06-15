@@ -719,6 +719,51 @@ export function NoteTree({
     return normalizePath(selected?.folder_path);
   }, [notes, selectedId]);
 
+  const favoritesList = useMemo(() => {
+    const list = favoriteNotes ?? notes.filter((n) => "is_favorite" in n && n.is_favorite);
+    const dir = sortDirection === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      if (sortField === "title") return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
+      const aRaw = (a as unknown as Record<string, unknown>)[sortField];
+      const bRaw = (b as unknown as Record<string, unknown>)[sortField];
+      const aTs = typeof aRaw === "string" ? new Date(aRaw).getTime() : 0;
+      const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
+      return dir * (aTs - bTs);
+    });
+  }, [favoriteNotes, notes, sortField, sortDirection]);
+
+  const recentList = useMemo(() => {
+    return [...notes]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 20);
+  }, [notes]);
+
+  const trashList = useMemo(() => {
+    const list = trashedNotes ?? [];
+    return [...list].sort((a, b) => {
+      const aTs = new Date((a.trashed_at as string | null) ?? a.updated_at).getTime();
+      const bTs = new Date((b.trashed_at as string | null) ?? b.updated_at).getTime();
+      return bTs - aTs;
+    });
+  }, [trashedNotes]);
+
+  // Auto-expand virtual roots when the selected note belongs there
+  useEffect(() => {
+    if (!selectedId) return;
+    const inTrash = (trashedNotes ?? []).some((n) => n.id === selectedId);
+    const inFavorites =
+      !inTrash &&
+      (favoriteNotes ?? []).some((n) => n.id === selectedId) &&
+      !notes.some((n) => n.id === selectedId);
+    if (!inTrash && !inFavorites) return;
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (inTrash) next.add("__trash__");
+      if (inFavorites) next.add("__favorites__");
+      return next;
+    });
+  }, [selectedId, trashedNotes, favoriteNotes, notes]);
+
   useEffect(() => {
     const requiredKeys = new Set<string>(["__root__"]);
     collectAncestorPaths(activeFolderPath).forEach((path) => requiredKeys.add(path));
@@ -746,6 +791,16 @@ export function NoteTree({
       return next;
     });
   }, []);
+
+  const toggleVirtualRoot = useCallback((key: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
 
   const handleDrop = useCallback((path: string, event: DragEvent) => {
     event.preventDefault();
