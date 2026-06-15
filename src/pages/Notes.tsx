@@ -740,9 +740,11 @@ export default function Notes() {
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
-          <div className="flex items-center gap-1.5 text-sm font-semibold h-8 px-2">
-            <FileText className="h-4 w-4" />
-            {searchMode ? "Search" : "All Notes"}
+          <div className="flex flex-col text-sm font-semibold h-8 px-2 leading-tight">
+            <div className="flex items-center gap-1.5">
+              <FileText className="h-4 w-4" />
+              {searchMode ? "Search" : "Notes"}
+            </div>
             <span className="text-[10px] text-muted-foreground font-normal">
               {!searchMode && counts.all}
             </span>
