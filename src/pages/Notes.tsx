@@ -580,9 +580,8 @@ export default function Notes() {
   const currentNotes = useMemo(() => {
     let notes: (Note | SemanticSearchResult)[];
     if (searchMode && searchResults) notes = searchResults;
-    else if (filter === "favorites") notes = favNotes;
-    else if (filter === "trash") notes = trashNotes;
     else notes = allNotes;
+
 
     if (entityFilter) {
       notes = notes.filter((n) => n.entity_type === entityFilter);
@@ -636,7 +635,7 @@ export default function Notes() {
       return dir * (aTs - bTs);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
+  }, [allNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -650,7 +649,7 @@ export default function Notes() {
     );
   }, [selectedId, allNotes, trashNotes, favNotes, searchResults]);
 
-  const activeFilter = filterConfig.find((f) => f.key === filter)!;
+  
 
   const exitSearch = () => {
     setSearchMode(false);
