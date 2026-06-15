@@ -1,59 +1,29 @@
-## Goal
+## Remove the "All Notes / Favorites / Trash" filter dropdown
 
-In the notes sidebar, currently the tree has a single root **"Vault root"**. Add three more sibling roots, all **collapsed by default**:
+Now that the sidebar tree has dedicated **Favorites**, **Recent**, **Vault root**, and **Trash** roots, the top-of-panel filter dropdown is redundant. Remove it and always show "All Notes" in the middle panel list.
 
-- **⭐ Favorites** — all starred notes (flat list)
-- **🕘 Recent** — 20 most recently updated notes (flat list)
-- **🗑 Trash** — all trashed notes (flat list)
+### Changes in `src/pages/Notes.tsx`
 
-## Feasibility
+1. **Remove the dropdown UI** (lines ~751-775) — the `<DropdownMenu>` with `activeFilter` and `filterConfig`. Replace it with a simple static header label ("All Notes" with its icon and total count) to keep the panel header visually balanced next to the Filter-by-type button and the search/sort controls.
 
-Easy and cheap. All data is already loaded by `useNotes` hooks in `src/pages/Notes.tsx`:
+2. **Hard-code the filter to "all"** — remove the `filter` state (or initialize it to `"all"` and never change it). All list-filtering logic that depends on `filter` (favorites/trash branches) collapses to the "all" branch, which already excludes trashed notes.
 
-- `allNotes` (excludes trash) → source for Recent
-- `favNotes` → source for Favorites
-- `trashNotes` → source for Trash
+3. **Remove now-unused code**:
+   - `filterConfig` array
+   - `activeFilter` derivation
+   - `setFilter` calls
+   - `ChevronDown` import if no longer used elsewhere
+   - `counts.favorites` / `counts.trash` if only consumed by the dropdown (keep `counts.all` for the header label)
 
-No new queries, no schema change, no extra network calls. Rendering ~20 extra rows when expanded has zero perceptible perf impact. The existing top filter chips ("All / Favorites / Trash") can stay — the new roots are a parallel, always-visible navigation aid in the tree.
+4. **Navigation behavior** — selecting a note from the **Trash** or **Favorites** tree root still opens the editor correctly (that path doesn't depend on the middle-panel list). The middle panel simply continues to show "All Notes" (non-trashed); the tree is the source of truth for finding favorited/trashed notes. This matches option 2 from the previous discussion.
 
-## Changes
+### Out of scope
 
-### `src/pages/Notes.tsx`
-- Pass two new props to `<NoteTree>`:
-  - `favoriteNotes={favNotes}`
-  - `trashedNotes={trashNotes}`
-- `recentNotes` is derived inside `NoteTree` from `notes` (top 20 by `updated_at`) so we don't double-compute.
+- No changes to `NoteTree.tsx` — virtual roots stay as-is.
+- No changes to search behavior (the `searchMode` branch is independent).
+- No changes to the entity-type Filter button next to the dropdown.
 
-### `src/components/notes/NoteTree.tsx`
-- Add optional props `favoriteNotes`, `trashedNotes`.
-- Replace the single `<FolderRow node={tree} />` render with a wrapper that renders four siblings in order:
-  1. `Vault root` (existing tree, expanded by default — unchanged behavior)
-  2. `Favorites` (virtual root, collapsed by default)
-  3. `Recent` (virtual root, collapsed by default)
-  4. `Trash` (virtual root, collapsed by default)
-- Implement virtual roots as a lightweight `VirtualRootRow` component (or reuse `FolderRow` with a `variant: "virtual"` flag) that:
-  - Shows chevron + icon (Star / Clock / Trash2) + label + count badge
-  - When expanded, renders `NoteRow`s for the supplied notes — no nested folders, no drag/drop targets, no "New note here" context menu
-  - Uses stable expand keys: `__favorites__`, `__recent__`, `__trash__` (NOT added to default `expanded` set, so they start collapsed)
-- For the Trash root, `NoteRow` already supports `onRestoreNote` / `onDeleteNotePermanently` context-menu actions — pass them through.
-- For Favorites and Recent, the standard note context menu works as-is.
-- Selection: clicking a note in any virtual root calls existing `onSelectNote`; it opens the same editor. No change to routing.
-- Sorting inside virtual roots:
-  - Favorites: respect the current `sortField`/`sortDirection`
-  - Recent: always `updated_at desc`, capped at 20
-  - Trash: `trashed_at desc` (fallback `updated_at desc`)
+### Verification
 
-### Auto-expand behavior
-The existing effect auto-expands ancestors of the selected note. Extend it: if the selected note is trashed → auto-expand `__trash__`; if favorite and not in Vault → auto-expand `__favorites__`. Otherwise leave virtual roots collapsed (user preference is preserved per session via the existing `expanded` state).
-
-### No drag & drop on virtual roots
-Virtual roots are not real folders. Dropping a note onto Favorites/Recent/Trash is a no-op in this iteration (could later mean "star it" / "trash it" but out of scope here).
-
-## Out of scope
-- Persisting expand state across reloads
-- Pinned-notes root
-- Allowing drop on Trash to delete
-- Changing the existing top filter chips
-
-## Risks
-None significant. Counts and lists update reactively via React Query just like today.
+- `bunx tsc --noEmit` should be clean.
+- Visually confirm the panel header still looks balanced and that clicking a trashed/favorited note from the tree opens it in the editor.
