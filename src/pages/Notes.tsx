@@ -240,7 +240,6 @@ export default function Notes() {
 
   const handleCreate = useCallback(async () => {
     const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
-    setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
   }, [activeFolderPath, createNote, selectNote]);
@@ -297,7 +296,6 @@ export default function Notes() {
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
     setActiveFolderPath(folderPath);
     const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
-    setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
   }, [createNote, selectNote]);
