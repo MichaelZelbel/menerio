@@ -849,6 +849,36 @@ export function NoteTree({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 overflow-y-auto p-2">
+        {[
+          { key: "__favorites__", label: "Favorites", icon: Star, items: favoritesList },
+          { key: "__recent__", label: "Recent", icon: Clock, items: recentList },
+        ].map((root) => (
+          <VirtualRootRow
+            key={root.key}
+            rootKey={root.key}
+            label={root.label}
+            icon={root.icon}
+            notes={root.items}
+            expanded={expanded}
+            onToggle={toggleVirtualRoot}
+            depthStep={depthStep}
+            noteBasePad={noteBasePad}
+            folderOptions={folderOptions}
+            selectedId={selectedId}
+            multiActive={multiActive}
+            selectedIds={selectedIds}
+            bulk={bulk}
+            draggingKey={draggingKey}
+            onSelectFolder={onSelectFolder}
+            onSelectNote={onSelectNote}
+            onMoveNote={onMoveNote}
+            onRestoreNote={onRestoreNote}
+            onDeleteNotePermanently={onDeleteNotePermanently}
+            onDuplicateNote={handleDuplicateNote}
+            setDragOverPath={setDragOverPath}
+            setDraggingKey={setDraggingKey}
+          />
+        ))}
         <FolderRow
           node={tree}
           depth={0}
@@ -879,37 +909,31 @@ export function NoteTree({
           setDragOverPath={setDragOverPath}
           setDraggingKey={setDraggingKey}
         />
-        {[
-          { key: "__favorites__", label: "Favorites", icon: Star, items: favoritesList },
-          { key: "__recent__", label: "Recent", icon: Clock, items: recentList },
-          { key: "__trash__", label: "Trash", icon: Trash2, items: trashList },
-        ].map((root) => (
-          <VirtualRootRow
-            key={root.key}
-            rootKey={root.key}
-            label={root.label}
-            icon={root.icon}
-            notes={root.items}
-            expanded={expanded}
-            onToggle={toggleVirtualRoot}
-            depthStep={depthStep}
-            noteBasePad={noteBasePad}
-            folderOptions={folderOptions}
-            selectedId={selectedId}
-            multiActive={multiActive}
-            selectedIds={selectedIds}
-            bulk={bulk}
-            draggingKey={draggingKey}
-            onSelectFolder={onSelectFolder}
-            onSelectNote={onSelectNote}
-            onMoveNote={onMoveNote}
-            onRestoreNote={onRestoreNote}
-            onDeleteNotePermanently={onDeleteNotePermanently}
-            onDuplicateNote={handleDuplicateNote}
-            setDragOverPath={setDragOverPath}
-            setDraggingKey={setDraggingKey}
-          />
-        ))}
+        <VirtualRootRow
+          key="__trash__"
+          rootKey="__trash__"
+          label="Trash"
+          icon={Trash2}
+          notes={trashList}
+          expanded={expanded}
+          onToggle={toggleVirtualRoot}
+          depthStep={depthStep}
+          noteBasePad={noteBasePad}
+          folderOptions={folderOptions}
+          selectedId={selectedId}
+          multiActive={multiActive}
+          selectedIds={selectedIds}
+          bulk={bulk}
+          draggingKey={draggingKey}
+          onSelectFolder={onSelectFolder}
+          onSelectNote={onSelectNote}
+          onMoveNote={onMoveNote}
+          onRestoreNote={onRestoreNote}
+          onDeleteNotePermanently={onDeleteNotePermanently}
+          onDuplicateNote={handleDuplicateNote}
+          setDragOverPath={setDragOverPath}
+          setDraggingKey={setDraggingKey}
+        />
       </div>
 
       {multiActive && (
