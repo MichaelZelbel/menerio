@@ -13,7 +13,7 @@ import {
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteTree } from "@/components/notes/NoteTree";
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { NoteFilter } from "@/components/notes/NoteSidebar";
+
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +58,7 @@ import {
   X,
   
   FileText,
-  Star,
+  
   Trash2,
   ChevronDown,
   ChevronRight,
@@ -81,11 +81,6 @@ import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
-  { key: "all", label: "All Notes", icon: FileText },
-  { key: "favorites", label: "Favorites", icon: Star },
-  { key: "trash", label: "Trash", icon: Trash2 },
-];
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
@@ -113,7 +108,7 @@ export default function Notes() {
   const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<NoteFilter>("all");
+  
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
   const [showLocalGraph, setShowLocalGraph] = useState(false);
@@ -245,7 +240,6 @@ export default function Notes() {
 
   const handleCreate = useCallback(async () => {
     const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
-    setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
   }, [activeFolderPath, createNote, selectNote]);
@@ -302,7 +296,6 @@ export default function Notes() {
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
     setActiveFolderPath(folderPath);
     const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
-    setFilter("all");
     setSearchMode(false);
     selectNote(note.id);
   }, [createNote, selectNote]);
@@ -587,9 +580,8 @@ export default function Notes() {
   const currentNotes = useMemo(() => {
     let notes: (Note | SemanticSearchResult)[];
     if (searchMode && searchResults) notes = searchResults;
-    else if (filter === "favorites") notes = favNotes;
-    else if (filter === "trash") notes = trashNotes;
     else notes = allNotes;
+
 
     if (entityFilter) {
       notes = notes.filter((n) => n.entity_type === entityFilter);
@@ -643,7 +635,7 @@ export default function Notes() {
       return dir * (aTs - bTs);
     });
     return sorted;
-  }, [filter, allNotes, favNotes, trashNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
+  }, [allNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
@@ -657,7 +649,7 @@ export default function Notes() {
     );
   }, [selectedId, allNotes, trashNotes, favNotes, searchResults]);
 
-  const activeFilter = filterConfig.find((f) => f.key === filter)!;
+  
 
   const exitSearch = () => {
     setSearchMode(false);
@@ -748,31 +740,13 @@ export default function Notes() {
       <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-1.5 text-sm font-semibold h-8 px-2">
-                <activeFilter.icon className="h-4 w-4" />
-                {searchMode ? "Search" : activeFilter.label}
-                <span className="text-[10px] text-muted-foreground font-normal">
-                  {!searchMode && counts[filter]}
-                </span>
-                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              {filterConfig.map((f) => (
-                <DropdownMenuItem
-                  key={f.key}
-                  onClick={() => { setFilter(f.key); setSearchMode(false); }}
-                  className="gap-2"
-                >
-                  <f.icon className="h-4 w-4" />
-                  <span className="flex-1">{f.label}</span>
-                  <span className="text-[10px] text-muted-foreground">{counts[f.key]}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-1.5 text-sm font-semibold h-8 px-2">
+            <FileText className="h-4 w-4" />
+            {searchMode ? "Search" : "All Notes"}
+            <span className="text-[10px] text-muted-foreground font-normal">
+              {!searchMode && counts.all}
+            </span>
+          </div>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
