@@ -1189,7 +1189,10 @@ export default function Notes() {
             onDeleteNotePermanently={handleDeleteNotePermanently}
             sortField={sortField === "manual" ? "updated_at" : sortField}
             sortDirection={sortDirection}
+            favoriteNotes={favNotes}
+            trashedNotes={trashNotes}
           />
+
         )}
       </div>
 

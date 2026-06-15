@@ -1,37 +1,59 @@
-# People Detail: Profile als Default, Overview integrieren
+## Goal
 
-## Ziel
-Beim Öffnen einer Person landet man direkt auf dem **Profile**-Tab (ganz links). Der bisherige **Overview**-Tab wird entfernt, seine Inhalte (Private Notes + Related Notes) wandern in den Profile-Tab.
+In the notes sidebar, currently the tree has a single root **"Vault root"**. Add three more sibling roots, all **collapsed by default**:
 
-## Änderungen
+- **⭐ Favorites** — all starred notes (flat list)
+- **🕘 Recent** — 20 most recently updated notes (flat list)
+- **🗑 Trash** — all trashed notes (flat list)
 
-### 1. Tab-Struktur in `src/pages/People.tsx`
-- Entferne `TabsTrigger value="overview"` und den gesamten `TabsContent value="overview"`-Block.
-- Verschiebe `TabsTrigger value="profile"` an die erste Position (links).
-- Setze `activePersonTab` Default-State von `"overview"` auf `"profile"`.
-- Aktualisiere den "Back to People"-Button: Reset auf `"profile"` statt `"overview"`.
+## Feasibility
 
-### 2. Private Notes + Related Notes in `src/components/people/ContactProfileTab.tsx` integrieren
-- Übernehme den **Notes**-Block (Edit-Mode vs. Read-Mode) aus dem alten Overview-Tab.
-- Übernehme den **Related Notes**-Block (Liste verlinkter Notes) aus dem alten Overview-Tab.
-- Platziere beide Sektionen **oben** im Profile-Tab, vor LifeEventsStrip und RelationshipsSection.
-- Der Edit-Mode für Notes wird über den bestehenden `isEditing`-Zustand in `People.tsx` gesteuert; `ContactProfileTab` bekommt `notes`, `editingNotes`, `relatedNotes` und Callbacks (`onEditNotes`, `onSaveNotes`) als Props.
+Easy and cheap. All data is already loaded by `useNotes` hooks in `src/pages/Notes.tsx`:
 
-### 3. Prop-Schnittstelle erweitern
-`ContactProfileTabProps` erhält:
-```
-notes: string | null
-editingNotes: string | null
-isEditing: boolean
-relatedNotes: Note[]
-onEditNotes: () => void
-onSaveNotes: (notes: string) => void
-```
+- `allNotes` (excludes trash) → source for Recent
+- `favNotes` → source for Favorites
+- `trashNotes` → source for Trash
 
-## Was bleibt erhalten
-- **Private Notes**: Freitext-Notizfeld bleibt vollständig editierbar.
-- **Related Notes**: Automatisch verknüpfte Notes bleiben sichtbar und klickbar.
-- Alle anderen Tabs (Groups, Conversation, Timeline, Documents) bleiben unverändert.
+No new queries, no schema change, no extra network calls. Rendering ~20 extra rows when expanded has zero perceptible perf impact. The existing top filter chips ("All / Favorites / Trash") can stay — the new roots are a parallel, always-visible navigation aid in the tree.
 
-## Was verschwindet
-- Nur der separate "Overview"-Tab als eigenständiger Reiter.
+## Changes
+
+### `src/pages/Notes.tsx`
+- Pass two new props to `<NoteTree>`:
+  - `favoriteNotes={favNotes}`
+  - `trashedNotes={trashNotes}`
+- `recentNotes` is derived inside `NoteTree` from `notes` (top 20 by `updated_at`) so we don't double-compute.
+
+### `src/components/notes/NoteTree.tsx`
+- Add optional props `favoriteNotes`, `trashedNotes`.
+- Replace the single `<FolderRow node={tree} />` render with a wrapper that renders four siblings in order:
+  1. `Vault root` (existing tree, expanded by default — unchanged behavior)
+  2. `Favorites` (virtual root, collapsed by default)
+  3. `Recent` (virtual root, collapsed by default)
+  4. `Trash` (virtual root, collapsed by default)
+- Implement virtual roots as a lightweight `VirtualRootRow` component (or reuse `FolderRow` with a `variant: "virtual"` flag) that:
+  - Shows chevron + icon (Star / Clock / Trash2) + label + count badge
+  - When expanded, renders `NoteRow`s for the supplied notes — no nested folders, no drag/drop targets, no "New note here" context menu
+  - Uses stable expand keys: `__favorites__`, `__recent__`, `__trash__` (NOT added to default `expanded` set, so they start collapsed)
+- For the Trash root, `NoteRow` already supports `onRestoreNote` / `onDeleteNotePermanently` context-menu actions — pass them through.
+- For Favorites and Recent, the standard note context menu works as-is.
+- Selection: clicking a note in any virtual root calls existing `onSelectNote`; it opens the same editor. No change to routing.
+- Sorting inside virtual roots:
+  - Favorites: respect the current `sortField`/`sortDirection`
+  - Recent: always `updated_at desc`, capped at 20
+  - Trash: `trashed_at desc` (fallback `updated_at desc`)
+
+### Auto-expand behavior
+The existing effect auto-expands ancestors of the selected note. Extend it: if the selected note is trashed → auto-expand `__trash__`; if favorite and not in Vault → auto-expand `__favorites__`. Otherwise leave virtual roots collapsed (user preference is preserved per session via the existing `expanded` state).
+
+### No drag & drop on virtual roots
+Virtual roots are not real folders. Dropping a note onto Favorites/Recent/Trash is a no-op in this iteration (could later mean "star it" / "trash it" but out of scope here).
+
+## Out of scope
+- Persisting expand state across reloads
+- Pinned-notes root
+- Allowing drop on Trash to delete
+- Changing the existing top filter chips
+
+## Risks
+None significant. Counts and lists update reactively via React Query just like today.
