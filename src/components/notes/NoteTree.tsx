@@ -537,6 +537,111 @@ const NoteRow = memo(function NoteRow({
   );
 });
 
+interface VirtualRootRowProps {
+  rootKey: string;
+  label: string;
+  icon: typeof Star;
+  notes: (Note | SemanticSearchResult)[];
+  expanded: Set<string>;
+  onToggle: (key: string) => void;
+  depthStep: number;
+  noteBasePad: number;
+  folderOptions: FolderNode[];
+  selectedId: string | null;
+  multiActive: boolean;
+  selectedIds: string[];
+  bulk: UseBulkSelectResult;
+  draggingKey: string | null;
+  onSelectFolder: (path: string | null) => void;
+  onSelectNote: (id: string) => void;
+  onMoveNote: (noteId: string, path: string) => void;
+  onRestoreNote?: (noteId: string) => void;
+  onDeleteNotePermanently?: (noteId: string) => void;
+  onDuplicateNote: (note: Note | SemanticSearchResult) => Promise<void>;
+  setDragOverPath: Dispatch<SetStateAction<string | null>>;
+  setDraggingKey: Dispatch<SetStateAction<string | null>>;
+}
+
+const VirtualRootRow = memo(function VirtualRootRow({
+  rootKey,
+  label,
+  icon: Icon,
+  notes,
+  expanded,
+  onToggle,
+  depthStep,
+  noteBasePad,
+  folderOptions,
+  selectedId,
+  multiActive,
+  selectedIds,
+  bulk,
+  draggingKey,
+  onSelectFolder,
+  onSelectNote,
+  onMoveNote,
+  onRestoreNote,
+  onDeleteNotePermanently,
+  onDuplicateNote,
+  setDragOverPath,
+  setDraggingKey,
+}: VirtualRootRowProps) {
+  const isOpen = expanded.has(rootKey);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToggle(rootKey)}
+        className="flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-accent/60"
+        style={{ paddingLeft: "8px" }}
+      >
+        <span className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground">
+          {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </span>
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{notes.length}</span>
+      </button>
+      {isOpen && (
+        <div>
+          {notes.length === 0 ? (
+            <div
+              className="text-[11px] text-muted-foreground italic"
+              style={{ paddingLeft: `${noteBasePad + depthStep}px`, paddingTop: "2px", paddingBottom: "2px" }}
+            >
+              No notes
+            </div>
+          ) : (
+            notes.map((note) => (
+              <NoteRow
+                key={note.id}
+                note={note}
+                depth={1}
+                noteBasePad={noteBasePad}
+                depthStep={depthStep}
+                folderOptions={folderOptions}
+                selectedId={selectedId}
+                multiActive={multiActive}
+                selectedIds={selectedIds}
+                bulk={bulk}
+                draggingKey={draggingKey}
+                onSelectFolder={onSelectFolder}
+                onSelectNote={onSelectNote}
+                onMoveNote={onMoveNote}
+                onRestoreNote={onRestoreNote}
+                onDeleteNotePermanently={onDeleteNotePermanently}
+                onDuplicateNote={onDuplicateNote}
+                setDragOverPath={setDragOverPath}
+                setDraggingKey={setDraggingKey}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function NoteTree({
   notes,
   folderPaths,
@@ -554,7 +659,10 @@ export function NoteTree({
   onDeleteNotePermanently,
   sortField = "updated_at",
   sortDirection = "desc",
+  favoriteNotes,
+  trashedNotes,
 }: NoteTreeProps) {
+
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const duplicateNote = useDuplicateNote();
