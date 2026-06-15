@@ -13,7 +13,7 @@ import {
 import { NoteList } from "@/components/notes/NoteList";
 import { NoteTree } from "@/components/notes/NoteTree";
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { NoteFilter } from "@/components/notes/NoteSidebar";
+
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +58,7 @@ import {
   X,
   
   FileText,
-  Star,
+  
   Trash2,
   ChevronDown,
   ChevronRight,
@@ -81,11 +81,6 @@ import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-const filterConfig: { key: NoteFilter; label: string; icon: typeof FileText }[] = [
-  { key: "all", label: "All Notes", icon: FileText },
-  { key: "favorites", label: "Favorites", icon: Star },
-  { key: "trash", label: "Trash", icon: Trash2 },
-];
 
 type SearchMode = "semantic" | "exact";
 type SearchScope = "all" | "notes" | "media";
@@ -113,7 +108,7 @@ export default function Notes() {
   const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<NoteFilter>("all");
+  
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
   const [showLocalGraph, setShowLocalGraph] = useState(false);
