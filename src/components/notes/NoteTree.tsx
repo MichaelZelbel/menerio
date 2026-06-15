@@ -58,7 +58,10 @@ interface NoteTreeProps {
   onDeleteNotePermanently?: (noteId: string) => void;
   sortField?: NoteTreeSortField;
   sortDirection?: NoteTreeSortDirection;
+  favoriteNotes?: Note[];
+  trashedNotes?: Note[];
 }
+
 
 interface FolderNode {
   name: string;
