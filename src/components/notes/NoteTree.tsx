@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
+  Clock,
   Copy,
   FilePlus,
   FileText,
@@ -17,6 +18,7 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
+
 import { Note, SemanticSearchResult, useDuplicateNote } from "@/hooks/useNotes";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
