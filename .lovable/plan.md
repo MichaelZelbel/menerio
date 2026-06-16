@@ -1,55 +1,65 @@
-## Root cause
+# Fix: clicking a note shows the list, not the editor (narrow preview widths)
 
-`src/App.tsx` declares two sibling routes that both render `<Notes />`:
+## What's actually happening
 
-```tsx
-<Route path="notes" element={<Notes />} />
-<Route path="notes/:noteId" element={<Notes />} />
-```
+In the Notes page the two panels are sized by **two different mechanisms** that can disagree:
 
-These are distinct element instances. Navigating between `/dashboard/notes` and `/dashboard/notes/<id>` switches matches, which unmounts the first `<Notes />` and mounts a second. Every hook resets, every query refetches, the tree re-expands from scratch and TipTap rebuilds — the visible "flash and re-render" the user reports. Happens on every selection, on any viewport. Independent of the recent mobile work.
+- **Tailwind CSS** — the list panel uses `w-full md:w-72`. Below 768 px the list is full width; at/above 768 px it's a 288 px column.
+- **JavaScript** — `useIsMobile()` decides whether the list pane gets `hidden` (when a note is selected) and whether the editor pane gets `hidden` (when no note is selected).
+
+`useIsMobile()` returns `false` on the very first render (its state starts as `undefined` → `!!undefined` → `false`) and only flips to the correct value inside a `useEffect`. So on the first paint at a viewport like ~700 px:
+
+- Tailwind: `md:w-72` does **not** apply → list is `w-full`.
+- JS: thinks "desktop" → does not add `hidden` to the list.
+- Result: the list panel takes the entire container width. The editor sits next to it with `flex-1`, but its sibling is `w-full shrink-0`, so the editor gets 0 px of width and is invisible. That's exactly what your screenshot shows after clicking "Hello World".
+
+Even after the effect fires, any later re-mount or width change can reproduce the same one-frame disagreement, and at the exact boundary (≈767–768 px) the two systems can stay out of sync because they key off subtly different media queries (`max-width: 767px` vs `min-width: 768px`) and the JS initial value.
 
 ## Fix
 
-Collapse the two routes into one shared element so React Router keeps `<Notes />` mounted across selection changes.
+Make `useIsMobile()` the **single source of truth** for the Notes layout and remove the Tailwind responsive width classes from the panels.
 
-### 1. `src/App.tsx`
+### 1. `src/hooks/use-mobile.tsx`
 
-Replace the two route lines with a single splat route:
+Resolve the initial value synchronously so the first render is already correct:
 
-```tsx
-<Route path="notes/*" element={<Notes />} />
+```ts
+const [isMobile, setIsMobile] = React.useState<boolean>(() =>
+  typeof window !== "undefined" &&
+  window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
+);
 ```
 
-A splat route matches both `/dashboard/notes` and `/dashboard/notes/<id>` with the same element instance, so `<Notes />` stays mounted as `:noteId` changes.
+Keep the existing `matchMedia` listener for live resizes. Return `isMobile` directly (no `!!`).
 
-### 2. `src/pages/Notes.tsx`
+### 2. `src/pages/Notes.tsx` — list panel (around line 745)
 
-The component currently reads `noteId` via `useParams<{ noteId?: string }>()`. With the splat route, `useParams()['*']` holds the rest of the path. Replace:
-
-```tsx
-const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
-```
-
-with:
+Replace:
 
 ```tsx
-const params = useParams();
-const urlNoteId = params["*"] || undefined;
+"w-full md:w-72",
+isMobile && selectedId ? "hidden" : "flex"
 ```
 
-Everything else (the `useEffect` that syncs `selectedId` from `urlNoteId`, the `selectNote → navigate(...)` calls) stays unchanged.
+with width driven by `isMobile`:
 
-No other call sites use `useParams` for this noteId.
+```tsx
+isMobile ? "w-full" : "w-72",
+isMobile && selectedId ? "hidden" : "flex"
+```
 
-## Verification
+### 3. `src/pages/Notes.tsx` — editor panel (around line 1186)
 
-- Click between several notes on desktop: tree state stays put, no flash, editor swaps in instantly (only the editor remounts via its `key={selectedNote.id}`, which is intentional).
-- Deep-link to `/dashboard/notes/<id>` loads the editor with that note.
-- Deep-link to `/dashboard/notes` loads with no selection.
-- Mobile behavior from the previous step still works (list ↔ editor switch via back button).
-- `bunx tsc --noEmit` clean.
+No class changes needed. With the list panel either `hidden` (mobile, note selected) or a fixed `w-72` column (desktop), the `flex-1 min-w-0` editor always has room to render.
 
-## Out of scope
+### 4. Verify
 
-The `useIsMobile()` first-render flip and the editor wrapper structure are not the cause and don't need changing for this bug. If they cause other issues later, address separately.
+- View the preview at 600 px, 767 px, 768 px, and 1200 px widths.
+- At all narrow widths: clicking a note should hide the list and show the editor full-width with a "← Notes" back button.
+- At ≥ 768 px: both panels visible side by side; clicking a note swaps the editor content in place with no flash and no disappearing panel.
+
+## Technical notes
+
+- The bug is **not** the route change we made earlier — that fix (single `notes/*` route) is still correct and stays.
+- The breakpoint stays at 768 px to match Tailwind's `md` for the rest of the app; only the Notes panel widths stop relying on the `md:` class.
+- No data, query, or editor changes. Scope is layout + the mobile hook's initial value.
