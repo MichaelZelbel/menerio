@@ -534,7 +534,7 @@ const corsHeaders = {
 
 const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
 - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
-- "people": array of people mentioned (empty if none)
+- "people": array of names of actual human beings mentioned (real individuals — first name, full name, or known alias). Do NOT include companies, products, apps, projects, tools, libraries, websites, brands, domains, or open-source repos, even if the name sounds like a personal name. When in doubt (e.g., a single capitalized word with no clearly human context), leave it out.
 
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
 - "topics": array of 1-5 short topic tags (always generate at least one)
