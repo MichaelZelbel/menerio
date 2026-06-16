@@ -107,7 +107,8 @@ const SORT_STORAGE_KEY = "menerio:notelist:sort";
 
 export default function Notes() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
+  const params = useParams();
+  const urlNoteId = params["*"] || undefined;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();

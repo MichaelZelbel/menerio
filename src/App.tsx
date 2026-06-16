@@ -128,8 +128,7 @@ const App = () => (
                     }
                   >
                     <Route index element={<Dashboard />} />
-                    <Route path="notes" element={<Notes />} />
-                    <Route path="notes/:noteId" element={<Notes />} />
+                    <Route path="notes/*" element={<Notes />} />
                     <Route path="settings" element={<Settings />} />
 
                     <Route path="activity" element={<ActivityPage />} />

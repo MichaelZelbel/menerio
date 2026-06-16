@@ -1,76 +1,55 @@
-## Ziel
+## Root cause
 
-Menerio auf Mobilgeräten benutzbar machen, beginnend mit dem Notes-Workspace (akutestes Problem), und das Wissen als wiederverwendbaren Skill für weitere Seiten festhalten.
+`src/App.tsx` declares two sibling routes that both render `<Notes />`:
 
-## Teil A — Notes-Workspace mobil nutzbar machen (Sofortmaßnahme)
-
-Das aktuelle Layout in `src/pages/Notes.tsx` ist ein starres 3-Spalten-Flex (`w-72` Tree | Notizliste | Editor). Auf < 768 px läuft der Editor aus dem Viewport. Lösung: **Single-Pane-Stack auf Mobil** mit drei sichtbaren Zuständen (Tree, Liste, Editor) und Navigation per Zurück-Button / Drawer — wie Obsidian Mobile, Bear, Apple Notes.
-
-### Verhalten
-
-```text
-Desktop (≥ md):                Mobil (< md):
-┌─────┬──────┬──────────┐      ┌──────────────┐
-│Tree │Liste │ Editor   │      │ aktives Pane │
-└─────┴──────┴──────────┘      └──────────────┘
-                                 + Header mit ←
-                                 + Drawer für Tree
+```tsx
+<Route path="notes" element={<Notes />} />
+<Route path="notes/:noteId" element={<Notes />} />
 ```
 
-Mobiler Pane-State: `'tree' | 'list' | 'editor'`.
-- App-Start auf Mobil: `'list'` (Vault-Wurzel).
-- Tap auf Ordner/Tag im Tree → `'list'`.
-- Tap auf Notiz in Liste → `'editor'`.
-- Editor-Header bekommt mobilen `← Zurück`-Button → `'list'`.
-- Listen-Header bekommt mobilen Menü-Button → öffnet Tree als **Sheet** (Drawer von links).
+These are distinct element instances. Navigating between `/dashboard/notes` and `/dashboard/notes/<id>` switches matches, which unmounts the first `<Notes />` and mounts a second. Every hook resets, every query refetches, the tree re-expands from scratch and TipTap rebuilds — the visible "flash and re-render" the user reports. Happens on every selection, on any viewport. Independent of the recent mobile work.
 
-### Konkrete Änderungen
+## Fix
 
-1. **`src/pages/Notes.tsx`**
-   - `useIsMobile()` einbinden.
-   - Wrapper `min-h-[100dvh]` statt `100vh` (iOS-Adressleiste).
-   - Mobil: Tree-Spalte aus dem Flex entfernen und stattdessen in ein `Sheet` (shadcn) verschieben, ausgelöst durch einen Menü-Button im Listen-Header.
-   - Mobil: nur das aktive Pane rendern (`mobilePane`-State). Desktop unverändert.
-   - Editor-Pane auf Mobil bekommt Header-Zeile mit `← Notizen`-Button.
-   - Notiz-Auswahl-Handler setzt zusätzlich `mobilePane='editor'`.
-   - Alle Container im Editor-Pfad: `min-w-0` ergänzen, damit lange Inhalte umbrechen statt zu sprengen.
+Collapse the two routes into one shared element so React Router keeps `<Notes />` mounted across selection changes.
 
-2. **`src/components/notes/NoteTree.tsx`** (nur sanft)
-   - Touch-Targets: Zeilen-Padding `py-1` → `py-1.5` auf Mobil (≥ 36 px Höhe, ausreichend für Listen mit Disclosure-Icons).
-   - Sicherstellen, dass Klick auf einen Ordner im Sheet das Sheet schließt.
+### 1. `src/App.tsx`
 
-3. **Globale Shell** (`DashboardLayout.tsx`)
-   - Höhenberechnungen `calc(100vh - 56px)` → `calc(100dvh - 56px)` an den 2–3 betroffenen Stellen.
+Replace the two route lines with a single splat route:
 
-4. **`src/index.css`**
-   - `env(safe-area-inset-bottom)` als Padding für fixed Footer / Editor-Toolbar.
+```tsx
+<Route path="notes/*" element={<Notes />} />
+```
 
-Keine Änderung an Editor-Logik, Suche, Daten, Routing-Struktur.
+A splat route matches both `/dashboard/notes` and `/dashboard/notes/<id>` with the same element instance, so `<Notes />` stays mounted as `:noteId` changes.
 
-### Verifikation
+### 2. `src/pages/Notes.tsx`
 
-- Preview auf 375 × 812 (iPhone) und 768 × 1024 (iPad): Tree-Sheet öffnen, Notiz wählen, Editor sichtbar, Zurück führt zurück.
-- Desktop ≥ 1024 px: unverändert.
+The component currently reads `noteId` via `useParams<{ noteId?: string }>()`. With the splat route, `useParams()['*']` holds the rest of the path. Replace:
+
+```tsx
+const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
+```
+
+with:
+
+```tsx
+const params = useParams();
+const urlNoteId = params["*"] || undefined;
+```
+
+Everything else (the `useEffect` that syncs `selectedId` from `urlNoteId`, the `selectNote → navigate(...)` calls) stays unchanged.
+
+No other call sites use `useParams` for this noteId.
+
+## Verification
+
+- Click between several notes on desktop: tree state stays put, no flash, editor swaps in instantly (only the editor remounts via its `key={selectedNote.id}`, which is intentional).
+- Deep-link to `/dashboard/notes/<id>` loads the editor with that note.
+- Deep-link to `/dashboard/notes` loads with no selection.
+- Mobile behavior from the previous step still works (list ↔ editor switch via back button).
 - `bunx tsc --noEmit` clean.
 
-## Teil B — Skill „responsive-design" anlegen
+## Out of scope
 
-Datei: `.agents/skills/responsive-design/SKILL.md`, danach `skills--apply_draft`.
-
-Inhalt (Kurzform):
-- **Mobile-first**: Layout für < 768 px zuerst denken, dann `md:` aufwärts ergänzen.
-- **Ein-Pane-Regel**: Multi-Pane-Workspaces auf Mobil zu Stack + Drawer/Sheet umbauen, nie horizontal quetschen.
-- **Höhe**: `100dvh` statt `100vh`; Header-Offsets über `calc(100dvh - Xpx)`.
-- **Overflow**: jeder Flex-Child, der Text enthält, braucht `min-w-0`; nur explizit gewollte Bereiche dürfen horizontal scrollen.
-- **Touch**: Buttons/Links ≥ 40 px Höhe auf Mobil; Hover-Only-UI durch sichtbare Aktionen ersetzen.
-- **Safe areas**: `env(safe-area-inset-*)` für fixe Leisten.
-- **Tooling**: `useIsMobile()` für Verzweigungen, `Sheet` für Drawer, `Tabs`/State für Pane-Switching.
-- **QA-Checkliste**: 375 × 812, 768 × 1024, 1280 × 800.
-
-Damit wird der Skill bei jeder weiteren Mobile-Aufgabe automatisch verfügbar.
-
-## Out of scope (Folgearbeit)
-
-- Mobile-Optimierung weiterer Seiten (People, Lexicon, Graph, Settings, Admin). Jede bekommt einen eigenen, ähnlich kleinen Pass — der Skill aus Teil B leitet die Arbeit.
-- PWA-/Capacitor-Optimierungen.
-- Gesten (Swipe-zum-Zurück) — erst nach Validierung des Tap-Flows.
+The `useIsMobile()` first-render flip and the editor wrapper structure are not the cause and don't need changing for this bug. If they cause other issues later, address separately.
