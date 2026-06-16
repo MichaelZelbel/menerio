@@ -736,12 +736,17 @@ export default function Notes() {
 
   return (
     <>
-    <div className="flex h-[calc(100vh-56px)] overflow-hidden">
+    <div className="flex h-[calc(100dvh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
 
       {/* Note list panel */}
-      <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
+      <div className={cn(
+        "shrink-0 border-r border-border flex-col bg-background min-w-0",
+        "w-full md:w-72",
+        isMobile && selectedId ? "hidden" : "flex"
+      )}>
+
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
           <div className="flex flex-col text-sm font-semibold h-8 px-2 leading-tight">
