@@ -62,6 +62,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Filter,
   Check,
   Sparkles,
@@ -76,6 +77,7 @@ import {
   LayoutGrid,
   Loader2,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
@@ -108,6 +110,8 @@ export default function Notes() {
   const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
+
   
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
@@ -732,12 +736,17 @@ export default function Notes() {
 
   return (
     <>
-    <div className="flex h-[calc(100vh-56px)] overflow-hidden">
+    <div className="flex h-[calc(100dvh-56px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
 
       {/* Note list panel */}
-      <div className="w-72 shrink-0 border-r border-border flex flex-col bg-background">
+      <div className={cn(
+        "shrink-0 border-r border-border flex-col bg-background min-w-0",
+        "w-full md:w-72",
+        isMobile && selectedId ? "hidden" : "flex"
+      )}>
+
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
           <div className="flex flex-col text-sm font-semibold h-8 px-2 leading-tight">
@@ -1173,16 +1182,36 @@ export default function Notes() {
       </div>
 
       {/* Right panel — editor */}
-      <div className="flex-1 min-w-0">
+      <div className={cn(
+        "flex-1 min-w-0 flex-col",
+        isMobile && !selectedId ? "hidden" : "flex"
+      )}>
         {selectedNote ? (
-          <NoteEditor
-            key={selectedNote.id}
-            note={selectedNote}
-            onNoteDeleted={() => selectNote(null)}
-            showLocalGraph={showLocalGraph}
-            onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
-            onNoteSelect={selectNote}
-          />
+          <>
+            {isMobile && (
+              <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  onClick={() => selectNote(null)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Notes
+                </Button>
+              </div>
+            )}
+            <div className="flex-1 min-h-0 min-w-0">
+              <NoteEditor
+                key={selectedNote.id}
+                note={selectedNote}
+                onNoteDeleted={() => selectNote(null)}
+                showLocalGraph={showLocalGraph}
+                onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
+                onNoteSelect={selectNote}
+              />
+            </div>
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <div className="mb-4">
@@ -1199,6 +1228,7 @@ export default function Notes() {
             </Button>
           </div>
         )}
+
       </div>
     </div>
     <AlertDialog
