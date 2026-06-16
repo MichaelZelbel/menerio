@@ -744,7 +744,7 @@ export default function Notes() {
       {/* Note list panel */}
       <div className={cn(
         "shrink-0 border-r border-border flex-col bg-background min-w-0",
-        "w-full md:w-72",
+        isMobile ? "w-full" : "w-72",
         isMobile && selectedId ? "hidden" : "flex"
       )}>
 
