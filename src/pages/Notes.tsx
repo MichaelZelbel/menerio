@@ -110,6 +110,8 @@ export default function Notes() {
   const { noteId: urlNoteId } = useParams<{ noteId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
+
   
   const [selectedId, setSelectedId] = useState<string | null>(urlNoteId || null);
   const [searchMode, setSearchMode] = useState(false);
