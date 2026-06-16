@@ -534,7 +534,7 @@ const corsHeaders = {
 
 const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
 - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
-- "people": array of people mentioned (empty if none)
+- "people": array of names of actual human beings mentioned (real individuals — first name, full name, or known alias). Do NOT include companies, products, apps, projects, tools, libraries, websites, brands, domains, or open-source repos, even if the name sounds like a personal name. When in doubt (e.g., a single capitalized word with no clearly human context), leave it out.
 
 - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
 - "topics": array of 1-5 short topic tags (always generate at least one)
@@ -803,6 +803,37 @@ async function generateReviewItems(
         }
       }
 
+      // Build a set of names that are already known as Lexicon (wiki) concepts —
+      // these are non-person entities (projects, products, tools, …) and must
+      // never trigger an "Add to People" suggestion.
+      const lexiconNames = new Set<string>();
+      const { data: lexiconPages } = await supabase
+        .from("wiki_pages")
+        .select("title, slug, aliases")
+        .eq("user_id", userId);
+      for (const p of (lexiconPages || []) as any[]) {
+        if (p.title) lexiconNames.add(String(p.title).toLowerCase());
+        if (p.slug) lexiconNames.add(String(p.slug).toLowerCase().replace(/-/g, " "));
+        if (Array.isArray(p.aliases)) {
+          for (const a of p.aliases) if (a) lexiconNames.add(String(a).toLowerCase());
+        }
+      }
+      // Same-note race: include pages created by wiki-ingest for THIS note.
+      const { data: thisNotePages } = await supabase
+        .from("wiki_page_sources")
+        .select("wiki_pages(title, aliases, slug)")
+        .eq("user_id", userId)
+        .eq("note_id", noteId);
+      for (const row of (thisNotePages || []) as any[]) {
+        const wp = row.wiki_pages;
+        if (!wp) continue;
+        if (wp.title) lexiconNames.add(String(wp.title).toLowerCase());
+        if (wp.slug) lexiconNames.add(String(wp.slug).toLowerCase().replace(/-/g, " "));
+        if (Array.isArray(wp.aliases)) {
+          for (const a of wp.aliases) if (a) lexiconNames.add(String(a).toLowerCase());
+        }
+      }
+
       const fullText = `${noteTitle}\n${noteContent}`;
       const { factor: sourceFactor, sourceTag } = getSourceConfidenceFactor(metadata);
       const blocklist = new Set(preferences.personBlocklist || []);
@@ -810,6 +841,12 @@ async function generateReviewItems(
       for (const person of people) {
         // 1. Exact match
         if (nameToContact.has(person.toLowerCase())) continue;
+
+        // 1b. Already a Lexicon concept (project/product/tool/etc.) — never suggest as a person.
+        if (lexiconNames.has(person.toLowerCase())) {
+          console.log(`Skipping "${person}" — already a Lexicon entry (non-person)`);
+          continue;
+        }
 
         // 2. User-defined / generic blocklist — drop completely.
         if (blocklist.has(person.toLowerCase())) {
