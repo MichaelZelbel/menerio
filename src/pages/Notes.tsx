@@ -1182,16 +1182,36 @@ export default function Notes() {
       </div>
 
       {/* Right panel — editor */}
-      <div className="flex-1 min-w-0">
+      <div className={cn(
+        "flex-1 min-w-0 flex-col",
+        isMobile && !selectedId ? "hidden" : "flex"
+      )}>
         {selectedNote ? (
-          <NoteEditor
-            key={selectedNote.id}
-            note={selectedNote}
-            onNoteDeleted={() => selectNote(null)}
-            showLocalGraph={showLocalGraph}
-            onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
-            onNoteSelect={selectNote}
-          />
+          <>
+            {isMobile && (
+              <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  onClick={() => selectNote(null)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Notes
+                </Button>
+              </div>
+            )}
+            <div className="flex-1 min-h-0 min-w-0">
+              <NoteEditor
+                key={selectedNote.id}
+                note={selectedNote}
+                onNoteDeleted={() => selectNote(null)}
+                showLocalGraph={showLocalGraph}
+                onToggleLocalGraph={() => setShowLocalGraph(prev => !prev)}
+                onNoteSelect={selectNote}
+              />
+            </div>
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <div className="mb-4">
@@ -1208,6 +1228,7 @@ export default function Notes() {
             </Button>
           </div>
         )}
+
       </div>
     </div>
     <AlertDialog
