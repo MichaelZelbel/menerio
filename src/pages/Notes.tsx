@@ -62,6 +62,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Filter,
   Check,
   Sparkles,
@@ -76,6 +77,7 @@ import {
   LayoutGrid,
   Loader2,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
