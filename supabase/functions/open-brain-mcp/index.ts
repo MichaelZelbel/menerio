@@ -192,6 +192,10 @@ function formatNote(
     parts.push(`People: ${(m.people as string[]).join(", ")}`);
   if (Array.isArray(m.action_items) && m.action_items.length)
     parts.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
+  const snippet = (t as any).chunk_snippet as string | undefined;
+  if (snippet && (t as any).exact_phrase_match) {
+    parts.push(`Match: ${snippet}`);
+  }
   parts.push(`\n${t.content}`);
 
   // Append media analysis info
