@@ -27,6 +27,42 @@ serve(async (req) => {
     if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     const userId = user.id;
 
+    // Load owner identity (display name + self aliases) — mirrors process-note's loadSelfContext
+    let ownerPreferredName: string | null = null;
+    const ownerAliases = new Set<string>();
+    let selfMatchingEnabled = true;
+    {
+      const { data: profile } = await db
+        .from("profiles")
+        .select("display_name, self_matching_enabled")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profile) {
+        selfMatchingEnabled = (profile as any).self_matching_enabled !== false;
+        const dn = ((profile as any).display_name || "").trim();
+        if (dn) {
+          ownerPreferredName = dn;
+          ownerAliases.add(dn.toLowerCase());
+          const first = dn.split(/\s+/)[0];
+          if (first) ownerAliases.add(first.toLowerCase());
+        }
+      }
+      if (selfMatchingEnabled) {
+        const { data: aliasRows } = await db
+          .from("user_self_aliases")
+          .select("alias, is_active")
+          .eq("user_id", userId)
+          .eq("is_active", true);
+        for (const r of (aliasRows || []) as any[]) {
+          const a = String(r.alias || "").trim().toLowerCase();
+          if (a) ownerAliases.add(a);
+        }
+      }
+    }
+    const ownerDisplay = ownerPreferredName || "the profile owner";
+    const aliasList = Array.from(ownerAliases);
+    const aliasesText = aliasList.length ? aliasList.join(", ") : "(none provided)";
+
     // Get existing categories for the user
     const { data: categories } = await db
       .from("profile_categories")
@@ -113,14 +149,33 @@ serve(async (req) => {
 
     const existingLabels = (existingEntries || []).map((e: any) => `${e.label}: ${e.value}`);
 
-    const prompt = `You are analyzing a user's personal notes to suggest profile entries they might want to add to their personal profile. The profile has these categories (by slug): ${categorySlugs.join(", ")}.
+    const prompt = `You are analyzing a user's personal notes to suggest profile entries for the OWNER'S OWN personal profile.
 
-Here are the default category slugs and what they cover:
+PROFILE OWNER
+The profile owner is: ${ownerDisplay}
+Also known as (aliases): ${aliasesText}
+You are building ONLY this owner's own personal profile — not a profile for anyone else mentioned in the notes.
+
+STRICT SUBJECT-ATTRIBUTION RULES (must follow):
+- ONLY suggest a fact when the note text makes a first-person statement about the OWNER themselves ("I am…", "I'm…", "my…", "I have…", "I live in…", "I work as…"), OR an explicit statement about the owner by their own name/alias above.
+- NEVER suggest a fact that describes someone else — a contact, partner, family member, friend, colleague, VRChat persona/alt, or any third party mentioned in the notes. Facts about other people belong to THOSE people, not the owner.
+- The "Top people mentioned" list below names OTHER people in the owner's notes. It is context about who the owner knows — it is NOT a source of the owner's own attributes. Do not turn a mentioned person's traits, job, location, health, or relationships into the owner's profile entries.
+- If you cannot tell whether a fact is about the owner or about someone else, DO NOT suggest it. When in doubt, leave it out.
+- Do not infer the owner's identity, relationships, health, or location from facts stated about other people (e.g. a contact having a spouse does not mean the owner has one).
+
+EXAMPLES
+✓ Note says: "I'm a backend engineer at Acme based in Berlin." → suggest professional/location entries for the owner.
+✗ Note says: "Alex is my dentist and lives in Munich." → do NOT suggest "lives in Munich" for the owner (that's Alex). You also should not suggest "dentist: Alex" as an owner attribute unless an explicit owner-facing field calls for it.
+✗ Note titled "Xihui" describing that person's job, hobbies, or partner → do NOT turn any of those into owner profile entries.
+
+PROFILE CATEGORIES (by slug) available on this profile: ${categorySlugs.join(", ")}
+
+Default category slugs and what they cover:
 - identity: Name, pronouns, languages, nationality
 - location: Current city, timezone, living situation
 - professional: Job, company, industry, skills
 - education: Degrees, certifications
-- relationships: Partner, children, close family
+- relationships: Partners, children, close family — the owner may have multiple partners; never assume only one, and only record relationships first-person about the owner
 - communication: Tone, humor style
 - personality: Type indicators, core values
 - principles: Personal rules, codex vitae
@@ -134,11 +189,11 @@ Here are the default category slugs and what they cover:
 - goals: Short-term, long-term goals
 - preferences: Morning/night, introvert/extrovert
 
-DATA FROM THE USER'S NOTES:
+DATA FROM THE USER'S NOTES (mostly describes OTHER people and topics — apply the attribution rules above):
 
 Top topics: ${topTopics.join(", ") || "none"}
 
-Top people mentioned: ${topPeople.join(", ") || "none"}
+Top people mentioned (these are OTHER people, NOT the owner): ${topPeople.join(", ") || "none"}
 
 Note types: ${entitySummary.join(", ") || "none"}
 
@@ -150,14 +205,14 @@ ${sampleSnippets.join("\n---\n")}
 Existing profile entries (DO NOT duplicate these):
 ${existingLabels.join("\n") || "none yet"}
 
-Based on these patterns, suggest profile entries the user might want to add. For each suggestion provide:
+Based on these patterns, suggest profile entries the OWNER might want to add to their OWN profile. For each suggestion provide:
 - category_slug (from the list above)
 - label (short field name)
 - value (suggested value)
 - confidence: "high", "medium", or "low"
-- reason: brief explanation of why you suggest this
+- reason: brief explanation, including which note text made this clearly about the owner
 
-Only suggest things you're reasonably confident about. Return 5-15 suggestions max. Return valid JSON array.`;
+Only suggest things you're reasonably confident are about the OWNER. Return 5-15 suggestions max (fewer is fine — return an empty array if nothing in the notes clearly describes the owner). Return valid JSON array.`;
 
     const chatResult = await runChat({
       db,
