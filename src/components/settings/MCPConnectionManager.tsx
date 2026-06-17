@@ -316,61 +316,25 @@ export function MCPConnectionManager() {
   );
 
   const agentPrompt = useMemo(
-    () => `You have access to Menerio — the user's personal AI memory and second brain.
+    () => `**Set up Menerio as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
 
-# Setup (do this first, before anything else)
-This message is a task, not background reading. Before answering the user's next question, register Menerio as an MCP server in your own configuration so it persists across sessions:
+**Step 1 — Get my token.** Before anything else, ask me to paste my Personal MCP Token. I'll generate it in Menerio → Settings → MCP Server (starts with \`${MCP_TOKEN_PREFIX}\`) and send it back. Wait for it.
 
-1. Add a new MCP server using whatever mechanism your host environment provides — an MCP config file (e.g. \`.mcp.json\`, \`mcp.json\`, \`~/.config/.../mcp.json\`), a connections manifest (e.g. \`connections.md\`), a settings command, or a tool the user has given you for managing MCP connections.
-2. Name the connection \`menerio\`.
-3. Use the URL, transport, and headers in the "Connection" section below. Store the token there too — do not keep it only in conversational memory.
-4. If you maintain a connections registry file such as \`connections.md\` or \`.mcp.json\`, add an entry for Menerio in it now.
-5. If you cannot determine where to register MCP servers in the current environment, ask the user once where to put it, then proceed.
-6. After registering, verify the connection by calling \`initialize\` → \`tools/list\` → \`tools/call get_user_profile\`, and report the result back to the user in one short line (e.g. "Menerio connected — N tools available, signed in as <name>.").
+**Step 2 — Install the server.** Register Menerio as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
 
-Only after this setup step is complete should you continue with the user's request.
+- Transport: HTTP (streamable)
+- URL: \`${MCP_URL}\` *(exactly this — no \`/mcp\`, \`/sse\`, or \`/v1\` suffix)*
+- Auth header: \`Authorization: Bearer <the token I gave you>\`
 
-# Connection
-- MCP Server URL: ${MCP_URL}
-- Transport: MCP Streamable HTTP
-- Auth header: \`Authorization: Bearer <PERSONAL_MCP_TOKEN>\` (token starts with \`${MCP_TOKEN_PREFIX}\`)
-- Required headers:
-  - \`Authorization: Bearer <PERSONAL_MCP_TOKEN>\`
-  - \`Accept: application/json, text/event-stream\`
-  - \`Content-Type: application/json\`
-- Replace \`<PERSONAL_MCP_TOKEN>\` everywhere it appears with the Personal MCP Token shown once when the user created it in Menerio → Settings → MCP Server. It is the same single token in every header — do not ask for two different values.
-- The token is long-lived; it stays valid until the user revokes it or its optional expiration date passes.
-- Keep the endpoint exactly as shown above. Do not add /mcp, /sse, /v1, or any other path.
-- If a tool call returns \`401 Invalid or revoked token\`, ask the user for a new Personal MCP Token from Menerio → Settings → MCP Server instead of retrying.
+**Step 3 — Save behavior rules.** Ask my permission, then append the following to your **global / user-level** instructions file (e.g. \`~/.claude/CLAUDE.md\`, \`GEMINI.md\`, \`AGENTS.md\`, or your tool's user-scope rules) so they apply in every future session:
 
-# What Menerio is
-Menerio stores the user's notes, People (contacts with interaction history), Moments (structured timeline events), Groups (goal-oriented sets of people), Collections (user-defined structured data with custom schemas), Lexicon pages (durable synthesized knowledge), a knowledge graph of links between notes, media (images/PDFs with AI descriptions), and a structured profile (identity, preferences, values, goals, agent instructions).
+- At the start of a session that needs personal context, call \`get_user_profile\` once to personalize, and honor any \`agent_instructions\` it returns.
+- When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_notes\` (and \`lexicon_search\`) before answering — don't answer from memory alone.
+- When I share a new fact, decision, idea, or meeting note worth keeping, call \`capture_note\` without asking. Confirm before saving long-form content. If it clearly fits a user collection, prefer \`add_collection_item\`.
+- For things that happened at a point in time (meetings, milestones), prefer \`create_moment_with_ai\`.
+- After any write, end with a one-line confirmation of what was saved and where. Never invent note ids, titles, or dates.
 
-# Available tools
-Always call \`tools/list\` at session start to discover the live, authoritative tool surface — the categories below are a guide, not an exhaustive list, and the server gains new tools over time.
-
-- **Notes** — \`search_notes\`, \`list_recent_notes\`, \`capture_note\`, \`update_note\`, \`trash_note\`, \`get_stats\`, \`get_action_items\`.
-- **People** — \`list_people\`, \`search_contacts\`, \`get_contact_context\`, \`get_person_notes\`, \`log_interaction\`.
-- **Moments** — \`create_moment_with_ai\` (preferred for natural-language input), \`list_moments\`, \`search_moments\`.
-- **Groups** — \`list_groups\`, \`get_group\`, \`create_group\`, \`add_group_member\`, \`update_group_membership\`, \`log_group_interaction\`, \`create_group_next_step\`, \`generate_group_briefing\`, plus AI suggestion/import helpers.
-- **Collections** — \`list_collections\`, \`get_collection_schema\`, \`add_collection_item\`, \`update_collection_item\`, \`list_collection_items\`, \`search_all_collections\`. Honour each collection's \`agent_instructions\`.
-- **Lexicon** — \`lexicon_search\`, \`lexicon_get_page\`, \`lexicon_create_page\`, \`lexicon_update_page\`, \`lexicon_run_lint\`.
-- **Knowledge graph** — \`get_connected_notes\`, \`find_path\`, \`get_clusters\`.
-- **Media** — \`search_images\`, \`get_note_media\`.
-- **Identity** — \`get_user_profile\`.
-
-# How to behave
-- Treat the Setup section above as a task to complete on first paste, not background information.
-- On first use in a conversation, call \`get_user_profile\` so your answers are personalised. Honour any \`agent_instructions\` returned.
-- Early in a session, also call \`list_collections\` so you know which user-defined collections exist and how the user wants to capture into each one.
-- When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_notes\` (and \`lexicon_search\` for durable synthesized knowledge) before answering from your own memory.
-- When the user shares a new fact, decision, idea, observation, or meeting note worth keeping, call \`capture_note\` — don't ask for permission for short factual captures; do confirm for long-form content. If the content clearly belongs in a collection, prefer \`add_collection_item\`.
-- For events that happened at a point in time and matter on the user's timeline (meetings, milestones, conversations), prefer \`create_moment_with_ai\`.
-- Output style: concise. For lists of notes, show one bullet per item with title + date. Only show full content when explicitly asked.
-- After any write, end with a one-line confirmation of what was saved and where.
-- Never invent note ids, titles, or dates. If a search returns nothing, say so.
-
-Use these tools whenever the user asks you to recall, search, save, or organise anything from their personal memory.`,
+**Step 4 — Verify.** Confirm the MCP server is connected (list your servers), confirm the rules were written to the file, then call \`get_user_profile\` to prove the connection. Report all three results.`,
     []
   );
 
