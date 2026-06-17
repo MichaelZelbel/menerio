@@ -1970,7 +1970,7 @@ server.registerTool(
   {
     title: "Get User Profile",
     description:
-      "Retrieve the user's personal profile — identity, preferences, values, goals, health info, and explicit instructions for how to interact with them. Use this at the start of conversations to understand who you're working with, or when you need specific context about the user's preferences, background, or communication style. Supports scope filtering so you only get the categories relevant to your role.",
+      "Retrieve the user's personal profile — identity, preferences, values, goals, health info, and explicit instructions for how to interact with them. The response also includes a `relationships` block listing key people in the user's life (spouse, partner, family, etc.), derived from structured contact fields AND from first-person assertions in notes (e.g. \"X is my wife\"). Use this at the start of conversations and whenever the user asks about people close to them — the answer is usually here in one call.",
     inputSchema: {
       scope: z.string().optional().describe("Filter by scope: all, professional, personal, health. Omit to get everything except private."),
       categories: z.array(z.string()).optional().describe("Only return these category slugs"),
