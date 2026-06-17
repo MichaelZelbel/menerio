@@ -1870,16 +1870,52 @@ async function deriveUserRelationships(userId: string): Promise<{
   derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }>;
 } | null> {
   try {
-    // 1) Structured contacts with a relationship value.
+    // 1a) Structured contacts with a scalar relationship value.
     const { data: contactRows } = await supabase
       .from("contacts")
       .select("id, name, relationship, ai_visibility, is_sensitive")
       .eq("user_id", userId)
-      .is("merged_into", null)
-      .not("relationship", "is", null);
-    const structured = (contactRows || [])
-      .filter((c: any) => c.ai_visibility !== "hidden" && !c.is_sensitive && c.relationship && c.name)
-      .map((c: any) => ({ name: c.name as string, relationship: String(c.relationship).toLowerCase(), contact_id: c.id as string }));
+      .is("merged_into", null);
+
+    const visibleContactsById = new Map<string, { id: string; name: string; ai_visibility: string | null; is_sensitive: boolean | null }>();
+    for (const c of (contactRows || []) as any[]) {
+      if (c.ai_visibility === "hidden" || c.is_sensitive) continue;
+      if (!c.name) continue;
+      visibleContactsById.set(c.id, c);
+    }
+
+    const structured: Array<{ name: string; relationship: string; contact_id: string }> = [];
+    const structuredSeen = new Set<string>(); // name|rel (case-insensitive)
+    const pushStructured = (name: string, rel: string, contactId: string) => {
+      const key = `${name.toLowerCase().trim()}|${rel.toLowerCase().trim()}`;
+      if (structuredSeen.has(key)) return;
+      structuredSeen.add(key);
+      structured.push({ name, relationship: rel.toLowerCase(), contact_id: contactId });
+    };
+
+    for (const c of (contactRows || []) as any[]) {
+      if (!visibleContactsById.has(c.id)) continue;
+      if (!c.relationship) continue;
+      pushStructured(c.name, String(c.relationship), c.id);
+    }
+
+    // 1b) Typed multi-valued relationships from contact_relationships
+    //     where the contact is the source and the user ('self') is the target.
+    const { data: relRows } = await supabase
+      .from("contact_relationships")
+      .select("source_id, source_type, target_type, label, custom_label")
+      .eq("user_id", userId)
+      .eq("target_type", "self")
+      .eq("source_type", "contact")
+      .not("source_id", "is", null);
+
+    for (const r of (relRows || []) as any[]) {
+      const contact = visibleContactsById.get(r.source_id);
+      if (!contact) continue;
+      const label = String(r.custom_label || r.label || "").trim();
+      if (!label) continue;
+      pushStructured(contact.name, label, contact.id);
+    }
 
     // 2) Derived: scan visible, non-trashed notes for first-person relationship
     //    assertions. Keep it bounded — most recent 500 notes.
@@ -1996,11 +2032,13 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
       };
 
-      // Fetch categories (never return private via MCP)
+      // Fetch categories (never return private via MCP).
+      // contact_id IS NULL → user's own profile categories (not contacts').
       let catQuery = supabase
         .from("profile_categories")
         .select("id, name, slug, visibility_scope, sort_order")
         .eq("user_id", getCurrentUserId())
+        .is("contact_id", null)
         .neq("visibility_scope", "private")
         .order("sort_order");
 
@@ -2016,7 +2054,8 @@ server.registerTool(
         filteredCats = filteredCats.filter((c: any) => catSlugs.includes(c.slug));
       }
 
-      // Fetch entries for these categories
+      // Fetch entries for these categories — also restricted to the user's own
+      // profile (contact_id IS NULL) so contact entries never leak through.
       const catIds = filteredCats.map((c: any) => c.id);
       if (catIds.length === 0) {
         return emptyProfileResponse();
@@ -2026,6 +2065,7 @@ server.registerTool(
         .from("profile_entries")
         .select("category_id, label, value, linked_note_id, sort_order")
         .eq("user_id", getCurrentUserId())
+        .is("contact_id", null)
         .in("category_id", catIds)
         .order("sort_order");
 
@@ -2049,27 +2089,70 @@ server.registerTool(
         }
       }
 
-      // Build structured response
-      const profileCategories = filteredCats.map((cat: any) => {
-        const catEntries = (entries || [])
-          .filter((e: any) => e.category_id === cat.id)
-          .map((e: any) => {
-            const entry: Record<string, unknown> = {
-              label: e.label,
-              value: e.value,
-              has_linked_note: !!e.linked_note_id,
-            };
-            if (e.linked_note_id && noteMap.has(e.linked_note_id)) {
-              entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
-              if (include_notes) {
-                entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
-              }
-            }
-            return entry;
-          });
+      // Build structured response, collapsing categories that share a slug into
+      // one block and de-duplicating entries within each block by (label, value).
+      const slugOrder: string[] = [];
+      const slugBuckets = new Map<string, { name: string; slug: string; catIds: string[] }>();
+      for (const cat of filteredCats as any[]) {
+        const slug = cat.slug || cat.id;
+        if (!slugBuckets.has(slug)) {
+          slugBuckets.set(slug, { name: cat.name, slug, catIds: [cat.id] });
+          slugOrder.push(slug);
+        } else {
+          slugBuckets.get(slug)!.catIds.push(cat.id);
+        }
+      }
 
+      const profileCategories = slugOrder.map((slug) => {
+        const bucket = slugBuckets.get(slug)!;
+        const catIdSet = new Set(bucket.catIds);
+        const seenEntries = new Map<string, Record<string, unknown>>();
+        const orderedKeys: string[] = [];
+
+        for (const e of (entries || []) as any[]) {
+          if (!catIdSet.has(e.category_id)) continue;
+          const labelKey = String(e.label ?? "").trim().toLowerCase();
+          const valueKey = String(e.value ?? "").trim().toLowerCase();
+          const key = `${labelKey}\u0000${valueKey}`;
+
+          const existing = seenEntries.get(key);
+          if (existing) {
+            // Prefer the variant that has a linked note.
+            if (e.linked_note_id && !existing.has_linked_note) {
+              const entry: Record<string, unknown> = {
+                label: e.label,
+                value: e.value,
+                has_linked_note: true,
+              };
+              if (noteMap.has(e.linked_note_id)) {
+                entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
+                if (include_notes) {
+                  entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
+                }
+              }
+              seenEntries.set(key, entry);
+            }
+            continue;
+          }
+
+          const entry: Record<string, unknown> = {
+            label: e.label,
+            value: e.value,
+            has_linked_note: !!e.linked_note_id,
+          };
+          if (e.linked_note_id && noteMap.has(e.linked_note_id)) {
+            entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
+            if (include_notes) {
+              entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
+            }
+          }
+          seenEntries.set(key, entry);
+          orderedKeys.push(key);
+        }
+
+        const catEntries = orderedKeys.map((k) => seenEntries.get(k)!);
         if (catEntries.length === 0) return null;
-        return { name: cat.name, slug: cat.slug, entries: catEntries };
+        return { name: bucket.name, slug: bucket.slug, entries: catEntries };
       }).filter(Boolean);
 
       if (profileCategories.length === 0) {
