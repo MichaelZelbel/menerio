@@ -460,6 +460,73 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Relationship synonyms — terms that, when present in a query, mark it as a
+// first-person personal-fact question. Used to boost exact-phrase hits and to
+// derive a relationships block in get_user_profile.
+const RELATIONSHIP_TERMS = [
+  "wife", "husband", "spouse", "partner", "girlfriend", "boyfriend",
+  "fiance", "fiancee", "fiancé", "fiancée",
+  "mom", "mother", "dad", "father", "parent", "parents",
+  "sister", "brother", "sibling", "siblings",
+  "son", "daughter", "kid", "kids", "child", "children",
+  "uncle", "aunt", "cousin",
+  "grandma", "grandpa", "grandmother", "grandfather",
+  "boss", "manager", "colleague", "coworker", "employee", "assistant",
+  "friend", "best friend", "roommate", "neighbor",
+];
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Find the first whole-word match of any phrase in content (case-insensitive).
+// Phrases longer than 1 word match as a phrase; single words match whole-word.
+function findFirstPhraseMatch(content: string, phrases: string[]): { index: number; length: number } | null {
+  if (!content) return null;
+  let best: { index: number; length: number } | null = null;
+  for (const p of phrases) {
+    const phrase = p.trim();
+    if (!phrase) continue;
+    const re = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "i");
+    const m = re.exec(content);
+    if (m && m.index >= 0 && (best === null || m.index < best.index)) {
+      best = { index: m.index, length: m[0].length };
+    }
+  }
+  return best;
+}
+
+// Build a ±200-char snippet window centered on the match, collapsing whitespace.
+function buildWindowSnippet(content: string, matchIndex: number, matchLength: number, radius = 200): string {
+  const start = Math.max(0, matchIndex - radius);
+  const end = Math.min(content.length, matchIndex + matchLength + radius);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < content.length ? "…" : "";
+  const slice = content.slice(start, end).replace(/\s+/g, " ").trim();
+  return `${prefix}${slice}${suffix}`;
+}
+
+// Given the original query, return the set of phrases we look for to boost
+// (query tokens >= 3 chars, plus relationship synonyms if any term is present).
+function buildBoostPhrases(query: string): string[] {
+  const q = query.toLowerCase();
+  const tokens = q.split(/[^a-zà-ÿ0-9]+/i).filter((t) => t.length >= 3);
+  const phrases = new Set<string>(tokens);
+  // If the query is about a personal relationship, also boost the synonym set
+  // and a few common assertion phrases so "Xihui is my wife" lands at the top
+  // even when the user asked "name of my wife".
+  const hitsRelationship = tokens.some((t) => RELATIONSHIP_TERMS.includes(t));
+  if (hitsRelationship) {
+    for (const t of RELATIONSHIP_TERMS) phrases.add(t);
+    for (const t of RELATIONSHIP_TERMS) {
+      phrases.add(`is my ${t}`);
+      phrases.add(`my ${t}`);
+      phrases.add(`${t}:`);
+    }
+  }
+  return Array.from(phrases);
+}
+
 // Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
 async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
   let semanticResults: any[] = [];
