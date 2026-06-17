@@ -600,7 +600,27 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       merged.push({ ...r, similarity: null });
     }
   }
-  return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+
+  // Exact-phrase boost: rows whose content contains a query-token or
+  // relationship-synonym phrase get promoted, and their snippet is rewritten
+  // to a window centered on the match so the salient sentence is what the
+  // model reads first.
+  const phrases = buildBoostPhrases(query);
+  const boosted: any[] = [];
+  const rest: any[] = [];
+  for (const r of merged) {
+    const haystack = `${r.title || ""}\n${r.content || ""}`;
+    const hit = findFirstPhraseMatch(haystack, phrases);
+    if (hit) {
+      r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+      r.exact_phrase_match = true;
+      boosted.push(r);
+    } else {
+      rest.push(r);
+    }
+  }
+  const ordered = [...boosted, ...rest];
+  return { rows: ordered.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
 }
 
 
