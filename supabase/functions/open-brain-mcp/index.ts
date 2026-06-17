@@ -1858,7 +1858,113 @@ server.registerTool(
   }
 );
 
-// Tool: Get User Profile
+// Derive relationships for the current user from two sources:
+//   1. Structured: contacts.relationship (when populated by the user).
+//   2. Derived: first-person assertions in note content like
+//      "X is my wife", "my wife [[X]]", "wife: X". Wikilink-aware.
+// Returns a compact, agent-friendly shape suitable for embedding in
+// get_user_profile responses so personal-fact questions are answered
+// in a single tool call.
+async function deriveUserRelationships(userId: string): Promise<{
+  structured: Array<{ name: string; relationship: string; contact_id: string }>;
+  derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }>;
+} | null> {
+  try {
+    // 1) Structured contacts with a relationship value.
+    const { data: contactRows } = await supabase
+      .from("contacts")
+      .select("id, name, relationship, ai_visibility, is_sensitive")
+      .eq("user_id", userId)
+      .is("merged_into", null)
+      .not("relationship", "is", null);
+    const structured = (contactRows || [])
+      .filter((c: any) => c.ai_visibility !== "hidden" && !c.is_sensitive && c.relationship && c.name)
+      .map((c: any) => ({ name: c.name as string, relationship: String(c.relationship).toLowerCase(), contact_id: c.id as string }));
+
+    // 2) Derived: scan visible, non-trashed notes for first-person relationship
+    //    assertions. Keep it bounded — most recent 500 notes.
+    const { data: notes } = await supabase
+      .from("notes")
+      .select("id, title, content, ai_visibility, is_trashed")
+      .eq("user_id", userId)
+      .eq("is_trashed", false)
+      .order("updated_at", { ascending: false })
+      .limit(500);
+
+    const derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }> = [];
+    const seen = new Set<string>(); // dedupe by name|relationship
+    const relAlt = RELATIONSHIP_TERMS.map(escapeRegex).join("|");
+
+    // Patterns we recognise:
+    //   "[[Name]] is my <rel>"      → name = wikilink target or display
+    //   "<Name> is my <rel>"        → name = preceding capitalised words / note title
+    //   "my <rel> [[Name]]"
+    //   "my <rel>, [[Name]]"
+    //   "<rel>: [[Name]]"  /  "<rel>: Name"
+    const patterns: Array<{ re: RegExp; nameGroup: number; relGroup: number }> = [
+      { re: new RegExp(`\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]\\s+is\\s+my\\s+(${relAlt})\\b`, "gi"), nameGroup: 1, relGroup: 2 },
+      { re: new RegExp(`\\bmy\\s+(${relAlt})[\\s,:\\-—]+\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
+      { re: new RegExp(`\\b(${relAlt})\\s*:\\s*\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
+    ];
+
+    for (const n of (notes || []) as any[]) {
+      if (n.ai_visibility === "hidden") continue;
+      const content = String(n.content || "");
+      if (!content) continue;
+
+      // Plus: "<NoteTitle> is my <rel>" anywhere in the body — useful for
+      // person-notes where the note title is the person's name.
+      const titleEsc = n.title ? escapeRegex(String(n.title)) : null;
+      const titleRe = titleEsc
+        ? new RegExp(`\\b${titleEsc}\\b\\s+is\\s+my\\s+(${relAlt})\\b`, "i")
+        : null;
+      if (titleRe) {
+        const m = titleRe.exec(content);
+        if (m) {
+          const key = `${n.title.toLowerCase()}|${m[1].toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            derived.push({
+              name: n.title,
+              relationship: m[1].toLowerCase(),
+              source_note_id: n.id,
+              source_note_title: n.title,
+              quote: buildWindowSnippet(content, m.index, m[0].length, 80),
+            });
+          }
+        }
+      }
+
+      for (const { re, nameGroup, relGroup } of patterns) {
+        re.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          const name = (m[nameGroup] || "").trim();
+          const rel = (m[relGroup] || "").trim().toLowerCase();
+          if (!name || !rel) continue;
+          const key = `${name.toLowerCase()}|${rel}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          derived.push({
+            name,
+            relationship: rel,
+            source_note_id: n.id,
+            source_note_title: n.title || "",
+            quote: buildWindowSnippet(content, m.index, m[0].length, 80),
+          });
+        }
+      }
+    }
+
+    if (structured.length === 0 && derived.length === 0) return null;
+    return { structured, derived };
+  } catch (err) {
+    console.warn("deriveUserRelationships failed:", err);
+    return null;
+  }
+}
+
+
 server.registerTool(
   "get_user_profile",
   {
