@@ -2019,12 +2019,7 @@ server.registerTool(
       // Fetch entries for these categories
       const catIds = filteredCats.map((c: any) => c.id);
       if (catIds.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       const { data: entries } = await supabase
