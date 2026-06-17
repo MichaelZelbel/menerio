@@ -1887,10 +1887,13 @@ async function deriveUserRelationships(userId: string): Promise<{
     const structured: Array<{ name: string; relationship: string; contact_id: string }> = [];
     const structuredSeen = new Set<string>(); // name|rel (case-insensitive)
     const pushStructured = (name: string, rel: string, contactId: string) => {
-      const key = `${name.toLowerCase().trim()}|${rel.toLowerCase().trim()}`;
+      const normRel = rel.toLowerCase().trim();
+      const key = `${name.toLowerCase().trim()}|${normRel}`;
       if (structuredSeen.has(key)) return;
+      const junk = new Set(["self", "myself", "me", "none", "n/a", "na", "unknown"]);
+      if (junk.has(normRel)) return;
       structuredSeen.add(key);
-      structured.push({ name, relationship: rel.toLowerCase(), contact_id: contactId });
+      structured.push({ name, relationship: normRel, contact_id: contactId });
     };
 
     for (const c of (contactRows || []) as any[]) {
@@ -1936,11 +1939,9 @@ async function deriveUserRelationships(userId: string): Promise<{
     //   "<Name> is my <rel>"        → name = preceding capitalised words / note title
     //   "my <rel> [[Name]]"
     //   "my <rel>, [[Name]]"
-    //   "<rel>: [[Name]]"  /  "<rel>: Name"
     const patterns: Array<{ re: RegExp; nameGroup: number; relGroup: number }> = [
       { re: new RegExp(`\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]\\s+is\\s+my\\s+(${relAlt})\\b`, "gi"), nameGroup: 1, relGroup: 2 },
       { re: new RegExp(`\\bmy\\s+(${relAlt})[\\s,:\\-—]+\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
-      { re: new RegExp(`\\b(${relAlt})\\s*:\\s*\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
     ];
 
     for (const n of (notes || []) as any[]) {
