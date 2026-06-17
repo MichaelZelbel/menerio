@@ -2031,12 +2031,7 @@ server.registerTool(
 
       // Check if there are any entries at all
       if (!entries?.length) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       // Optionally fetch linked notes
