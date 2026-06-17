@@ -1939,11 +1939,9 @@ async function deriveUserRelationships(userId: string): Promise<{
     //   "<Name> is my <rel>"        → name = preceding capitalised words / note title
     //   "my <rel> [[Name]]"
     //   "my <rel>, [[Name]]"
-    //   "<rel>: [[Name]]"  /  "<rel>: Name"
     const patterns: Array<{ re: RegExp; nameGroup: number; relGroup: number }> = [
       { re: new RegExp(`\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]\\s+is\\s+my\\s+(${relAlt})\\b`, "gi"), nameGroup: 1, relGroup: 2 },
       { re: new RegExp(`\\bmy\\s+(${relAlt})[\\s,:\\-—]+\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
-      { re: new RegExp(`\\b(${relAlt})\\s*:\\s*\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
     ];
 
     for (const n of (notes || []) as any[]) {
