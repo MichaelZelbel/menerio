@@ -2549,11 +2549,11 @@ server.registerTool(
   {
     title: "Search Brain (Notes + Lexicon)",
     description:
-      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page.",
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.25),
+      threshold: z.number().optional().default(0.2),
     },
   },
   async ({ query, limit, threshold }) => {
