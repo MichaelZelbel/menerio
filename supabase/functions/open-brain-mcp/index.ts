@@ -1870,16 +1870,52 @@ async function deriveUserRelationships(userId: string): Promise<{
   derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }>;
 } | null> {
   try {
-    // 1) Structured contacts with a relationship value.
+    // 1a) Structured contacts with a scalar relationship value.
     const { data: contactRows } = await supabase
       .from("contacts")
       .select("id, name, relationship, ai_visibility, is_sensitive")
       .eq("user_id", userId)
-      .is("merged_into", null)
-      .not("relationship", "is", null);
-    const structured = (contactRows || [])
-      .filter((c: any) => c.ai_visibility !== "hidden" && !c.is_sensitive && c.relationship && c.name)
-      .map((c: any) => ({ name: c.name as string, relationship: String(c.relationship).toLowerCase(), contact_id: c.id as string }));
+      .is("merged_into", null);
+
+    const visibleContactsById = new Map<string, { id: string; name: string; ai_visibility: string | null; is_sensitive: boolean | null }>();
+    for (const c of (contactRows || []) as any[]) {
+      if (c.ai_visibility === "hidden" || c.is_sensitive) continue;
+      if (!c.name) continue;
+      visibleContactsById.set(c.id, c);
+    }
+
+    const structured: Array<{ name: string; relationship: string; contact_id: string }> = [];
+    const structuredSeen = new Set<string>(); // name|rel (case-insensitive)
+    const pushStructured = (name: string, rel: string, contactId: string) => {
+      const key = `${name.toLowerCase().trim()}|${rel.toLowerCase().trim()}`;
+      if (structuredSeen.has(key)) return;
+      structuredSeen.add(key);
+      structured.push({ name, relationship: rel.toLowerCase(), contact_id: contactId });
+    };
+
+    for (const c of (contactRows || []) as any[]) {
+      if (!visibleContactsById.has(c.id)) continue;
+      if (!c.relationship) continue;
+      pushStructured(c.name, String(c.relationship), c.id);
+    }
+
+    // 1b) Typed multi-valued relationships from contact_relationships
+    //     where the contact is the source and the user ('self') is the target.
+    const { data: relRows } = await supabase
+      .from("contact_relationships")
+      .select("source_id, source_type, target_type, label, custom_label")
+      .eq("user_id", userId)
+      .eq("target_type", "self")
+      .eq("source_type", "contact")
+      .not("source_id", "is", null);
+
+    for (const r of (relRows || []) as any[]) {
+      const contact = visibleContactsById.get(r.source_id);
+      if (!contact) continue;
+      const label = String(r.custom_label || r.label || "").trim();
+      if (!label) continue;
+      pushStructured(contact.name, label, contact.id);
+    }
 
     // 2) Derived: scan visible, non-trashed notes for first-person relationship
     //    assertions. Keep it bounded — most recent 500 notes.
