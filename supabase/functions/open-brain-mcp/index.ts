@@ -2073,17 +2073,13 @@ server.registerTool(
       }).filter(Boolean);
 
       if (profileCategories.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       const result: Record<string, unknown> = {
         profile: { categories: profileCategories },
       };
+      if (relationships) result.relationships = relationships;
 
       // Agent instructions
       if (include_instructions) {
