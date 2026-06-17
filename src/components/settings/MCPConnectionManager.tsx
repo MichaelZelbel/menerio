@@ -318,17 +318,29 @@ export function MCPConnectionManager() {
   const agentPrompt = useMemo(
     () => `You have access to Menerio — the user's personal AI memory and second brain.
 
+# Setup (do this first, before anything else)
+This message is a task, not background reading. Before answering the user's next question, register Menerio as an MCP server in your own configuration so it persists across sessions:
+
+1. Add a new MCP server using whatever mechanism your host environment provides — an MCP config file (e.g. \`.mcp.json\`, \`mcp.json\`, \`~/.config/.../mcp.json\`), a connections manifest (e.g. \`connections.md\`), a settings command, or a tool the user has given you for managing MCP connections.
+2. Name the connection \`menerio\`.
+3. Use the URL, transport, and headers in the "Connection" section below. Store the token there too — do not keep it only in conversational memory.
+4. If you maintain a connections registry file such as \`connections.md\` or \`.mcp.json\`, add an entry for Menerio in it now.
+5. If you cannot determine where to register MCP servers in the current environment, ask the user once where to put it, then proceed.
+6. After registering, verify the connection by calling \`initialize\` → \`tools/list\` → \`tools/call get_user_profile\`, and report the result back to the user in one short line (e.g. "Menerio connected — N tools available, signed in as <name>.").
+
+Only after this setup step is complete should you continue with the user's request.
+
 # Connection
 - MCP Server URL: ${MCP_URL}
 - Transport: MCP Streamable HTTP
-- Auth header: \`Authorization: Bearer <PROJECT_MCP_TOKEN>\` (token starts with \`${MCP_TOKEN_PREFIX}\`)
+- Auth header: \`Authorization: Bearer <PERSONAL_MCP_TOKEN>\` (token starts with \`${MCP_TOKEN_PREFIX}\`)
 - Required headers:
-  - \`Authorization: Bearer <PROJECT_MCP_TOKEN>\`
+  - \`Authorization: Bearer <PERSONAL_MCP_TOKEN>\`
   - \`Accept: application/json, text/event-stream\`
   - \`Content-Type: application/json\`
+- Replace \`<PERSONAL_MCP_TOKEN>\` everywhere it appears with the Personal MCP Token shown once when the user created it in Menerio → Settings → MCP Server. It is the same single token in every header — do not ask for two different values.
 - The token is long-lived; it stays valid until the user revokes it or its optional expiration date passes.
 - Keep the endpoint exactly as shown above. Do not add /mcp, /sse, /v1, or any other path.
-- Verification flow: call \`initialize\`, then \`tools/list\`, then \`tools/call\` with the safe read-only tool \`get_user_profile\`.
 - If a tool call returns \`401 Invalid or revoked token\`, ask the user for a new Personal MCP Token from Menerio → Settings → MCP Server instead of retrying.
 
 # What Menerio is
@@ -348,6 +360,7 @@ Always call \`tools/list\` at session start to discover the live, authoritative 
 - **Identity** — \`get_user_profile\`.
 
 # How to behave
+- Treat the Setup section above as a task to complete on first paste, not background information.
 - On first use in a conversation, call \`get_user_profile\` so your answers are personalised. Honour any \`agent_instructions\` returned.
 - Early in a session, also call \`list_collections\` so you know which user-defined collections exist and how the user wants to capture into each one.
 - When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_notes\` (and \`lexicon_search\` for durable synthesized knowledge) before answering from your own memory.
@@ -360,6 +373,7 @@ Always call \`tools/list\` at session start to discover the live, authoritative 
 Use these tools whenever the user asks you to recall, search, save, or organise anything from their personal memory.`,
     []
   );
+
 
   return (
     <div className="space-y-6">
