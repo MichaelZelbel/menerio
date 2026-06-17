@@ -375,7 +375,7 @@ export async function runChat(args: {
     const usage = result?.usage ?? {};
     const pt = usage.prompt_tokens ?? 0;
     const ct = usage.completion_tokens ?? 0;
-    const total = usage.total_tokens ?? (pt + ct) || FALLBACK_TOKENS[effective.model] || 300;
+    const total = (usage.total_tokens ?? (pt + ct)) || FALLBACK_TOKENS[effective.model] || 300;
     const usageSource = pt || ct || usage.total_tokens ? "provider" : "fallback";
     try {
       credits = await deductTokens(args.db, {
