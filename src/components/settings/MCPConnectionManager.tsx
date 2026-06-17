@@ -35,17 +35,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import {
   Copy,
   Check,
-  Terminal,
-  Monitor,
-  Code2,
+  Plug,
   Sparkles,
   Key,
   Plus,
@@ -57,23 +49,113 @@ import { toast } from "sonner";
 
 const MCP_URL = "https://mcp.menerio.com";
 const MCP_TOKEN_PREFIX = "mnr_mcp_";
-const TOKEN_PLACEHOLDER = `${MCP_TOKEN_PREFIX}YOUR_TOKEN`;
 
-const TOOLS = [
-  { name: "search_thoughts", desc: "Semantic search across all your captured thoughts by meaning" },
-  { name: "list_recent", desc: "List recent notes with filters by type, topic, person, or date range" },
-  { name: "capture_thought", desc: "Save a new thought — auto-generates embedding and metadata" },
-  { name: "get_stats", desc: "Summary statistics: totals, top topics, people, recent activity" },
-  { name: "get_action_items", desc: "All open action items extracted from notes" },
-  { name: "get_person_notes", desc: "All notes mentioning a specific person" },
-  { name: "search_images", desc: "Search across all analyzed images and PDFs by description or extracted text" },
-  { name: "get_note_media", desc: "Get all media analysis results for a specific note" },
-  { name: "get_user_profile", desc: "Retrieve identity, preferences, values, goals, and agent instructions" },
-  { name: "lexicon_search", desc: "Search Lexicon pages by title, slug, or content" },
-  { name: "lexicon_get_page", desc: "Read a full Lexicon page with sources and backlinks" },
-  { name: "lexicon_create_page", desc: "Create a reviewed Lexicon page on your behalf" },
-  { name: "lexicon_update_page", desc: "Update a reviewed Lexicon page on your behalf" },
-  { name: "lexicon_run_lint", desc: "Run the Lexicon health check for broken links, orphans, drift, and contradictions" },
+type ToolCategory = {
+  category: string;
+  blurb: string;
+  tools: { name: string; desc: string }[];
+};
+
+const TOOL_CATEGORIES: ToolCategory[] = [
+  {
+    category: "Notes",
+    blurb: "Capture, search, and manage thoughts.",
+    tools: [
+      { name: "search_notes", desc: "Semantic search across all notes by meaning." },
+      { name: "list_recent_notes", desc: "Recent notes, filterable by type, topic, person, or date." },
+      { name: "capture_note", desc: "Save a new note — title, embedding, topics, people and actions extracted automatically." },
+      { name: "update_note", desc: "Edit an existing note." },
+      { name: "trash_note", desc: "Move a note to trash." },
+      { name: "get_stats", desc: "Totals, top topics, people, recent activity." },
+      { name: "get_action_items", desc: "Open action items extracted from notes." },
+    ],
+  },
+  {
+    category: "People",
+    blurb: "Contacts and their interaction history.",
+    tools: [
+      { name: "list_people", desc: "List all contacts." },
+      { name: "search_contacts", desc: "Search contacts by name, company, or tag." },
+      { name: "get_contact_context", desc: "Full context for one person: profile, notes, interactions, moments." },
+      { name: "get_person_notes", desc: "All notes mentioning a specific person." },
+      { name: "log_interaction", desc: "Record an interaction with a contact." },
+    ],
+  },
+  {
+    category: "Moments (timeline)",
+    blurb: "Structured life events on the user's timeline.",
+    tools: [
+      { name: "create_moment_with_ai", desc: "Preferred. Create a Moment from a natural-language description; AI fills in structured fields." },
+      { name: "list_moments", desc: "List recent Moments, optionally filtered." },
+      { name: "search_moments", desc: "Search Moments by content or participants." },
+    ],
+  },
+  {
+    category: "Groups",
+    blurb: "Goal-oriented sets of people with stages and next steps.",
+    tools: [
+      { name: "list_groups", desc: "List active Groups with counts and goals." },
+      { name: "get_group", desc: "Group detail: members, interactions, next steps, briefing." },
+      { name: "create_group", desc: "Create a new Group." },
+      { name: "add_group_member", desc: "Add or restore a Group member." },
+      { name: "update_group_membership", desc: "Update stage/status, priority, notes, or archive." },
+      { name: "log_group_interaction", desc: "Record an interaction in the Group context." },
+      { name: "create_group_next_step", desc: "Add an open next-step action for a membership." },
+      { name: "suggest_group_next_step", desc: "AI-suggest one next step (does not save)." },
+      { name: "generate_group_briefing", desc: "Generate and save a Markdown briefing for a Group." },
+      { name: "add_members_from_notes", desc: "AI-add or propose Group members from notes." },
+      { name: "preview_group_members_from_note", desc: "Preview deterministic import from a Markdown table/list note." },
+      { name: "import_group_members_from_note", desc: "Import members deterministically from a Markdown table/list note." },
+      { name: "review_group_member_suggestion", desc: "Apply Keep / Roll Back / Never Again to a Review Queue item." },
+    ],
+  },
+  {
+    category: "Collections",
+    blurb: "User-defined structured data sets with custom schemas.",
+    tools: [
+      { name: "list_collections", desc: "List all collections with their agent_instructions." },
+      { name: "get_collection_schema", desc: "Field schema (keys, types, options) for one collection." },
+      { name: "add_collection_item", desc: "Add an item to a collection." },
+      { name: "update_collection_item", desc: "Update an existing collection item." },
+      { name: "list_collection_items", desc: "Search and list items within a collection." },
+      { name: "search_all_collections", desc: "Search items across every collection at once." },
+    ],
+  },
+  {
+    category: "Lexicon",
+    blurb: "Durable, synthesized knowledge pages.",
+    tools: [
+      { name: "lexicon_search", desc: "Search Lexicon pages by title, slug, or content." },
+      { name: "lexicon_get_page", desc: "Read a full Lexicon page with sources and backlinks." },
+      { name: "lexicon_create_page", desc: "Create a reviewed Lexicon page." },
+      { name: "lexicon_update_page", desc: "Update a reviewed Lexicon page." },
+      { name: "lexicon_run_lint", desc: "Run the Lexicon health check (broken links, orphans, drift, contradictions)." },
+    ],
+  },
+  {
+    category: "Knowledge graph",
+    blurb: "Connections between notes.",
+    tools: [
+      { name: "get_connected_notes", desc: "Notes linked to a given note." },
+      { name: "find_path", desc: "Find a path of connections between two notes." },
+      { name: "get_clusters", desc: "Topic clusters across the knowledge graph." },
+    ],
+  },
+  {
+    category: "Media",
+    blurb: "Images and PDFs with AI analysis.",
+    tools: [
+      { name: "search_images", desc: "Search analyzed images and PDFs by description or extracted text." },
+      { name: "get_note_media", desc: "Media analysis attached to a note." },
+    ],
+  },
+  {
+    category: "Identity",
+    blurb: "Who the user is.",
+    tools: [
+      { name: "get_user_profile", desc: "Identity, preferences, values, goals, and agent_instructions. Call once at session start." },
+    ],
+  },
 ];
 
 type McpApiToken = {
@@ -233,75 +315,46 @@ export function MCPConnectionManager() {
     </Button>
   );
 
-  const claudeSnippet = useMemo(
-    () => `{
-  "mcpServers": {
-    "menerio": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote",
-        "${MCP_URL}",
-        "--header",
-        "Authorization: Bearer ${TOKEN_PLACEHOLDER}",
-        "--header",
-        "Accept: application/json, text/event-stream",
-        "--header",
-        "Content-Type: application/json"
-      ]
-    }
-  }
-}`,
-    []
-  );
-
-  const claudeCodeCommand = useMemo(
-    () =>
-      `claude mcp add --transport http menerio ${MCP_URL} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}" --header "Accept: application/json, text/event-stream" --header "Content-Type: application/json"`,
-    []
-  );
-
   const agentPrompt = useMemo(
     () => `You have access to Menerio — the user's personal AI memory and second brain.
 
 # Connection
 - MCP Server URL: ${MCP_URL}
-- Auth header: \`Authorization: Bearer <PROJECT_MCP_TOKEN>\`
-- Token format: the token starts with \`${MCP_TOKEN_PREFIX}\`.
-- The token is long-lived. It does not expire after 1 hour; it remains valid until the user revokes it or until its optional expiration date.
+- Transport: MCP Streamable HTTP
+- Auth header: \`Authorization: Bearer <PROJECT_MCP_TOKEN>\` (token starts with \`${MCP_TOKEN_PREFIX}\`)
 - Required headers:
   - \`Authorization: Bearer <PROJECT_MCP_TOKEN>\`
   - \`Accept: application/json, text/event-stream\`
   - \`Content-Type: application/json\`
+- The token is long-lived; it stays valid until the user revokes it or its optional expiration date passes.
 - Keep the endpoint exactly as shown above. Do not add /mcp, /sse, /v1, or any other path.
 - Verification flow: call \`initialize\`, then \`tools/list\`, then \`tools/call\` with the safe read-only tool \`get_user_profile\`.
 - If a tool call returns \`401 Invalid or revoked token\`, ask the user for a new Personal MCP Token from Menerio → Settings → MCP Server instead of retrying.
 
 # What Menerio is
-Menerio stores the user's thoughts, notes, contacts (People), action items, media (images/PDFs with AI descriptions), a knowledge graph of links between notes, and a structured profile (identity, preferences, values, goals, agent instructions).
+Menerio stores the user's notes, People (contacts with interaction history), Moments (structured timeline events), Groups (goal-oriented sets of people), Collections (user-defined structured data with custom schemas), Lexicon pages (durable synthesized knowledge), a knowledge graph of links between notes, media (images/PDFs with AI descriptions), and a structured profile (identity, preferences, values, goals, agent instructions).
 
 # Available tools
-- \`search_thoughts(query, limit?, threshold?)\` — semantic search across notes. Use first when the user asks about a topic, idea, or anything they've previously captured.
-- \`list_recent(limit?, type?, topic?, person?, days?)\` — recent notes, filterable.
-- \`capture_thought(content)\` — save a new thought. Title, embedding, topics, people and action items are extracted automatically.
-- \`get_stats()\` — totals, top topics, people, recent activity.
-- \`get_action_items(status?, priority?, person?, include_done?)\` — open to-dos extracted from notes.
-- \`get_person_notes(name)\` — all notes mentioning a specific person.
-- \`search_images(query)\` — search analyzed images and PDFs by description or extracted text.
-- \`get_note_media(note_id)\` — media analysis attached to a note.
-- \`get_user_profile(include_instructions?, include_notes?, scope?)\` — identity, preferences, values, goals, agent instructions. Call this once at the start of a session so you know who the user is.
-- \`lexicon_search(query, limit?, page_type?)\` — search Lexicon pages by title, slug, or content.
-- \`lexicon_get_page(slug)\` — read a full Lexicon page with source notes and backlinks.
-- \`lexicon_create_page(slug, title, page_type, content, summary?)\` — create a reviewed Lexicon page on the user's behalf.
-- \`lexicon_update_page(slug, content?, title?, summary?, page_type?)\` — update a reviewed Lexicon page on the user's behalf.
-- \`lexicon_run_lint()\` — run the Lexicon health check.
+Always call \`tools/list\` at session start to discover the live, authoritative tool surface — the categories below are a guide, not an exhaustive list, and the server gains new tools over time.
+
+- **Notes** — \`search_notes\`, \`list_recent_notes\`, \`capture_note\`, \`update_note\`, \`trash_note\`, \`get_stats\`, \`get_action_items\`.
+- **People** — \`list_people\`, \`search_contacts\`, \`get_contact_context\`, \`get_person_notes\`, \`log_interaction\`.
+- **Moments** — \`create_moment_with_ai\` (preferred for natural-language input), \`list_moments\`, \`search_moments\`.
+- **Groups** — \`list_groups\`, \`get_group\`, \`create_group\`, \`add_group_member\`, \`update_group_membership\`, \`log_group_interaction\`, \`create_group_next_step\`, \`generate_group_briefing\`, plus AI suggestion/import helpers.
+- **Collections** — \`list_collections\`, \`get_collection_schema\`, \`add_collection_item\`, \`update_collection_item\`, \`list_collection_items\`, \`search_all_collections\`. Honour each collection's \`agent_instructions\`.
+- **Lexicon** — \`lexicon_search\`, \`lexicon_get_page\`, \`lexicon_create_page\`, \`lexicon_update_page\`, \`lexicon_run_lint\`.
+- **Knowledge graph** — \`get_connected_notes\`, \`find_path\`, \`get_clusters\`.
+- **Media** — \`search_images\`, \`get_note_media\`.
+- **Identity** — \`get_user_profile\`.
 
 # How to behave
 - On first use in a conversation, call \`get_user_profile\` so your answers are personalised. Honour any \`agent_instructions\` returned.
-- When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_thoughts\` before answering from memory.
-- When the user asks about durable synthesized knowledge, concepts, projects, people, or a Lexicon page, use \`lexicon_search\` or \`lexicon_get_page\`.
-- When the user shares a new fact, decision, idea, observation, or meeting note worth keeping, call \`capture_thought\` — don't ask for permission for short factual captures, do confirm for long-form content.
+- Early in a session, also call \`list_collections\` so you know which user-defined collections exist and how the user wants to capture into each one.
+- When the user references something they "remember", "wrote down", "captured", or asks "what do I know about X", call \`search_notes\` (and \`lexicon_search\` for durable synthesized knowledge) before answering from your own memory.
+- When the user shares a new fact, decision, idea, observation, or meeting note worth keeping, call \`capture_note\` — don't ask for permission for short factual captures; do confirm for long-form content. If the content clearly belongs in a collection, prefer \`add_collection_item\`.
+- For events that happened at a point in time and matter on the user's timeline (meetings, milestones, conversations), prefer \`create_moment_with_ai\`.
 - Output style: concise. For lists of notes, show one bullet per item with title + date. Only show full content when explicitly asked.
-- After any \`capture_thought\`, end with a one-line confirmation including the detected type and topics.
+- After any write, end with a one-line confirmation of what was saved and where.
 - Never invent note ids, titles, or dates. If a search returns nothing, say so.
 
 Use these tools whenever the user asks you to recall, search, save, or organise anything from their personal memory.`,
@@ -329,7 +382,7 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
                 <Key className="h-5 w-5" /> Personal MCP Tokens
               </CardTitle>
               <CardDescription>
-                Long-lived, revocable tokens for Claude Desktop, Cursor, OpenClaw, Manus, n8n, and other MCP clients.
+                Long-lived, revocable tokens for any MCP-compatible AI client.
               </CardDescription>
             </div>
             <Dialog
@@ -359,7 +412,7 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
                       value={newTokenName}
                       onChange={(event) => setNewTokenName(event.target.value.slice(0, 80))}
                       maxLength={80}
-                      placeholder="Claude Desktop on MacBook"
+                      placeholder="My laptop"
                     />
                   </div>
                   <div className="space-y-2">
@@ -398,8 +451,6 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
               <CopyButton text={MCP_URL} id="url" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Most clients (Claude, Cursor, n8n) send the token in an <code className="font-mono">Authorization: Bearer</code> header.
-              ChatGPT custom connectors append it to the URL as <code className="font-mono">?key=…</code> instead — both are supported.
               Only tokens with prefix <code className="font-mono">mnr_mcp_</code> work here (the keys under "Hub API Keys" are for a different API and will be rejected).
             </p>
           </div>
@@ -497,6 +548,56 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
+            <Plug className="h-5 w-5" /> Protocol
+          </CardTitle>
+          <CardDescription>
+            Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint below using a Personal MCP Token from this page.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
+            <span className="text-muted-foreground">Transport</span>
+            <span><strong>MCP Streamable HTTP</strong></span>
+
+            <span className="text-muted-foreground">Endpoint</span>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
+                {MCP_URL}
+              </code>
+              <CopyButton text={MCP_URL} id="protocol-url" />
+            </div>
+
+            <span className="text-muted-foreground">Auth header</span>
+            <code className="rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
+              Authorization: Bearer &lt;PROJECT_MCP_TOKEN&gt;
+            </code>
+
+            <span className="text-muted-foreground">Required headers</span>
+            <div className="space-y-1">
+              <code className="block rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
+                Accept: application/json, text/event-stream
+              </code>
+              <code className="block rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
+                Content-Type: application/json
+              </code>
+            </div>
+
+            <span className="text-muted-foreground">Alternate auth</span>
+            <span className="text-muted-foreground">
+              Clients that can't set custom headers (e.g. ChatGPT custom connectors) can append{" "}
+              <code className="font-mono text-foreground">?key=&lt;PROJECT_MCP_TOKEN&gt;</code> to the URL instead.
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Keep the endpoint exactly as shown — don't append <code className="font-mono">/mcp</code>, <code className="font-mono">/sse</code>, or any other path.
+            The token must start with <code className="font-mono">mnr_mcp_</code>.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" /> Agent Setup Prompt
           </CardTitle>
           <CardDescription>
@@ -522,158 +623,31 @@ Use these tools whenever the user asks you to recall, search, save, or organise 
             <Sparkles className="h-5 w-5" /> Available Tools
           </CardTitle>
           <CardDescription>
-            These tools are exposed to any AI agent connected to your MCP server.
+            Tools currently exposed to any AI agent connected to your MCP server, grouped by area.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {TOOLS.map((tool) => (
-              <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
-                <Badge variant="outline" className="mt-0.5 font-mono text-[10px] shrink-0">
-                  {tool.name}
-                </Badge>
-                <p className="text-sm text-muted-foreground">{tool.desc}</p>
+        <CardContent className="space-y-5">
+          {TOOL_CATEGORIES.map((group) => (
+            <div key={group.category} className="space-y-2">
+              <div>
+                <h4 className="text-sm font-semibold">{group.category}</h4>
+                <p className="text-xs text-muted-foreground">{group.blurb}</p>
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Terminal className="h-5 w-5" /> Compatible Clients
-          </CardTitle>
-          <CardDescription>
-            Copy-paste configs for popular MCP-compatible AI tools. Use a Personal MCP Token from this page.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="claude">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Monitor className="h-4 w-4" />
-                  <span>Claude Desktop</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>Open Claude Desktop</li>
-                  <li>
-                    Go to <strong>Settings</strong> → <strong>Developer</strong> → <strong>Edit Config</strong>
-                  </li>
-                  <li>Paste the JSON below into <code className="text-xs">claude_desktop_config.json</code></li>
-                  <li>Replace <code className="text-xs">{TOKEN_PLACEHOLDER}</code> with a Personal MCP Token</li>
-                  <li>Restart Claude Desktop</li>
-                </ol>
-                <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton text={claudeSnippet} id="claude" />
+              <div className="space-y-2">
+                {group.tools.map((tool) => (
+                  <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
+                    <Badge variant="outline" className="mt-0.5 font-mono text-[10px] shrink-0">
+                      {tool.name}
+                    </Badge>
+                    <p className="text-sm text-muted-foreground">{tool.desc}</p>
                   </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            <AccordionItem value="claude-code">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Terminal className="h-4 w-4" />
-                  <span>Claude Code (CLI)</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Run this in your terminal, then replace the token placeholder:</p>
-                <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">
-                    {claudeCodeCommand}
-                  </pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton text={claudeCodeCommand} id="claude-code" />
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            <AccordionItem value="cursor">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Code2 className="h-4 w-4" />
-                  <span>Cursor / VS Code</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Add this to <code className="text-xs bg-muted px-1 rounded">.cursor/mcp.json</code> or your VS Code MCP settings:
-                </p>
-                <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto">{claudeSnippet}</pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton text={claudeSnippet} id="cursor" />
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            <AccordionItem value="chatgpt">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  <span>ChatGPT (Custom Connector)</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3">
-                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>In ChatGPT, open <strong>Settings → Connectors → New</strong> (requires a Pro / Team / Enterprise plan with Custom Connectors enabled).</li>
-                  <li><strong>Name:</strong> Menerio (or anything you like).</li>
-                  <li>
-                    <strong>MCP Server URL:</strong> paste the URL below. It already includes your token as a <code className="text-xs">?key=…</code> parameter, because ChatGPT does not let you set custom auth headers.
-                  </li>
-                  <li>
-                    <strong>Authentication:</strong> select <strong>No Auth</strong>. The token in the URL handles authentication.
-                  </li>
-                  <li>Tick <em>"I understand and want to continue"</em> and click <strong>Create</strong>.</li>
-                </ol>
-                <div className="relative">
-                  <pre className="rounded-md bg-muted p-3 text-xs font-mono overflow-x-auto break-all">{`${MCP_URL}/?key=${TOKEN_PLACEHOLDER}`}</pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton text={`${MCP_URL}/?key=${TOKEN_PLACEHOLDER}`} id="chatgpt" />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Replace <code className="font-mono">{TOKEN_PLACEHOLDER}</code> with a Personal MCP Token created above. Treat the resulting URL like a password — anyone with it can read and write your Menerio data.
-                </p>
-              </AccordionContent>
-            </AccordionItem>
-
-            <AccordionItem value="other">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  <span>Any other MCP client</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-3 text-sm text-muted-foreground">
-                <p>Menerio speaks the standard MCP Streamable HTTP protocol. For any client:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>
-                    Endpoint: <code className="text-xs bg-muted px-1 rounded">{MCP_URL}</code>
-                  </li>
-                  <li>
-                    Header: <code className="text-xs bg-muted px-1 rounded">Authorization: Bearer &lt;PROJECT_MCP_TOKEN&gt;</code>
-                  </li>
-                  <li>
-                    Header: <code className="text-xs bg-muted px-1 rounded">Accept: application/json, text/event-stream</code>
-                  </li>
-                  <li>
-                    Header: <code className="text-xs bg-muted px-1 rounded">Content-Type: application/json</code>
-                  </li>
-                  <li>Transport: HTTP (Streamable)</li>
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
+                ))}
+              </div>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            The authoritative list always comes from <code className="font-mono">tools/list</code> on the live MCP server — new tools may be available before this page reflects them.
+          </p>
         </CardContent>
       </Card>
     </div>

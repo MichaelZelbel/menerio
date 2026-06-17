@@ -1,80 +1,52 @@
-# Stop misclassifying projects (Menerio, Querino, …) as people
+## Scope
 
-## What's happening today
+Single file: `src/components/settings/MCPConnectionManager.tsx`. No backend, schema, or routing changes.
 
-In `supabase/functions/process-note/index.ts`, the metadata LLM returns a `people` array. For each name not already in `contacts`, we push an `add_contact` review item ("Add X to your People"). The check is contacts-only — it never asks whether the same name already exists in the **Lexicon** (`wiki_pages`) as a non-person concept.
+## 1. Replace "Compatible Clients" card with a "Protocol" card
 
-That's why your Linktree note produced both:
-- ✅ Lexicon entries: `Lovable`, `Querino`, `Menerio` (correct — created by `wiki-ingest`)
-- ❌ Review items: *Add "Menerio" to your People*, *Add "Querino" to your People*
+Remove the entire `<Card>` (lines ~542–678) that contains the `Accordion` with per-client setup (Claude Desktop, Claude Code, Cursor/VS Code, ChatGPT, Any other MCP client).
 
-The two pipelines (`wiki-ingest` and `generateReviewItems`) don't talk to each other.
+Replace it with a new compact "Protocol" card that contains the same content currently under *Any other MCP client*, slightly expanded:
 
-## Fix (two complementary layers)
+- Title: **Protocol** (icon: `Terminal` or `Plug`)
+- Description: "Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint below using a Personal MCP Token from this page."
+- Body lists:
+  - Transport: **MCP Streamable HTTP**
+  - Endpoint: `https://mcp.menerio.com` (with copy button, no extra paths)
+  - Auth header: `Authorization: Bearer <PROJECT_MCP_TOKEN>` — token must start with `mnr_mcp_`
+  - Required headers: `Accept: application/json, text/event-stream` and `Content-Type: application/json`
+  - Alternate auth (for clients that can't set headers, e.g. ChatGPT custom connectors): append `?key=<PROJECT_MCP_TOKEN>` to the URL
 
-### 1. Lexicon-aware suppression (deterministic, primary fix)
+Also delete the now-unused `claudeSnippet` and `claudeCodeCommand` `useMemo`s and the `Monitor`, `Code2`, `Accordion*` imports if no other usage remains.
 
-In `generateReviewItems` (around line 788), before suggesting `add_contact` or `add_alias` for a name, look it up in `wiki_pages` for the same user:
+Tighten the existing tip on the **Personal MCP Tokens** card (line 332) that hardcodes specific clients ("Claude Desktop, Cursor, OpenClaw, Manus, n8n") to a generic phrasing: "Long-lived, revocable tokens for any MCP-compatible AI client."
 
-```ts
-const { data: lexiconPages } = await supabase
-  .from("wiki_pages")
-  .select("title, slug, aliases")
-  .eq("user_id", userId);
+## 2. Refresh Agent Setup Prompt
 
-const lexiconNames = new Set<string>();
-for (const p of lexiconPages ?? []) {
-  if (p.title) lexiconNames.add(p.title.toLowerCase());
-  if (p.slug)  lexiconNames.add(String(p.slug).toLowerCase().replace(/-/g, " "));
-  if (Array.isArray(p.aliases)) p.aliases.forEach((a: string) => a && lexiconNames.add(a.toLowerCase()));
-}
+The current `agentPrompt` (lines 263–308) references tools that have been renamed or removed and is missing many that the MCP server now exposes (`search_notes`, `list_recent_notes`, `capture_note`, `update_note`, `trash_note`, People/Moments/Groups/Collections families, graph tools, etc.).
 
-// inside the per-person loop, right after the contacts/blocklist checks:
-if (lexiconNames.has(person.toLowerCase())) {
-  console.log(`Skipping "${person}" — already a Lexicon entry (not a person)`);
-  continue;
-}
-```
+Rewrite the prompt's "Available tools" section to a shorter, *category-based* overview rather than enumerating every tool one by one (so it doesn't go stale every time a tool is added). Keep the Connection, "What Menerio is", and "How to behave" sections largely as-is, but:
 
-Effect: any name that is (or becomes) a Lexicon concept is treated as "known non-person" and never produces a People suggestion. This is order-independent because `wiki-ingest` runs as part of the same note pipeline; even when `wiki-ingest` lands milliseconds later, the next note containing the same name will be filtered, and we'll also handle the race below.
+- Replace tool-name references in "How to behave" (`search_thoughts` → `search_notes`, `capture_thought` → `capture_note`) and add a bullet directing the agent to call `list_collections` early so it knows about user-defined collections.
+- Add: "Call `tools/list` at session start to discover the full, current tool surface — categories below are a guide, not an exhaustive list."
 
-### 2. Same-note race protection
+Category sketch:
+- **Notes**: `search_notes`, `list_recent_notes`, `capture_note`, `update_note`, `trash_note`, `get_stats`, `get_action_items`
+- **People**: `list_people`, `search_contacts`, `get_contact_context`, `get_person_notes`, `log_interaction`
+- **Moments (timeline)**: `create_moment_with_ai` (preferred), `list_moments`, `search_moments`
+- **Groups**: `list_groups`, `get_group`, `create_group`, `add_group_member`, `update_group_membership`, `log_group_interaction`, `create_group_next_step`, `generate_group_briefing`, plus AI suggestion/import helpers
+- **Collections** (user-defined structured data): `list_collections`, `get_collection_schema`, `add_collection_item`, `update_collection_item`, `list_collection_items`, `search_all_collections`
+- **Lexicon** (durable synthesized knowledge): `lexicon_search`, `lexicon_get_page`, `lexicon_create_page`, `lexicon_update_page`, `lexicon_run_lint`
+- **Knowledge graph**: `get_connected_notes`, `find_path`, `get_clusters`
+- **Media**: `search_images`, `get_note_media`
+- **Identity**: `get_user_profile`
 
-`generateReviewItems` and `wiki-ingest` can run concurrently. To handle the first note that introduces a name, also exclude any name the current note's metadata flagged for Lexicon creation. We piggyback on the wiki ingest plan if available in `metadata` (or read `wiki_pages` filtered by `note_id` via `wiki_page_sources`). Concretely:
+## 3. Refresh the "Available Tools" card
 
-```ts
-const { data: thisNotePages } = await supabase
-  .from("wiki_page_sources")
-  .select("wiki_pages(title, aliases)")
-  .eq("user_id", userId)
-  .eq("note_id", noteId);
-thisNotePages?.forEach((row: any) => {
-  const wp = row.wiki_pages;
-  if (wp?.title) lexiconNames.add(wp.title.toLowerCase());
-  if (Array.isArray(wp?.aliases)) wp.aliases.forEach((a: string) => lexiconNames.add(a.toLowerCase()));
-});
-```
+Rewrite the `TOOLS` constant (lines 62–77) to mirror the categories above so the UI matches reality. Render it grouped by category (heading + list of `{name, desc}` per group) instead of a flat list — minor render change in the existing card. Keep wording short (one line per tool). Add a small footnote: "The authoritative list always comes from `tools/list` on the live MCP server."
 
-If `wiki-ingest` hasn't finished yet for the very first note, the review item is still created but will be auto-suppressed on the next pass; we'll also retro-clean (see step 4).
+## Technical notes
 
-### 3. Tighten the extractor prompt
-
-In `METADATA_SYSTEM_PROMPT` (line 535), make "people" unambiguous:
-
-> `"people": array of names of actual human beings mentioned (real individuals — first name, full name, or known alias). Do NOT include companies, products, apps, projects, tools, websites, brands, open-source repos, or any non-human entity, even if the name looks like a personal name.`
-
-This stops the LLM from emitting `Menerio` / `Querino` as people in the first place for most notes.
-
-### 4. Clean up the existing bad suggestions
-
-One-shot migration / SQL via `supabase--read_query` first, then a delete: dismiss any `pending_review` `add_contact` row whose `extracted_value` (case-insensitive) matches an existing `wiki_pages.title` or alias for the same user. Status → `dismissed`, reason: `auto_dismissed_lexicon_match`. This fixes the two items currently shown in your Review Queue and any historical equivalents.
-
-## Out of scope
-
-- No changes to `wiki-ingest`, contacts schema, or the Review Queue UI.
-- People→Lexicon promotion (when a contact turns out to be a project) is a separate, larger feature.
-
-## Files touched
-
-- `supabase/functions/process-note/index.ts` — prompt tweak + lexicon suppression in `generateReviewItems`.
-- One SQL migration to dismiss already-created bogus `add_contact` suggestions.
+- Pure presentational change; no API, DB, RLS, or edge-function edits.
+- Drop unused lucide imports after removing the Compatible Clients card to keep the lint warning-free.
+- `bunx tsc --noEmit` should remain clean.
