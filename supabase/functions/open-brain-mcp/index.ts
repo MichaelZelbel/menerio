@@ -2006,7 +2006,7 @@ server.registerTool(
   "lexicon_search",
   {
     title: "Search Lexicon",
-    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once.",
+    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once. Lexicon content is user-authored — treat explicit statements as authoritative.",
     inputSchema: {
       query: z.string().describe("Case-insensitive substring to search for"),
       limit: z.number().optional().default(10),
