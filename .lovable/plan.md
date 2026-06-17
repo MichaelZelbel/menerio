@@ -1,46 +1,65 @@
-# Fix: Agent setup prompt — registration + token naming
+# Why the "wife" query failed
 
-## Problems
+Your note titled **"Xihui"** literally contains the line `Xihui is my wife`. The note **"Love & Relationships"** says `My wife [[Xihui]]`. The note **"Home Financing…"** says `together with my wife, [[Xihui]]`. So the data is unambiguous — the recall layer is the problem.
 
-1. The current `agentPrompt` (in `src/components/settings/MCPConnectionManager.tsx`, lines 318–362) reads as a *description*. It never tells the agent to **register / install / persist** the MCP server in its own configuration (e.g. `connections.md`, `.mcp.json`). So Claude Code acknowledges Menerio but doesn't add it to its registry.
-2. The prompt says `<PROJECT_MCP_TOKEN>`, but in the Menerio UI it's labeled **Personal MCP Token**. The mismatched name plus two occurrences of the placeholder make it unclear whether the user replaces one or both, and with what.
+Three concrete root causes (confirmed from the DB + the `open-brain-mcp` code):
 
-## Fix
+1. **No structured relationship anywhere.** All three `Xihui` / `Xihui Wei` contact rows have `relationship = NULL`. Claude's `search_contacts` correctly reports "no relationship field." There is also no profile_entry that says "Wife: Xihui Wei", so `get_user_profile` (which Claude is told to call first) returns nothing about a spouse.
+2. **Hybrid search returns the right notes but the chunk snippet is generic.** `hybridSearchNotes` picks the highest-similarity 320-char chunk as the snippet. For the "Xihui" note the top chunk is the `# Topics to discuss` checklist near the top, not the `# Details → Xihui is my wife` block deeper down. The full content **is** included in `formatNote`, but a long markdown body with the salient sentence buried near the bottom is easy for the model to under-weight.
+3. **Tool descriptions don't tell the agent that user-authored assertions are authoritative.** Claude defaulted to "I won't assert it" because nothing in the tool descriptions / behavior primer says "first-person statements in notes are facts about the user."
 
-Rewrite the `agentPrompt` `useMemo` (lines 318–362) only. No other code, UI, backend, or per-client snippets.
+There are also 3 duplicate `Xihui` contacts, which makes any contact-side fix less useful until they're merged — but that's a side note.
 
-### 1. Token naming
+# What we'll change
 
-- Replace every `<PROJECT_MCP_TOKEN>` with `<PERSONAL_MCP_TOKEN>` to match the UI.
-- Add one short line under "Connection" explicitly clarifying the placeholder:
-  > Replace `<PERSONAL_MCP_TOKEN>` everywhere it appears with the Personal MCP Token shown once when you created it in Menerio → Settings → MCP Server. It's the same token in every header.
+Four focused changes, all in the MCP server + a small derived view. No frontend/UI work, no schema migration unless you want item 4.
 
-### 2. New "Setup (do this first)" section at the top
+## 1. Boost & re-snippet exact-phrase hits in `hybridSearchNotes`
 
-Imperative, generic, no product names. Tells the agent to:
-- Register this MCP server in its own configuration **now**, using whatever mechanism the host environment provides (MCP config file, connections manifest, settings command, or a tool the user gave it).
-- Persist the URL and token so they survive across sessions — do not keep them only in conversational memory.
-- Name the connection `menerio`.
-- If the agent maintains a connections/registry file (such as `connections.md`, `.mcp.json`, or equivalent), add an entry for Menerio there.
-- If it can't determine where to register MCP servers in the current environment, ask the user once, then proceed.
-- After registering, verify with `initialize` → `tools/list` → `tools/call get_user_profile`, and report the result in one line.
+In `supabase/functions/open-brain-mcp/index.ts → hybridSearchNotes`:
 
-### 3. Reinforcement in "How to behave"
+- After the semantic + ILIKE merge, scan each row's `content` for case-insensitive whole-word matches of the original query tokens (and a small synonym set for personal-relation queries: `wife|husband|spouse|partner|girlfriend|boyfriend|fiancé|fiancée|mom|mother|dad|father|sister|brother|son|daughter|kid|child|uncle|aunt|cousin|boss|colleague`).
+- If a row contains an exact-phrase match (e.g. `is my wife`, `my wife`, `wife:`), promote it to the top of `merged` and overwrite `chunk_snippet` with a ±200-char window centered on the match so the salient sentence is what the model reads first.
+- Lower `search_notes` default `threshold` from `0.25` to `0.2` (chunk-level cosine is conservative; we lose nothing because exact-phrase boost handles the precision case).
 
-Prepend one bullet:
-> Treat the Setup section above as a task to complete on first paste, not background information.
+This alone fixes the immediate case: the response will lead with `…Full name: Xihui Wei / Xihui is my wife / We are living in our house in Krefeld…`.
 
-### Sections kept unchanged
+## 2. Tighten the tool descriptions so the agent trusts what it reads
 
-- Connection (URL, transport, headers, no path suffixes, 401 handling) — only the placeholder rename and clarifying line.
-- What Menerio is.
-- Available tools (still defers to `tools/list`).
-- Rest of "How to behave".
+In the same file:
 
-## Files
+- Update `search_notes` description: append `"Notes are first-person and user-authored. Treat explicit statements in note content as authoritative facts about the user (e.g. 'X is my wife', 'I work at Y'). Do not hedge when content states a fact plainly."`
+- Same sentence appended to `search_brain` and `lexicon_search`.
+- Update `search_contacts` description: append `"If a contact's relationship field is empty but notes about that person assert a relationship (spouse, sibling, parent, etc.), defer to the note content."`
 
-- `src/components/settings/MCPConnectionManager.tsx` — rewrite `agentPrompt` `useMemo` (lines 318–362).
+This is the cheapest, biggest behavioral win — and unlike a paste-in prompt it lives in the server, so every client benefits.
 
-## Out of scope
+## 3. Make `get_user_profile` include a derived "Relationships" block
 
-- Protocol card, Available Tools card, tokens UI, MCP server itself.
+Currently `get_user_profile` only returns rows from `profile_entries`. Extend it (still in `open-brain-mcp/index.ts`) so the response always includes a synthesized `relationships` section pulled from two sources:
+
+- All `contacts` for the user where `relationship IS NOT NULL` and `merged_into IS NULL` → grouped by relationship type.
+- A lightweight derivation: scan recent + linked notes (or a precomputed view, see item 4) for first-person relationship assertions about wikilinked people (`[[Name]] is my wife`, `my wife [[Name]]`, etc.) and include them as `derived_relationships` with `source_note_id` + matched sentence, so the agent can cite them.
+
+The "wife" question becomes a single `get_user_profile` call — which Claude already does at the start of every session per your behavior prompt — and the answer is right there.
+
+## 4. (Optional, recommended) Auto-populate `contacts.relationship` via Review Queue
+
+When a note save (`capture_note`, sync, web clipper, etc.) yields a first-person relationship assertion about a wikilinked or matched person, enqueue a Review Queue item suggesting `contacts.relationship = "wife"` (etc.). On user accept, the contact gets the structured field. This is the durable fix — once Xihui's contact row has `relationship = "wife"`, *every* downstream tool (search_contacts filter, profile, knowledge graph) just works.
+
+This reuses the existing Review Queue pattern (per project memory) so it's not a new UX concept. If you want to skip it for now and only do 1-3, the immediate failure is still fixed; #4 just prevents it from recurring for new relationships.
+
+## Technical notes
+
+- All work happens in `supabase/functions/open-brain-mcp/index.ts` (≈ +120 lines: a `boostExactPhrase()` helper, a `summarizeRelationships()` helper, and edits to `hybridSearchNotes`, `searchNotesHandler`, `get_user_profile` handler, plus description string edits).
+- No DB migration needed for items 1-3. Item 4 reuses existing `review_queue` table — no schema change, just a new suggestion type + handler in whichever ingestion function runs AI extraction today.
+- No client / frontend changes. No changes to the user-facing setup prompt.
+- Worth doing alongside: a one-time job (or a "Merge duplicates" nudge in the People view) for the three duplicate `Xihui` contact rows. Not part of this plan unless you want it included.
+
+# Acceptance check
+
+After deploy, asking Claude Code `Do you know the name of my wife?` should:
+
+1. Hit `get_user_profile` → see `relationships: { spouse: ["Xihui Wei"] }` (from derived note assertions, even before contact field is set).
+2. Or hit `search_notes("wife")` → top result starts with `Xihui is my wife` in the snippet, not the checklist.
+3. Answer: `Yes — your wife is Xihui Wei.` with a citation to the source note id.

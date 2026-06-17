@@ -192,6 +192,10 @@ function formatNote(
     parts.push(`People: ${(m.people as string[]).join(", ")}`);
   if (Array.isArray(m.action_items) && m.action_items.length)
     parts.push(`Actions: ${(m.action_items as string[]).join("; ")}`);
+  const snippet = (t as any).chunk_snippet as string | undefined;
+  if (snippet && (t as any).exact_phrase_match) {
+    parts.push(`Match: ${snippet}`);
+  }
   parts.push(`\n${t.content}`);
 
   // Append media analysis info
@@ -460,6 +464,73 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Relationship synonyms — terms that, when present in a query, mark it as a
+// first-person personal-fact question. Used to boost exact-phrase hits and to
+// derive a relationships block in get_user_profile.
+const RELATIONSHIP_TERMS = [
+  "wife", "husband", "spouse", "partner", "girlfriend", "boyfriend",
+  "fiance", "fiancee", "fiancé", "fiancée",
+  "mom", "mother", "dad", "father", "parent", "parents",
+  "sister", "brother", "sibling", "siblings",
+  "son", "daughter", "kid", "kids", "child", "children",
+  "uncle", "aunt", "cousin",
+  "grandma", "grandpa", "grandmother", "grandfather",
+  "boss", "manager", "colleague", "coworker", "employee", "assistant",
+  "friend", "best friend", "roommate", "neighbor",
+];
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Find the first whole-word match of any phrase in content (case-insensitive).
+// Phrases longer than 1 word match as a phrase; single words match whole-word.
+function findFirstPhraseMatch(content: string, phrases: string[]): { index: number; length: number } | null {
+  if (!content) return null;
+  let best: { index: number; length: number } | null = null;
+  for (const p of phrases) {
+    const phrase = p.trim();
+    if (!phrase) continue;
+    const re = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "i");
+    const m = re.exec(content);
+    if (m && m.index >= 0 && (best === null || m.index < best.index)) {
+      best = { index: m.index, length: m[0].length };
+    }
+  }
+  return best;
+}
+
+// Build a ±200-char snippet window centered on the match, collapsing whitespace.
+function buildWindowSnippet(content: string, matchIndex: number, matchLength: number, radius = 200): string {
+  const start = Math.max(0, matchIndex - radius);
+  const end = Math.min(content.length, matchIndex + matchLength + radius);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < content.length ? "…" : "";
+  const slice = content.slice(start, end).replace(/\s+/g, " ").trim();
+  return `${prefix}${slice}${suffix}`;
+}
+
+// Given the original query, return the set of phrases we look for to boost
+// (query tokens >= 3 chars, plus relationship synonyms if any term is present).
+function buildBoostPhrases(query: string): string[] {
+  const q = query.toLowerCase();
+  const tokens = q.split(/[^a-zà-ÿ0-9]+/i).filter((t) => t.length >= 3);
+  const phrases = new Set<string>(tokens);
+  // If the query is about a personal relationship, also boost the synonym set
+  // and a few common assertion phrases so "Xihui is my wife" lands at the top
+  // even when the user asked "name of my wife".
+  const hitsRelationship = tokens.some((t) => RELATIONSHIP_TERMS.includes(t));
+  if (hitsRelationship) {
+    for (const t of RELATIONSHIP_TERMS) phrases.add(t);
+    for (const t of RELATIONSHIP_TERMS) {
+      phrases.add(`is my ${t}`);
+      phrases.add(`my ${t}`);
+      phrases.add(`${t}:`);
+    }
+  }
+  return Array.from(phrases);
+}
+
 // Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
 async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
   let semanticResults: any[] = [];
@@ -533,7 +604,27 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       merged.push({ ...r, similarity: null });
     }
   }
-  return { rows: merged.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+
+  // Exact-phrase boost: rows whose content contains a query-token or
+  // relationship-synonym phrase get promoted, and their snippet is rewritten
+  // to a window centered on the match so the salient sentence is what the
+  // model reads first.
+  const phrases = buildBoostPhrases(query);
+  const boosted: any[] = [];
+  const rest: any[] = [];
+  for (const r of merged) {
+    const haystack = `${r.title || ""}\n${r.content || ""}`;
+    const hit = findFirstPhraseMatch(haystack, phrases);
+    if (hit) {
+      r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+      r.exact_phrase_match = true;
+      boosted.push(r);
+    } else {
+      rest.push(r);
+    }
+  }
+  const ordered = [...boosted, ...rest];
+  return { rows: ordered.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
 }
 
 
@@ -574,11 +665,11 @@ server.registerTool(
   {
     title: "Search Notes",
     description:
-      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.25),
+      threshold: z.number().optional().default(0.2),
     },
   },
   searchNotesHandler
@@ -1059,7 +1150,7 @@ server.registerTool(
   "search_contacts",
   {
     title: "Search Contacts",
-    description: "Search your personal CRM contacts by name, company, or relationship type.",
+    description: "Search your personal CRM contacts by name, company, or relationship type. If a contact's relationship field is empty but notes about that person assert a relationship (spouse, sibling, parent, etc.), defer to the note content — the structured field is optional, not the source of truth.",
     inputSchema: {
       query: z.string().optional().describe("Search by name or company"),
       relationship: z.string().optional().describe("Filter by relationship type"),
@@ -1767,13 +1858,119 @@ server.registerTool(
   }
 );
 
-// Tool: Get User Profile
+// Derive relationships for the current user from two sources:
+//   1. Structured: contacts.relationship (when populated by the user).
+//   2. Derived: first-person assertions in note content like
+//      "X is my wife", "my wife [[X]]", "wife: X". Wikilink-aware.
+// Returns a compact, agent-friendly shape suitable for embedding in
+// get_user_profile responses so personal-fact questions are answered
+// in a single tool call.
+async function deriveUserRelationships(userId: string): Promise<{
+  structured: Array<{ name: string; relationship: string; contact_id: string }>;
+  derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }>;
+} | null> {
+  try {
+    // 1) Structured contacts with a relationship value.
+    const { data: contactRows } = await supabase
+      .from("contacts")
+      .select("id, name, relationship, ai_visibility, is_sensitive")
+      .eq("user_id", userId)
+      .is("merged_into", null)
+      .not("relationship", "is", null);
+    const structured = (contactRows || [])
+      .filter((c: any) => c.ai_visibility !== "hidden" && !c.is_sensitive && c.relationship && c.name)
+      .map((c: any) => ({ name: c.name as string, relationship: String(c.relationship).toLowerCase(), contact_id: c.id as string }));
+
+    // 2) Derived: scan visible, non-trashed notes for first-person relationship
+    //    assertions. Keep it bounded — most recent 500 notes.
+    const { data: notes } = await supabase
+      .from("notes")
+      .select("id, title, content, ai_visibility, is_trashed")
+      .eq("user_id", userId)
+      .eq("is_trashed", false)
+      .order("updated_at", { ascending: false })
+      .limit(500);
+
+    const derived: Array<{ name: string; relationship: string; source_note_id: string; source_note_title: string; quote: string }> = [];
+    const seen = new Set<string>(); // dedupe by name|relationship
+    const relAlt = RELATIONSHIP_TERMS.map(escapeRegex).join("|");
+
+    // Patterns we recognise:
+    //   "[[Name]] is my <rel>"      → name = wikilink target or display
+    //   "<Name> is my <rel>"        → name = preceding capitalised words / note title
+    //   "my <rel> [[Name]]"
+    //   "my <rel>, [[Name]]"
+    //   "<rel>: [[Name]]"  /  "<rel>: Name"
+    const patterns: Array<{ re: RegExp; nameGroup: number; relGroup: number }> = [
+      { re: new RegExp(`\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]\\s+is\\s+my\\s+(${relAlt})\\b`, "gi"), nameGroup: 1, relGroup: 2 },
+      { re: new RegExp(`\\bmy\\s+(${relAlt})[\\s,:\\-—]+\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
+      { re: new RegExp(`\\b(${relAlt})\\s*:\\s*\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]`, "gi"), nameGroup: 2, relGroup: 1 },
+    ];
+
+    for (const n of (notes || []) as any[]) {
+      if (n.ai_visibility === "hidden") continue;
+      const content = String(n.content || "");
+      if (!content) continue;
+
+      // Plus: "<NoteTitle> is my <rel>" anywhere in the body — useful for
+      // person-notes where the note title is the person's name.
+      const titleEsc = n.title ? escapeRegex(String(n.title)) : null;
+      const titleRe = titleEsc
+        ? new RegExp(`\\b${titleEsc}\\b\\s+is\\s+my\\s+(${relAlt})\\b`, "i")
+        : null;
+      if (titleRe) {
+        const m = titleRe.exec(content);
+        if (m) {
+          const key = `${n.title.toLowerCase()}|${m[1].toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            derived.push({
+              name: n.title,
+              relationship: m[1].toLowerCase(),
+              source_note_id: n.id,
+              source_note_title: n.title,
+              quote: buildWindowSnippet(content, m.index, m[0].length, 80),
+            });
+          }
+        }
+      }
+
+      for (const { re, nameGroup, relGroup } of patterns) {
+        re.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          const name = (m[nameGroup] || "").trim();
+          const rel = (m[relGroup] || "").trim().toLowerCase();
+          if (!name || !rel) continue;
+          const key = `${name.toLowerCase()}|${rel}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          derived.push({
+            name,
+            relationship: rel,
+            source_note_id: n.id,
+            source_note_title: n.title || "",
+            quote: buildWindowSnippet(content, m.index, m[0].length, 80),
+          });
+        }
+      }
+    }
+
+    if (structured.length === 0 && derived.length === 0) return null;
+    return { structured, derived };
+  } catch (err) {
+    console.warn("deriveUserRelationships failed:", err);
+    return null;
+  }
+}
+
+
 server.registerTool(
   "get_user_profile",
   {
     title: "Get User Profile",
     description:
-      "Retrieve the user's personal profile — identity, preferences, values, goals, health info, and explicit instructions for how to interact with them. Use this at the start of conversations to understand who you're working with, or when you need specific context about the user's preferences, background, or communication style. Supports scope filtering so you only get the categories relevant to your role.",
+      "Retrieve the user's personal profile — identity, preferences, values, goals, health info, and explicit instructions for how to interact with them. The response also includes a `relationships` block listing key people in the user's life (spouse, partner, family, etc.), derived from structured contact fields AND from first-person assertions in notes (e.g. \"X is my wife\"). Use this at the start of conversations and whenever the user asks about people close to them — the answer is usually here in one call.",
     inputSchema: {
       scope: z.string().optional().describe("Filter by scope: all, professional, personal, health. Omit to get everything except private."),
       categories: z.array(z.string()).optional().describe("Only return these category slugs"),
@@ -1783,6 +1980,22 @@ server.registerTool(
   },
   async ({ scope, categories: catSlugs, include_notes, include_instructions }) => {
     try {
+      // Always compute derived relationships — they're the single most useful
+      // self-knowledge surface and must show up even when the user hasn't yet
+      // populated a profile category.
+      const relationships = await deriveUserRelationships(getCurrentUserId());
+
+      const emptyProfileResponse = () => {
+        const payload: Record<string, unknown> = {
+          profile: {
+            categories: [],
+            note: "No profile categories defined yet. The user can create their profile in Menerio's Profile section.",
+          },
+        };
+        if (relationships) payload.relationships = relationships;
+        return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+      };
+
       // Fetch categories (never return private via MCP)
       let catQuery = supabase
         .from("profile_categories")
@@ -1806,12 +2019,7 @@ server.registerTool(
       // Fetch entries for these categories
       const catIds = filteredCats.map((c: any) => c.id);
       if (catIds.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       const { data: entries } = await supabase
@@ -1823,12 +2031,7 @@ server.registerTool(
 
       // Check if there are any entries at all
       if (!entries?.length) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       // Optionally fetch linked notes
@@ -1870,17 +2073,13 @@ server.registerTool(
       }).filter(Boolean);
 
       if (profileCategories.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "No profile has been set up yet. The user can create their profile in Menerio's Profile section.",
-          }],
-        };
+        return emptyProfileResponse();
       }
 
       const result: Record<string, unknown> = {
         profile: { categories: profileCategories },
       };
+      if (relationships) result.relationships = relationships;
 
       // Agent instructions
       if (include_instructions) {
@@ -1915,7 +2114,7 @@ server.registerTool(
   "lexicon_search",
   {
     title: "Search Lexicon",
-    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once.",
+    description: "Search Lexicon pages (synthesized topic / strategy / concept pages) by title, slug, or content. For raw user-written notes prefer `search_notes`. Use `search_brain` to query both at once. Lexicon content is user-authored — treat explicit statements as authoritative.",
     inputSchema: {
       query: z.string().describe("Case-insensitive substring to search for"),
       limit: z.number().optional().default(10),
@@ -2458,11 +2657,11 @@ server.registerTool(
   {
     title: "Search Brain (Notes + Lexicon)",
     description:
-      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page.",
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.25),
+      threshold: z.number().optional().default(0.2),
     },
   },
   async ({ query, limit, threshold }) => {
