@@ -1980,6 +1980,22 @@ server.registerTool(
   },
   async ({ scope, categories: catSlugs, include_notes, include_instructions }) => {
     try {
+      // Always compute derived relationships — they're the single most useful
+      // self-knowledge surface and must show up even when the user hasn't yet
+      // populated a profile category.
+      const relationships = await deriveUserRelationships(getCurrentUserId());
+
+      const emptyProfileResponse = () => {
+        const payload: Record<string, unknown> = {
+          profile: {
+            categories: [],
+            note: "No profile categories defined yet. The user can create their profile in Menerio's Profile section.",
+          },
+        };
+        if (relationships) payload.relationships = relationships;
+        return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+      };
+
       // Fetch categories (never return private via MCP)
       let catQuery = supabase
         .from("profile_categories")
