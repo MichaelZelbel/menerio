@@ -27,6 +27,42 @@ serve(async (req) => {
     if (authErr || !user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     const userId = user.id;
 
+    // Load owner identity (display name + self aliases) — mirrors process-note's loadSelfContext
+    let ownerPreferredName: string | null = null;
+    const ownerAliases = new Set<string>();
+    let selfMatchingEnabled = true;
+    {
+      const { data: profile } = await db
+        .from("profiles")
+        .select("display_name, self_matching_enabled")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profile) {
+        selfMatchingEnabled = (profile as any).self_matching_enabled !== false;
+        const dn = ((profile as any).display_name || "").trim();
+        if (dn) {
+          ownerPreferredName = dn;
+          ownerAliases.add(dn.toLowerCase());
+          const first = dn.split(/\s+/)[0];
+          if (first) ownerAliases.add(first.toLowerCase());
+        }
+      }
+      if (selfMatchingEnabled) {
+        const { data: aliasRows } = await db
+          .from("user_self_aliases")
+          .select("alias, is_active")
+          .eq("user_id", userId)
+          .eq("is_active", true);
+        for (const r of (aliasRows || []) as any[]) {
+          const a = String(r.alias || "").trim().toLowerCase();
+          if (a) ownerAliases.add(a);
+        }
+      }
+    }
+    const ownerDisplay = ownerPreferredName || "the profile owner";
+    const aliasList = Array.from(ownerAliases);
+    const aliasesText = aliasList.length ? aliasList.join(", ") : "(none provided)";
+
     // Get existing categories for the user
     const { data: categories } = await db
       .from("profile_categories")
