@@ -1150,7 +1150,7 @@ server.registerTool(
   "search_contacts",
   {
     title: "Search Contacts",
-    description: "Search your personal CRM contacts by name, company, or relationship type.",
+    description: "Search your personal CRM contacts by name, company, or relationship type. If a contact's relationship field is empty but notes about that person assert a relationship (spouse, sibling, parent, etc.), defer to the note content — the structured field is optional, not the source of truth.",
     inputSchema: {
       query: z.string().optional().describe("Search by name or company"),
       relationship: z.string().optional().describe("Filter by relationship type"),
