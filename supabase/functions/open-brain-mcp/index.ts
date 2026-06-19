@@ -598,7 +598,8 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     seenIds.add(r.id);
     merged.push(r);
   }
-  for (const r of (textResults || [])) {
+  const visibleText = await filterVisibleNotes(textResults || [], supabase, getCurrentUserId());
+  for (const r of visibleText) {
     if (!seenIds.has(r.id)) {
       seenIds.add(r.id);
       merged.push({ ...r, similarity: null });
