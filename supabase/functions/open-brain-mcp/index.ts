@@ -29,6 +29,9 @@ const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
 const HUB_KEY_USED_MESSAGE =
   "You used a Hub API key (prefix `mnr_`). The MCP server needs a separate Personal MCP Token (prefix `mnr_mcp_`). Create one in Menerio → Settings → MCP Server.";
+const RESPONSE_CHAR_BUDGET = 6000; // hard cap on a search tool's total text response
+const SNIPPET_CAP = 320;           // max chars per result snippet
+const CANDIDATE_CAP = 50;          // max ranked candidates hybrid search returns
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
