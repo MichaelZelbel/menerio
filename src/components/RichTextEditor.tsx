@@ -105,7 +105,7 @@ export function RichTextEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, link: false, underline: false }),
       UnderlineExt,
-      LinkExt.configure({ openOnClick: false }),
+      LinkExt.configure({ openOnClick: false, HTMLAttributes: { rel: "noopener noreferrer", target: null } }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Highlight.configure({ multicolor: true }),
       TaskList,
