@@ -2952,16 +2952,18 @@ server.registerTool(
   {
     title: "Search Brain (Notes + Lexicon)",
     description:
-      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact.",
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact. Results are bounded — use `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.2),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
-  async ({ query, limit, threshold }) => {
+  async ({ query, limit, threshold, offset = 0, view = "snippet" }) => {
     try {
-      const [{ rows: noteRows, mode }, lexRows] = await Promise.all([
+      const [{ rows: noteRows, total: noteTotal, mode }, lexRows] = await Promise.all([
         hybridSearchNotes(query, limit, threshold),
         searchLexiconPages(query, limit),
       ]);
@@ -2970,24 +2972,44 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `No notes or Lexicon pages found matching "${query}".` }] };
       }
 
-      const noteIds = noteRows.map((t: any) => t.id);
-      const mediaMap = noteIds.length ? await getMediaForNotes(noteIds) : new Map();
-      const noteOut = noteRows.map((t: any, i: number) => `[note] ${formatNote(t, i, t.similarity, mediaMap.get(t.id))}`);
-      const lexOut = lexRows.map((p: any, i: number) =>
-        `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
-        (p.summary ? `\n   ${p.summary}` : "") +
-        (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "")
-      );
+      const notePage = noteRows.slice(offset, offset + limit);
+      const header = `Found ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`;
 
-      const text =
-        `Found ${noteRows.length} note(s) [${mode}] and ${lexRows.length} Lexicon page(s):\n\n` +
-        [...noteOut, ...lexOut].join("\n\n");
+      let used = header.length;
+      const blocks: string[] = [];
+      let capped = false;
+
+      for (let i = 0; i < notePage.length; i++) {
+        const t = notePage[i] as any;
+        const block = `[note] ${formatNoteResult(t, offset + i, t.similarity ?? undefined, view, query)}`;
+        const cost = block.length + 2;
+        if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+        blocks.push(block);
+        used += cost;
+      }
+
+      if (!capped) {
+        for (let i = 0; i < lexRows.length; i++) {
+          const p = lexRows[i] as any;
+          const block = `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
+            (p.summary ? `\n   ${p.summary}` : "") +
+            (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "");
+          const cost = block.length + 2;
+          if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+          blocks.push(block);
+          used += cost;
+        }
+      }
+
+      let text = `${header}\n\n${blocks.join("\n\n")}`;
+      if (capped) text += `\n\n… capped (response budget reached). Re-run with a higher offset for more notes, or get_note(id) for a full note body.`;
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
+
 
 // ============================================================
 // Backward-compat aliases (deprecated old "thought" naming)
