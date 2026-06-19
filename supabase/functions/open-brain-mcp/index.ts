@@ -908,12 +908,12 @@ server.registerTool(
     description:
       "List recently captured notes with optional filters by type, topic, person, or time range. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
-      limit: z.number().optional().default(10),
+      limit: z.coerce.number().optional().default(10),
       type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
-      days: z.number().optional().describe("Only notes from the last N days"),
-      offset: z.number().optional().default(0),
+      days: z.coerce.number().optional().describe("Only notes from the last N days"),
+      offset: z.coerce.number().optional().default(0),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
@@ -2955,9 +2955,9 @@ server.registerTool(
       "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact. Results are bounded — use `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
-      limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.2),
-      offset: z.number().optional().default(0),
+      limit: z.coerce.number().optional().default(10),
+      threshold: z.coerce.number().optional().default(0.2),
+      offset: z.coerce.number().optional().default(0),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
