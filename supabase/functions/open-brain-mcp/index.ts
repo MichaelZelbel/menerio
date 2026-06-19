@@ -583,7 +583,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
+    .select("id, title, content, metadata, tags, created_at, ai_visibility")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
