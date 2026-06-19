@@ -563,7 +563,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
+          .select("id, title, content, metadata, tags, created_at, ai_visibility")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
