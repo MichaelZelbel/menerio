@@ -217,6 +217,56 @@ function formatNote(
   return parts.join("\n");
 }
 
+// Bounded formatter — NEVER includes the full note body. Used by all search-style tools.
+function formatNoteResult(
+  t: {
+    id?: string;
+    title?: string;
+    content?: string;
+    metadata?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
+    tags?: string[];
+    chunk_snippet?: string;
+  },
+  i: number,
+  score?: number,
+  view: "snippet" | "metadata" = "snippet",
+  query?: string,
+): string {
+  const m = (t.metadata || {}) as Record<string, unknown>;
+  const parts: string[] = [];
+  const scoreStr = score != null ? ` (${(score * 100).toFixed(1)}% match)` : "";
+  parts.push(`--- Result ${i + 1}${scoreStr} ---`);
+  parts.push(`Title: ${t.title || "Untitled"}`);
+  parts.push(`ID: ${t.id || ""}`);
+  const dateStr = t.updated_at || t.created_at;
+  parts.push(`Updated: ${dateStr ? new Date(dateStr).toISOString().slice(0, 10) : "unknown"}`);
+  parts.push(`Type: ${(m.type as string) || "unknown"}`);
+
+  if (view === "metadata") return parts.join("\n");
+
+  const tags = Array.isArray(t.tags) ? (t.tags as string[]) : [];
+  if (tags.length) parts.push(`Tags: ${tags.join(", ")}`);
+
+  let snippet = "";
+  if (t.chunk_snippet) {
+    snippet = t.chunk_snippet;
+  } else {
+    const haystack = `${t.title || ""}\n${t.content || ""}`;
+    if (query) {
+      const hit = findFirstPhraseMatch(haystack, buildBoostPhrases(query));
+      if (hit) snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+    }
+    if (!snippet) snippet = (t.content || "").slice(0, SNIPPET_CAP);
+  }
+  snippet = snippet.replace(/\s+/g, " ").trim();
+  if (snippet.length > SNIPPET_CAP) snippet = snippet.slice(0, SNIPPET_CAP - 1) + "…";
+  parts.push(`Match: ${snippet}`);
+
+  return parts.join("\n");
+}
+
 function noteText(note: { title?: string | null; content?: string | null; created_at?: string | null }) {
   return `${note.title || "Untitled"}: ${String(note.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").slice(0, 1000)}${note.created_at ? ` (${note.created_at})` : ""}`;
 }
