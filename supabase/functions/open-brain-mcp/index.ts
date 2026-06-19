@@ -732,18 +732,43 @@ async function searchLexiconPages(query: string, limit: number): Promise<any[]> 
 }
 
 // Tool 1: Semantic Search (Notes)
-const searchNotesHandler = async ({ query, limit, threshold }: { query: string; limit: number; threshold: number }) => {
+type SearchNotesArgs = {
+  query: string;
+  limit: number;
+  threshold: number;
+  offset?: number;
+  view?: "snippet" | "metadata";
+};
+const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = "snippet" }: SearchNotesArgs) => {
   try {
-    const { rows: limited, mode } = await hybridSearchNotes(query, limit, threshold);
-    if (limited.length === 0) {
+    const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold);
+    if (total === 0) {
       return { content: [{ type: "text" as const, text: `No notes found matching "${query}". If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
     }
-    const noteIds = limited.map((t: any) => t.id);
-    const mediaMap = await getMediaForNotes(noteIds);
-    const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
-    return {
-      content: [{ type: "text" as const, text: `Found ${limited.length} note(s) [${mode}]:\n\n${results.join("\n\n")}` }],
-    };
+    const page = rows.slice(offset, offset + limit);
+    const header = `Found ~${total} note(s) [${mode}]. Showing ${total ? offset + 1 : 0}-${offset + page.length} (has_more: ${offset + page.length < total}):`;
+
+    let used = header.length;
+    const out: string[] = [];
+    let dropped = 0;
+    for (let i = 0; i < page.length; i++) {
+      const t = page[i] as any;
+      const block = formatNoteResult(t, offset + i, t.similarity ?? undefined, view, query);
+      const cost = block.length + 2; // separator
+      if (used + cost > RESPONSE_CHAR_BUDGET && out.length > 0) {
+        dropped = page.length - i;
+        break;
+      }
+      out.push(block);
+      used += cost;
+    }
+
+    let text = `${header}\n\n${out.join("\n\n")}`;
+    if (dropped > 0) {
+      const nextOffset = offset + out.length;
+      text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note(id) for a note's full content.`;
+    }
+    return { content: [{ type: "text" as const, text }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
@@ -754,15 +779,18 @@ server.registerTool(
   {
     title: "Search Notes",
     description:
-      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.2),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
   searchNotesHandler
 );
+
 
 // Tool: Get a single note's full current content (read-before-update)
 server.registerTool(
