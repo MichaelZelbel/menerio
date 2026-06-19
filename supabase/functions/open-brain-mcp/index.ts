@@ -586,7 +586,7 @@ function buildBoostPhrases(query: string): string[] {
 }
 
 // Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
-async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
+async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; total: number; mode: string }> {
   let semanticResults: any[] = [];
   let semanticOk = false;
   try {
@@ -594,7 +594,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     const { data, error } = await supabase.rpc("match_note_chunks", {
       query_embedding: qEmb,
       match_threshold: threshold,
-      match_count: Math.max(limit * 3, 30),
+      match_count: Math.max(CANDIDATE_CAP, 30),
       p_user_id: getCurrentUserId(),
     });
     if (!error && data) {
@@ -617,7 +617,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, ai_visibility")
+          .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -637,12 +637,12 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, ai_visibility")
+    .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
-    .limit(limit);
+    .limit(CANDIDATE_CAP);
   textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
   const { data: textResults } = await textQuery;
 
@@ -661,26 +661,60 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
 
   // Exact-phrase boost: rows whose content contains a query-token or
-  // relationship-synonym phrase get promoted, and their snippet is rewritten
-  // to a window centered on the match so the salient sentence is what the
-  // model reads first.
+  // relationship-synonym phrase get a meaningful snippet centered on the hit.
   const phrases = buildBoostPhrases(query);
-  const boosted: any[] = [];
-  const rest: any[] = [];
   for (const r of merged) {
     const haystack = `${r.title || ""}\n${r.content || ""}`;
     const hit = findFirstPhraseMatch(haystack, phrases);
     if (hit) {
-      r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+      if (!r.chunk_snippet) r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
       r.exact_phrase_match = true;
-      boosted.push(r);
-    } else {
-      rest.push(r);
     }
   }
-  const ordered = [...boosted, ...rest];
-  return { rows: ordered.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+
+  // Tiered deterministic ranking — exact/prefix title matches always win.
+  const qn = (query || "").trim().toLowerCase();
+  const tierOf = (r: any) => {
+    const title = (r.title || "").trim().toLowerCase();
+    if (qn && title === qn) return 0;
+    if (qn && title.startsWith(qn)) return 1;
+    if (qn && title.includes(qn)) return 2;
+    if (r.exact_phrase_match) return 3;
+    if (r.similarity != null) return 4;
+    return 5;
+  };
+  const ranked = merged
+    .map((r, idx) => ({ r, idx, tier: tierOf(r) }))
+    .sort((a, b) =>
+      a.tier - b.tier ||
+      ((b.r.similarity ?? -1) - (a.r.similarity ?? -1)) ||
+      (new Date(b.r.updated_at || b.r.created_at || 0).getTime() - new Date(a.r.updated_at || a.r.created_at || 0).getTime()) ||
+      (a.idx - b.idx)
+    )
+    .map((x) => x.r);
+
+  // For title-tier rows without a snippet, synthesize one from title+body.
+  for (const r of ranked) {
+    if (r.chunk_snippet) continue;
+    const title = (r.title || "").toLowerCase();
+    if (!qn || (!title.includes(qn))) continue;
+    const body = r.content || "";
+    if (body) {
+      const hit = findFirstPhraseMatch(`${r.title || ""}\n${body}`, [qn]);
+      if (hit) {
+        r.chunk_snippet = buildWindowSnippet(`${r.title || ""}\n${body}`, hit.index, hit.length);
+      } else {
+        r.chunk_snippet = body.slice(0, SNIPPET_CAP);
+      }
+    } else {
+      r.chunk_snippet = r.title || "";
+    }
+  }
+
+  return { rows: ranked.slice(0, CANDIDATE_CAP), total: ranked.length, mode: semanticOk ? "semantic+text" : "text_only" };
 }
+
+
 
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
