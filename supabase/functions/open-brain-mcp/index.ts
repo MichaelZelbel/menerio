@@ -1095,7 +1095,7 @@ server.registerTool(
           if (ids.length === 0) return { data: [], error: null };
           const { data: rows } = await supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility")
             .in("id", ids);
           const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
           return { data: filtered, error: null };
