@@ -2071,24 +2071,42 @@ server.registerTool(
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       if (!media?.length) return { content: [{ type: "text" as const, text: "No media found in this note." }] };
 
-      const lines = media.map((m: any, i: number) => {
+      const header = `${media.length} media item(s) in this note:`;
+      let used = header.length;
+      const lines: string[] = [];
+      let dropped = 0;
+      for (let i = 0; i < media.length; i++) {
+        const m = media[i] as any;
         const parts: string[] = [];
         const label = m.media_type === "pdf" || m.media_type === "pdf_page"
           ? `PDF${m.page_number ? ` page ${m.page_number}` : ""}`
           : "Image";
         parts.push(`${i + 1}. [${label}] ${m.original_filename || m.storage_path.split("/").pop()}`);
         parts.push(`   Status: ${m.analysis_status}`);
-        if (m.description) parts.push(`   Description: ${m.description}`);
+        if (m.description) {
+          const desc = String(m.description).replace(/\s+/g, " ").trim();
+          const clamped = desc.length > SNIPPET_CAP ? desc.slice(0, SNIPPET_CAP - 1) + "…" : desc;
+          parts.push(`   Description: ${clamped}`);
+        }
         if (m.topics?.length) parts.push(`   Topics: ${m.topics.join(", ")}`);
         if (m.extracted_text) parts.push(`   Text: ${m.extracted_text.substring(0, 300)}${m.extracted_text.length > 300 ? "…" : ""}`);
         const raw = m.raw_analysis as Record<string, unknown> | null;
         if (raw?.content_type) parts.push(`   Content type: ${raw.content_type}`);
-        return parts.join("\n");
-      });
+        const block = parts.join("\n");
+        const cost = block.length + 2;
+        if (used + cost > RESPONSE_CHAR_BUDGET && lines.length > 0) {
+          dropped = media.length - i;
+          break;
+        }
+        lines.push(block);
+        used += cost;
+      }
 
-      return {
-        content: [{ type: "text" as const, text: `${media.length} media item(s) in this note:\n\n${lines.join("\n\n")}` }],
-      };
+      let text = `${header}\n\n${lines.join("\n\n")}`;
+      if (dropped > 0) {
+        text += `\n\n… ${dropped} more media item(s) not shown (response capped).`;
+      }
+      return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
