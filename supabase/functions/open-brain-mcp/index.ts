@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
+import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import {
   applyVisibility,
   assertWritable,
@@ -28,6 +29,9 @@ const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
 const HUB_KEY_USED_MESSAGE =
   "You used a Hub API key (prefix `mnr_`). The MCP server needs a separate Personal MCP Token (prefix `mnr_mcp_`). Create one in Menerio → Settings → MCP Server.";
+const RESPONSE_CHAR_BUDGET = 6000; // hard cap on a search tool's total text response
+const SNIPPET_CAP = 320;           // max chars per result snippet
+const CANDIDATE_CAP = 50;          // max ranked candidates hybrid search returns
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -209,6 +213,56 @@ function formatNote(
       if (m.topics?.length) parts.push(`    Topics: ${m.topics.join(", ")}`);
     }
   }
+
+  return parts.join("\n");
+}
+
+// Bounded formatter — NEVER includes the full note body. Used by all search-style tools.
+function formatNoteResult(
+  t: {
+    id?: string;
+    title?: string;
+    content?: string;
+    metadata?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
+    tags?: string[];
+    chunk_snippet?: string;
+  },
+  i: number,
+  score?: number,
+  view: "snippet" | "metadata" = "snippet",
+  query?: string,
+): string {
+  const m = (t.metadata || {}) as Record<string, unknown>;
+  const parts: string[] = [];
+  const scoreStr = score != null ? ` (${(score * 100).toFixed(1)}% match)` : "";
+  parts.push(`--- Result ${i + 1}${scoreStr} ---`);
+  parts.push(`Title: ${t.title || "Untitled"}`);
+  parts.push(`ID: ${t.id || ""}`);
+  const dateStr = t.updated_at || t.created_at;
+  parts.push(`Updated: ${dateStr ? new Date(dateStr).toISOString().slice(0, 10) : "unknown"}`);
+  parts.push(`Type: ${(m.type as string) || "unknown"}`);
+
+  if (view === "metadata") return parts.join("\n");
+
+  const tags = Array.isArray(t.tags) ? (t.tags as string[]) : [];
+  if (tags.length) parts.push(`Tags: ${tags.join(", ")}`);
+
+  let snippet = "";
+  if (t.chunk_snippet) {
+    snippet = t.chunk_snippet;
+  } else {
+    const haystack = `${t.title || ""}\n${t.content || ""}`;
+    if (query) {
+      const hit = findFirstPhraseMatch(haystack, buildBoostPhrases(query));
+      if (hit) snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+    }
+    if (!snippet) snippet = (t.content || "").slice(0, SNIPPET_CAP);
+  }
+  snippet = snippet.replace(/\s+/g, " ").trim();
+  if (snippet.length > SNIPPET_CAP) snippet = snippet.slice(0, SNIPPET_CAP - 1) + "…";
+  parts.push(`Match: ${snippet}`);
 
   return parts.join("\n");
 }
@@ -532,7 +586,7 @@ function buildBoostPhrases(query: string): string[] {
 }
 
 // Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
-async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; mode: string }> {
+async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; total: number; mode: string }> {
   let semanticResults: any[] = [];
   let semanticOk = false;
   try {
@@ -540,7 +594,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     const { data, error } = await supabase.rpc("match_note_chunks", {
       query_embedding: qEmb,
       match_threshold: threshold,
-      match_count: Math.max(limit * 3, 30),
+      match_count: Math.max(CANDIDATE_CAP, 30),
       p_user_id: getCurrentUserId(),
     });
     if (!error && data) {
@@ -563,7 +617,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, ai_visibility")
+          .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -583,12 +637,12 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, ai_visibility")
+    .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
     .order("updated_at", { ascending: false })
-    .limit(limit);
+    .limit(CANDIDATE_CAP);
   textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
   const { data: textResults } = await textQuery;
 
@@ -607,26 +661,60 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
 
   // Exact-phrase boost: rows whose content contains a query-token or
-  // relationship-synonym phrase get promoted, and their snippet is rewritten
-  // to a window centered on the match so the salient sentence is what the
-  // model reads first.
+  // relationship-synonym phrase get a meaningful snippet centered on the hit.
   const phrases = buildBoostPhrases(query);
-  const boosted: any[] = [];
-  const rest: any[] = [];
   for (const r of merged) {
     const haystack = `${r.title || ""}\n${r.content || ""}`;
     const hit = findFirstPhraseMatch(haystack, phrases);
     if (hit) {
-      r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
+      if (!r.chunk_snippet) r.chunk_snippet = buildWindowSnippet(haystack, hit.index, hit.length);
       r.exact_phrase_match = true;
-      boosted.push(r);
-    } else {
-      rest.push(r);
     }
   }
-  const ordered = [...boosted, ...rest];
-  return { rows: ordered.slice(0, limit), mode: semanticOk ? "semantic+text" : "text_only" };
+
+  // Tiered deterministic ranking — exact/prefix title matches always win.
+  const qn = (query || "").trim().toLowerCase();
+  const tierOf = (r: any) => {
+    const title = (r.title || "").trim().toLowerCase();
+    if (qn && title === qn) return 0;
+    if (qn && title.startsWith(qn)) return 1;
+    if (qn && title.includes(qn)) return 2;
+    if (r.exact_phrase_match) return 3;
+    if (r.similarity != null) return 4;
+    return 5;
+  };
+  const ranked = merged
+    .map((r, idx) => ({ r, idx, tier: tierOf(r) }))
+    .sort((a, b) =>
+      a.tier - b.tier ||
+      ((b.r.similarity ?? -1) - (a.r.similarity ?? -1)) ||
+      (new Date(b.r.updated_at || b.r.created_at || 0).getTime() - new Date(a.r.updated_at || a.r.created_at || 0).getTime()) ||
+      (a.idx - b.idx)
+    )
+    .map((x) => x.r);
+
+  // For title-tier rows without a snippet, synthesize one from title+body.
+  for (const r of ranked) {
+    if (r.chunk_snippet) continue;
+    const title = (r.title || "").toLowerCase();
+    if (!qn || (!title.includes(qn))) continue;
+    const body = r.content || "";
+    if (body) {
+      const hit = findFirstPhraseMatch(`${r.title || ""}\n${body}`, [qn]);
+      if (hit) {
+        r.chunk_snippet = buildWindowSnippet(`${r.title || ""}\n${body}`, hit.index, hit.length);
+      } else {
+        r.chunk_snippet = body.slice(0, SNIPPET_CAP);
+      }
+    } else {
+      r.chunk_snippet = r.title || "";
+    }
+  }
+
+  return { rows: ranked.slice(0, CANDIDATE_CAP), total: ranked.length, mode: semanticOk ? "semantic+text" : "text_only" };
 }
+
+
 
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
@@ -644,18 +732,43 @@ async function searchLexiconPages(query: string, limit: number): Promise<any[]> 
 }
 
 // Tool 1: Semantic Search (Notes)
-const searchNotesHandler = async ({ query, limit, threshold }: { query: string; limit: number; threshold: number }) => {
+type SearchNotesArgs = {
+  query: string;
+  limit: number;
+  threshold: number;
+  offset?: number;
+  view?: "snippet" | "metadata";
+};
+const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = "snippet" }: SearchNotesArgs) => {
   try {
-    const { rows: limited, mode } = await hybridSearchNotes(query, limit, threshold);
-    if (limited.length === 0) {
+    const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold);
+    if (total === 0) {
       return { content: [{ type: "text" as const, text: `No notes found matching "${query}". If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
     }
-    const noteIds = limited.map((t: any) => t.id);
-    const mediaMap = await getMediaForNotes(noteIds);
-    const results = limited.map((t: any, i: number) => formatNote(t, i, t.similarity, mediaMap.get(t.id)));
-    return {
-      content: [{ type: "text" as const, text: `Found ${limited.length} note(s) [${mode}]:\n\n${results.join("\n\n")}` }],
-    };
+    const page = rows.slice(offset, offset + limit);
+    const header = `Found ~${total} note(s) [${mode}]. Showing ${total ? offset + 1 : 0}-${offset + page.length} (has_more: ${offset + page.length < total}):`;
+
+    let used = header.length;
+    const out: string[] = [];
+    let dropped = 0;
+    for (let i = 0; i < page.length; i++) {
+      const t = page[i] as any;
+      const block = formatNoteResult(t, offset + i, t.similarity ?? undefined, view, query);
+      const cost = block.length + 2; // separator
+      if (used + cost > RESPONSE_CHAR_BUDGET && out.length > 0) {
+        dropped = page.length - i;
+        break;
+      }
+      out.push(block);
+      used += cost;
+    }
+
+    let text = `${header}\n\n${out.join("\n\n")}`;
+    if (dropped > 0) {
+      const nextOffset = offset + out.length;
+      text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note(id) for a note's full content.`;
+    }
+    return { content: [{ type: "text" as const, text }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
@@ -666,15 +779,18 @@ server.registerTool(
   {
     title: "Search Notes",
     description:
-      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.2),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
   searchNotesHandler
 );
+
 
 // Tool: Get a single note's full current content (read-before-update)
 server.registerTool(
@@ -720,15 +836,24 @@ server.registerTool(
 
 
 // Tool 2: List Recent Notes
-const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { limit: number; type?: string; topic?: string; person?: string; days?: number }) => {
+type ListRecentArgs = {
+  limit: number;
+  type?: string;
+  topic?: string;
+  person?: string;
+  days?: number;
+  offset?: number;
+  view?: "snippet" | "metadata";
+};
+const listRecentNotesHandler = async ({ limit, type, topic, person, days, offset = 0, view = "snippet" }: ListRecentArgs) => {
   try {
     let q = supabase
       .from("notes")
-      .select("id, title, content, metadata, created_at")
+      .select("id, title, content, metadata, tags, created_at, updated_at", { count: "exact" })
       .eq("is_trashed", false)
       .eq("user_id", getCurrentUserId())
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (type) q = q.contains("metadata", { type });
     if (topic) q = q.contains("metadata", { topics: [topic] });
@@ -740,7 +865,7 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
     }
     q = await applyVisibility(q, "notes", supabase, getCurrentUserId());
 
-    const { data, error } = await q;
+    const { data, error, count } = await q;
 
     if (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -749,12 +874,28 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
       return { content: [{ type: "text" as const, text: "No notes found." }] };
     }
 
-    const noteIds = data.map((t: any) => t.id);
-    const mediaMap = await getMediaForNotes(noteIds);
-    const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
-    return {
-      content: [{ type: "text" as const, text: `${data.length} recent note(s):\n\n${results.join("\n\n")}` }],
-    };
+    const total = typeof count === "number" ? count : offset + data.length;
+    const header = `${total} recent note(s). Showing ${offset + 1}-${offset + data.length} (has_more: ${offset + data.length < total}):`;
+    let used = header.length;
+    const out: string[] = [];
+    let dropped = 0;
+    for (let i = 0; i < data.length; i++) {
+      const t = data[i] as any;
+      const block = formatNoteResult(t, offset + i, undefined, view);
+      const cost = block.length + 2;
+      if (used + cost > RESPONSE_CHAR_BUDGET && out.length > 0) {
+        dropped = data.length - i;
+        break;
+      }
+      out.push(block);
+      used += cost;
+    }
+    let text = `${header}\n\n${out.join("\n\n")}`;
+    if (dropped > 0) {
+      const nextOffset = offset + out.length;
+      text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note(id) for a note's full content.`;
+    }
+    return { content: [{ type: "text" as const, text }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
@@ -765,40 +906,64 @@ server.registerTool(
   {
     title: "List Recent Notes",
     description:
-      "List recently captured notes with optional filters by type, topic, person, or time range.",
+      "List recently captured notes with optional filters by type, topic, person, or time range. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       limit: z.number().optional().default(10),
       type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
       days: z.number().optional().describe("Only notes from the last N days"),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
   listRecentNotesHandler
 );
 
+
 // Tool 3: Capture Note
 const captureNoteHandler = async ({ content }: { content: string }) => {
   try {
-    const [embedding, metadata] = await Promise.all([
-      getEmbedding(content),
-      extractMetadata(content),
-    ]);
+    const metadata = await extractMetadata(content);
 
     const firstLine = content.split("\n")[0];
     const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
-    const { error } = await supabase.from("notes").insert({
+    const { data: inserted, error } = await supabase.from("notes").insert({
       user_id: getCurrentUserId(),
       content,
       title,
-      embedding,
       metadata: { ...metadata, source: "mcp" },
       tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-    });
+    }).select("id").single();
 
-    if (error) {
-      return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
+    if (error || !inserted) {
+      return { content: [{ type: "text" as const, text: `Failed to capture: ${error?.message || "insert failed"}` }], isError: true };
+    }
+
+    // Build chunks + embeddings synchronously so the note is searchable immediately.
+    let indexingNote = "";
+    try {
+      const res = await embedAndStoreNoteChunks(
+        supabase,
+        OPENROUTER_API_KEY,
+        getCurrentUserId(),
+        inserted.id,
+        title,
+        content,
+        "mcp-capture",
+      );
+      if (res.firstChunkEmbedding) {
+        await supabase.from("notes").update({ embedding: res.firstChunkEmbedding }).eq("id", inserted.id);
+      }
+      if (res.insufficientCredits) {
+        indexingNote = " (indexing deferred — insufficient credits, will catch up later)";
+      } else if (res.failures > 0 && res.chunkCount === 0) {
+        indexingNote = " (indexing failed — background job will retry)";
+      }
+    } catch (idxErr) {
+      console.warn("chunk indexing failed on capture", (idxErr as Error).message);
+      indexingNote = " (indexing will catch up in the background)";
     }
 
     const meta = metadata as Record<string, unknown>;
@@ -809,12 +974,14 @@ const captureNoteHandler = async ({ content }: { content: string }) => {
       confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
     if (Array.isArray(meta.action_items) && meta.action_items.length)
       confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+    confirmation += indexingNote;
 
     return { content: [{ type: "text" as const, text: confirmation }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
 };
+
 
 server.registerTool(
   "capture_note",
@@ -2785,16 +2952,18 @@ server.registerTool(
   {
     title: "Search Brain (Notes + Lexicon)",
     description:
-      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact.",
+      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact. Results are bounded — use `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.number().optional().default(10),
       threshold: z.number().optional().default(0.2),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
-  async ({ query, limit, threshold }) => {
+  async ({ query, limit, threshold, offset = 0, view = "snippet" }) => {
     try {
-      const [{ rows: noteRows, mode }, lexRows] = await Promise.all([
+      const [{ rows: noteRows, total: noteTotal, mode }, lexRows] = await Promise.all([
         hybridSearchNotes(query, limit, threshold),
         searchLexiconPages(query, limit),
       ]);
@@ -2803,24 +2972,44 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `No notes or Lexicon pages found matching "${query}".` }] };
       }
 
-      const noteIds = noteRows.map((t: any) => t.id);
-      const mediaMap = noteIds.length ? await getMediaForNotes(noteIds) : new Map();
-      const noteOut = noteRows.map((t: any, i: number) => `[note] ${formatNote(t, i, t.similarity, mediaMap.get(t.id))}`);
-      const lexOut = lexRows.map((p: any, i: number) =>
-        `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
-        (p.summary ? `\n   ${p.summary}` : "") +
-        (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "")
-      );
+      const notePage = noteRows.slice(offset, offset + limit);
+      const header = `Found ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`;
 
-      const text =
-        `Found ${noteRows.length} note(s) [${mode}] and ${lexRows.length} Lexicon page(s):\n\n` +
-        [...noteOut, ...lexOut].join("\n\n");
+      let used = header.length;
+      const blocks: string[] = [];
+      let capped = false;
+
+      for (let i = 0; i < notePage.length; i++) {
+        const t = notePage[i] as any;
+        const block = `[note] ${formatNoteResult(t, offset + i, t.similarity ?? undefined, view, query)}`;
+        const cost = block.length + 2;
+        if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+        blocks.push(block);
+        used += cost;
+      }
+
+      if (!capped) {
+        for (let i = 0; i < lexRows.length; i++) {
+          const p = lexRows[i] as any;
+          const block = `[lexicon] ${i + 1}. ${p.title} (${p.page_type}) — slug: ${p.slug}` +
+            (p.summary ? `\n   ${p.summary}` : "") +
+            (typeof p.source_count === "number" ? `\n   sources: ${p.source_count}` : "");
+          const cost = block.length + 2;
+          if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+          blocks.push(block);
+          used += cost;
+        }
+      }
+
+      let text = `${header}\n\n${blocks.join("\n\n")}`;
+      if (capped) text += `\n\n… capped (response budget reached). Re-run with a higher offset for more notes, or get_note(id) for a full note body.`;
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
   }
 );
+
 
 // ============================================================
 // Backward-compat aliases (deprecated old "thought" naming)
