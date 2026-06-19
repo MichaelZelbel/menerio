@@ -1066,7 +1066,7 @@ server.registerTool(
         (async () => {
           let mq = supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility")
             .eq("is_trashed", false)
             .eq("user_id", getCurrentUserId())
             .contains("metadata", { people: [name] })
