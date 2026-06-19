@@ -1268,7 +1268,7 @@ server.registerTool(
 
       let notesQuery = supabase
         .from("notes")
-        .select("title, content, created_at, ai_visibility, person_id, metadata")
+        .select("title, content, created_at, ai_visibility, metadata")
         .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
