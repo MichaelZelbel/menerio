@@ -836,15 +836,24 @@ server.registerTool(
 
 
 // Tool 2: List Recent Notes
-const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { limit: number; type?: string; topic?: string; person?: string; days?: number }) => {
+type ListRecentArgs = {
+  limit: number;
+  type?: string;
+  topic?: string;
+  person?: string;
+  days?: number;
+  offset?: number;
+  view?: "snippet" | "metadata";
+};
+const listRecentNotesHandler = async ({ limit, type, topic, person, days, offset = 0, view = "snippet" }: ListRecentArgs) => {
   try {
     let q = supabase
       .from("notes")
-      .select("id, title, content, metadata, created_at")
+      .select("id, title, content, metadata, tags, created_at, updated_at", { count: "exact" })
       .eq("is_trashed", false)
       .eq("user_id", getCurrentUserId())
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (type) q = q.contains("metadata", { type });
     if (topic) q = q.contains("metadata", { topics: [topic] });
@@ -856,7 +865,7 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
     }
     q = await applyVisibility(q, "notes", supabase, getCurrentUserId());
 
-    const { data, error } = await q;
+    const { data, error, count } = await q;
 
     if (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -865,12 +874,28 @@ const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { li
       return { content: [{ type: "text" as const, text: "No notes found." }] };
     }
 
-    const noteIds = data.map((t: any) => t.id);
-    const mediaMap = await getMediaForNotes(noteIds);
-    const results = data.map((t: any, i: number) => formatNote(t, i, undefined, mediaMap.get(t.id)));
-    return {
-      content: [{ type: "text" as const, text: `${data.length} recent note(s):\n\n${results.join("\n\n")}` }],
-    };
+    const total = typeof count === "number" ? count : offset + data.length;
+    const header = `${total} recent note(s). Showing ${offset + 1}-${offset + data.length} (has_more: ${offset + data.length < total}):`;
+    let used = header.length;
+    const out: string[] = [];
+    let dropped = 0;
+    for (let i = 0; i < data.length; i++) {
+      const t = data[i] as any;
+      const block = formatNoteResult(t, offset + i, undefined, view);
+      const cost = block.length + 2;
+      if (used + cost > RESPONSE_CHAR_BUDGET && out.length > 0) {
+        dropped = data.length - i;
+        break;
+      }
+      out.push(block);
+      used += cost;
+    }
+    let text = `${header}\n\n${out.join("\n\n")}`;
+    if (dropped > 0) {
+      const nextOffset = offset + out.length;
+      text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note(id) for a note's full content.`;
+    }
+    return { content: [{ type: "text" as const, text }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
@@ -881,17 +906,20 @@ server.registerTool(
   {
     title: "List Recent Notes",
     description:
-      "List recently captured notes with optional filters by type, topic, person, or time range.",
+      "List recently captured notes with optional filters by type, topic, person, or time range. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       limit: z.number().optional().default(10),
       type: z.string().optional().describe("Filter by type: observation, task, idea, reference, person_note, meeting_note, decision, project"),
       topic: z.string().optional().describe("Filter by topic tag"),
       person: z.string().optional().describe("Filter by person mentioned"),
       days: z.number().optional().describe("Only notes from the last N days"),
+      offset: z.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
   listRecentNotesHandler
 );
+
 
 // Tool 3: Capture Note
 const captureNoteHandler = async ({ content }: { content: string }) => {
