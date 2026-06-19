@@ -56,7 +56,7 @@ export async function applyVisibility(
   let q = query.eq("ai_visibility", "visible");
   if (table === "contacts") return q;
 
-  if (table === "notes" || table === "moments" || table === "action_items") {
+  if (table === "moments" || table === "action_items") {
     if (await shouldHideSensitiveLinked(supabase, userId)) {
       const ids = await getSensitivePersonIds(supabase, userId);
       if (ids.size > 0) {

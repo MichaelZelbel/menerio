@@ -563,7 +563,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
+          .select("id, title, content, metadata, tags, created_at, ai_visibility")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
@@ -583,7 +583,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, ai_visibility, person_id")
+    .select("id, title, content, metadata, tags, created_at, ai_visibility")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
@@ -598,7 +598,8 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     seenIds.add(r.id);
     merged.push(r);
   }
-  for (const r of (textResults || [])) {
+  const visibleText = await filterVisibleNotes(textResults || [], supabase, getCurrentUserId());
+  for (const r of visibleText) {
     if (!seenIds.has(r.id)) {
       seenIds.add(r.id);
       merged.push({ ...r, similarity: null });
@@ -674,6 +675,49 @@ server.registerTool(
   },
   searchNotesHandler
 );
+
+// Tool: Get a single note's full current content (read-before-update)
+server.registerTool(
+  "get_note",
+  {
+    title: "Get Note",
+    description:
+      "Fetch one note's full current content by ID (preferred) or exact title. Use this to read a note's body BEFORE calling update_note, which overwrites the entire content.",
+    inputSchema: {
+      note: z.string().describe("Note UUID (preferred) or exact title to look up"),
+    },
+  },
+  async ({ note }) => {
+    try {
+      let q = supabase
+        .from("notes")
+        .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility, is_trashed, source_app")
+        .eq("user_id", getCurrentUserId());
+      q = isUuid(note) ? q.eq("id", note) : q.ilike("title", note);
+      const { data, error } = await q.limit(1);
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      const row = (data || [])[0];
+      if (!row) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
+      if (row.ai_visibility === "hidden") {
+        return { content: [{ type: "text" as const, text: "This note is hidden from AI in Menerio. Unhide it to let MCP read or edit it." }] };
+      }
+      const m = (row.metadata || {}) as Record<string, unknown>;
+      const parts: string[] = [];
+      parts.push(`Title: ${row.title || "Untitled"}`);
+      parts.push(`ID: ${row.id}`);
+      parts.push(`Created: ${new Date(row.created_at).toLocaleDateString()}`);
+      if (row.updated_at) parts.push(`Updated: ${new Date(row.updated_at).toLocaleDateString()}`);
+      parts.push(`Type: ${m.type || "unknown"}`);
+      if (Array.isArray(row.tags) && row.tags.length) parts.push(`Tags: ${row.tags.join(", ")}`);
+      if (row.is_trashed) parts.push("(This note is currently in the trash.)");
+      parts.push(`\n${row.content || ""}`);
+      return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
 
 // Tool 2: List Recent Notes
 const listRecentNotesHandler = async ({ limit, type, topic, person, days }: { limit: number; type?: string; topic?: string; person?: string; days?: number }) => {
@@ -1065,7 +1109,7 @@ server.registerTool(
         (async () => {
           let mq = supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility")
             .eq("is_trashed", false)
             .eq("user_id", getCurrentUserId())
             .contains("metadata", { people: [name] })
@@ -1094,7 +1138,7 @@ server.registerTool(
           if (ids.length === 0) return { data: [], error: null };
           const { data: rows } = await supabase
             .from("notes")
-            .select("id, title, content, metadata, created_at, ai_visibility, person_id")
+            .select("id, title, content, metadata, created_at, ai_visibility")
             .in("id", ids);
           const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
           return { data: filtered, error: null };
@@ -1267,7 +1311,7 @@ server.registerTool(
 
       let notesQuery = supabase
         .from("notes")
-        .select("title, content, created_at, ai_visibility, person_id, metadata")
+        .select("title, content, created_at, ai_visibility, metadata")
         .eq("user_id", getCurrentUserId())
         .eq("is_trashed", false)
         .contains("metadata", { people: [contact.name] })
