@@ -924,25 +924,46 @@ server.registerTool(
 // Tool 3: Capture Note
 const captureNoteHandler = async ({ content }: { content: string }) => {
   try {
-    const [embedding, metadata] = await Promise.all([
-      getEmbedding(content),
-      extractMetadata(content),
-    ]);
+    const metadata = await extractMetadata(content);
 
     const firstLine = content.split("\n")[0];
     const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
 
-    const { error } = await supabase.from("notes").insert({
+    const { data: inserted, error } = await supabase.from("notes").insert({
       user_id: getCurrentUserId(),
       content,
       title,
-      embedding,
       metadata: { ...metadata, source: "mcp" },
       tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-    });
+    }).select("id").single();
 
-    if (error) {
-      return { content: [{ type: "text" as const, text: `Failed to capture: ${error.message}` }], isError: true };
+    if (error || !inserted) {
+      return { content: [{ type: "text" as const, text: `Failed to capture: ${error?.message || "insert failed"}` }], isError: true };
+    }
+
+    // Build chunks + embeddings synchronously so the note is searchable immediately.
+    let indexingNote = "";
+    try {
+      const res = await embedAndStoreNoteChunks(
+        supabase,
+        OPENROUTER_API_KEY,
+        getCurrentUserId(),
+        inserted.id,
+        title,
+        content,
+        "mcp-capture",
+      );
+      if (res.firstChunkEmbedding) {
+        await supabase.from("notes").update({ embedding: res.firstChunkEmbedding }).eq("id", inserted.id);
+      }
+      if (res.insufficientCredits) {
+        indexingNote = " (indexing deferred — insufficient credits, will catch up later)";
+      } else if (res.failures > 0 && res.chunkCount === 0) {
+        indexingNote = " (indexing failed — background job will retry)";
+      }
+    } catch (idxErr) {
+      console.warn("chunk indexing failed on capture", (idxErr as Error).message);
+      indexingNote = " (indexing will catch up in the background)";
     }
 
     const meta = metadata as Record<string, unknown>;
@@ -953,12 +974,14 @@ const captureNoteHandler = async ({ content }: { content: string }) => {
       confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
     if (Array.isArray(meta.action_items) && meta.action_items.length)
       confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
+    confirmation += indexingNote;
 
     return { content: [{ type: "text" as const, text: confirmation }] };
   } catch (err: unknown) {
     return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
   }
 };
+
 
 server.registerTool(
   "capture_note",
