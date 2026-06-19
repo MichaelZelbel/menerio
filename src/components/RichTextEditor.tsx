@@ -65,8 +65,8 @@ export function RichTextEditor({
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
 
-  const toEditorHtml = (markdown: string) =>
-    markdownToHtml(markdown).replace(
+  const toEditorHtml = (markdown: string) => {
+    let html = markdownToHtml(markdown).replace(
       /<span[^>]*data-wikilink="true"[^>]*>[\s\S]*?<\/span>/gi,
       (match) => {
         const target = match.match(/data-note-title="([^"]*)"/i)?.[1] || "";
@@ -76,6 +76,30 @@ export function RichTextEditor({
         return `<a class="wiki-link" data-slug="${slug}" href="/lexicon/${slug}">${label}</a>`;
       },
     );
+    // Defensively strip target="_blank" from anchors that resolve to internal hosts,
+    // so historical content doesn't force a new-tab open before our click handler runs.
+    html = html.replace(/<a\b([^>]*)>/gi, (full, attrs: string) => {
+      const hrefMatch = attrs.match(/href\s*=\s*"([^"]*)"/i);
+      if (!hrefMatch) return full;
+      const href = hrefMatch[1];
+      if (!href || href.startsWith("#")) return full;
+      if (!/^(https?:)?\/\//i.test(href) && !href.startsWith("/")) return full;
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return full;
+      }
+      const isInternal =
+        url.host === window.location.host ||
+        INTERNAL_APP_HOSTS.includes(url.host) ||
+        url.host.endsWith(".lovable.app");
+      if (!isInternal) return full;
+      const cleaned = attrs.replace(/\s+target\s*=\s*"[^"]*"/gi, "");
+      return `<a${cleaned}>`;
+    });
+    return html;
+  };
 
   const editor = useEditor({
     extensions: [
