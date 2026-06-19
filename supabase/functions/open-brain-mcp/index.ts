@@ -1962,17 +1962,19 @@ server.registerTool(
       "Search across all analyzed images and PDFs by description or extracted text. Returns matching media with descriptions, extracted text, and the parent note context. Use this to find visual content like diagrams, screenshots, whiteboards, or any image/PDF that was previously captured.",
     inputSchema: {
       query: z.string().describe("What to search for in images/PDFs"),
-      limit: z.number().optional().default(10),
-      threshold: z.number().optional().default(0.5),
+      limit: z.coerce.number().optional().default(10),
+      threshold: z.coerce.number().optional().default(0.5),
+      offset: z.coerce.number().optional().default(0),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
-  async ({ query, limit, threshold }) => {
+  async ({ query, limit, threshold, offset = 0, view = "snippet" }) => {
     try {
       const qEmb = await getEmbedding(query);
       const { data, error } = await supabase.rpc("match_media", {
         query_embedding: qEmb,
         match_threshold: threshold,
-        match_count: limit,
+        match_count: CANDIDATE_CAP,
         p_user_id: getCurrentUserId(),
       });
 
@@ -1984,24 +1986,48 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `No images or PDFs found matching "${query}".` }] };
       }
 
-      const results = data.map((m: any, i: number) => {
+      const total = data.length;
+      const page = data.slice(offset, offset + limit);
+      const clamp = (s: string) => {
+        const norm = s.replace(/\s+/g, " ").trim();
+        return norm.length > SNIPPET_CAP ? norm.slice(0, SNIPPET_CAP - 1) + "…" : norm;
+      };
+
+      const header = `Found ~${total} media match(es). Showing ${total ? offset + 1 : 0}-${offset + page.length} (has_more: ${offset + page.length < total}):`;
+
+      let used = header.length;
+      const blocks: string[] = [];
+      let dropped = 0;
+      for (let i = 0; i < page.length; i++) {
+        const m = page[i] as any;
         const parts: string[] = [];
-        parts.push(`--- Result ${i + 1} (${(m.similarity * 100).toFixed(1)}% match) ---`);
+        parts.push(`--- Result ${offset + i + 1} (${(m.similarity * 100).toFixed(1)}% match) ---`);
         const label = m.media_type === "pdf" || m.media_type === "pdf_page"
           ? `PDF${m.page_number ? ` page ${m.page_number}` : ""}`
           : "Image";
         parts.push(`Type: ${label}`);
         if (m.original_filename) parts.push(`File: ${m.original_filename}`);
-        parts.push(`Note: ${m.note_title}`);
-        if (m.description) parts.push(`Description: ${m.description}`);
-        if (m.topics?.length) parts.push(`Topics: ${m.topics.join(", ")}`);
-        if (m.extracted_text) parts.push(`Extracted text:\n${m.extracted_text.substring(0, 500)}`);
-        return parts.join("\n");
-      });
+        if (m.note_title) parts.push(`Note: ${m.note_title}`);
+        if (view !== "metadata") {
+          if (m.description) parts.push(`Description: ${clamp(String(m.description))}`);
+          if (m.extracted_text) parts.push(`Text: ${clamp(String(m.extracted_text))}`);
+        }
+        const block = parts.join("\n");
+        const cost = block.length + 2;
+        if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) {
+          dropped = page.length - i;
+          break;
+        }
+        blocks.push(block);
+        used += cost;
+      }
 
-      return {
-        content: [{ type: "text" as const, text: `Found ${data.length} media match(es):\n\n${results.join("\n\n")}` }],
-      };
+      let text = `${header}\n\n${blocks.join("\n\n")}`;
+      if (dropped > 0) {
+        const nextOffset = offset + blocks.length;
+        text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note_media(note) for a note's full media.`;
+      }
+      return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
