@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
+import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import {
   applyVisibility,
   assertWritable,
