@@ -724,10 +724,17 @@ DERIVED FACTS — compute the canonical underlying fact when possible:
 - If the note states an age AND a reference date, compute date of birth: label = "Date of birth", value = "YYYY-MM-DD" (year = referenceYear - age).
 - If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
 - If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact.
-- Always normalize date values to ISO YYYY-MM-DD.`;
+- Always normalize date values to ISO YYYY-MM-DD.
 
-// Labels that should only ever have ONE pending suggestion / entry per contact at a time.
-const SINGLETON_PROFILE_LABELS = new Set([
+CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
+${CANONICAL_LABELS_FOR_PROMPT}
+When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
+
+// Singleton labels = labels with at most one truth per subject. Derived from
+// the shared canonical schema so the two stay in sync. Legacy alias forms are
+// also included so pre-canonicalization dedup still works.
+const SINGLETON_PROFILE_LABELS = new Set<string>([
+  // Legacy / pre-canonical alias forms still seen in storage:
   "job title", "current job title", "role", "title",
   "company", "current company", "employer",
   "current city", "city", "location",
@@ -735,20 +742,15 @@ const SINGLETON_PROFILE_LABELS = new Set([
   "pronouns", "nationality",
   "partner", "spouse",
 ]);
-
-// Labels that all refer to the same canonical field. The first entry in each
-// group is the canonical label that gets persisted.
-const CANONICAL_LABEL_GROUPS: Array<{ canonical: string; aliases: string[] }> = [
-  { canonical: "Date of birth", aliases: ["date of birth", "birthday", "birth date", "dob", "geburtstag", "geburtsdatum"] },
-  { canonical: "Anniversary", aliases: ["anniversary", "wedding anniversary", "hochzeitstag"] },
-];
-
-function canonicalizeLabel(label: string): string {
-  const lower = (label || "").trim().toLowerCase();
-  for (const group of CANONICAL_LABEL_GROUPS) {
-    if (group.aliases.includes(lower)) return group.canonical;
+// Add every canonical single-value label from the shared schema.
+for (const schema of Object.values(PROFILE_CANONICAL_SCHEMA)) {
+  for (const def of schema.labels) {
+    if (def.single) SINGLETON_PROFILE_LABELS.add(def.canonical.toLowerCase());
   }
-  return label;
+}
+
+function canonicalizeLabel(label: string, categorySlug = "identity"): string {
+  return canonicalProfileLabel(categorySlug, label);
 }
 
 /**
