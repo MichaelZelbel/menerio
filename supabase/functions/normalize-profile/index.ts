@@ -190,7 +190,7 @@ serve(async (req) => {
       // Fire-and-forget on the edge runtime; respond immediately so the
       // HTTP client doesn't time out on long all_contacts sweeps.
       try {
-        // @ts-ignore - EdgeRuntime is a Supabase Edge global
+        // @ts-expect-error - EdgeRuntime is a Supabase Edge global
         EdgeRuntime.waitUntil(runAll());
       } catch {
         // Fallback: still kick off, just unawaited.
