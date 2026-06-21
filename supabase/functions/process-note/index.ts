@@ -465,6 +465,10 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
   }
   const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
 
+  if (suggestion.suggestion_type === "add_moment") {
+    console.log(`[auto-apply moment] canAutoApply=${canAutoApply} mode=${preferences.mode} conf=${confidence} threshold=${threshold} sensitive=${suggestion.is_sensitive} autoAddSensitive=${preferences.autoAddSensitive}`);
+  }
+
   if (!canAutoApply) {
     return { ...suggestion, status: "pending_review" };
   }
@@ -595,7 +599,10 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         } as any)
         .select("id")
         .single();
-      if (momentErr || !insertedMoment) return { ...suggestion, status: "pending_review" };
+      if (momentErr || !insertedMoment) {
+        console.error("[auto-apply moment] insert failed:", momentErr, "payload:", JSON.stringify({ user_id: suggestion.user_id, title, happenedAt, personId, impact: p.impact_level, confidence_date: p.confidence_date, confidence_truth: p.confidence_truth }));
+        return { ...suggestion, status: "pending_review" };
+      }
       const participantRows = participants
         .filter((x) => x.contact_id)
         .map((x) => ({ moment_id: insertedMoment.id, person_id: x.contact_id }));
