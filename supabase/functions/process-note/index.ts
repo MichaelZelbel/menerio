@@ -662,6 +662,7 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
 const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
   add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+  add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
 };
 
 function thresholdFor(suggestionType: string, sensitivity: string): number {
