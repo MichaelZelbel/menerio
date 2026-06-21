@@ -627,6 +627,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       // Stale / failed → let the human decide.
       return { ...suggestion, status: "pending_review" };
     }
+  } catch (err) {
     console.error("auto-apply suggestion failed:", err);
   }
 
