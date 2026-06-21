@@ -966,6 +966,23 @@ const captureNoteHandler = async ({ content }: { content: string }) => {
       indexingNote = " (indexing will catch up in the background)";
     }
 
+    // Fire-and-forget: trigger full process-note pipeline (metadata, profile facts,
+    // moments, relationships, connections). Mirrors receive-note / hub-api-notes.
+    try {
+      fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ note_id: inserted.id }),
+      }).catch((e) => console.warn("process-note trigger failed (capture):", (e as Error).message));
+    } catch (e) {
+      console.warn("process-note trigger failed (capture):", (e as Error).message);
+    }
+
+
+
     const meta = metadata as Record<string, unknown>;
     let confirmation = `Captured as ${meta.type || "note"}`;
     if (Array.isArray(meta.topics) && meta.topics.length)
@@ -1052,6 +1069,24 @@ server.registerTool(
         .select("id, title, tags, folder_path, is_favorite, is_pinned, updated_at")
         .single();
       if (error) return jsonTool({ error: error.message });
+
+      // Fire-and-forget: re-run process-note so edits re-extract metadata,
+      // embeddings, profile facts, moments, and connections.
+      if (content !== undefined || title !== undefined) {
+        try {
+          fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ note_id }),
+          }).catch((e) => console.warn("process-note trigger failed (update):", (e as Error).message));
+        } catch (e) {
+          console.warn("process-note trigger failed (update):", (e as Error).message);
+        }
+      }
+
       return jsonTool({ ok: true, note: data });
     } catch (err: unknown) {
       return jsonTool({ error: (err as Error).message });
