@@ -404,7 +404,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return deterministicGroups.concat(llmGroups);
+  return deterministicGroups.concat(softSingleGroups).concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
