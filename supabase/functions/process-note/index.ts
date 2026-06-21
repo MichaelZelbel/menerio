@@ -1247,6 +1247,15 @@ async function generateProfileSuggestions(
         console.log(`[profile-extract] Dropping fact: invalid category_slug="${f.category_slug}"`);
         continue;
       }
+      // Phase A canonicalization (source-side only, non-destructive):
+      // 1) Re-home well-known cross-category labels (e.g. Place of birth → identity).
+      // 2) Canonicalize the label within the (possibly corrected) category.
+      const correctedSlug = correctProfileCategory(f.label, f.category_slug);
+      if (PROFILE_CATEGORY_SLUGS.includes(correctedSlug)) {
+        f.category_slug = correctedSlug;
+      }
+      f.label = canonicalProfileLabel(f.category_slug, f.label);
+
       const nm = f.contact_name.toLowerCase().trim();
       let target = nameToTarget.get(nm) || null;
       if (!target) {
