@@ -173,6 +173,7 @@ serve(async (req) => {
             contactId: subj,
             preferences,
             sourceNoteId: null,
+            includeNotesContext: true,
             helpers,
           });
           totalCreated += r.created;
