@@ -979,6 +979,9 @@ const captureNoteHandler = async ({ content }: { content: string }) => {
       }).catch((e) => console.warn("process-note trigger failed (capture):", (e as Error).message));
     } catch (e) {
       console.warn("process-note trigger failed (capture):", (e as Error).message);
+    }
+
+
 
     const meta = metadata as Record<string, unknown>;
     let confirmation = `Captured as ${meta.type || "note"}`;
