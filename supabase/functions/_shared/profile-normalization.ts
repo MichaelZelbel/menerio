@@ -9,6 +9,7 @@ import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
+  isSingleValueLabel,
 } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
@@ -169,11 +170,63 @@ export async function planSubjectNormalization(args: {
     });
   }
 
-  // Build LLM input from rows NOT already owned by the deterministic pass.
+  // --- Soft single-label multiplicity detector (deterministic) ---
+  // For canonical [single] labels with 2+ rows AND 2+ distinct values: emit a
+  // low-confidence (0.55) merge group so it routes to REVIEW (never auto-applies).
+  // The user picks the right value. This guarantees duplicates never pass silently
+  // when the LLM non-deterministically fails to merge them.
+  type SoftMember = { row: ProfileEntryRow; correctedSlug: string; canonLabel: string };
+  const softBuckets = new Map<string, SoftMember[]>();
+  for (const row of rows) {
+    if (deterministicIds.has(row.id)) continue;
+    const currentSlug = slugById.get(row.category_id) || "preferences";
+    const correctedSlug = correctProfileCategory(row.label, currentSlug);
+    const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
+    if (!isSingleValueLabel(canonLabel)) continue;
+    const key = `${correctedSlug}||${canonLabel.toLowerCase()}`;
+    const m: SoftMember = { row, correctedSlug, canonLabel };
+    const bucket = softBuckets.get(key);
+    if (bucket) bucket.push(m); else softBuckets.set(key, [m]);
+  }
+  const softSingleGroups: NormalizationGroup[] = [];
+  for (const members of softBuckets.values()) {
+    if (members.length < 2) continue;
+    const distinctValues = new Set(members.map((m) => (m.row.value || "").trim().toLowerCase()));
+    if (distinctValues.size < 2) continue;
+    // Survivor: longest trimmed value; tie → already in corrected category.
+    let survivor = members[0];
+    let survivorLen = (survivor.row.value || "").trim().length;
+    let survivorInCorrect = slugById.get(survivor.row.category_id) === survivor.correctedSlug;
+    for (const cand of members.slice(1)) {
+      const candLen = (cand.row.value || "").trim().length;
+      const candInCorrect = slugById.get(cand.row.category_id) === cand.correctedSlug;
+      if (candLen > survivorLen || (candLen === survivorLen && candInCorrect && !survivorInCorrect)) {
+        survivor = cand;
+        survivorLen = candLen;
+        survivorInCorrect = candInCorrect;
+      }
+    }
+    const memberIds = members.map((m) => m.row.id);
+    for (const id of memberIds) deterministicIds.add(id);
+    softSingleGroups.push({
+      user_id: userId,
+      contact_id: contactId,
+      member_entry_ids: memberIds,
+      survivor_entry_id: survivor.row.id,
+      canonical_category_slug: survivor.correctedSlug,
+      canonical_label: survivor.canonLabel,
+      canonical_value: survivor.row.value,
+      operation: "merge",
+      confidence: 0.55,
+      rationale: `Multiple entries share the single-value field '${survivor.canonLabel}'; choose one.`,
+    });
+  }
+
+  // Build LLM input from rows NOT already owned by the deterministic passes.
   // This guarantees zero overlap: the LLM cannot see, and therefore cannot
-  // touch, any row that the deterministic collapser has already claimed.
+  // touch, any row claimed by the exact-duplicate or soft-single passes.
   const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
-  if (llmRows.length < 2) return deterministicGroups;
+  if (llmRows.length < 2) return deterministicGroups.concat(softSingleGroups);
 
   const llmEntries = llmRows.map((r) => ({
     id: r.id,
@@ -184,7 +237,11 @@ export async function planSubjectNormalization(args: {
   }));
 
   // Optional dated-evidence assembly for time-conflict resolution.
-  const CHAR_BUDGET = 6000;
+  // Large-profile guard: shrink prompt budget for big subjects to avoid
+  // WORKER_RESOURCE_LIMIT (observed on a 37-entry contact w/ notes context).
+  const isBigProfile = rows.length > 25;
+  const CHAR_BUDGET = isBigProfile ? 2500 : 6000;
+  const SUBJECT_NOTES_LIMIT = isBigProfile ? 8 : 15;
   let evidenceBlock = "";
   if (includeNotesContext) {
     try {
@@ -218,7 +275,7 @@ export async function planSubjectNormalization(args: {
           .eq("is_trashed", false)
           .contains("metadata", { matched_people: [contactId] })
           .order("created_at", { ascending: false })
-          .limit(15);
+          .limit(SUBJECT_NOTES_LIMIT);
         subjectNotes = (data || []) as any[];
       } else {
         const { data } = await supabase
@@ -227,7 +284,7 @@ export async function planSubjectNormalization(args: {
           .eq("user_id", userId)
           .eq("is_trashed", false)
           .order("created_at", { ascending: false })
-          .limit(15);
+          .limit(SUBJECT_NOTES_LIMIT);
         subjectNotes = (data || []) as any[];
       }
       for (const n of subjectNotes) addNote(n);
@@ -271,7 +328,7 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups;
+    return deterministicGroups.concat(softSingleGroups);
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
@@ -347,7 +404,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return deterministicGroups.concat(llmGroups);
+  return deterministicGroups.concat(softSingleGroups).concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {

@@ -165,26 +165,38 @@ serve(async (req) => {
       let totalCreated = 0;
       let totalAuto = 0;
       const perSubject: any[] = [];
-      for (const subj of subjects) {
-        try {
-          const r = await createNormalizationSuggestions({
-            supabase: db,
-            userId,
-            contactId: subj,
-            preferences,
-            sourceNoteId: null,
-            includeNotesContext: true,
-            helpers,
-          });
-          totalCreated += r.created;
-          totalAuto += r.autoApplied;
-          perSubject.push({ subject: subj ?? "owner", ...r });
-        } catch (e) {
-          console.error(`[normalize-profile] backfill subject=${subj}`, e);
-          perSubject.push({ subject: subj ?? "owner", error: String(e) });
+      const runAll = async () => {
+        for (const subj of subjects) {
+          try {
+            const r = await createNormalizationSuggestions({
+              supabase: db,
+              userId,
+              contactId: subj,
+              preferences,
+              sourceNoteId: null,
+              includeNotesContext: true,
+              helpers,
+            });
+            totalCreated += r.created;
+            totalAuto += r.autoApplied;
+            perSubject.push({ subject: subj ?? "owner", ...r });
+          } catch (e) {
+            console.error(`[normalize-profile] backfill subject=${subj}`, e);
+            perSubject.push({ subject: subj ?? "owner", error: String(e) });
+          }
         }
+        console.log(`[normalize-profile] background backfill done: created=${totalCreated} auto=${totalAuto} subjects=${subjects.length}`);
+      };
+      // Fire-and-forget on the edge runtime; respond immediately so the
+      // HTTP client doesn't time out on long all_contacts sweeps.
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase Edge global
+        EdgeRuntime.waitUntil(runAll());
+      } catch {
+        // Fallback: still kick off, just unawaited.
+        runAll();
       }
-      return json({ ok: true, created: totalCreated, autoApplied: totalAuto, subjects: perSubject });
+      return json({ ok: true, started: true, scope, subjectCount: subjects.length }, 202);
     }
 
     if (action === "apply") {
