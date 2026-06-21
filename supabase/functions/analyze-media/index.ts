@@ -421,6 +421,31 @@ async function processMedia(
     console.log(
       `analyze-media complete via Mistral (${mediaType}) note=${noteId} path=${storagePath}`
     );
+
+    // If this was the LAST in-flight media row for the note, re-trigger
+    // process-note so newly-OCR'd document text feeds embeddings, profile
+    // extraction, and moment detection. Fire-and-forget; downstream dedup
+    // prevents duplicate suggestions.
+    try {
+      const { count: stillProcessing } = await supabase
+        .from("media_analysis")
+        .select("id", { count: "exact", head: true })
+        .eq("note_id", noteId)
+        .eq("analysis_status", "processing");
+      if (!stillProcessing || stillProcessing === 0) {
+        const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`;
+        fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ note_id: noteId }),
+        }).catch((e) => console.warn("re-trigger process-note failed:", e));
+      }
+    } catch (e) {
+      console.warn("post-OCR re-trigger check failed:", e);
+    }
   } catch (err) {
     console.error("analyze-media error:", err);
     await supabase
