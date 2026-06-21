@@ -237,7 +237,11 @@ export async function planSubjectNormalization(args: {
   }));
 
   // Optional dated-evidence assembly for time-conflict resolution.
-  const CHAR_BUDGET = 6000;
+  // Large-profile guard: shrink prompt budget for big subjects to avoid
+  // WORKER_RESOURCE_LIMIT (observed on a 37-entry contact w/ notes context).
+  const isBigProfile = rows.length > 25;
+  const CHAR_BUDGET = isBigProfile ? 2500 : 6000;
+  const SUBJECT_NOTES_LIMIT = isBigProfile ? 8 : 15;
   let evidenceBlock = "";
   if (includeNotesContext) {
     try {
