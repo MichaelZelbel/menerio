@@ -1066,7 +1066,8 @@ async function generateProfileSuggestions(
 ) {
   const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
   const selfEntry = matchedPeople.find((p) => p.is_self);
-  matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
+  matchedPeople = matchedPeople.filter((p) => (p.contact_id || p.is_self) && p.canonical_name);
+  // Run extraction if we have any matched contact OR a self entry (so OWNER profile facts work too).
   if (matchedPeople.length === 0) return;
 
   // Skip extraction only for note types that are structurally never biographical
