@@ -12,6 +12,12 @@ import {
   relationshipPairKey,
   type EntityRef,
 } from "../_shared/relationship-canonical.ts";
+import {
+  CANONICAL_LABELS_FOR_PROMPT,
+  PROFILE_CANONICAL_SCHEMA,
+  canonicalProfileLabel,
+  correctProfileCategory,
+} from "../_shared/profile-canonical-schema.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
