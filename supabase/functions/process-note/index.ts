@@ -617,7 +617,16 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: insertedMoment.id, applied_at: new Date().toISOString() };
     }
-  } catch (err) {
+
+    if (suggestion.suggestion_type === "normalize_profile_entry") {
+      const payload = suggestion.payload as any;
+      const result = await applyNormalization(supabase, payload);
+      if (result.ok && result.entryId) {
+        return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: result.entryId, applied_at: new Date().toISOString() };
+      }
+      // Stale / failed → let the human decide.
+      return { ...suggestion, status: "pending_review" };
+    }
     console.error("auto-apply suggestion failed:", err);
   }
 
