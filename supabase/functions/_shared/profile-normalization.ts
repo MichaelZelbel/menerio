@@ -25,6 +25,7 @@ export type ProfileEntryRow = {
   value: string;
   sort_order: number | null;
   linked_note_id: string | null;
+  created_at?: string | null;
 };
 
 export type NormalizationGroup = {
