@@ -2027,13 +2027,17 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Generate review queue suggestions (no extra LLM calls)
     await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
-    // Generate profile suggestions for matched people (one extra LLM call)
-    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople, {
+    // Generate profile suggestions for matched people + OWNER (one extra LLM call).
+    // Pass fullText (includes [Media content] OCR) so scans/IDs contribute facts.
+    await generateProfileSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, {
       source_app: (note as any).source_app,
       is_external: (note as any).is_external,
       metadata: mergedMetadata,
       note_created_at: (note as any).created_at ?? null,
     });
+
+    // Generate timeline-moment suggestions from past events documented in the note.
+    await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
