@@ -397,6 +397,7 @@ export async function createNormalizationSuggestions(args: {
   contactId: string | null;
   preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean };
   sourceNoteId?: string | null;
+  includeNotesContext?: boolean;
   // injected helpers from process-note (avoids circular import)
   helpers: {
     filterSuppressedSuggestions: (userId: string, s: ReviewSuggestion[]) => Promise<ReviewSuggestion[]>;
@@ -405,9 +406,9 @@ export async function createNormalizationSuggestions(args: {
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
 }): Promise<{ created: number; autoApplied: number }> {
-  const { supabase, userId, contactId, preferences, sourceNoteId, helpers } = args;
+  const { supabase, userId, contactId, preferences, sourceNoteId, helpers, includeNotesContext = false } = args;
 
-  const groups = await planSubjectNormalization({ supabase, userId, contactId });
+  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext });
   if (groups.length === 0) return { created: 0, autoApplied: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.
