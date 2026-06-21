@@ -211,7 +211,7 @@ Deno.serve(async (req) => {
           Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ noteId: data.id, userId }),
+        body: JSON.stringify({ note_id: data.id }),
       }).catch(() => {});
 
       return json({ data });
