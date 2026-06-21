@@ -9,6 +9,7 @@ import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
+  isSingleValueLabel,
 } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
