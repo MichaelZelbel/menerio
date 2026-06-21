@@ -1200,35 +1200,56 @@ async function generateProfileSuggestions(
       return;
     }
 
-    // Filter to valid category slugs and match to contacts
-    const nameToContact = new Map(
-      matchedPeople.map((p) => [(p.canonical_name || p.name).toLowerCase(), p]),
-    );
-    // Also map by original extracted name
+    // Map names → { contact_id (null for owner), canonical_name }
+    const OWNER_KEY = "__owner__";
+    type Target = { contact_id: string | null; canonical_name: string; is_self: boolean };
+    const nameToTarget = new Map<string, Target>();
+    let ownerTarget: Target | null = null;
     for (const p of matchedPeople) {
-      nameToContact.set(p.name.toLowerCase(), p);
+      const target: Target = {
+        contact_id: p.contact_id || null,
+        canonical_name: p.canonical_name || p.name,
+        is_self: !!p.is_self,
+      };
+      nameToTarget.set((p.canonical_name || p.name).toLowerCase(), target);
+      nameToTarget.set(p.name.toLowerCase(), target);
+      if (p.is_self) {
+        ownerTarget = target;
+        nameToTarget.set("me", target);
+        nameToTarget.set("myself", target);
+        nameToTarget.set("i", target);
+        nameToTarget.set("the owner", target);
+      }
+    }
+    // Also resolve owner via self aliases
+    if (selfEntry) {
+      const selfCtxLazy = await loadSelfContext(userId);
+      for (const a of selfCtxLazy.aliases) nameToTarget.set(a.toLowerCase(), ownerTarget!);
     }
 
-    const validFacts = extractedFacts.filter((f) => {
-      if (!f.contact_name || !f.category_slug || !f.label || !f.value) return false;
+    const keyFor = (t: Target) => t.contact_id || OWNER_KEY;
+
+    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; _target: Target }> = [];
+    for (const f of extractedFacts) {
+      if (!f.contact_name || !f.category_slug || !f.label || !f.value) continue;
       if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
         console.log(`[profile-extract] Dropping fact: invalid category_slug="${f.category_slug}"`);
-        return false;
+        continue;
       }
-      // Fuzzy match contact name against known contacts
-      const exactMatch = nameToContact.has(f.contact_name.toLowerCase());
-      if (exactMatch) return true;
-      // Try fuzzy matching
-      for (const [key, contact] of nameToContact) {
-        if (isFuzzyMatch(f.contact_name, key)) {
-          // Rewrite contact_name to canonical for downstream matching
-          f.contact_name = contact.canonical_name;
-          return true;
+      const nm = f.contact_name.toLowerCase().trim();
+      let target = nameToTarget.get(nm) || null;
+      if (!target) {
+        for (const [key, t] of nameToTarget) {
+          if (isFuzzyMatch(f.contact_name, key)) { target = t; break; }
         }
       }
-      console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
-      return false;
-    });
+      if (!target) {
+        console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
+        continue;
+      }
+      f.contact_name = target.canonical_name;
+      validFacts.push({ ...f, _target: target });
+    }
 
     console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
 
@@ -1236,33 +1257,54 @@ async function generateProfileSuggestions(
       return;
     }
 
-    // Get existing profile entries for these contacts to avoid duplicates
-    const contactIds = [...new Set(validFacts.map((f) => nameToContact.get(f.contact_name.toLowerCase())!.contact_id))];
+    // Look up existing profile entries (per contact, plus owner with contact_id IS NULL)
+    const contactIds = [...new Set(validFacts.map((f) => f._target.contact_id).filter(Boolean))] as string[];
+    const hasOwnerFact = validFacts.some((f) => !f._target.contact_id);
 
-    const { data: existingEntries } = await supabase
-      .from("profile_entries")
-      .select("contact_id, label, value, category_id")
-      .eq("user_id", userId)
-      .in("contact_id", contactIds);
+    let existingEntries: any[] = [];
+    let existingCategories: any[] = [];
+    if (contactIds.length > 0) {
+      const { data: e1 } = await supabase
+        .from("profile_entries")
+        .select("contact_id, label, value, category_id")
+        .eq("user_id", userId)
+        .in("contact_id", contactIds);
+      existingEntries.push(...(e1 || []));
+      const { data: c1 } = await supabase
+        .from("profile_categories")
+        .select("id, slug, contact_id")
+        .eq("user_id", userId)
+        .in("contact_id", contactIds);
+      existingCategories.push(...(c1 || []));
+    }
+    if (hasOwnerFact) {
+      const { data: e2 } = await supabase
+        .from("profile_entries")
+        .select("contact_id, label, value, category_id")
+        .eq("user_id", userId)
+        .is("contact_id", null);
+      existingEntries.push(...(e2 || []));
+      const { data: c2 } = await supabase
+        .from("profile_categories")
+        .select("id, slug, contact_id")
+        .eq("user_id", userId)
+        .is("contact_id", null);
+      existingCategories.push(...(c2 || []));
+    }
 
-    // Get existing categories for these contacts to map slugs to IDs
-    const { data: existingCategories } = await supabase
-      .from("profile_categories")
-      .select("id, slug, contact_id")
-      .eq("user_id", userId)
-      .in("contact_id", contactIds);
+    const entryKey = (cid: string | null, label: string, value: string) =>
+      `${cid || OWNER_KEY}|${label.toLowerCase()}|${value.toLowerCase()}`;
+    const singletonEntryKey = (cid: string | null, label: string) =>
+      `${cid || OWNER_KEY}|${label.toLowerCase()}`;
 
-    const entrySet = new Set(
-      (existingEntries || []).map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}|${e.value.toLowerCase()}`),
-    );
-    // Singleton-label set: (contact_id, label) — used to enforce one-value-per-label.
+    const entrySet = new Set(existingEntries.map((e: any) => entryKey(e.contact_id, e.label, e.value)));
     const singletonEntrySet = new Set(
-      (existingEntries || [])
+      existingEntries
         .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
-        .map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}`),
+        .map((e: any) => singletonEntryKey(e.contact_id, e.label)),
     );
 
-    // Check existing review_queue for duplicate profile suggestions
+    // Existing review_queue items
     const { data: existingQueueItems } = await supabase
       .from("review_queue")
       .select("payload, status")
@@ -1272,61 +1314,55 @@ async function generateProfileSuggestions(
 
     const queueSet = new Set(
       (existingQueueItems || []).map((q: any) =>
-        `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}|${(q.payload.value || "").toLowerCase()}`
+        entryKey(q.payload?.contact_id || null, q.payload?.label || "", q.payload?.value || "")
       ),
     );
-    // Singleton-label set for pending queue items.
     const singletonQueueSet = new Set(
       (existingQueueItems || [])
         .filter((q: any) =>
-          SINGLETON_PROFILE_LABELS.has((q.payload.label || "").toLowerCase()) &&
+          SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
           ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
         )
-        .map((q: any) => `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}`),
+        .map((q: any) => singletonEntryKey(q.payload?.contact_id || null, q.payload?.label || "")),
     );
 
     const suggestions: ReviewSuggestion[] = [];
-    const perContactCount = new Map<string, number>();
+    const perTargetCount = new Map<string, number>();
 
     for (const fact of validFacts) {
-      const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
+      const target = fact._target;
+      const tKey = keyFor(target);
       const labelLower = fact.label.toLowerCase();
-      const dedupKey = `${contact.contact_id}|${labelLower}|${fact.value.toLowerCase()}`;
-      const singletonKey = `${contact.contact_id}|${labelLower}`;
+      const dedupKey = entryKey(target.contact_id, fact.label, fact.value);
+      const sKey = singletonEntryKey(target.contact_id, fact.label);
 
-      // Skip if entry already exists or already in queue
       if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
-
-      // Singleton-label dedupe: only one Job title / Current city / etc. at a time.
       if (SINGLETON_PROFILE_LABELS.has(labelLower)) {
-        if (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey)) {
-          console.log(`[profile-extract] skipping fact: singleton label "${fact.label}" already pending/known for ${contact.canonical_name}`);
+        if (singletonEntrySet.has(sKey) || singletonQueueSet.has(sKey)) {
+          console.log(`[profile-extract] skipping singleton "${fact.label}" already known for ${target.canonical_name}`);
           continue;
         }
       }
+      const count = perTargetCount.get(tKey) || 0;
+      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) continue;
+      perTargetCount.set(tKey, count + 1);
 
-      // Per-(contact, note) cap to prevent flooding.
-      const count = perContactCount.get(contact.contact_id) || 0;
-      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) {
-        console.log(`[profile-extract] cap reached for ${contact.canonical_name} on note ${noteId}, dropping further facts`);
-        continue;
-      }
-      perContactCount.set(contact.contact_id, count + 1);
-
-      // Find category ID if categories are seeded
-      const catRow = (existingCategories || []).find(
-        (c: any) => c.slug === fact.category_slug && c.contact_id === contact.contact_id,
+      const catRow = existingCategories.find(
+        (c: any) => c.slug === fact.category_slug && (c.contact_id || null) === target.contact_id,
       );
+
+      const ownerLabelName = target.is_self ? "your" : `${target.canonical_name}'s`;
 
       suggestions.push({
         user_id: userId,
         source_note_id: noteId,
         suggestion_type: "add_profile_entry",
-        title: `Add to ${contact.canonical_name}'s profile: ${fact.label}`,
+        title: `Add to ${ownerLabelName} profile: ${fact.label}`,
         description: `"${fact.value}" — extracted from "${noteTitle}"`,
         payload: {
-          contact_id: contact.contact_id,
-          contact_name: contact.canonical_name,
+          contact_id: target.contact_id,
+          contact_name: target.canonical_name,
+          is_owner: target.contact_id === null,
           category_slug: fact.category_slug,
           category_id: catRow?.id || null,
           label: fact.label,
@@ -1340,22 +1376,23 @@ async function generateProfileSuggestions(
           ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
           : DEFAULT_CONFIDENCE.add_profile_entry,
         is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
-        suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
+        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${fact.value}`),
       });
 
-      // Track to avoid duplicates within same batch
       queueSet.add(dedupKey);
-      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(sKey);
     }
 
     if (suggestions.length > 0) {
       const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
-      const { error } = await supabase.from("review_queue").insert(unsuppressed);
+      const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
+      const { error } = await supabase.from("review_queue").insert(prepared);
       if (error) console.error("Profile suggestion insert error:", error);
-      else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
+      else console.log(`Created ${prepared.length} profile suggestions for note ${noteId}`);
     } else {
       console.log(`All profile facts already known for note ${noteId}`);
     }
+
 
     // ── Relationship suggestions ──
     if (extractedRelationships.length > 0) {
