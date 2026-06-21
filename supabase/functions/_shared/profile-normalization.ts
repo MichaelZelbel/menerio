@@ -99,13 +99,14 @@ export async function planSubjectNormalization(args: {
   supabase: any;
   userId: string;
   contactId: string | null;
+  includeNotesContext?: boolean;
 }): Promise<NormalizationGroup[]> {
-  const { supabase, userId, contactId } = args;
+  const { supabase, userId, contactId, includeNotesContext = false } = args;
 
   // Load all entries for this subject + their categories.
   let entryQuery = supabase
     .from("profile_entries")
-    .select("id, category_id, contact_id, label, value, sort_order, linked_note_id")
+    .select("id, category_id, contact_id, label, value, sort_order, linked_note_id, created_at")
     .eq("user_id", userId);
   entryQuery = contactId ? entryQuery.eq("contact_id", contactId) : entryQuery.is("contact_id", null);
   const { data: entries } = await entryQuery;
