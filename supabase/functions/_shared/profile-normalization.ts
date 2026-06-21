@@ -7,6 +7,8 @@ import { runChat } from "./llm-router.ts";
 import {
   PROFILE_CANONICAL_SCHEMA,
   CANONICAL_LABELS_FOR_PROMPT,
+  canonicalProfileLabel,
+  correctProfileCategory,
 } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
@@ -116,7 +118,61 @@ export async function planSubjectNormalization(args: {
   const slugById = new Map<string, string>();
   for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
 
-  const llmEntries = rows.map((r) => ({
+  // --- Deterministic exact-duplicate collapser (runs BEFORE the LLM) ---
+  // Cluster rows by (correctedCategorySlug, canonicalLabel, trimmed-lowercased value).
+  // Any cluster of size > 1 is an unambiguous exact duplicate we can collapse
+  // safely without asking the LLM.
+  type ClusterMember = {
+    row: ProfileEntryRow;
+    currentSlug: string;
+    correctedSlug: string;
+    canonLabel: string;
+  };
+  const clusters = new Map<string, ClusterMember[]>();
+  for (const row of rows) {
+    const currentSlug = slugById.get(row.category_id) || "preferences";
+    const correctedSlug = correctProfileCategory(row.label, currentSlug);
+    const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
+    const normValue = (row.value || "").trim().toLowerCase();
+    const clusterKey = `${correctedSlug}||${canonLabel.toLowerCase()}||${normValue}`;
+    const bucket = clusters.get(clusterKey);
+    const entry: ClusterMember = { row, currentSlug, correctedSlug, canonLabel };
+    if (bucket) bucket.push(entry);
+    else clusters.set(clusterKey, [entry]);
+  }
+
+  const deterministicGroups: NormalizationGroup[] = [];
+  const deterministicIds = new Set<string>();
+  for (const members of clusters.values()) {
+    if (members.length < 2) continue;
+    // Survivor preference: already in correct category AND already carrying canonical label.
+    let survivor = members.find(
+      (m) => m.currentSlug === m.correctedSlug && m.row.label === m.canonLabel,
+    );
+    if (!survivor) survivor = members[0];
+    const memberIds = members.map((m) => m.row.id);
+    for (const id of memberIds) deterministicIds.add(id);
+    deterministicGroups.push({
+      user_id: userId,
+      contact_id: contactId,
+      member_entry_ids: memberIds,
+      survivor_entry_id: survivor.row.id,
+      canonical_category_slug: survivor.correctedSlug,
+      canonical_label: survivor.canonLabel,
+      canonical_value: survivor.row.value, // original, non-lowercased
+      operation: "merge",
+      confidence: 1.0,
+      rationale: "Exact duplicate entries collapsed to the canonical label/category.",
+    });
+  }
+
+  // Build LLM input from rows NOT already owned by the deterministic pass.
+  // This guarantees zero overlap: the LLM cannot see, and therefore cannot
+  // touch, any row that the deterministic collapser has already claimed.
+  const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
+  if (llmRows.length < 2) return deterministicGroups;
+
+  const llmEntries = llmRows.map((r) => ({
     id: r.id,
     category: slugById.get(r.category_id) || "preferences",
     label: r.label,
@@ -142,13 +198,17 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return [];
+    return deterministicGroups;
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
-  const validIds = new Set(rows.map((r) => r.id));
+  // Only non-deterministic row ids are valid for LLM groups — this rejects any
+  // attempt (hallucinated or not) by the LLM to reference a row the
+  // deterministic pass already owns.
+  const validIds = new Set(llmRows.map((r) => r.id));
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const out: NormalizationGroup[] = [];
+  const llmGroups: NormalizationGroup[] = [];
+
 
   for (const g of rawGroups) {
     if (!g || typeof g !== "object") continue;
@@ -182,7 +242,7 @@ export async function planSubjectNormalization(args: {
       : "merge";
     const conf = Math.max(0, Math.min(1, Number(g.confidence) || 0.7));
 
-    out.push({
+    llmGroups.push({
       user_id: userId,
       contact_id: contactId,
       member_entry_ids: memberIds,
@@ -195,7 +255,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return out;
+  return deterministicGroups.concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
