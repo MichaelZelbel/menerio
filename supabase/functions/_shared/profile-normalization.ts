@@ -242,7 +242,7 @@ export async function planSubjectNormalization(args: {
       : "merge";
     const conf = Math.max(0, Math.min(1, Number(g.confidence) || 0.7));
 
-    out.push({
+    llmGroups.push({
       user_id: userId,
       contact_id: contactId,
       member_entry_ids: memberIds,
@@ -255,7 +255,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return out;
+  return deterministicGroups.concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
