@@ -465,10 +465,6 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
   }
   const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
 
-  if (suggestion.suggestion_type === "add_moment") {
-    console.log(`[auto-apply moment] canAutoApply=${canAutoApply} mode=${preferences.mode} conf=${confidence} threshold=${threshold} sensitive=${suggestion.is_sensitive} autoAddSensitive=${preferences.autoAddSensitive}`);
-  }
-
   if (!canAutoApply) {
     return { ...suggestion, status: "pending_review" };
   }
