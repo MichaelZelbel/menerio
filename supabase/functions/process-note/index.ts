@@ -1716,7 +1716,11 @@ async function generateMomentSuggestions(
       target_entity_type: "moment",
       source_title: noteTitle,
       extracted_value: `${title} (${happenedAt})`,
-      confidence_score: DEFAULT_CONFIDENCE.add_moment,
+      // Derive score from LLM-reported date+truth certainty (0-10 each).
+      // Mapping: avg=10 → 0.95, avg=9 → 0.90, avg=8 → 0.86 (clears 0.85 conservative bar),
+      // avg=7 → 0.80, avg=6 → 0.74, avg=5 → 0.68, avg≤3 → ≤0.55.
+      // Floor 0.50, ceiling 0.95. Genuinely uncertain moments stay in review.
+      confidence_score: Math.max(0.5, Math.min(0.95, 0.5 + ((confDate + confTruth) / 20) * 0.45)),
       is_sensitive: isSensitiveSuggestion("add_moment", { title, description: description || "" }, fullText),
       suppression_key: suppressionKey,
     };
