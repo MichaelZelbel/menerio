@@ -676,6 +676,7 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_alias: 0.78,
   add_profile_entry: 0.80,
   add_relationship: 0.72,
+  add_moment: 0.78,
 };
 
 const SENSITIVE_TERMS = [
