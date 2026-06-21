@@ -63,6 +63,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
+  add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
 };
 
@@ -162,6 +163,14 @@ export default function ReviewQueue() {
       return;
     }
 
+    if (item.suggestion_type === "add_moment" && item.target_entity_id) {
+      await supabase.from("moment_participants").delete().eq("moment_id", item.target_entity_id);
+      await supabase.from("moments").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["moments"] });
+      queryClient.invalidateQueries({ queryKey: ["timeline"] });
+      return;
+    }
+
     if (item.suggestion_type === "add_alias") {
       const { contact_id, alias } = item.payload as any;
       if (!contact_id || !alias) return;
@@ -183,71 +192,65 @@ export default function ReviewQueue() {
 
   const handleAcceptProfileEntry = async (item: ReviewItem) => {
     const { contact_id, contact_name, category_slug, label, value } = item.payload as any;
-    if (!contact_id || !category_slug || !label || !value) {
+    if (!category_slug || !label || !value) {
       showToast.error("Incomplete profile suggestion");
       return;
     }
+    const isOwner = !contact_id;
+    const ownerName = isOwner ? "your" : `${contact_name}'s`;
+
+    // Helper: find existing category honoring contact_id IS NULL for owner.
+    const findCategory = async () => {
+      const q = supabase
+        .from("profile_categories")
+        .select("id")
+        .eq("user_id", user!.id)
+        .eq("slug", category_slug);
+      const { data } = isOwner
+        ? await q.is("contact_id", null).maybeSingle()
+        : await q.eq("contact_id", contact_id).maybeSingle();
+      return data?.id || null;
+    };
 
     try {
-      // Check if the contact has profile categories seeded (scoped to current user)
-      const { data: existingCats, error: existingErr } = await supabase
+      // Check if categories are seeded for this scope (owner or contact).
+      const seedQuery = supabase
         .from("profile_categories")
         .select("id, slug")
-        .eq("user_id", user!.id)
-        .eq("contact_id", contact_id);
+        .eq("user_id", user!.id);
+      const { data: existingCats, error: existingErr } = isOwner
+        ? await seedQuery.is("contact_id", null)
+        : await seedQuery.eq("contact_id", contact_id);
 
       if (existingErr) {
-        showToast.error("Failed to load contact profile: " + existingErr.message);
+        showToast.error("Failed to load profile: " + existingErr.message);
         return;
       }
 
       let categoryId: string | null = null;
       const matchExisting = (existingCats || []).find((c: any) => c.slug === category_slug);
-      if (matchExisting) {
-        categoryId = matchExisting.id;
-      }
+      if (matchExisting) categoryId = matchExisting.id;
 
-      // If no categories exist at all, seed defaults via plain insert.
-      // The unique index uses an expression (COALESCE(contact_id, ...)) so we
-      // cannot use ON CONFLICT — instead we tolerate 23505 unique-violations
-      // (race with another tab) and re-fetch to resolve the category id.
+      // Seed defaults if no categories exist in this scope.
       if (!existingCats || existingCats.length === 0) {
         const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
           ...c,
           user_id: user!.id,
-          contact_id,
+          contact_id: isOwner ? null : contact_id,
           is_default: true,
         } as any));
-        const { error: seedErr } = await supabase
-          .from("profile_categories")
-          .insert(rows);
+        const { error: seedErr } = await supabase.from("profile_categories").insert(rows);
         if (seedErr && (seedErr as any).code !== "23505") {
-          showToast.error("Failed to initialize contact profile: " + seedErr.message);
+          showToast.error("Failed to initialize profile: " + seedErr.message);
           return;
         }
-        // Re-fetch to get the category id (covers both fresh seed and race with another tab)
-        const { data: refetched } = await supabase
-          .from("profile_categories")
-          .select("id, slug")
-          .eq("user_id", user!.id)
-          .eq("contact_id", contact_id)
-          .eq("slug", category_slug)
-          .maybeSingle();
-        categoryId = refetched?.id || null;
+        categoryId = await findCategory();
       }
 
-      // Still no category? Create the missing one (custom slug or non-default).
-      // Same constraint applies — use select-then-insert with race tolerance.
       if (!categoryId) {
-        const { data: existing } = await supabase
-          .from("profile_categories")
-          .select("id")
-          .eq("user_id", user!.id)
-          .eq("contact_id", contact_id)
-          .eq("slug", category_slug)
-          .maybeSingle();
-        if (existing?.id) {
-          categoryId = existing.id;
+        const existingId = await findCategory();
+        if (existingId) {
+          categoryId = existingId;
         } else {
           const catDef = DEFAULT_PROFILE_CATEGORIES.find((c) => c.slug === category_slug);
           const { data: newCat, error: catErr } = await supabase
@@ -257,7 +260,7 @@ export default function ReviewQueue() {
               slug: category_slug,
               icon: catDef?.icon || "folder",
               user_id: user!.id,
-              contact_id,
+              contact_id: isOwner ? null : contact_id,
               is_default: false,
               sort_order: 99,
               visibility_scope: "all",
@@ -266,15 +269,7 @@ export default function ReviewQueue() {
             .maybeSingle();
           if (catErr) {
             if ((catErr as any).code === "23505") {
-              // Race: another insert won. Re-select.
-              const { data: raced } = await supabase
-                .from("profile_categories")
-                .select("id")
-                .eq("user_id", user!.id)
-                .eq("contact_id", contact_id)
-                .eq("slug", category_slug)
-                .maybeSingle();
-              categoryId = raced?.id || null;
+              categoryId = await findCategory();
             } else {
               showToast.error("Failed to create category: " + catErr.message);
               return;
@@ -290,10 +285,9 @@ export default function ReviewQueue() {
         return;
       }
 
-      // Insert the profile entry
       const { data: inserted, error: entryErr } = await supabase.from("profile_entries").insert({
         category_id: categoryId,
-        contact_id,
+        contact_id: isOwner ? null : contact_id,
         label,
         value,
         sort_order: 0,
@@ -305,9 +299,10 @@ export default function ReviewQueue() {
         return;
       }
 
-      // Invalidate contact profile queries
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
+      queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
+      queryClient.invalidateQueries({ queryKey: ["profile-categories"] });
       updateStatus.mutate({
         id: item.id,
         status: "kept",
@@ -317,7 +312,61 @@ export default function ReviewQueue() {
           applied_at: new Date().toISOString(),
         },
       });
-      showToast.success(`Added "${label}: ${value}" to ${contact_name}'s profile`);
+      showToast.success(`Added "${label}: ${value}" to ${ownerName} profile`);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleAcceptMoment = async (item: ReviewItem) => {
+    const p = item.payload as any;
+    const title = String(p?.title || "").trim();
+    const happenedAt = String(p?.happened_at || "").trim();
+    if (!title || !happenedAt) {
+      showToast.error("Incomplete moment suggestion");
+      return;
+    }
+    try {
+      const participants: Array<{ contact_id?: string | null; is_self?: boolean; name?: string }> = Array.isArray(p.participants) ? p.participants : [];
+      const firstContact = participants.find((x) => x.contact_id);
+      const { data: inserted, error } = await supabase
+        .from("moments")
+        .insert({
+          user_id: user!.id,
+          title,
+          description: p.description || null,
+          happened_at: happenedAt,
+          impact_level: Math.max(1, Math.min(4, Number(p.impact_level) || 2)),
+          confidence_date: Math.max(0, Math.min(10, Number(p.confidence_date) || 7)),
+          confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
+          person_id: firstContact?.contact_id || null,
+          source: "note_auto",
+          status: "happened",
+        } as any)
+        .select("id")
+        .single();
+      if (error || !inserted) {
+        showToast.error("Failed to add moment: " + (error?.message || "Unknown error"));
+        return;
+      }
+      const partRows = participants
+        .filter((x) => x.contact_id)
+        .map((x) => ({ moment_id: inserted.id, person_id: x.contact_id }));
+      if (partRows.length > 0) {
+        await supabase.from("moment_participants").insert(partRows as any);
+      }
+      queryClient.invalidateQueries({ queryKey: ["moments"] });
+      queryClient.invalidateQueries({ queryKey: ["timeline"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: {
+          target_entity_type: "moment",
+          target_entity_id: inserted.id,
+          applied_at: new Date().toISOString(),
+        },
+      });
+      showToast.success(`Added moment: ${title}`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }
@@ -416,6 +465,10 @@ export default function ReviewQueue() {
 
     if (type === "add_relationship") {
       return handleAcceptRelationship(item);
+    }
+
+    if (type === "add_moment") {
+      return handleAcceptMoment(item);
     }
 
     if (type === "group_member_suggestion") {

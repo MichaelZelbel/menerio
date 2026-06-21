@@ -495,11 +495,61 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
     }
 
     if (suggestion.suggestion_type === "add_profile_entry") {
-      const contactId = suggestion.payload.contact_id as string | undefined;
-      const categoryId = suggestion.payload.category_id as string | null | undefined;
+      const contactIdRaw = suggestion.payload.contact_id as string | null | undefined;
+      const contactId: string | null = contactIdRaw || null;
+      const categorySlug = suggestion.payload.category_slug as string | undefined;
+      let categoryId = suggestion.payload.category_id as string | null | undefined;
       const label = String(suggestion.payload.label || "").trim();
       const value = String(suggestion.payload.value || "").trim();
-      if (!contactId || !categoryId || !label || !value) return { ...suggestion, status: "pending_review" };
+      if (!label || !value || !categorySlug) return { ...suggestion, status: "pending_review" };
+
+      // Resolve / create the category. Owner categories have contact_id IS NULL.
+      if (!categoryId) {
+        const baseQuery = supabase
+          .from("profile_categories")
+          .select("id")
+          .eq("user_id", suggestion.user_id)
+          .eq("slug", categorySlug);
+        const { data: existingCat } = contactId
+          ? await baseQuery.eq("contact_id", contactId).maybeSingle()
+          : await baseQuery.is("contact_id", null).maybeSingle();
+        if (existingCat?.id) {
+          categoryId = existingCat.id;
+        } else {
+          const { data: newCat, error: catErr } = await supabase
+            .from("profile_categories")
+            .insert({
+              user_id: suggestion.user_id,
+              contact_id: contactId,
+              slug: categorySlug,
+              name: categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1),
+              icon: "folder",
+              is_default: false,
+              sort_order: 99,
+              visibility_scope: "all",
+            } as any)
+            .select("id")
+            .maybeSingle();
+          if (catErr && (catErr as any).code !== "23505") {
+            return { ...suggestion, status: "pending_review" };
+          }
+          if (newCat?.id) {
+            categoryId = newCat.id;
+          } else {
+            const baseQuery2 = supabase
+              .from("profile_categories")
+              .select("id")
+              .eq("user_id", suggestion.user_id)
+              .eq("slug", categorySlug);
+            const { data: raced } = contactId
+              ? await baseQuery2.eq("contact_id", contactId).maybeSingle()
+              : await baseQuery2.is("contact_id", null).maybeSingle();
+            categoryId = raced?.id || null;
+          }
+        }
+      }
+      if (!categoryId) return { ...suggestion, status: "pending_review" };
+
       const { data, error } = await supabase
         .from("profile_entries")
         .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
@@ -519,6 +569,40 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_moment") {
+      const p = suggestion.payload as any;
+      const happenedAt = String(p.happened_at || "").trim();
+      const title = String(p.title || "").trim();
+      if (!happenedAt || !title) return { ...suggestion, status: "pending_review" };
+      const participants: Array<{ contact_id?: string | null; is_self?: boolean; name?: string }> = Array.isArray(p.participants) ? p.participants : [];
+      const firstContactParticipant = participants.find((x) => x.contact_id);
+      const personId = firstContactParticipant?.contact_id || null;
+      const { data: insertedMoment, error: momentErr } = await supabase
+        .from("moments")
+        .insert({
+          user_id: suggestion.user_id,
+          title,
+          description: p.description || null,
+          happened_at: happenedAt,
+          impact_level: Math.max(1, Math.min(4, Number(p.impact_level) || 2)),
+          confidence_date: Math.max(0, Math.min(10, Number(p.confidence_date) || 7)),
+          confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
+          person_id: personId,
+          source: "note_auto",
+          status: "happened",
+        } as any)
+        .select("id")
+        .single();
+      if (momentErr || !insertedMoment) return { ...suggestion, status: "pending_review" };
+      const participantRows = participants
+        .filter((x) => x.contact_id)
+        .map((x) => ({ moment_id: insertedMoment.id, person_id: x.contact_id }));
+      if (participantRows.length > 0) {
+        await supabase.from("moment_participants").insert(participantRows as any);
+      }
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: insertedMoment.id, applied_at: new Date().toISOString() };
     }
   } catch (err) {
     console.error("auto-apply suggestion failed:", err);
@@ -578,6 +662,7 @@ const SENSITIVITY_THRESHOLDS: Record<string, number> = {
 const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
   add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
+  add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
 };
 
 function thresholdFor(suggestionType: string, sensitivity: string): number {
@@ -591,6 +676,7 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_alias: 0.78,
   add_profile_entry: 0.80,
   add_relationship: 0.72,
+  add_moment: 0.78,
 };
 
 const SENSITIVE_TERMS = [
@@ -599,56 +685,43 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note.
+const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
 
 Return a JSON object with two keys:
 1. "facts": an array of profile fact objects, each with:
-   - "contact_name": the person's name exactly as provided
+   - "contact_name": the person's name exactly as provided. For first-person facts about the note author (the OWNER themself), use the literal string "me".
    - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
-   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title", "Wedding date", "Spouse")
+   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer", "2006-01-23", "Xihui")
 
 2. "relationships": an array of relationship objects, each with:
    - "person_a": name of the first person
    - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
-   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
+   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor", "spouse")
    - "label_b_to_a": what person_b is to person_a
 
+OWNER-FACT GUIDANCE:
+- The note author / profile owner is the user. Extract facts about THEM into the OWNER profile by setting contact_name = "me".
+- Owner facts may come from first-person language ("I am", "my", "I live in"), the owner's own name/aliases listed in the user prompt, or scanned documents/IDs/certificates clearly belonging to the owner.
+- A wedding/marriage event (in the note text OR in attached document OCR) is an owner fact: emit {contact_name:"me", category_slug:"relationships", label:"Wedding date", value:"YYYY-MM-DD"} AND a relationship (person_a:"me", person_b:<spouse name>, label_a_to_b:"spouse", label_b_to_a:"spouse"). Also emit a Wedding date fact for the spouse.
+
 CRITICAL — DO NOT EXTRACT FACTS WHEN:
-- The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
-- The person is the subject of a third-party article, prompt template, course, product description, or job posting where the role described belongs to the content, NOT to the person.
+- The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content.
+- The person is the subject of a third-party article, prompt template, course, product description, or job posting where the role described belongs to the content.
 - The note is a prompt library, template, documentation, code snippet, or generic reference where the person is only tangentially named.
 - A fact would be inferred only from indirect mentions, quotes, or generic context.
-
-DO EXTRACT when the note describes the person directly, whether in first OR third person. Examples that QUALIFY:
-- "Met Sarah for coffee — she just moved to Lisbon and is loving it."
-- "Tom started a new role as Head of Design at Notion last week."
-- "Nate works as a knowledge architect at Acme."
-- "Anna's birthday is May 12."
-- "Karim is vegetarian and allergic to peanuts."
-
-Examples that DO NOT qualify:
-- "OB1-Wiki Prompt 3: Wiki Synthesis Agent — by Nate Jones" → no facts. Nate is the author; "Wiki Synthesis Agent" is the prompt's role, not Nate's job.
-- "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
 - Extract facts/relationships clearly stated or strongly implied about the person themselves
 - Do NOT invent or assume — if unsure, skip
-- Skip authorship-only and topic-only mentions
 - Return empty arrays if nothing qualifies
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
 
-DERIVED FACTS — compute the canonical underlying fact when the note gives you enough to do so safely:
-- If the note states an age AND a reference date (explicit "on YYYY-MM-DD" in the text, or unambiguously from the provided Note date), compute the date of birth:
-    label = "Date of birth", value = "YYYY-MM-DD" where year = referenceYear - age, month/day from the reference date.
+DERIVED FACTS — compute the canonical underlying fact when possible:
+- If the note states an age AND a reference date, compute date of birth: label = "Date of birth", value = "YYYY-MM-DD" (year = referenceYear - age).
 - If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
-- If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact at all — never store free text like "61st birthday on 2026-05-25" as a value.
-- Always normalize date values to ISO YYYY-MM-DD.
-
-Derived-fact examples:
-- Note text "Gunther turned 61 on 2026-05-25." → {contact_name: "Gunther", category_slug: "identity", label: "Date of birth", value: "1965-05-25"}
-- Note text "Anna's 30th birthday was on 2024-03-12." → {label: "Date of birth", value: "1994-03-12"}
-- Note text "Tom is 40 years old" with Note date 2026-01-10 and no explicit birthday date → DO NOT emit a Date of birth (we don't know month/day).`;
+- If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact.
+- Always normalize date values to ISO YYYY-MM-DD.`;
 
 // Labels that should only ever have ONE pending suggestion / entry per contact at a time.
 const SINGLETON_PROFILE_LABELS = new Set([
@@ -993,7 +1066,8 @@ async function generateProfileSuggestions(
 ) {
   const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
   const selfEntry = matchedPeople.find((p) => p.is_self);
-  matchedPeople = matchedPeople.filter((p) => p.contact_id && !p.is_self && p.canonical_name);
+  matchedPeople = matchedPeople.filter((p) => (p.contact_id || p.is_self) && p.canonical_name);
+  // Run extraction if we have any matched contact OR a self entry (so OWNER profile facts work too).
   if (matchedPeople.length === 0) return;
 
   // Skip extraction only for note types that are structurally never biographical
@@ -1126,35 +1200,56 @@ async function generateProfileSuggestions(
       return;
     }
 
-    // Filter to valid category slugs and match to contacts
-    const nameToContact = new Map(
-      matchedPeople.map((p) => [(p.canonical_name || p.name).toLowerCase(), p]),
-    );
-    // Also map by original extracted name
+    // Map names → { contact_id (null for owner), canonical_name }
+    const OWNER_KEY = "__owner__";
+    type Target = { contact_id: string | null; canonical_name: string; is_self: boolean };
+    const nameToTarget = new Map<string, Target>();
+    let ownerTarget: Target | null = null;
     for (const p of matchedPeople) {
-      nameToContact.set(p.name.toLowerCase(), p);
+      const target: Target = {
+        contact_id: p.contact_id || null,
+        canonical_name: p.canonical_name || p.name,
+        is_self: !!p.is_self,
+      };
+      nameToTarget.set((p.canonical_name || p.name).toLowerCase(), target);
+      nameToTarget.set(p.name.toLowerCase(), target);
+      if (p.is_self) {
+        ownerTarget = target;
+        nameToTarget.set("me", target);
+        nameToTarget.set("myself", target);
+        nameToTarget.set("i", target);
+        nameToTarget.set("the owner", target);
+      }
+    }
+    // Also resolve owner via self aliases
+    if (selfEntry) {
+      const selfCtxLazy = await loadSelfContext(userId);
+      for (const a of selfCtxLazy.aliases) nameToTarget.set(a.toLowerCase(), ownerTarget!);
     }
 
-    const validFacts = extractedFacts.filter((f) => {
-      if (!f.contact_name || !f.category_slug || !f.label || !f.value) return false;
+    const keyFor = (t: Target) => t.contact_id || OWNER_KEY;
+
+    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; _target: Target }> = [];
+    for (const f of extractedFacts) {
+      if (!f.contact_name || !f.category_slug || !f.label || !f.value) continue;
       if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
         console.log(`[profile-extract] Dropping fact: invalid category_slug="${f.category_slug}"`);
-        return false;
+        continue;
       }
-      // Fuzzy match contact name against known contacts
-      const exactMatch = nameToContact.has(f.contact_name.toLowerCase());
-      if (exactMatch) return true;
-      // Try fuzzy matching
-      for (const [key, contact] of nameToContact) {
-        if (isFuzzyMatch(f.contact_name, key)) {
-          // Rewrite contact_name to canonical for downstream matching
-          f.contact_name = contact.canonical_name;
-          return true;
+      const nm = f.contact_name.toLowerCase().trim();
+      let target = nameToTarget.get(nm) || null;
+      if (!target) {
+        for (const [key, t] of nameToTarget) {
+          if (isFuzzyMatch(f.contact_name, key)) { target = t; break; }
         }
       }
-      console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
-      return false;
-    });
+      if (!target) {
+        console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
+        continue;
+      }
+      f.contact_name = target.canonical_name;
+      validFacts.push({ ...f, _target: target });
+    }
 
     console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
 
@@ -1162,33 +1257,54 @@ async function generateProfileSuggestions(
       return;
     }
 
-    // Get existing profile entries for these contacts to avoid duplicates
-    const contactIds = [...new Set(validFacts.map((f) => nameToContact.get(f.contact_name.toLowerCase())!.contact_id))];
+    // Look up existing profile entries (per contact, plus owner with contact_id IS NULL)
+    const contactIds = [...new Set(validFacts.map((f) => f._target.contact_id).filter(Boolean))] as string[];
+    const hasOwnerFact = validFacts.some((f) => !f._target.contact_id);
 
-    const { data: existingEntries } = await supabase
-      .from("profile_entries")
-      .select("contact_id, label, value, category_id")
-      .eq("user_id", userId)
-      .in("contact_id", contactIds);
+    let existingEntries: any[] = [];
+    let existingCategories: any[] = [];
+    if (contactIds.length > 0) {
+      const { data: e1 } = await supabase
+        .from("profile_entries")
+        .select("contact_id, label, value, category_id")
+        .eq("user_id", userId)
+        .in("contact_id", contactIds);
+      existingEntries.push(...(e1 || []));
+      const { data: c1 } = await supabase
+        .from("profile_categories")
+        .select("id, slug, contact_id")
+        .eq("user_id", userId)
+        .in("contact_id", contactIds);
+      existingCategories.push(...(c1 || []));
+    }
+    if (hasOwnerFact) {
+      const { data: e2 } = await supabase
+        .from("profile_entries")
+        .select("contact_id, label, value, category_id")
+        .eq("user_id", userId)
+        .is("contact_id", null);
+      existingEntries.push(...(e2 || []));
+      const { data: c2 } = await supabase
+        .from("profile_categories")
+        .select("id, slug, contact_id")
+        .eq("user_id", userId)
+        .is("contact_id", null);
+      existingCategories.push(...(c2 || []));
+    }
 
-    // Get existing categories for these contacts to map slugs to IDs
-    const { data: existingCategories } = await supabase
-      .from("profile_categories")
-      .select("id, slug, contact_id")
-      .eq("user_id", userId)
-      .in("contact_id", contactIds);
+    const entryKey = (cid: string | null, label: string, value: string) =>
+      `${cid || OWNER_KEY}|${label.toLowerCase()}|${value.toLowerCase()}`;
+    const singletonEntryKey = (cid: string | null, label: string) =>
+      `${cid || OWNER_KEY}|${label.toLowerCase()}`;
 
-    const entrySet = new Set(
-      (existingEntries || []).map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}|${e.value.toLowerCase()}`),
-    );
-    // Singleton-label set: (contact_id, label) — used to enforce one-value-per-label.
+    const entrySet = new Set(existingEntries.map((e: any) => entryKey(e.contact_id, e.label, e.value)));
     const singletonEntrySet = new Set(
-      (existingEntries || [])
+      existingEntries
         .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
-        .map((e: any) => `${e.contact_id}|${e.label.toLowerCase()}`),
+        .map((e: any) => singletonEntryKey(e.contact_id, e.label)),
     );
 
-    // Check existing review_queue for duplicate profile suggestions
+    // Existing review_queue items
     const { data: existingQueueItems } = await supabase
       .from("review_queue")
       .select("payload, status")
@@ -1198,61 +1314,55 @@ async function generateProfileSuggestions(
 
     const queueSet = new Set(
       (existingQueueItems || []).map((q: any) =>
-        `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}|${(q.payload.value || "").toLowerCase()}`
+        entryKey(q.payload?.contact_id || null, q.payload?.label || "", q.payload?.value || "")
       ),
     );
-    // Singleton-label set for pending queue items.
     const singletonQueueSet = new Set(
       (existingQueueItems || [])
         .filter((q: any) =>
-          SINGLETON_PROFILE_LABELS.has((q.payload.label || "").toLowerCase()) &&
+          SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
           ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
         )
-        .map((q: any) => `${q.payload.contact_id}|${(q.payload.label || "").toLowerCase()}`),
+        .map((q: any) => singletonEntryKey(q.payload?.contact_id || null, q.payload?.label || "")),
     );
 
     const suggestions: ReviewSuggestion[] = [];
-    const perContactCount = new Map<string, number>();
+    const perTargetCount = new Map<string, number>();
 
     for (const fact of validFacts) {
-      const contact = nameToContact.get(fact.contact_name.toLowerCase())!;
+      const target = fact._target;
+      const tKey = keyFor(target);
       const labelLower = fact.label.toLowerCase();
-      const dedupKey = `${contact.contact_id}|${labelLower}|${fact.value.toLowerCase()}`;
-      const singletonKey = `${contact.contact_id}|${labelLower}`;
+      const dedupKey = entryKey(target.contact_id, fact.label, fact.value);
+      const sKey = singletonEntryKey(target.contact_id, fact.label);
 
-      // Skip if entry already exists or already in queue
       if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
-
-      // Singleton-label dedupe: only one Job title / Current city / etc. at a time.
       if (SINGLETON_PROFILE_LABELS.has(labelLower)) {
-        if (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey)) {
-          console.log(`[profile-extract] skipping fact: singleton label "${fact.label}" already pending/known for ${contact.canonical_name}`);
+        if (singletonEntrySet.has(sKey) || singletonQueueSet.has(sKey)) {
+          console.log(`[profile-extract] skipping singleton "${fact.label}" already known for ${target.canonical_name}`);
           continue;
         }
       }
+      const count = perTargetCount.get(tKey) || 0;
+      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) continue;
+      perTargetCount.set(tKey, count + 1);
 
-      // Per-(contact, note) cap to prevent flooding.
-      const count = perContactCount.get(contact.contact_id) || 0;
-      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) {
-        console.log(`[profile-extract] cap reached for ${contact.canonical_name} on note ${noteId}, dropping further facts`);
-        continue;
-      }
-      perContactCount.set(contact.contact_id, count + 1);
-
-      // Find category ID if categories are seeded
-      const catRow = (existingCategories || []).find(
-        (c: any) => c.slug === fact.category_slug && c.contact_id === contact.contact_id,
+      const catRow = existingCategories.find(
+        (c: any) => c.slug === fact.category_slug && (c.contact_id || null) === target.contact_id,
       );
+
+      const ownerLabelName = target.is_self ? "your" : `${target.canonical_name}'s`;
 
       suggestions.push({
         user_id: userId,
         source_note_id: noteId,
         suggestion_type: "add_profile_entry",
-        title: `Add to ${contact.canonical_name}'s profile: ${fact.label}`,
+        title: `Add to ${ownerLabelName} profile: ${fact.label}`,
         description: `"${fact.value}" — extracted from "${noteTitle}"`,
         payload: {
-          contact_id: contact.contact_id,
-          contact_name: contact.canonical_name,
+          contact_id: target.contact_id,
+          contact_name: target.canonical_name,
+          is_owner: target.contact_id === null,
           category_slug: fact.category_slug,
           category_id: catRow?.id || null,
           label: fact.label,
@@ -1266,22 +1376,23 @@ async function generateProfileSuggestions(
           ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
           : DEFAULT_CONFIDENCE.add_profile_entry,
         is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
-        suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${fact.label}:${fact.value}`),
+        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${fact.value}`),
       });
 
-      // Track to avoid duplicates within same batch
       queueSet.add(dedupKey);
-      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
+      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(sKey);
     }
 
     if (suggestions.length > 0) {
       const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
-      const { error } = await supabase.from("review_queue").insert(unsuppressed);
+      const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
+      const { error } = await supabase.from("review_queue").insert(prepared);
       if (error) console.error("Profile suggestion insert error:", error);
-      else console.log(`Created ${suggestions.length} profile suggestions for note ${noteId}`);
+      else console.log(`Created ${prepared.length} profile suggestions for note ${noteId}`);
     } else {
       console.log(`All profile facts already known for note ${noteId}`);
     }
+
 
     // ── Relationship suggestions ──
     if (extractedRelationships.length > 0) {
@@ -1325,12 +1436,12 @@ async function generateProfileSuggestions(
         let contactB: { id: string; name: string } | null = null;
 
         if (!isSelfA) {
-          const matchA = nameToContact.get(rel.person_a.toLowerCase());
-          if (matchA) contactA = { id: matchA.contact_id!, name: matchA.canonical_name! };
+          const matchA = nameToTarget.get(rel.person_a.toLowerCase());
+          if (matchA && matchA.contact_id) contactA = { id: matchA.contact_id, name: matchA.canonical_name };
           else {
-            for (const [key, c] of nameToContact) {
-              if (isFuzzyMatch(rel.person_a, key)) {
-                contactA = { id: c.contact_id!, name: c.canonical_name! };
+            for (const [key, c] of nameToTarget) {
+              if (c.contact_id && isFuzzyMatch(rel.person_a, key)) {
+                contactA = { id: c.contact_id, name: c.canonical_name };
                 break;
               }
             }
@@ -1342,12 +1453,12 @@ async function generateProfileSuggestions(
         }
 
         if (!isSelfB) {
-          const matchB = nameToContact.get(rel.person_b.toLowerCase());
-          if (matchB) contactB = { id: matchB.contact_id!, name: matchB.canonical_name! };
+          const matchB = nameToTarget.get(rel.person_b.toLowerCase());
+          if (matchB && matchB.contact_id) contactB = { id: matchB.contact_id, name: matchB.canonical_name };
           else {
-            for (const [key, c] of nameToContact) {
-              if (isFuzzyMatch(rel.person_b, key)) {
-                contactB = { id: c.contact_id!, name: c.canonical_name! };
+            for (const [key, c] of nameToTarget) {
+              if (c.contact_id && isFuzzyMatch(rel.person_b, key)) {
+                contactB = { id: c.contact_id, name: c.canonical_name };
                 break;
               }
             }
@@ -1417,6 +1528,207 @@ async function generateProfileSuggestions(
     }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
+  }
+}
+
+/* ── Moment (timeline event) suggestion generator ──
+ * Detects concrete PAST events in the note (with attached document OCR) and
+ * proposes adding them to the timeline. Honors auto-apply prefs via
+ * prepareSuggestionForInsert and dedups against existing moments. */
+const MOMENT_EXTRACTION_PROMPT = `You inspect a personal note (which may include OCR text from attached scanned documents) and decide whether it documents a single concrete PAST real-world event that belongs on the user's personal timeline (e.g. wedding, graduation, birth, move, job change, trip, hospitalisation, milestone meeting, funeral, anniversary celebration).
+
+Return JSON:
+{
+  "is_event": boolean,
+  "happened_at": "YYYY-MM-DD" | null,
+  "title": short explicit title (e.g. "Wedding of Michael and Xihui"),
+  "description": one-sentence description,
+  "impact_level": integer 1-4 (1=minor, 4=major life event),
+  "confidence_date": integer 0-10,
+  "confidence_truth": integer 0-10,
+  "participants": [ { "name": string, "is_self": boolean } ]
+}
+
+Rules:
+- is_event = true ONLY when a clearly identifiable past event with a specific date is described or documented. Diaries, opinions, prompts, code, articles, recurring routines → false.
+- happened_at MUST be an ISO date present in the note (or computable from the OCR).
+- title should describe the event explicitly (not the note's title verbatim).
+- participants lists the real humans involved, marking the OWNER with is_self:true.
+- If unsure, return is_event:false.`;
+
+async function generateMomentSuggestions(
+  userId: string,
+  noteId: string,
+  noteTitle: string,
+  fullText: string,
+  matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
+  metadata: Record<string, unknown>,
+) {
+  try {
+    const dates = Array.isArray((metadata as any).dates_mentioned) ? ((metadata as any).dates_mentioned as string[]) : [];
+    const hasContactOrSelf = matchedPeople.some((p) => p.contact_id || p.is_self);
+    if (dates.length === 0 || !hasContactOrSelf) return;
+
+    const preferences = await getSuggestionPreferences(userId);
+    if (preferences.mode === "off") return;
+
+    const balance = await checkBalance(supabase, userId);
+    if (!balance.allowed) return;
+
+    const peopleHint = matchedPeople
+      .map((p) => `${p.canonical_name || p.name}${p.is_self ? " (owner)" : ""}`)
+      .join(", ");
+    const datesHint = dates.join(", ");
+    const userPrompt = `Known people in this note: ${peopleHint}\nDates mentioned: ${datesHint}\n\nNote title: ${noteTitle}\nNote content (including [Media content] OCR):\n${stripHtmlIfNeeded(fullText).slice(0, 16000)}`;
+
+    let parsed: any;
+    try {
+      const result = await runChat({
+        db: supabase,
+        userId,
+        callSite: "process-note.moment_extraction",
+        messages: [{ role: "user", content: userPrompt }],
+        defaults: {
+          provider: "openrouter",
+          model: "deepseek/deepseek-v4-flash",
+          systemPrompt: MOMENT_EXTRACTION_PROMPT,
+        },
+        callOptions: { response_format: { type: "json_object" } },
+      });
+      parsed = JSON.parse(result.content);
+    } catch (err: any) {
+      if (err?.message === "INSUFFICIENT_CREDITS") return;
+      console.error("[moment-extract] LLM error:", err);
+      return;
+    }
+
+    if (!parsed || parsed.is_event !== true) {
+      console.log(`[moment-extract] not an event for note ${noteId}`);
+      return;
+    }
+    const happenedAt = String(parsed.happened_at || "").trim();
+    const title = String(parsed.title || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(happenedAt) || !title) return;
+
+    const description = String(parsed.description || "").trim() || null;
+    const impact = Math.max(1, Math.min(4, Number(parsed.impact_level) || 2));
+    const confDate = Math.max(0, Math.min(10, Number(parsed.confidence_date) || 7));
+    const confTruth = Math.max(0, Math.min(10, Number(parsed.confidence_truth) || 7));
+
+    // Map LLM participants → matched contacts / self
+    type ParticipantPayload = { name: string; contact_id: string | null; is_self: boolean };
+    const participants: ParticipantPayload[] = [];
+    const seenIds = new Set<string>();
+    const seenSelf = { v: false };
+    const llmParticipants: Array<{ name?: string; is_self?: boolean }> = Array.isArray(parsed.participants) ? parsed.participants : [];
+    for (const lp of llmParticipants) {
+      const nm = String(lp?.name || "").trim();
+      const isSelf = !!lp?.is_self;
+      let matched = matchedPeople.find((p) => {
+        if (isSelf && p.is_self) return true;
+        if (!nm) return false;
+        const key = (p.canonical_name || p.name).toLowerCase();
+        return key === nm.toLowerCase() || isFuzzyMatch(nm, key);
+      });
+      if (!matched) continue;
+      if (matched.is_self) {
+        if (seenSelf.v) continue;
+        seenSelf.v = true;
+        participants.push({ name: matched.canonical_name || "Me", contact_id: null, is_self: true });
+      } else if (matched.contact_id) {
+        if (seenIds.has(matched.contact_id)) continue;
+        seenIds.add(matched.contact_id);
+        participants.push({ name: matched.canonical_name || matched.name, contact_id: matched.contact_id, is_self: false });
+      }
+    }
+    // Fallback: include all matched people if LLM gave no usable participants
+    if (participants.length === 0) {
+      for (const p of matchedPeople) {
+        if (p.is_self && !seenSelf.v) {
+          seenSelf.v = true;
+          participants.push({ name: p.canonical_name || "Me", contact_id: null, is_self: true });
+        } else if (p.contact_id && !seenIds.has(p.contact_id)) {
+          seenIds.add(p.contact_id);
+          participants.push({ name: p.canonical_name || p.name, contact_id: p.contact_id, is_self: false });
+        }
+      }
+    }
+    if (participants.length === 0) return;
+
+    // Dedup against existing moments: same date ±2 days + overlapping title token + at least one shared participant
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+    const candidateTokens = new Set(normalize(title).split(" ").filter((t) => t.length > 3));
+    const dateMin = new Date(new Date(happenedAt).getTime() - 2 * 86400000).toISOString();
+    const dateMax = new Date(new Date(happenedAt).getTime() + 2 * 86400000).toISOString();
+    const { data: nearby } = await supabase
+      .from("moments")
+      .select("id, title, happened_at, person_id")
+      .eq("user_id", userId)
+      .gte("happened_at", dateMin)
+      .lte("happened_at", dateMax)
+      .is("deleted_at", null);
+    const contactPersonIds = new Set(participants.filter((p) => p.contact_id).map((p) => p.contact_id!));
+    for (const m of (nearby || []) as any[]) {
+      const existingTokens = new Set(normalize(String(m.title || "")).split(" ").filter((t) => t.length > 3));
+      let overlap = 0;
+      for (const t of candidateTokens) if (existingTokens.has(t)) overlap++;
+      if (overlap === 0) continue;
+      // If date matches exactly OR any shared participant, treat as duplicate
+      const sameDate = String(m.happened_at).slice(0, 10) === happenedAt;
+      const sharedPerson = m.person_id && contactPersonIds.has(m.person_id);
+      if (sameDate || sharedPerson) {
+        console.log(`[moment-extract] duplicate of existing moment ${m.id}, skipping`);
+        return;
+      }
+    }
+
+    const suppressionKey = buildSuppressionKey("add_moment", "moment", null, `${normalize(title)}|${happenedAt}`);
+
+    // Dedup against existing review_queue entries
+    const { data: existingQ } = await supabase
+      .from("review_queue")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("suggestion_type", "add_moment")
+      .eq("suppression_key", suppressionKey)
+      .limit(1);
+    if (existingQ && existingQ.length > 0) {
+      console.log(`[moment-extract] review_queue already has this moment suggestion`);
+      return;
+    }
+
+    const suggestion: ReviewSuggestion = {
+      user_id: userId,
+      source_note_id: noteId,
+      suggestion_type: "add_moment",
+      title: `Add timeline moment: ${title}`,
+      description: `${happenedAt}${description ? " — " + description : ""}`,
+      payload: {
+        title,
+        description,
+        happened_at: happenedAt,
+        impact_level: impact,
+        confidence_date: confDate,
+        confidence_truth: confTruth,
+        participants,
+      },
+      status: "pending_review",
+      target_entity_type: "moment",
+      source_title: noteTitle,
+      extracted_value: `${title} (${happenedAt})`,
+      confidence_score: DEFAULT_CONFIDENCE.add_moment,
+      is_sensitive: isSensitiveSuggestion("add_moment", { title, description: description || "" }, fullText),
+      suppression_key: suppressionKey,
+    };
+
+    const unsuppressed = await filterSuppressedSuggestions(userId, [suggestion]);
+    if (unsuppressed.length === 0) return;
+    const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
+    const { error } = await supabase.from("review_queue").insert(prepared);
+    if (error) console.error("Moment suggestion insert error:", error);
+    else console.log(`Created moment suggestion for note ${noteId} (status=${prepared[0]?.status})`);
+  } catch (err) {
+    console.error("generateMomentSuggestions error:", err);
   }
 }
 
@@ -1715,13 +2027,17 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Generate review queue suggestions (no extra LLM calls)
     await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
 
-    // Generate profile suggestions for matched people (one extra LLM call)
-    await generateProfileSuggestions(note.user_id, noteId, note.title, note.content, matchedPeople, {
+    // Generate profile suggestions for matched people + OWNER (one extra LLM call).
+    // Pass fullText (includes [Media content] OCR) so scans/IDs contribute facts.
+    await generateProfileSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, {
       source_app: (note as any).source_app,
       is_external: (note as any).is_external,
       metadata: mergedMetadata,
       note_created_at: (note as any).created_at ?? null,
     });
+
+    // Generate timeline-moment suggestions from past events documented in the note.
+    await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
@@ -1734,7 +2050,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       body: JSON.stringify({ note_id: noteId }),
     }).catch(err => console.error("compute-connections trigger error:", err));
 
-    console.log("process-note completed for:", noteId, "remaining credits:", lastCredits?.remaining_credits);
+    console.log("process-note completed for:", noteId);
   } catch (err) {
     console.error("Background processing error:", err);
   }
