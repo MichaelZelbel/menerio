@@ -35,6 +35,7 @@ import {
   Eye,
   RotateCcw,
   Users2,
+  Sparkles,
 } from "lucide-react";
 
 const DEFAULT_PROFILE_CATEGORIES = [
@@ -65,6 +66,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
   add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
+  normalize_profile_entry: { icon: Sparkles, label: "Profile cleanup", color: "text-fuchsia-500" },
 };
 
 const truncateText = (text: string | null | undefined, length = 200) => {
@@ -142,8 +144,26 @@ export default function ReviewQueue() {
     } as any, { onConflict: "user_id,suppression_key" });
   };
 
+  const invalidateProfileQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
+    queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
+    queryClient.invalidateQueries({ queryKey: ["profile-categories"] });
+  };
+
   const revertAppliedChange = async (item: ReviewItem) => {
     if (!item.target_entity_id && item.status !== "auto_applied_unreviewed") return;
+
+    if (item.suggestion_type === "normalize_profile_entry") {
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: { action: "rollback", review_id: item.id },
+      });
+      if (error || !data?.ok) {
+        throw new Error(error?.message || data?.reason || "Rollback failed");
+      }
+      invalidateProfileQueries();
+      return;
+    }
 
     if (item.suggestion_type === "add_contact" && item.target_entity_id) {
       await supabase.from("contacts").delete().eq("id", item.target_entity_id);
@@ -456,8 +476,39 @@ export default function ReviewQueue() {
     }
   };
 
+  const handleAcceptNormalize = async (item: ReviewItem) => {
+    const payload = item.payload as any;
+    try {
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: { action: "apply", review_id: item.id },
+      });
+      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
+      if (stale) {
+        showToast.info("This profile changed since the suggestion was made — skipping");
+        refreshReviewQueues();
+        invalidateProfileQueries();
+        return;
+      }
+      if (error || !data?.ok) {
+        showToast.error("Could not clean up profile: " + (error?.message || data?.reason || "Unknown error"));
+        refreshReviewQueues();
+        return;
+      }
+      invalidateProfileQueries();
+      refreshReviewQueues();
+      showToast.success(`Cleaned up: ${payload?.canonical_label || "profile entry"}`);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
+
+    if (type === "normalize_profile_entry") {
+      return handleAcceptNormalize(item);
+    }
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
@@ -801,7 +852,44 @@ export default function ReviewQueue() {
                     </div>
                   </div>
                 </CardHeader>
+                {item.suggestion_type === "normalize_profile_entry" && (() => {
+                  const before = Array.isArray(payload?.before) ? payload.before : [];
+                  const beforeSlugs: string[] = Array.from(new Set(before.map((b: any) => String(b?.category_slug || "")).filter(Boolean)));
+                  const movedCategory = payload?.canonical_category_slug && beforeSlugs.length > 0 && !beforeSlugs.includes(payload.canonical_category_slug);
+                  return (
+                    <CardContent className="space-y-3">
+                      <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Merge {before.length} {before.length === 1 ? "entry" : "entries"} → canonical
+                        </p>
+                        <ul className="space-y-1">
+                          {before.map((b: any) => (
+                            <li key={b.id} className="text-xs text-muted-foreground/90">
+                              <span className="font-medium">{b.label}</span>
+                              <span className="opacity-70">: {b.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="pt-2 border-t border-border/60">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-foreground">
+                              {payload?.canonical_label}: <span className="font-normal">{payload?.canonical_value}</span>
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">{payload?.canonical_category_slug}</Badge>
+                            {movedCategory && (
+                              <span className="text-[10px] text-muted-foreground">→ moved to {payload.canonical_category_slug}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {payload?.rationale && (
+                        <p className="text-xs text-muted-foreground italic">{payload.rationale}</p>
+                      )}
+                    </CardContent>
+                  );
+                })()}
                 <CardContent>
+
                   <div className="flex items-center justify-between">
                     {item.source_note ? (
                       <Link

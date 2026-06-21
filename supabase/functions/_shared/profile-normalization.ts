@@ -86,6 +86,7 @@ Rules:
 5. Fix obviously wrong categories (e.g. "Place of birth" filed under location → identity; wedding/spouse → relationships).
 6. Output ONLY groups that require a CHANGE. If an entry is already canonical, unique, and correctly categorized, omit it.
 7. survivor_entry_id: pick the existing row that already best matches the canonical (richest value + correct category) so we UPDATE it in place. Set null only when no member is a good survivor; in that case the apply step will INSERT a fresh canonical and delete all members.
+8. Only map an entry to a canonical label when the entry's VALUE is consistent with that label's meaning. Never relabel based on the label name alone when the value contradicts it (e.g. 'Humor Style: Witty' is NOT a Social handle). If a field is really a personality/communication-style trait, recategorize it to 'personality' and KEEP its existing label rather than forcing a canonical label. If you are unsure, leave the entry untouched (emit no group for it).
 
 Return JSON ONLY in this shape (no prose):
 { "groups": [ { "member_entry_ids": ["uuid", ...], "survivor_entry_id": "uuid"|null, "canonical_category_slug": "string", "canonical_label": "string", "canonical_value": "string", "operation": "merge"|"relabel"|"recategorize"|"reformat", "confidence": 0.0, "rationale": "short string" } ] }`;
