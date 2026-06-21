@@ -237,6 +237,25 @@ export async function planSubjectNormalization(args: {
     });
     if (allEqual) continue;
 
+    // Lossy-merge guard: reject groups where members differ in BOTH value AND
+    // canonical label (e.g. City:São Paulo + Country:Brazil under "Current city").
+    // Same value w/ different labels OR same canonical label w/ different values
+    // remain allowed — only the both-different case is data loss.
+    const memberRows = memberIds.map((id) => byId.get(id)).filter(Boolean) as ProfileEntryRow[];
+    const distinctValues = new Set(
+      memberRows.map((r) => (r.value || "").trim().toLowerCase()),
+    ).size;
+    const distinctCanonLabels = new Set(
+      memberRows.map((r) => canonicalProfileLabel(slug, r.label)),
+    ).size;
+    if (distinctValues >= 2 && distinctCanonLabels >= 2) {
+      console.warn(
+        `[normalize-profile] rejected lossy merge: combines different facts (${distinctValues} values / ${distinctCanonLabels} canonical labels)`,
+      );
+      continue;
+    }
+
+
     const op = ["merge", "relabel", "recategorize", "reformat"].includes(g.operation)
       ? g.operation
       : "merge";
