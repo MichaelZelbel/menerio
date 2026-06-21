@@ -852,7 +852,44 @@ export default function ReviewQueue() {
                     </div>
                   </div>
                 </CardHeader>
+                {item.suggestion_type === "normalize_profile_entry" && (() => {
+                  const before = Array.isArray(payload?.before) ? payload.before : [];
+                  const beforeSlugs: string[] = Array.from(new Set(before.map((b: any) => String(b?.category_slug || "")).filter(Boolean)));
+                  const movedCategory = payload?.canonical_category_slug && beforeSlugs.length > 0 && !beforeSlugs.includes(payload.canonical_category_slug);
+                  return (
+                    <CardContent className="space-y-3">
+                      <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Merge {before.length} {before.length === 1 ? "entry" : "entries"} → canonical
+                        </p>
+                        <ul className="space-y-1">
+                          {before.map((b: any) => (
+                            <li key={b.id} className="text-xs text-muted-foreground/90">
+                              <span className="font-medium">{b.label}</span>
+                              <span className="opacity-70">: {b.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="pt-2 border-t border-border/60">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-foreground">
+                              {payload?.canonical_label}: <span className="font-normal">{payload?.canonical_value}</span>
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">{payload?.canonical_category_slug}</Badge>
+                            {movedCategory && (
+                              <span className="text-[10px] text-muted-foreground">→ moved to {payload.canonical_category_slug}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {payload?.rationale && (
+                        <p className="text-xs text-muted-foreground italic">{payload.rationale}</p>
+                      )}
+                    </CardContent>
+                  );
+                })()}
                 <CardContent>
+
                   <div className="flex items-center justify-between">
                     {item.source_note ? (
                       <Link
