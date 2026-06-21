@@ -18,6 +18,10 @@ import {
   canonicalProfileLabel,
   correctProfileCategory,
 } from "../_shared/profile-canonical-schema.ts";
+import {
+  applyNormalization,
+  createNormalizationSuggestions,
+} from "../_shared/profile-normalization.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -613,6 +617,16 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: insertedMoment.id, applied_at: new Date().toISOString() };
     }
+
+    if (suggestion.suggestion_type === "normalize_profile_entry") {
+      const payload = suggestion.payload as any;
+      const result = await applyNormalization(supabase, payload);
+      if (result.ok && result.entryId) {
+        return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: result.entryId, applied_at: new Date().toISOString() };
+      }
+      // Stale / failed → let the human decide.
+      return { ...suggestion, status: "pending_review" };
+    }
   } catch (err) {
     console.error("auto-apply suggestion failed:", err);
   }
@@ -672,6 +686,8 @@ const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
   add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
   add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
+  // Destructive: stricter so low-confidence merges wait for human review even in auto mode.
+  normalize_profile_entry: { conservative: 0.92, balanced: 0.85, exploratory: 0.75 },
 };
 
 function thresholdFor(suggestionType: string, sensitivity: string): number {
@@ -686,6 +702,7 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_profile_entry: 0.80,
   add_relationship: 0.72,
   add_moment: 0.78,
+  normalize_profile_entry: 0.8,
 };
 
 const SENSITIVE_TERMS = [
@@ -1545,6 +1562,47 @@ async function generateProfileSuggestions(
         if (error) console.error("Relationship suggestion insert error:", error);
         else console.log(`Created ${preparedRels.length} relationship suggestions for note ${noteId}`);
       }
+    }
+
+    // ── Phase B: incremental profile normalization ──
+    // After writing new add_profile_entry suggestions for this note, normalize
+    // each touched subject's now-current SAVED profile. Best-effort: never
+    // throw out of process-note.
+    try {
+      const touchedContactIds = new Set<string>();
+      let touchedOwner = false;
+      for (const f of validFacts) {
+        if (f._target.contact_id) touchedContactIds.add(f._target.contact_id);
+        else touchedOwner = true;
+      }
+      const subjects: Array<string | null> = [];
+      if (touchedOwner) subjects.push(null);
+      for (const cid of touchedContactIds) subjects.push(cid);
+
+      for (const subj of subjects) {
+        try {
+          const res = await createNormalizationSuggestions({
+            supabase,
+            userId,
+            contactId: subj,
+            preferences,
+            sourceNoteId: noteId,
+            helpers: {
+              filterSuppressedSuggestions,
+              prepareSuggestionForInsert,
+              isSensitiveSuggestion,
+              buildSuppressionKey,
+            },
+          });
+          if (res.created > 0) {
+            console.log(`[normalize-profile] subject=${subj ?? "owner"} created=${res.created} auto=${res.autoApplied}`);
+          }
+        } catch (e) {
+          console.error(`[normalize-profile] subject=${subj ?? "owner"} failed:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[normalize-profile] incremental pass failed:", e);
     }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
