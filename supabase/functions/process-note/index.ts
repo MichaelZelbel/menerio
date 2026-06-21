@@ -1298,8 +1298,8 @@ async function generateProfileSuggestions(
     const contactIds = [...new Set(validFacts.map((f) => f._target.contact_id).filter(Boolean))] as string[];
     const hasOwnerFact = validFacts.some((f) => !f._target.contact_id);
 
-    let existingEntries: any[] = [];
-    let existingCategories: any[] = [];
+    const existingEntries: any[] = [];
+    const existingCategories: any[] = [];
     if (contactIds.length > 0) {
       const { data: e1 } = await supabase
         .from("profile_entries")
@@ -1702,7 +1702,7 @@ async function generateMomentSuggestions(
     for (const lp of llmParticipants) {
       const nm = String(lp?.name || "").trim();
       const isSelf = !!lp?.is_self;
-      let matched = matchedPeople.find((p) => {
+      const matched = matchedPeople.find((p) => {
         if (isSelf && p.is_self) return true;
         if (!nm) return false;
         const key = (p.canonical_name || p.name).toLowerCase();
