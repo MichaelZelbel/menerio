@@ -163,6 +163,14 @@ export default function ReviewQueue() {
       return;
     }
 
+    if (item.suggestion_type === "add_moment" && item.target_entity_id) {
+      await supabase.from("moment_participants").delete().eq("moment_id", item.target_entity_id);
+      await supabase.from("moments").delete().eq("id", item.target_entity_id);
+      queryClient.invalidateQueries({ queryKey: ["moments"] });
+      queryClient.invalidateQueries({ queryKey: ["timeline"] });
+      return;
+    }
+
     if (item.suggestion_type === "add_alias") {
       const { contact_id, alias } = item.payload as any;
       if (!contact_id || !alias) return;
