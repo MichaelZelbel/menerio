@@ -275,7 +275,7 @@ export async function planSubjectNormalization(args: {
           .eq("is_trashed", false)
           .contains("metadata", { matched_people: [contactId] })
           .order("created_at", { ascending: false })
-          .limit(15);
+          .limit(SUBJECT_NOTES_LIMIT);
         subjectNotes = (data || []) as any[];
       } else {
         const { data } = await supabase
@@ -284,7 +284,7 @@ export async function planSubjectNormalization(args: {
           .eq("user_id", userId)
           .eq("is_trashed", false)
           .order("created_at", { ascending: false })
-          .limit(15);
+          .limit(SUBJECT_NOTES_LIMIT);
         subjectNotes = (data || []) as any[];
       }
       for (const n of subjectNotes) addNote(n);
