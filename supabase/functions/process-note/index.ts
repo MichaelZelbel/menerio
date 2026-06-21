@@ -2050,7 +2050,7 @@ async function processInBackground(noteId: string, authHeader: string) {
       body: JSON.stringify({ note_id: noteId }),
     }).catch(err => console.error("compute-connections trigger error:", err));
 
-    console.log("process-note completed for:", noteId, "remaining credits:", lastCredits?.remaining_credits);
+    console.log("process-note completed for:", noteId);
   } catch (err) {
     console.error("Background processing error:", err);
   }
