@@ -25,6 +25,7 @@ export type ProfileEntryRow = {
   value: string;
   sort_order: number | null;
   linked_note_id: string | null;
+  created_at?: string | null;
 };
 
 export type NormalizationGroup = {
@@ -89,6 +90,7 @@ Rules:
 6. Output ONLY groups that require a CHANGE. If an entry is already canonical, unique, and correctly categorized, omit it.
 7. survivor_entry_id: pick the existing row that already best matches the canonical (richest value + correct category) so we UPDATE it in place. Set null only when no member is a good survivor; in that case the apply step will INSERT a fresh canonical and delete all members.
 8. Only map an entry to a canonical label when the entry's VALUE is consistent with that label's meaning. Never relabel based on the label name alone when the value contradicts it (e.g. 'Humor Style: Witty' is NOT a Social handle). If a field is really a personality/communication-style trait, recategorize it to 'personality' and KEEP its existing label rather than forcing a canonical label. If you are unsure, leave the entry untouched (emit no group for it).
+9. TIME-BASED CONFLICTS (only when a "DATED EVIDENCE" section is provided below): When two [single] entries hold DIFFERENT values and the dated evidence shows the subject CHANGED over time (moved city/address, changed job/employer), set the MOST RECENT/current value as the canonical [single] entry (operation 'reformat' or 'relabel' as appropriate), AND emit a SEPARATE group that relabels the OLDER entry to its 'Previous X' canonical (Previous city / Previous address / Previous employer), operation 'relabel', keeping that older entry's value. Cite the evidence (note title or date) in the rationale. Only do this when the dated evidence supports it; if it remains unclear, leave both entries unchanged (emit nothing). Each such group has exactly one member entry.
 
 Return JSON ONLY in this shape (no prose):
 { "groups": [ { "member_entry_ids": ["uuid", ...], "survivor_entry_id": "uuid"|null, "canonical_category_slug": "string", "canonical_label": "string", "canonical_value": "string", "operation": "merge"|"relabel"|"recategorize"|"reformat", "confidence": 0.0, "rationale": "short string" } ] }`;
@@ -97,13 +99,14 @@ export async function planSubjectNormalization(args: {
   supabase: any;
   userId: string;
   contactId: string | null;
+  includeNotesContext?: boolean;
 }): Promise<NormalizationGroup[]> {
-  const { supabase, userId, contactId } = args;
+  const { supabase, userId, contactId, includeNotesContext = false } = args;
 
   // Load all entries for this subject + their categories.
   let entryQuery = supabase
     .from("profile_entries")
-    .select("id, category_id, contact_id, label, value, sort_order, linked_note_id")
+    .select("id, category_id, contact_id, label, value, sort_order, linked_note_id, created_at")
     .eq("user_id", userId);
   entryQuery = contactId ? entryQuery.eq("contact_id", contactId) : entryQuery.is("contact_id", null);
   const { data: entries } = await entryQuery;
@@ -177,9 +180,79 @@ export async function planSubjectNormalization(args: {
     category: slugById.get(r.category_id) || "preferences",
     label: r.label,
     value: r.value,
+    created_at: r.created_at || null,
   }));
 
-  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON):\n${JSON.stringify(llmEntries, null, 2)}\n\nReturn ONLY groups that require a change.`;
+  // Optional dated-evidence assembly for time-conflict resolution.
+  const CHAR_BUDGET = 6000;
+  let evidenceBlock = "";
+  if (includeNotesContext) {
+    try {
+      const notesById = new Map<string, { id: string; title: string; date: string; snippet: string }>();
+      const addNote = (n: any) => {
+        if (!n?.id || notesById.has(n.id)) return;
+        const date = (n.created_at || "").slice(0, 10);
+        const title = String(n.title || "Untitled").slice(0, 120);
+        const body = String(n.content || "").replace(/\s+/g, " ").trim();
+        notesById.set(n.id, { id: n.id, title, date, snippet: body });
+      };
+
+      // (b) Notes linked from profile entries
+      const linkedIds = [...new Set(rows.map((r) => r.linked_note_id).filter(Boolean) as string[])];
+      if (linkedIds.length > 0) {
+        const { data: linked } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at")
+          .in("id", linkedIds)
+          .eq("user_id", userId);
+        for (const n of (linked || []) as any[]) addNote(n);
+      }
+
+      // (c) Subject notes
+      let subjectNotes: any[] = [];
+      if (contactId) {
+        const { data } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at, metadata")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .contains("metadata", { matched_people: [contactId] })
+          .order("created_at", { ascending: false })
+          .limit(15);
+        subjectNotes = (data || []) as any[];
+      } else {
+        const { data } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .order("created_at", { ascending: false })
+          .limit(15);
+        subjectNotes = (data || []) as any[];
+      }
+      for (const n of subjectNotes) addNote(n);
+
+      // Order newest first, truncate snippets, drop oldest if over budget.
+      const ordered = [...notesById.values()].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      const lines: string[] = [];
+      let used = 0;
+      for (const n of ordered) {
+        const snipLen = linkedIds.includes(n.id) ? 240 : 200;
+        const snip = n.snippet.slice(0, snipLen);
+        const line = `- [${n.date || "unknown"}] ${n.title}: ${snip}`;
+        if (used + line.length + 1 > CHAR_BUDGET) break;
+        lines.push(line);
+        used += line.length + 1;
+      }
+      if (lines.length > 0) {
+        evidenceBlock = `\n\nDATED EVIDENCE (notes & timestamps), newest first:\n${lines.join("\n")}`;
+      }
+    } catch (e) {
+      console.error("[normalize-profile] evidence assembly failed:", e);
+    }
+  }
+
+  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON, includes created_at):\n${JSON.stringify(llmEntries, null, 2)}${evidenceBlock}\n\nReturn ONLY groups that require a change.`;
 
   let parsed: any = null;
   try {
@@ -324,6 +397,7 @@ export async function createNormalizationSuggestions(args: {
   contactId: string | null;
   preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean };
   sourceNoteId?: string | null;
+  includeNotesContext?: boolean;
   // injected helpers from process-note (avoids circular import)
   helpers: {
     filterSuppressedSuggestions: (userId: string, s: ReviewSuggestion[]) => Promise<ReviewSuggestion[]>;
@@ -332,9 +406,9 @@ export async function createNormalizationSuggestions(args: {
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
 }): Promise<{ created: number; autoApplied: number }> {
-  const { supabase, userId, contactId, preferences, sourceNoteId, helpers } = args;
+  const { supabase, userId, contactId, preferences, sourceNoteId, helpers, includeNotesContext = false } = args;
 
-  const groups = await planSubjectNormalization({ supabase, userId, contactId });
+  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext });
   if (groups.length === 0) return { created: 0, autoApplied: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.

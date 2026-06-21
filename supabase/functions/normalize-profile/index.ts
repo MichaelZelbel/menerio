@@ -131,7 +131,8 @@ serve(async (req) => {
         const { data: c } = await db.from("contacts").select("id").eq("id", contactId).eq("user_id", userId).maybeSingle();
         if (!c) return json({ error: "contact not found" }, 404);
       }
-      const groups = await planSubjectNormalization({ supabase: db, userId, contactId });
+      const includeNotesContext = body?.includeNotesContext === false ? false : true;
+      const groups = await planSubjectNormalization({ supabase: db, userId, contactId, includeNotesContext });
       return json({ groups });
     }
 
@@ -172,6 +173,7 @@ serve(async (req) => {
             contactId: subj,
             preferences,
             sourceNoteId: null,
+            includeNotesContext: true,
             helpers,
           });
           totalCreated += r.created;
