@@ -830,7 +830,7 @@ function deriveCanonicalFacts(
     }
 
     // Generic label canonicalization for non-birthday facts.
-    out.push({ ...f, label: canonicalizeLabel(label) });
+    out.push({ ...f, label: canonicalizeLabel(label, f.category_slug) });
   }
   return out;
 }
