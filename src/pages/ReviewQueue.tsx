@@ -63,6 +63,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   link_note: { icon: Link2, label: "Link Note", color: "text-purple-500" },
   add_profile_entry: { icon: User, label: "Profile Fact", color: "text-amber-500" },
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
+  add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
 };
 
