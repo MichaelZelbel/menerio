@@ -1563,6 +1563,47 @@ async function generateProfileSuggestions(
         else console.log(`Created ${preparedRels.length} relationship suggestions for note ${noteId}`);
       }
     }
+
+    // ── Phase B: incremental profile normalization ──
+    // After writing new add_profile_entry suggestions for this note, normalize
+    // each touched subject's now-current SAVED profile. Best-effort: never
+    // throw out of process-note.
+    try {
+      const touchedContactIds = new Set<string>();
+      let touchedOwner = false;
+      for (const f of validFacts) {
+        if (f._target.contact_id) touchedContactIds.add(f._target.contact_id);
+        else touchedOwner = true;
+      }
+      const subjects: Array<string | null> = [];
+      if (touchedOwner) subjects.push(null);
+      for (const cid of touchedContactIds) subjects.push(cid);
+
+      for (const subj of subjects) {
+        try {
+          const res = await createNormalizationSuggestions({
+            supabase,
+            userId,
+            contactId: subj,
+            preferences,
+            sourceNoteId: noteId,
+            helpers: {
+              filterSuppressedSuggestions,
+              prepareSuggestionForInsert,
+              isSensitiveSuggestion,
+              buildSuppressionKey,
+            },
+          });
+          if (res.created > 0) {
+            console.log(`[normalize-profile] subject=${subj ?? "owner"} created=${res.created} auto=${res.autoApplied}`);
+          }
+        } catch (e) {
+          console.error(`[normalize-profile] subject=${subj ?? "owner"} failed:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[normalize-profile] incremental pass failed:", e);
+    }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
   }
