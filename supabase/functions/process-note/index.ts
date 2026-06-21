@@ -495,11 +495,61 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
     }
 
     if (suggestion.suggestion_type === "add_profile_entry") {
-      const contactId = suggestion.payload.contact_id as string | undefined;
-      const categoryId = suggestion.payload.category_id as string | null | undefined;
+      const contactIdRaw = suggestion.payload.contact_id as string | null | undefined;
+      const contactId: string | null = contactIdRaw || null;
+      const categorySlug = suggestion.payload.category_slug as string | undefined;
+      let categoryId = suggestion.payload.category_id as string | null | undefined;
       const label = String(suggestion.payload.label || "").trim();
       const value = String(suggestion.payload.value || "").trim();
-      if (!contactId || !categoryId || !label || !value) return { ...suggestion, status: "pending_review" };
+      if (!label || !value || !categorySlug) return { ...suggestion, status: "pending_review" };
+
+      // Resolve / create the category. Owner categories have contact_id IS NULL.
+      if (!categoryId) {
+        const baseQuery = supabase
+          .from("profile_categories")
+          .select("id")
+          .eq("user_id", suggestion.user_id)
+          .eq("slug", categorySlug);
+        const { data: existingCat } = contactId
+          ? await baseQuery.eq("contact_id", contactId).maybeSingle()
+          : await baseQuery.is("contact_id", null).maybeSingle();
+        if (existingCat?.id) {
+          categoryId = existingCat.id;
+        } else {
+          const { data: newCat, error: catErr } = await supabase
+            .from("profile_categories")
+            .insert({
+              user_id: suggestion.user_id,
+              contact_id: contactId,
+              slug: categorySlug,
+              name: categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1),
+              icon: "folder",
+              is_default: false,
+              sort_order: 99,
+              visibility_scope: "all",
+            } as any)
+            .select("id")
+            .maybeSingle();
+          if (catErr && (catErr as any).code !== "23505") {
+            return { ...suggestion, status: "pending_review" };
+          }
+          if (newCat?.id) {
+            categoryId = newCat.id;
+          } else {
+            const baseQuery2 = supabase
+              .from("profile_categories")
+              .select("id")
+              .eq("user_id", suggestion.user_id)
+              .eq("slug", categorySlug);
+            const { data: raced } = contactId
+              ? await baseQuery2.eq("contact_id", contactId).maybeSingle()
+              : await baseQuery2.is("contact_id", null).maybeSingle();
+            categoryId = raced?.id || null;
+          }
+        }
+      }
+      if (!categoryId) return { ...suggestion, status: "pending_review" };
+
       const { data, error } = await supabase
         .from("profile_entries")
         .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
@@ -519,6 +569,40 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+    }
+
+    if (suggestion.suggestion_type === "add_moment") {
+      const p = suggestion.payload as any;
+      const happenedAt = String(p.happened_at || "").trim();
+      const title = String(p.title || "").trim();
+      if (!happenedAt || !title) return { ...suggestion, status: "pending_review" };
+      const participants: Array<{ contact_id?: string | null; is_self?: boolean; name?: string }> = Array.isArray(p.participants) ? p.participants : [];
+      const firstContactParticipant = participants.find((x) => x.contact_id);
+      const personId = firstContactParticipant?.contact_id || null;
+      const { data: insertedMoment, error: momentErr } = await supabase
+        .from("moments")
+        .insert({
+          user_id: suggestion.user_id,
+          title,
+          description: p.description || null,
+          happened_at: happenedAt,
+          impact_level: Math.max(1, Math.min(4, Number(p.impact_level) || 2)),
+          confidence_date: Math.max(0, Math.min(10, Number(p.confidence_date) || 7)),
+          confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
+          person_id: personId,
+          source: "note_auto",
+          status: "happened",
+        } as any)
+        .select("id")
+        .single();
+      if (momentErr || !insertedMoment) return { ...suggestion, status: "pending_review" };
+      const participantRows = participants
+        .filter((x) => x.contact_id)
+        .map((x) => ({ moment_id: insertedMoment.id, person_id: x.contact_id }));
+      if (participantRows.length > 0) {
+        await supabase.from("moment_participants").insert(participantRows as any);
+      }
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: insertedMoment.id, applied_at: new Date().toISOString() };
     }
   } catch (err) {
     console.error("auto-apply suggestion failed:", err);
