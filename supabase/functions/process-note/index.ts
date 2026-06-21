@@ -18,6 +18,10 @@ import {
   canonicalProfileLabel,
   correctProfileCategory,
 } from "../_shared/profile-canonical-schema.ts";
+import {
+  applyNormalization,
+  createNormalizationSuggestions,
+} from "../_shared/profile-normalization.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
