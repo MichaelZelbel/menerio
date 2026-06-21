@@ -7,6 +7,8 @@ import { runChat } from "./llm-router.ts";
 import {
   PROFILE_CANONICAL_SCHEMA,
   CANONICAL_LABELS_FOR_PROMPT,
+  canonicalProfileLabel,
+  correctProfileCategory,
 } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
