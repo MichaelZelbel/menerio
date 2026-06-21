@@ -144,8 +144,26 @@ export default function ReviewQueue() {
     } as any, { onConflict: "user_id,suppression_key" });
   };
 
+  const invalidateProfileQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
+    queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
+    queryClient.invalidateQueries({ queryKey: ["profile-categories"] });
+  };
+
   const revertAppliedChange = async (item: ReviewItem) => {
     if (!item.target_entity_id && item.status !== "auto_applied_unreviewed") return;
+
+    if (item.suggestion_type === "normalize_profile_entry") {
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: { action: "rollback", review_id: item.id },
+      });
+      if (error || !data?.ok) {
+        throw new Error(error?.message || data?.reason || "Rollback failed");
+      }
+      invalidateProfileQueries();
+      return;
+    }
 
     if (item.suggestion_type === "add_contact" && item.target_entity_id) {
       await supabase.from("contacts").delete().eq("id", item.target_entity_id);
@@ -458,8 +476,39 @@ export default function ReviewQueue() {
     }
   };
 
+  const handleAcceptNormalize = async (item: ReviewItem) => {
+    const payload = item.payload as any;
+    try {
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: { action: "apply", review_id: item.id },
+      });
+      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
+      if (stale) {
+        showToast.info("This profile changed since the suggestion was made — skipping");
+        refreshReviewQueues();
+        invalidateProfileQueries();
+        return;
+      }
+      if (error || !data?.ok) {
+        showToast.error("Could not clean up profile: " + (error?.message || data?.reason || "Unknown error"));
+        refreshReviewQueues();
+        return;
+      }
+      invalidateProfileQueries();
+      refreshReviewQueues();
+      showToast.success(`Cleaned up: ${payload?.canonical_label || "profile entry"}`);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
+
+    if (type === "normalize_profile_entry") {
+      return handleAcceptNormalize(item);
+    }
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
