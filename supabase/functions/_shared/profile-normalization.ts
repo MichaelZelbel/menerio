@@ -328,7 +328,7 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups;
+    return deterministicGroups.concat(softSingleGroups);
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
