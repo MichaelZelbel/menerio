@@ -135,8 +135,6 @@ verify_jwt = false
 [functions.backfill-moment-profile-extraction]
 verify_jwt = false
 
-[functions.admin-reprocess-note]
-verify_jwt = false
 
 
 
