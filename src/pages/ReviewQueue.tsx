@@ -35,6 +35,7 @@ import {
   Eye,
   RotateCcw,
   Users2,
+  Sparkles,
 } from "lucide-react";
 
 const DEFAULT_PROFILE_CATEGORIES = [
@@ -65,6 +66,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   add_relationship: { icon: Link2, label: "Relationship", color: "text-indigo-500" },
   add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
+  normalize_profile_entry: { icon: Sparkles, label: "Profile cleanup", color: "text-fuchsia-500" },
 };
 
 const truncateText = (text: string | null | undefined, length = 200) => {
