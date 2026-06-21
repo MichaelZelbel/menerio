@@ -591,7 +591,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
           confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
           person_id: personId,
           source: "note_auto",
-          status: "happened",
+          status: "past_fact",
         } as any)
         .select("id")
         .single();
