@@ -676,6 +676,8 @@ const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
   add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
   add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
+  // Destructive: stricter so low-confidence merges wait for human review even in auto mode.
+  normalize_profile_entry: { conservative: 0.92, balanced: 0.85, exploratory: 0.75 },
 };
 
 function thresholdFor(suggestionType: string, sensitivity: string): number {
@@ -690,6 +692,7 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_profile_entry: 0.80,
   add_relationship: 0.72,
   add_moment: 0.78,
+  normalize_profile_entry: 0.8,
 };
 
 const SENSITIVE_TERMS = [
