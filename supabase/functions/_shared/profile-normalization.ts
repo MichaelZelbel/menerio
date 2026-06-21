@@ -180,9 +180,79 @@ export async function planSubjectNormalization(args: {
     category: slugById.get(r.category_id) || "preferences",
     label: r.label,
     value: r.value,
+    created_at: r.created_at || null,
   }));
 
-  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON):\n${JSON.stringify(llmEntries, null, 2)}\n\nReturn ONLY groups that require a change.`;
+  // Optional dated-evidence assembly for time-conflict resolution.
+  const CHAR_BUDGET = 6000;
+  let evidenceBlock = "";
+  if (includeNotesContext) {
+    try {
+      const notesById = new Map<string, { id: string; title: string; date: string; snippet: string }>();
+      const addNote = (n: any) => {
+        if (!n?.id || notesById.has(n.id)) return;
+        const date = (n.created_at || "").slice(0, 10);
+        const title = String(n.title || "Untitled").slice(0, 120);
+        const body = String(n.content || "").replace(/\s+/g, " ").trim();
+        notesById.set(n.id, { id: n.id, title, date, snippet: body });
+      };
+
+      // (b) Notes linked from profile entries
+      const linkedIds = [...new Set(rows.map((r) => r.linked_note_id).filter(Boolean) as string[])];
+      if (linkedIds.length > 0) {
+        const { data: linked } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at")
+          .in("id", linkedIds)
+          .eq("user_id", userId);
+        for (const n of (linked || []) as any[]) addNote(n);
+      }
+
+      // (c) Subject notes
+      let subjectNotes: any[] = [];
+      if (contactId) {
+        const { data } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at, metadata")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .contains("metadata", { matched_people: [contactId] })
+          .order("created_at", { ascending: false })
+          .limit(15);
+        subjectNotes = (data || []) as any[];
+      } else {
+        const { data } = await supabase
+          .from("notes")
+          .select("id, title, content, created_at")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .order("created_at", { ascending: false })
+          .limit(15);
+        subjectNotes = (data || []) as any[];
+      }
+      for (const n of subjectNotes) addNote(n);
+
+      // Order newest first, truncate snippets, drop oldest if over budget.
+      const ordered = [...notesById.values()].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      const lines: string[] = [];
+      let used = 0;
+      for (const n of ordered) {
+        const snipLen = linkedIds.includes(n.id) ? 240 : 200;
+        const snip = n.snippet.slice(0, snipLen);
+        const line = `- [${n.date || "unknown"}] ${n.title}: ${snip}`;
+        if (used + line.length + 1 > CHAR_BUDGET) break;
+        lines.push(line);
+        used += line.length + 1;
+      }
+      if (lines.length > 0) {
+        evidenceBlock = `\n\nDATED EVIDENCE (notes & timestamps), newest first:\n${lines.join("\n")}`;
+      }
+    } catch (e) {
+      console.error("[normalize-profile] evidence assembly failed:", e);
+    }
+  }
+
+  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON, includes created_at):\n${JSON.stringify(llmEntries, null, 2)}${evidenceBlock}\n\nReturn ONLY groups that require a change.`;
 
   let parsed: any = null;
   try {
