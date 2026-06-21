@@ -1436,12 +1436,12 @@ async function generateProfileSuggestions(
         let contactB: { id: string; name: string } | null = null;
 
         if (!isSelfA) {
-          const matchA = nameToContact.get(rel.person_a.toLowerCase());
-          if (matchA) contactA = { id: matchA.contact_id!, name: matchA.canonical_name! };
+          const matchA = nameToTarget.get(rel.person_a.toLowerCase());
+          if (matchA && matchA.contact_id) contactA = { id: matchA.contact_id, name: matchA.canonical_name };
           else {
-            for (const [key, c] of nameToContact) {
-              if (isFuzzyMatch(rel.person_a, key)) {
-                contactA = { id: c.contact_id!, name: c.canonical_name! };
+            for (const [key, c] of nameToTarget) {
+              if (c.contact_id && isFuzzyMatch(rel.person_a, key)) {
+                contactA = { id: c.contact_id, name: c.canonical_name };
                 break;
               }
             }
@@ -1453,12 +1453,12 @@ async function generateProfileSuggestions(
         }
 
         if (!isSelfB) {
-          const matchB = nameToContact.get(rel.person_b.toLowerCase());
-          if (matchB) contactB = { id: matchB.contact_id!, name: matchB.canonical_name! };
+          const matchB = nameToTarget.get(rel.person_b.toLowerCase());
+          if (matchB && matchB.contact_id) contactB = { id: matchB.contact_id, name: matchB.canonical_name };
           else {
-            for (const [key, c] of nameToContact) {
-              if (isFuzzyMatch(rel.person_b, key)) {
-                contactB = { id: c.contact_id!, name: c.canonical_name! };
+            for (const [key, c] of nameToTarget) {
+              if (c.contact_id && isFuzzyMatch(rel.person_b, key)) {
+                contactB = { id: c.contact_id, name: c.canonical_name };
                 break;
               }
             }
