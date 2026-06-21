@@ -467,6 +467,10 @@ export default function ReviewQueue() {
       return handleAcceptRelationship(item);
     }
 
+    if (type === "add_moment") {
+      return handleAcceptMoment(item);
+    }
+
     if (type === "group_member_suggestion") {
       const { group_id, contact_id } = item.payload as any;
       if (!group_id || !contact_id) {
