@@ -1,22 +1,34 @@
 ## Problem
 
-Inside the Lexicon (`/lexicon/...`), most rendered links still open in a new browser tab even though we previously added click interception. The interception only runs after the browser has already seen `target="_blank"` on the anchor, and in some cases the new tab wins the race / a middle-mouse or auxclick path bypasses the handler.
+In the note editor, the Undo button never lights up. The toolbar calls `editor.can().undo()` directly during render (`src/components/notes/EditorToolbar.tsx`), but the toolbar component does not subscribe to TipTap's transaction stream. On first render — right after a note loads — history is empty, so the button mounts disabled and stays disabled even as the user types and builds up history. Same staleness affects every other reactive button (bold/italic active states, list active, redo, etc.), they just happen to be less obvious.
 
-Root cause: the Tiptap `Link` extension renders link marks with `target="_blank"` as a built-in default. So even links that our markdown→HTML converter outputs cleanly (e.g. `<a href="/lexicon/foo">`) are re-serialized by Tiptap with `target="_blank" rel="noopener noreferrer nofollow"` when the editor mounts. Our click handler (`handleContainerClick` in `RichTextEditor`) then has to fight that on every click — and it doesn't catch auxclick / middle-click / focused-keyboard-enter paths, so links visibly "flash open" in a new tab.
+The user's note content is fine — undo is purely a UI wiring bug.
 
-## Fix (frontend only)
+## Fix
 
-Edit `src/components/RichTextEditor.tsx`:
+Make `EditorToolbar` re-render on every TipTap transaction so `editor.can().undo()`, `editor.can().redo()`, and every `editor.isActive(...)` call reflect the live editor state.
 
-1. Configure `LinkExt` so it never injects `target` by default. Pass `HTMLAttributes: { target: null, rel: "noopener noreferrer" }` (and keep `openOnClick: false`). That removes the Tiptap-injected `_blank` for every link the editor renders, which is what's wrapping the Lexicon body.
-2. In `toEditorHtml(...)`, defensively strip `target="_blank"` from any anchor whose `href` resolves to an internal host (same origin, `INTERNAL_APP_HOSTS`, or `*.lovable.app`). This protects against historical content that has `target="_blank"` baked into the stored markdown/HTML.
-3. Keep the existing `handleContainerClick` logic: for external links it still adds `target="_blank"` + safe `rel` on click. So external citations/sources continue to open in a new tab as before.
-4. Also listen for `auxclick` (middle-click) on the wrapper for internal anchors and treat it like a normal same-window navigation only when the click handler already prevents default — i.e. we do *not* hijack middle-click; users can still middle-click to force a new tab. This preserves the explicit "open in new tab" escape hatch already documented in the click handler.
+Two small, low-risk options (I'd go with option A):
 
-No changes to `WikiPage.tsx`, the markdown converter, `WikiLinkMark`, or any DB/edge code. Behavior outside the Lexicon (notes editor, etc.) uses the same `RichTextEditor`, so internal-link-in-same-window behavior becomes consistent app-wide — which matches the previously stated rule.
+**A. Subscribe via `useEffect` + `forceUpdate` in `EditorToolbar`** (works with current `@tiptap/react` version, no API risk)
+- In `EditorToolbar`, add a `useState` counter and a `useEffect` that registers `editor.on('transaction', tick); editor.on('selectionUpdate', tick); editor.on('update', tick)` and cleans up on unmount. That forces the toolbar to re-render on every editor change.
+
+**B. Use `useEditorState` from `@tiptap/react`** (cleaner, but only if the installed version exposes it)
+- Replace the direct `editor.can()/isActive()` reads with a `useEditorState({ editor, selector })` so only the derived booleans drive re-render.
+
+I'll verify which is available and pick A as the safe default; behavior is identical to the user.
+
+## Scope
+
+- Edit only `src/components/notes/EditorToolbar.tsx`.
+- Do not change `NoteEditor.tsx`, the StarterKit config, autosave, or the `setContent` paths — those are working correctly and history is preserved between autosaves (autosave skips `setContent` while the editor is focused / while a pending save matches).
+- Do not touch `RichTextEditor.tsx` (used by other surfaces, e.g. shared notes). Its toolbar has the same latent issue but the user reported the bug in the note editor; I'll keep this change minimal and we can mirror it later if you want.
 
 ## Verification
 
-- Open a Lexicon page that contains both `[[Wikilink]]` and a regular markdown `[label](/lexicon/other)` link → both navigate in the same tab.
-- Cmd/Ctrl-click or middle-click on an internal Lexicon link → still opens in a new tab (escape hatch preserved).
-- An external `https://example.com` link in a Lexicon page → still opens in a new tab.
+1. Open the affected note (`/dashboard/notes/88b295be-…`), type a few characters, watch the Undo button enable.
+2. Click Undo → last keystroke reverts. Click Redo → it reapplies.
+3. Use Cmd/Ctrl+Z as well to confirm keyboard undo (which already worked through ProseMirror) still works.
+4. Confirm autosave still fires (status indicator) and no extra re-renders cause lag while typing in a long note.
+
+No backend, no migrations, no edge function changes.

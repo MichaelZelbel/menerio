@@ -54,7 +54,7 @@ import {
   TableProperties,
   FileText,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface EditorToolbarProps {
   editor: Editor | null;
