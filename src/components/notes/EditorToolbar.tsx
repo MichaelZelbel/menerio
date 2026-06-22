@@ -109,6 +109,27 @@ function ToolbarButton({
 export function EditorToolbar({ editor, quickActions, noteActions, onInsertWikilink }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
+  // Force re-render on every editor transaction so reactive reads like
+  // `editor.can().undo()`, `editor.can().redo()`, and `editor.isActive(...)`
+  // reflect live state instead of being frozen at mount time (which kept
+  // the Undo button perpetually disabled even after the user typed).
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!editor) return;
+    const tick = () => setTick((n) => (n + 1) % 1_000_000);
+    editor.on("transaction", tick);
+    editor.on("selectionUpdate", tick);
+    editor.on("update", tick);
+    editor.on("focus", tick);
+    editor.on("blur", tick);
+    return () => {
+      editor.off("transaction", tick);
+      editor.off("selectionUpdate", tick);
+      editor.off("update", tick);
+      editor.off("focus", tick);
+      editor.off("blur", tick);
+    };
+  }, [editor]);
 
   if (!editor) return null;
 
