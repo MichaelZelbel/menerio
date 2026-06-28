@@ -212,7 +212,18 @@ serve(async (req) => {
       if (row.suggestion_type !== "normalize_profile_entry") return json({ error: "wrong suggestion_type" }, 400);
 
       const result = await applyNormalization(db, row.payload as NormalizationPayload);
-      if (!result.ok) return json({ ok: false, reason: result.reason }, 409);
+      if (!result.ok) {
+        // The suggestion can no longer be applied (source entries were edited
+        // or deleted, or the target category vanished). Resolve the queue row
+        // so it stops re-appearing in the user's Review Queue forever.
+        if (["stale", "empty", "category_unresolved"].includes(result.reason || "")) {
+          await db
+            .from("review_queue")
+            .update({ status: "removed", reviewed_at: new Date().toISOString() })
+            .eq("id", reviewId);
+        }
+        return json({ ok: false, reason: result.reason }, 409);
+      }
 
       await db
         .from("review_queue")

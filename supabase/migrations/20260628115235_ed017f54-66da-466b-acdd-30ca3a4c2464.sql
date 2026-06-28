@@ -1,0 +1,1 @@
+UPDATE public.review_queue SET status='removed', reviewed_at=now() WHERE id IN ('6a355a24-a0f7-41a9-a757-133fec68401f','ecfea06d-c960-47a6-96d6-2e6ce1791293') AND status='pending_review';
