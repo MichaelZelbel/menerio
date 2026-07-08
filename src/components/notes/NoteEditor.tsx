@@ -34,6 +34,7 @@ import { ExternalNotePanel } from "./ExternalNotePanel";
 import { WebClipPreview } from "./WebClipPreview";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
+import { Separator } from "@/components/ui/separator";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { OutgoingLinksPanel } from "./OutgoingLinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
@@ -1106,6 +1107,25 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 hidden={aiHidden}
                 className="ml-1"
               />
+              <Separator orientation="vertical" className="h-5 mx-1" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => window.open(`/dashboard/notes/${note.id}`, "_blank")}
+                title="Open in new tab"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 hover:text-destructive"
+                onClick={moveToTrash}
+                title="Move to trash"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
             </>
           }
           noteActions={
@@ -1164,9 +1184,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
                   <Link2 className="mr-2 h-4 w-4" /> Copy note link
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => window.open(`/dashboard/notes/${note.id}`, '_blank')}>
-                  <ExternalLink className="mr-2 h-4 w-4" /> Open in new tab
-                </DropdownMenuItem>
                 {sharedNote?.is_active ? (
                   <>
                     <DropdownMenuItem onClick={() => copyShareLink.mutate(sharedNote.share_token)}>
@@ -1186,15 +1203,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 )}
                 <DropdownMenuItem onClick={() => setShowForwardDialog(true)}>
                   <Send className="mr-2 h-4 w-4" /> Send to app
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator />
-
-                <DropdownMenuItem
-                  onClick={moveToTrash}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" /> Move to trash
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

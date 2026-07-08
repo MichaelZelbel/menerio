@@ -1,0 +1,161 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "Menerio Menerio" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img "Menerio" [ref=e7]
+          - generic [ref=e8]: Menerio
+        - navigation [ref=e9]:
+          - link "Home" [ref=e10] [cursor=pointer]:
+            - /url: /
+          - link "Features" [ref=e11] [cursor=pointer]:
+            - /url: /features
+          - link "Docs" [ref=e12] [cursor=pointer]:
+            - /url: /docs
+        - generic [ref=e13]:
+          - button "Toggle theme" [ref=e14] [cursor=pointer]:
+            - img
+            - img
+          - button "Sign In" [ref=e15] [cursor=pointer]
+          - button "Get Started" [ref=e16] [cursor=pointer]
+    - main [ref=e17]:
+      - main [ref=e19]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: A personal AI brain · MCP-native · Open source
+          - generic [ref=e29]:
+            - generic [ref=e30]:
+              - img "Meni, the Menerio mascot" [ref=e32]
+              - generic [ref=e58]: meni
+            - generic [ref=e59]:
+              - heading "One Brain. Every AI." [level=1] [ref=e60]:
+                - text: One Brain.
+                - generic [ref=e61]: Every AI.
+              - paragraph [ref=e62]: Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.
+          - generic [ref=e64]:
+            - generic:
+              - img "Meni, the Menerio mascot"
+            - generic [ref=e65]:
+              - generic [ref=e66]:
+                - generic [ref=e67]: NEW NOTE
+                - generic [ref=e68]: just now
+              - generic [ref=e69]: ▍
+              - generic [ref=e70]:
+                - generic [ref=e71]:
+                  - generic [ref=e72]: people
+                  - generic [ref=e74]:
+                    - generic [ref=e75]: B
+                    - text: Ben
+                - generic [ref=e76]:
+                  - generic [ref=e77]: categories
+                  - generic [ref=e78]:
+                    - generic [ref=e79]: Recommendation
+                    - generic [ref=e81]: Book
+                    - generic [ref=e83]: Habits
+          - button "Get Started — Free" [ref=e91] [cursor=pointer]:
+            - text: Get Started — Free
+            - img
+          - generic [ref=e92]:
+            - generic [ref=e93]:
+              - img [ref=e94]
+              - text: Capture from web, mobile, voice
+            - generic [ref=e97]:
+              - img [ref=e98]
+              - text: Available in Claude, ChatGPT, Gemini
+            - generic [ref=e101]:
+              - img [ref=e102]
+              - text: Open source · AGPL-3.0
+        - generic [ref=e106]:
+          - generic [ref=e107]:
+            - paragraph [ref=e108]: Features
+            - heading "Your thoughts, supercharged by AI" [level=2] [ref=e109]
+            - paragraph [ref=e110]: Not just another notes app. A database-backed knowledge system built for the age of AI agents.
+          - generic [ref=e111]:
+            - article [ref=e112]:
+              - img [ref=e115]
+              - heading "AI-Powered Memory" [level=3] [ref=e125]
+              - paragraph [ref=e126]: Every note is automatically embedded and classified. Your AI understands your thoughts by meaning, not just keywords.
+            - article [ref=e127]:
+              - img [ref=e130]
+              - heading "Semantic Search" [level=3] [ref=e133]
+              - paragraph [ref=e134]: Find anything by what it means, not just what it says. Ask questions and get relevant results from your entire knowledge base.
+            - article [ref=e135]:
+              - img [ref=e138]
+              - heading "Rich Note-Taking" [level=3] [ref=e141]
+              - paragraph [ref=e142]: Capture thoughts, ideas, meeting notes, and references. Tag, pin, and organize everything your way.
+            - article [ref=e143]:
+              - img [ref=e146]
+              - heading "MCP-Ready" [level=3] [ref=e151]
+              - paragraph [ref=e152]: Connect any AI tool — Claude, ChatGPT, Cursor — to your brain via the Model Context Protocol. One brain, every AI.
+            - article [ref=e153]:
+              - img [ref=e156]
+              - heading "Open & Portable" [level=3] [ref=e160]
+              - paragraph [ref=e161]: Your knowledge lives in your database. No vendor lock-in, no SaaS middlemen. Export anytime.
+            - article [ref=e162]:
+              - img [ref=e165]
+              - heading "Private & Secure" [level=3] [ref=e168]
+              - paragraph [ref=e169]: Row-level security ensures only you can access your thoughts. Your brain belongs to you.
+        - generic [ref=e171]:
+          - heading "Ready to build your brain?" [level=2] [ref=e172]
+          - paragraph [ref=e173]: Stop losing context every time you switch tools. Start building persistent, AI-accessible knowledge today.
+          - button "Start Your Brain" [ref=e175] [cursor=pointer]:
+            - text: Start Your Brain
+            - img
+    - contentinfo [ref=e176]:
+      - generic [ref=e178]:
+        - generic [ref=e179]:
+          - link "Menerio Menerio" [ref=e180] [cursor=pointer]:
+            - /url: /
+            - img "Menerio" [ref=e181]
+            - generic [ref=e182]: Menerio
+          - paragraph [ref=e183]: One brain. Every AI. Capture, search, and connect your thoughts.
+        - generic [ref=e184]:
+          - heading "Product" [level=4] [ref=e185]
+          - list [ref=e186]:
+            - listitem [ref=e187]:
+              - link "Docs" [ref=e188] [cursor=pointer]:
+                - /url: /docs
+            - listitem [ref=e189]:
+              - link "Source Code" [ref=e190] [cursor=pointer]:
+                - /url: https://github.com/MichaelZelbel/menerio
+        - generic [ref=e191]:
+          - heading "Legal" [level=4] [ref=e192]
+          - list [ref=e193]:
+            - listitem [ref=e194]:
+              - link "Privacy Policy" [ref=e195] [cursor=pointer]:
+                - /url: /privacy
+            - listitem [ref=e196]:
+              - link "Terms of Service" [ref=e197] [cursor=pointer]:
+                - /url: /terms
+            - listitem [ref=e198]:
+              - link "Cookie Policy" [ref=e199] [cursor=pointer]:
+                - /url: /cookies
+      - generic [ref=e201]:
+        - paragraph [ref=e202]: © 2026 Menerio. All rights reserved.
+        - generic [ref=e203]:
+          - link "X" [ref=e204] [cursor=pointer]:
+            - /url: https://x.com/MichaelZelbel
+            - img [ref=e205]
+          - link "GitHub" [ref=e207] [cursor=pointer]:
+            - /url: https://github.com/MichaelZelbel/menerio
+            - img [ref=e208]
+          - link "LinkedIn" [ref=e211] [cursor=pointer]:
+            - /url: https://www.linkedin.com/in/michaelzelbel/
+            - img [ref=e212]
+          - link "Email" [ref=e216] [cursor=pointer]:
+            - /url: mailto:support@menerio.com
+            - img [ref=e217]
+  - generic [ref=e222]:
+    - generic [ref=e223]:
+      - img [ref=e224]
+      - paragraph [ref=e226]:
+        - text: We use cookies to improve your experience. By continuing, you agree to our
+        - link "Cookie Policy" [ref=e227] [cursor=pointer]:
+          - /url: /cookies
+        - text: .
+    - generic [ref=e228]:
+      - button "Reject Non-Essential" [ref=e229] [cursor=pointer]
+      - button "Accept All" [ref=e230] [cursor=pointer]
