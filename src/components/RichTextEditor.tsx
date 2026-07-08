@@ -19,6 +19,8 @@ import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Markdown } from "tiptap-markdown";
 import { EditorToolbar } from "@/components/notes/EditorToolbar";
+import { EditorBubbleMenu } from "@/components/notes/EditorBubbleMenu";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { AudioEmbed } from "@/components/notes/extensions/AudioEmbed";
 import { PdfEmbed } from "@/components/notes/extensions/PdfEmbed";
 import { TaskListShortcut } from "@/components/notes/extensions/TaskListShortcut";
@@ -56,6 +58,7 @@ export function RichTextEditor({
   onWikiLinkClick,
   onInternalNavigate,
 }: RichTextEditorProps) {
+  const isMobile = useIsMobile();
   const toWikiSlug = (value: string) =>
     value
       .replace(/&quot;/g, '"')
@@ -219,6 +222,7 @@ export function RichTextEditor({
       {showToolbar && <EditorToolbar editor={editor} />}
       <div className="p-4" onClickCapture={handleContainerClick}>
         <EditorContent editor={editor} className="tiptap-editor" />
+        {editor && editable && !isMobile && <EditorBubbleMenu editor={editor} />}
       </div>
     </div>
   );

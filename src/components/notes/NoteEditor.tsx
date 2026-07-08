@@ -34,7 +34,9 @@ import { ExternalNotePanel } from "./ExternalNotePanel";
 import { WebClipPreview } from "./WebClipPreview";
 import { ForwardToAppDialog } from "./ForwardToAppDialog";
 import { WikilinkAutocomplete } from "./WikilinkAutocomplete";
+import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { Separator } from "@/components/ui/separator";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { OutgoingLinksPanel } from "./OutgoingLinksPanel";
 import { SuggestedLinksPanel } from "./SuggestedLinksPanel";
@@ -312,6 +314,7 @@ function insertWikilinkSafely(editor: any, attrs: { noteId: string; noteTitle: s
 }
 
 export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraphProp, onToggleLocalGraph, onNoteSelect }: NoteEditorProps) {
+  const isMobile = useIsMobile();
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const processNote = useProcessNote();
@@ -1352,7 +1355,18 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             disabled={note.is_trashed || note.is_external}
           />
         ) : (
-          <EditorContent editor={editor} className="tiptap-editor" />
+          <>
+            <EditorContent editor={editor} className="tiptap-editor" />
+            {editor && !isMobile && !note.is_trashed && !note.is_external && (
+              <EditorBubbleMenu
+                editor={editor}
+                onInsertWikilink={() => {
+                  const pos = editor.state.selection.from ?? 0;
+                  handleOpenAutocomplete(pos);
+                }}
+              />
+            )}
+          </>
         )}
         {/* Media analysis overlay badges */}
         {!sourceMode && <MediaAnalysisOverlay noteId={note.id} editorContainerRef={editorContainerRef} />}

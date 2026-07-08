@@ -43,17 +43,20 @@ export const DISPLAY_ORDER: ToolbarGroupId[] = [
 
 /**
  * First-to-collapse → last-to-collapse. Lists and the block-type dropdown are
- * the most-used structural controls, so they survive the longest.
+ * the most-used structural controls, so they survive the longest. Groups the
+ * selection bubble menu also covers (marks, color) collapse early — on a
+ * narrow pane the static bar should prefer what the bubble menu CAN'T do
+ * (lists, block formats, inserts).
  */
 export const COLLAPSE_ORDER: ToolbarGroupId[] = [
   "clear",
   "extendedMarks",
+  "coreMarks",
+  "color",
   "align",
   "blockFormat",
-  "color",
-  "insert",
   "history",
-  "coreMarks",
+  "insert",
   "lists",
   "blockType",
 ];

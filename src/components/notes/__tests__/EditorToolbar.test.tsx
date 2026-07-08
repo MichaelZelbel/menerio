@@ -40,23 +40,26 @@ describe("EditorToolbar (Priority+ layout)", () => {
   });
 
   it("collapses low-priority groups into the overflow popover when narrow, keeping lists inline", async () => {
-    // Wide enough for blockType + coreMarks + lists + trigger, not the rest.
+    // Wide enough for structural groups + trigger, not for the mark groups
+    // (which collapse early now that the selection bubble menu covers them).
     mockWidth = 520;
     render(<EditorToolbar editor={makeEditor()} />);
 
     // High-priority groups stay inline.
     expect(screen.getByTitle("Bullet list")).toBeInTheDocument();
     expect(screen.getByTitle("Checklist")).toBeInTheDocument();
-    expect(screen.getByTitle("Bold (Ctrl+B)")).toBeInTheDocument();
+    expect(screen.getByTitle("Insert table")).toBeInTheDocument();
 
-    // Low-priority groups are gone from the row...
-    expect(screen.queryByTitle("Clear formatting")).not.toBeInTheDocument();
+    // Bubble-menu-covered and low-priority groups are gone from the row...
+    expect(screen.queryByTitle("Bold (Ctrl+B)")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Quote")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Align left")).not.toBeInTheDocument();
 
     // ...and reachable through the overflow popover.
     const trigger = screen.getByTitle("More formatting");
     fireEvent.click(trigger);
-    expect(await screen.findByTitle("Clear formatting")).toBeInTheDocument();
+    expect(await screen.findByTitle("Quote")).toBeInTheDocument();
+    expect(screen.getByTitle("Bold (Ctrl+B)")).toBeInTheDocument();
     expect(screen.getByTitle("Align left")).toBeInTheDocument();
   });
 
