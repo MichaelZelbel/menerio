@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -91,6 +91,13 @@ export default function Settings() {
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
   const [profileLoading, setProfileLoading] = useState(false);
 
+  // Resync the field once the profile finishes loading. `profile` is null on a
+  // direct load / hard refresh (AuthContext fetches it async), so without this
+  // the input stays empty and "Save Name" would overwrite the real name with "".
+  useEffect(() => {
+    setDisplayName(profile?.display_name || "");
+  }, [profile?.display_name]);
+
   // Avatar state
   const [avatarUploading, setAvatarUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,10 +124,15 @@ export default function Settings() {
   // ── Profile save ──
   const handleSaveProfile = async () => {
     if (!user) return;
+    const trimmed = displayName.trim();
+    if (!trimmed) {
+      toast({ variant: "destructive", title: "Name required", description: "Display name can't be empty." });
+      return;
+    }
     setProfileLoading(true);
     const { error } = await supabase
       .from("profiles")
-      .update({ display_name: displayName })
+      .update({ display_name: trimmed })
       .eq("id", user.id);
     if (error) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });

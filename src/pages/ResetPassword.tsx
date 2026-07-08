@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,13 +14,26 @@ export default function ResetPassword() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isRecovery, setIsRecovery] = useState(false);
+  // null = still determining. Reading window.location.hash directly races the
+  // supabase client, which parses and then ERASES the recovery hash on load —
+  // so a valid link could be misread as "invalid". Instead we accept the fast
+  // path (hash still present), the PASSWORD_RECOVERY event supabase fires, or an
+  // established session (the recovery token already logged the user in).
+  const [isRecovery, setIsRecovery] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
+    if (window.location.hash.includes("type=recovery")) {
       setIsRecovery(true);
+      return;
     }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setIsRecovery(true);
+    });
+    // Resolve the pending state from the current session if no event arrives.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsRecovery((prev) => (prev === null ? !!session : prev));
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -35,6 +49,14 @@ export default function ResetPassword() {
       setLoading(false);
     }
   };
+
+  if (isRecovery === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (!isRecovery) {
     return (

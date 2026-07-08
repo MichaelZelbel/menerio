@@ -82,6 +82,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { escapeLike, pgOrValue } from "@/lib/postgrest";
 
 
 type SearchMode = "semantic" | "exact";
@@ -341,7 +342,7 @@ export default function Notes() {
     const { data: affected, error: fetchErr } = await supabase
       .from("note_folders" as any)
       .select("path")
-      .or(`path.eq.${oldPath},path.like.${oldPath}/%`);
+      .or(`path.eq.${pgOrValue(oldPath)},path.like.${pgOrValue(escapeLike(oldPath) + "/%")}`);
     if (fetchErr) throw fetchErr;
     const rows = ((affected || []) as unknown as Array<{ path: string }>);
     for (const row of rows) {
@@ -359,7 +360,7 @@ export default function Notes() {
     const { data: affectedNotes, error: nFetchErr } = await supabase
       .from("notes" as any)
       .select("id, folder_path")
-      .or(`folder_path.eq.${oldPath},folder_path.like.${oldPath}/%`);
+      .or(`folder_path.eq.${pgOrValue(oldPath)},folder_path.like.${pgOrValue(escapeLike(oldPath) + "/%")}`);
     if (nFetchErr) throw nFetchErr;
     const noteRows = ((affectedNotes || []) as unknown as Array<{ id: string; folder_path: string }>);
     for (const n of noteRows) {
@@ -465,7 +466,7 @@ export default function Notes() {
           const { error: fErr } = await supabase
             .from("note_folders" as any)
             .delete()
-            .or(`path.eq.${path},path.like.${path}/%`);
+            .or(`path.eq.${pgOrValue(path)},path.like.${pgOrValue(escapeLike(path) + "/%")}`);
           if (fErr) throw fErr;
           await refreshFolders();
           await queryClient.invalidateQueries({ queryKey: ["notes"] });

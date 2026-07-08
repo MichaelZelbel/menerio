@@ -2160,6 +2160,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
+    // Authorize the caller. This function runs with the service-role key and
+    // derives user_id from the note row, so an unauthenticated caller could
+    // otherwise force AI reprocessing of ANY note (draining the owner's credits
+    // and the shared LLM budget) just by guessing a note UUID. Accept either:
+    //   (a) an internal service-role call (other edge functions fan out here), or
+    //   (b) a real user JWT whose user owns the target note.
+    const token = authHeader.replace("Bearer ", "").trim();
+    const isInternal = token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!isInternal) {
+      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: owned } = await supabase
+        .from("notes")
+        .select("user_id")
+        .eq("id", note_id)
+        .single();
+      if (!owned || owned.user_id !== user.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
 

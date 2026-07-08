@@ -79,14 +79,20 @@ export function useShareNote() {
         .single();
       if (error) throw error;
       const shareToken = (data as any).share_token;
-      const url = getShareUrl(shareToken);
-      await navigator.clipboard.writeText(url);
-      return { url };
+      return { url: getShareUrl(shareToken) };
     },
-    onSuccess: (result, { noteId }) => {
-      if (!result.blocked) {
-        qc.invalidateQueries({ queryKey: ["shared-note", noteId] });
+    // The clipboard write lives here, NOT in mutationFn: if it lived alongside
+    // the DB upsert, a clipboard rejection (Safari's same-gesture rule, lost
+    // focus, denied permission) would reject the whole mutation and show
+    // "Failed to share note" — even though the note is already publicly shared.
+    onSuccess: async (result, { noteId }) => {
+      if (result.blocked) return;
+      qc.invalidateQueries({ queryKey: ["shared-note", noteId] });
+      try {
+        if (result.url) await navigator.clipboard.writeText(result.url);
         showToast.success("Public link copied to clipboard");
+      } catch {
+        showToast.success("Public link created — copy it from the share menu");
       }
     },
     onError: () => showToast.error("Failed to share note"),

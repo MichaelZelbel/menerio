@@ -655,28 +655,59 @@ export default function ReviewQueue() {
   };
 
   const handleRemoveAll = async () => {
-    for (const item of items) {
-      await revertAppliedChange(item);
-      updateStatus.mutate({ id: item.id, status: "removed" });
+    // Isolate each item so one failing revert can't abort the whole loop and
+    // leave the queue half-processed and frozen (no refresh, no toast). Always
+    // refresh in a finally.
+    let failures = 0;
+    try {
+      for (const item of items) {
+        try {
+          await revertAppliedChange(item);
+          updateStatus.mutate({ id: item.id, status: "removed" });
+        } catch (err: any) {
+          failures++;
+          showToast.error(`Failed to remove "${item.title}": ${err?.message || "Unknown error"}`);
+        }
+      }
+      for (const revision of wikiRevisions) {
+        try {
+          await rollbackWikiRevisionById(revision.id);
+        } catch (err: any) {
+          failures++;
+          showToast.error(`Failed to roll back a Lexicon edit: ${err?.message || "Unknown error"}`);
+        }
+      }
+    } finally {
+      refreshReviewQueues();
     }
-    for (const revision of wikiRevisions) {
-      await rollbackWikiRevisionById(revision.id);
-    }
-    refreshReviewQueues();
-    showToast.info("All visible changes removed");
+    if (failures === 0) showToast.info("All visible changes removed");
   };
 
   const handleNeverAgainAll = async () => {
-    for (const item of items) {
-      await revertAppliedChange(item);
-      await createSuppression(item);
-      updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+    let failures = 0;
+    try {
+      for (const item of items) {
+        try {
+          await revertAppliedChange(item);
+          await createSuppression(item);
+          updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
+        } catch (err: any) {
+          failures++;
+          showToast.error(`Failed to block "${item.title}": ${err?.message || "Unknown error"}`);
+        }
+      }
+      for (const revision of wikiRevisions) {
+        try {
+          await rollbackWikiRevisionById(revision.id);
+        } catch (err: any) {
+          failures++;
+          showToast.error(`Failed to roll back a Lexicon edit: ${err?.message || "Unknown error"}`);
+        }
+      }
+    } finally {
+      refreshReviewQueues();
     }
-    for (const revision of wikiRevisions) {
-      await rollbackWikiRevisionById(revision.id);
-    }
-    refreshReviewQueues();
-    showToast.info("All visible changes blocked where possible and rolled back");
+    if (failures === 0) showToast.info("All visible changes blocked where possible and rolled back");
   };
 
   const handleKeepAll = async () => {
@@ -812,10 +843,11 @@ export default function ReviewQueue() {
                       View diff
                     </Button>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
-                        <X className="h-4 w-4 mr-1" />
-                        Never Again
-                      </Button>
+                      {/* No per-page "Never Again" for Lexicon edits: unlike profile
+                          suggestions (which write ai_suggestion_suppressions), the wiki
+                          ingest pipeline has no suppression mechanism to honor it yet, so
+                          a "Never Again" here would be an empty promise identical to Roll
+                          Back. Tracked as a backend follow-up (lock a page from AI edits). */}
                       <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setRollbackWikiRevision(revision)}>
                         <RotateCcw className="h-4 w-4 mr-1" />
                         Roll Back

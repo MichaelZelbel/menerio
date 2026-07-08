@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { escapeLike } from "@/lib/postgrest";
 import { Badge } from "@/components/ui/badge";
 import { Plus } from "lucide-react";
 
@@ -57,7 +58,7 @@ export function WikilinkAutocomplete({
         .limit(15);
 
       if (query.trim()) {
-        q = q.ilike("title", `%${query}%`);
+        q = q.ilike("title", `%${escapeLike(query)}%`);
       }
 
       const { data } = await q;

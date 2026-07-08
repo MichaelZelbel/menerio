@@ -136,6 +136,7 @@ const App = () => (
                     <Route path="review" element={<WeeklyReview />} />
                     <Route path="timeline" element={<TimelinePage />} />
                     <Route path="people" element={<People />} />
+                    <Route path="people/:id" element={<People />} />
                     <Route path="groups" element={<Groups />} />
                     <Route path="groups/:slug" element={<GroupDetail />} />
 

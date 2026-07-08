@@ -26,6 +26,26 @@ Deno.serve(async (req: Request) => {
     const momentId = typeof body?.moment_id === "string" ? body.moment_id : null;
     if (!momentId) return json({ error: "moment_id required" }, 400);
 
+    // Authorize the caller. This runs with the service-role key and derives
+    // user_id from the moment row, so without a check anyone could trigger an
+    // LLM extraction against ANY user's moment (draining their credits and the
+    // shared LLM budget) by guessing a moment UUID. Accept either an internal
+    // service-role call, or a user JWT whose user owns the moment.
+    const authHeader = req.headers.get("Authorization");
+    const token = authHeader ? authHeader.replace("Bearer ", "").trim() : "";
+    const isInternal = token !== "" && token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!isInternal) {
+      if (!token) return json({ error: "Unauthorized" }, 401);
+      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !user) return json({ error: "Unauthorized" }, 401);
+      const { data: owned } = await supabase
+        .from("moments")
+        .select("user_id")
+        .eq("id", momentId)
+        .maybeSingle();
+      if (!owned || owned.user_id !== user.id) return json({ error: "Forbidden" }, 403);
+    }
+
     // @ts-expect-error EdgeRuntime is a Supabase global
     EdgeRuntime.waitUntil(
       extractProfileFromMoment(supabase, momentId).then((result) => {

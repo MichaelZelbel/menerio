@@ -194,7 +194,7 @@ export function RelationshipsSection({ contactId, contactName }: RelationshipsSe
                       {myName}
                     </Link>
                   ) : otherContactId ? (
-                    <Link to={`/dashboard/people?contact=${otherContactId}`} className="text-foreground hover:underline truncate">
+                    <Link to={`/dashboard/people/${otherContactId}`} className="text-foreground hover:underline truncate">
                       {otherName}
                     </Link>
                   ) : (

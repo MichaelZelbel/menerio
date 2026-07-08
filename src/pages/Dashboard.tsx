@@ -176,7 +176,7 @@ const Dashboard = () => {
           {!hasNotes && (
             <Card className="border-dashed">
               <CardContent className="py-8">
-                <CaptureEmptyState onCreateNote={() => navigate("/dashboard/notes?action=new")} />
+                <CaptureEmptyState onCreateNote={() => navigate("/dashboard/notes?action=create")} />
               </CardContent>
             </Card>
           )}

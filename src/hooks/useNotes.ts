@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
+import { ilikeContains } from "@/lib/postgrest";
 
 export interface RelatedItem {
   type: string;
@@ -319,7 +320,7 @@ export function useIlikeSearch() {
         .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
-        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
         .order("updated_at", { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -367,7 +368,7 @@ export function useSearchNotes() {
         .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
-        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
         .order("updated_at", { ascending: false })
         .limit(50);
       if (error) throw error;

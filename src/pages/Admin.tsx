@@ -265,32 +265,49 @@ function UsersTab() {
   const fetchUsers = useCallback(async () => {
     setLoading(true);
 
-    // Fetch profiles
-    let query = supabase.from("profiles").select("id, display_name, avatar_url, bio, created_at", { count: "exact" });
+    // Role filtering happens server-side. Previously it filtered only the 10
+    // rows already fetched for the current page, so users with the selected role
+    // on other pages were invisible and the total/pagination were wrong. Instead
+    // we resolve the matching user_ids first and constrain the profiles query to
+    // them, so count + range paginate correctly. (Every user has exactly one
+    // user_roles row, seeded by handle_new_user, so this covers "free" too.)
+    let roleFilteredIds: string[] | null = null;
+    if (roleFilter !== "all") {
+      const { data: roleRows, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", roleFilter as AppRole);
+      if (roleErr) { setLoading(false); return; }
+      roleFilteredIds = (roleRows || []).map((r: any) => r.user_id);
+      if (roleFilteredIds.length === 0) {
+        setRoles({});
+        setUsers([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
+    }
 
+    let query = supabase.from("profiles").select("id, display_name, avatar_url, bio, created_at", { count: "exact" });
     if (search) {
       query = query.ilike("display_name", `%${search}%`);
     }
-
+    if (roleFilteredIds) {
+      query = query.in("id", roleFilteredIds);
+    }
     query = query.order("created_at", { ascending: false }).range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
     const { data, count, error } = await query;
     if (error) { setLoading(false); return; }
 
-    // Fetch all roles
+    // Load all roles for the badge display on the visible rows.
     const { data: roleData } = await supabase.from("user_roles").select("user_id, role");
     const roleMap: Record<string, AppRole> = {};
     (roleData || []).forEach((r: any) => { roleMap[r.user_id] = r.role; });
     setRoles(roleMap);
 
-    let filtered = data || [];
-    if (roleFilter !== "all") {
-      const idsWithRole = Object.entries(roleMap).filter(([, r]) => r === roleFilter).map(([id]) => id);
-      filtered = filtered.filter((u) => idsWithRole.includes(u.id));
-    }
-
-    setUsers(filtered);
-    setTotal(roleFilter === "all" ? (count || 0) : filtered.length);
+    setUsers(data || []);
+    setTotal(count || 0);
     setLoading(false);
   }, [search, roleFilter, page]);
 
@@ -313,10 +330,20 @@ function UsersTab() {
   const handleDelete = async () => {
     if (!deleteId) return;
     setDeleteLoading(true);
-    // Use the delete-my-account edge function with admin override or direct deletion
-    const { error } = await supabase.from("profiles").delete().eq("id", deleteId);
-    if (error) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
+    // Delete via the admin edge function, which verifies the caller is an admin
+    // server-side and fully removes the auth user + owned data. The old path
+    // deleted only the profiles row, leaving an orphaned login and stray data.
+    const { data, error } = await supabase.functions.invoke("admin-delete-user", {
+      body: { target_user_id: deleteId },
+    });
+    // On a non-2xx response supabase-js surfaces a generic error; the real
+    // message (e.g. the self-delete guard) is in the response body.
+    let serverError = (data as any)?.error as string | undefined;
+    if (!serverError && error && (error as any).context?.json) {
+      try { serverError = (await (error as any).context.json())?.error; } catch { /* ignore */ }
+    }
+    if (error || serverError) {
+      toast({ variant: "destructive", title: "Error", description: serverError || error?.message || "Failed to delete user" });
     } else {
       toast({ title: "User deleted" });
       fetchUsers();

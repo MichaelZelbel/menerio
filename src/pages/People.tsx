@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -64,7 +65,15 @@ interface Person {
 export default function People() {
   const { user } = useAuth();
   const qc = useQueryClient();
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const { id: routePersonId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Selection is URL-driven so /dashboard/people/:id deep-links work and the
+  // browser back button behaves. Callers navigate here; we never keep a
+  // separate state copy that could drift from the URL.
+  const selectedPersonId = routePersonId ?? null;
+  const openPerson = (personId: string) => navigate(`/dashboard/people/${personId}`);
+  const closePerson = () => navigate("/dashboard/people");
   const [searchQuery, setSearchQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -83,6 +92,25 @@ export default function People() {
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [bulkGroupId, setBulkGroupId] = useState("");
   const addMembership = useAddMembership();
+
+  // Consume deep-link params from other surfaces (global "+", command palette,
+  // relationships panel). ?contact=<id> normalizes to the path form; ?action=create
+  // and ?new=1 open the create dialog. Params are stripped after handling so a
+  // refresh doesn't re-fire and re-navigating the same URL re-triggers.
+  useEffect(() => {
+    const contact = searchParams.get("contact");
+    if (contact) {
+      navigate(`/dashboard/people/${contact}`, { replace: true });
+      return;
+    }
+    if (searchParams.get("action") === "create" || searchParams.get("new")) {
+      setCreateOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("action");
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, navigate, setSearchParams]);
 
   // ── Queries ──
   const { data: people = [], isLoading } = useQuery<Person[]>({
@@ -173,7 +201,7 @@ export default function People() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
-      setSelectedPersonId(null);
+      closePerson();
       showToast.success("Person removed");
     },
   });
@@ -267,7 +295,7 @@ export default function People() {
       <div className="max-w-3xl">
         <SEOHead title={`${selectedPerson.name} — People — Menerio`} noIndex />
 
-        <Button variant="ghost" size="sm" onClick={() => { setSelectedPersonId(null); cancelEditing(); setActivePersonTab("profile"); }} className="mb-4">
+        <Button variant="ghost" size="sm" onClick={() => { closePerson(); cancelEditing(); setActivePersonTab("profile"); }} className="mb-4">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to People
         </Button>
 
@@ -428,7 +456,7 @@ export default function People() {
         onMergeComplete={() => {
           setMergeOpen(false);
           setMergePrefillId(null);
-          setSelectedPersonId(null);
+          closePerson();
         }}
       />
     </div>
@@ -532,7 +560,7 @@ export default function People() {
           {filtered.map((person) => (
             <div
               key={person.id}
-              onClick={() => setSelectedPersonId(person.id)}
+              onClick={() => openPerson(person.id)}
               className="flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -545,7 +573,7 @@ export default function People() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <User className="h-5 w-5 text-primary" />
                 </div>
-                <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedPersonId(person.id); }} className="min-w-0 text-left">
+                <button type="button" onClick={(event) => { event.stopPropagation(); openPerson(person.id); }} className="min-w-0 text-left">
                   <p className="truncate font-medium text-foreground">{person.name}</p>
                   {(person.aliases || []).length > 0 && (
                     <p className="truncate text-xs text-muted-foreground">{person.aliases.join(", ")}</p>

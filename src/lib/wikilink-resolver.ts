@@ -6,7 +6,10 @@
  * (or pasted markdown) get clickable, ID-bearing wikilinks again.
  */
 
-const WIKILINK_REGEX = /\[\[([^[\]\n]+?)\]\]/g;
+// Lazy match to the FIRST `]]`, allowing a stray `]` inside the title (e.g.
+// `[[Foo ] Bar]]`) so such titles round-trip. `[` and newline stay excluded to
+// prevent runaway matches; titles containing `[` or `|` remain unsupported.
+const WIKILINK_REGEX = /\[\[([^[\n]+?)\]\]/g;
 
 export interface ResolvedWikilink {
   noteId: string | null;
@@ -108,7 +111,7 @@ export function resolveWikilinksInHtml(
 export function extractWikilinkTitles(text: string): string[] {
   if (!text) return [];
   const out = new Set<string>();
-  const re = /\[\[([^[\]\n]+?)\]\]/g;
+  const re = /\[\[([^[\n]+?)\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const t = m[1].trim();

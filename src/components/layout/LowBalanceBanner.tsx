@@ -53,7 +53,7 @@ export function LowBalanceBanner() {
         )}
       </div>
       <Button asChild size="sm" variant={isEmpty ? "destructive" : "outline"} className="h-7 text-xs">
-        <Link to="/dashboard/settings?tab=billing">Manage billing</Link>
+        <Link to="/dashboard/settings?tab=credits">Manage credits</Link>
       </Button>
       {!isEmpty && (
         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleDismiss} aria-label="Dismiss">

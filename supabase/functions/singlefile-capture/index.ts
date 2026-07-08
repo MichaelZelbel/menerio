@@ -271,6 +271,77 @@ function decodeDataUri(uri: string): { bytes: Uint8Array; mime: string } | null 
 
 const MAX_HERO_BYTES = 5 * 1024 * 1024; // 5 MB
 
+/**
+ * Block hosts that point at private, loopback, link-local, or cloud-metadata
+ * addresses. The hero-image URL comes from attacker-controlled uploaded HTML,
+ * so fetching it server-side is an SSRF vector (e.g. http://169.254.169.254/…).
+ * Note: literal IPs and known-internal hostnames are blocked; a public hostname
+ * that *resolves* to a private IP (DNS rebinding) is not caught here, since the
+ * Supabase edge runtime doesn't expose reliable DNS resolution — this closes the
+ * common vectors, not every theoretical one.
+ */
+function isBlockedHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return true;
+  if (h === "metadata.google.internal" || h === "instance-data") return true;
+
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;          // link-local incl. metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true;          // private
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    return false;
+  }
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true;
+    if (h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return true;
+    const mapped = h.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // IPv4-mapped IPv6
+    if (mapped) return isBlockedHost(mapped[1]);
+    return false;
+  }
+  return false; // ordinary public hostname
+}
+
+/**
+ * Fetch an image URL with SSRF protection: only http(s), reject blocked hosts,
+ * and follow redirects manually (re-validating each hop) so a redirect into
+ * internal address space is caught rather than blindly followed.
+ */
+async function fetchImageSafely(startUrl: string): Promise<Response | null> {
+  let url = startUrl;
+  for (let hop = 0; hop < 4; hop++) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (isBlockedHost(parsed.hostname)) {
+      console.warn(`[singlefile-capture] blocked SSRF hero-image fetch to ${parsed.hostname}`);
+      return null;
+    }
+    const res = await fetch(url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(5_000),
+      headers: { "User-Agent": "Menerio-WebClipper/1.0" },
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return null;
+      url = new URL(loc, url).toString(); // resolve relative redirects, re-check next loop
+      continue;
+    }
+    return res;
+  }
+  return null; // too many redirects
+}
+
 /** Resolve a hero candidate (data URI or http(s)) into { bytes, mime, ext }. */
 async function resolveHeroImage(
   candidate: string,
@@ -302,12 +373,8 @@ async function resolveHeroImage(
   }
 
   try {
-    const res = await fetch(resolved, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(5_000),
-      headers: { "User-Agent": "Menerio-WebClipper/1.0" },
-    });
-    if (!res.ok) return null;
+    const res = await fetchImageSafely(resolved);
+    if (!res || !res.ok) return null;
     const mime = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     const ext = HERO_MIME_TO_EXT[mime];
     if (!ext) return null;

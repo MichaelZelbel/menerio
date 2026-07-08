@@ -548,3 +548,43 @@ describe("blank line preservation", () => {
     expect(md.trim()).toBe("A\n\n\nB");
   });
 });
+
+// ─── Escaping & wikilink edge cases (WS4) ────────────────────────────
+
+describe("literal markdown characters round-trip", () => {
+  const para = (text: string) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+
+  it("escapes literal asterisks when serializing", () => {
+    expect(tiptapJsonToMarkdown(para("2 * 3 * 4"))).toBe("2 \\* 3 \\* 4");
+  });
+
+  it("does not re-parse escaped asterisks as emphasis on reload", () => {
+    const html = markdownToHtml("2 \\* 3 \\* 4");
+    expect(html).toContain("2 * 3 * 4");
+    expect(html).not.toContain("<em>");
+  });
+
+  it("round-trips literal underscores and brackets without drift", () => {
+    const md = tiptapJsonToMarkdown(para("a_b [c] d"));
+    const html = markdownToHtml(md);
+    expect(html).toContain("a_b [c] d");
+    expect(html).not.toContain("<em>");
+    expect(html).not.toContain("<a ");
+  });
+});
+
+describe("wikilink titles containing a stray ]", () => {
+  it("parses a wikilink whose title contains a single ]", () => {
+    const html = markdownToHtml("See [[Foo ] Bar]] here.");
+    expect(html).toContain('data-note-title="Foo ] Bar"');
+  });
+
+  it("still splits an optional display alias", () => {
+    const html = markdownToHtml("[[Target|Alias]]");
+    expect(html).toContain('data-note-title="Target"');
+    expect(html).toContain('data-display-text="Alias"');
+  });
+});

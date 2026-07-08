@@ -629,15 +629,32 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       .catch((err) => console.warn("attachment resolver failed", err));
   }, [editor, user?.id]);
 
-  // Cancel every pending timer when the editor unmounts so we don't fire
-  // stale saves / sync calls / process triggers against a destroyed instance.
+  // On unmount, FLUSH any pending debounced save before cancelling timers.
+  // NoteEditor is remounted per note (key={note.id}) and torn down on
+  // navigation, so merely *cancelling* the 800ms content/title timers here
+  // silently dropped the last burst of edits when the user switched notes or
+  // clicked a wikilink within the debounce window. The pending payload lives
+  // in the refs; firing updateNote.mutate persists it (the mutation runs on
+  // the shared query client, so it completes after this instance is gone).
+  // We still cancel the process/sync timers — those are safe to drop.
   useEffect(() => {
     return () => {
+      const pendingContent = pendingSaveContentRef.current;
+      if (pendingContent !== null) {
+        updateNote.mutate({ id: note.id, content: pendingContent });
+        pendingSaveContentRef.current = null;
+      }
+      const pendingTitle = pendingSaveTitleRef.current;
+      if (pendingTitle !== null) {
+        updateNote.mutate({ id: note.id, title: pendingTitle });
+        pendingSaveTitleRef.current = null;
+      }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (processTimer.current) clearTimeout(processTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync when note changes
@@ -659,8 +676,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
-    if (processTimer.current) clearTimeout(processTimer.current);
+    // Only cancel the pending auto-process timer when the note actually changes.
+    // Previously this ran unconditionally, but autosave's onSuccess writes the
+    // saved row back into the query cache (~1s after a keystroke), which changes
+    // the `note.content` prop and re-runs this effect — cancelling the 10s timer
+    // before it could ever fire. So auto-classification was effectively dead
+    // during normal editing.
     if (noteChanged) {
+      if (processTimer.current) clearTimeout(processTimer.current);
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);

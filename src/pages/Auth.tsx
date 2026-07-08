@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { MailCheck, AlertCircle } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,8 +56,9 @@ export default function Auth() {
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   if (session) {
-    navigate(redirectTo, { replace: true });
-    return null;
+    // Declarative redirect — calling navigate() during render triggers React's
+    // "cannot update a component while rendering" warning.
+    return <Navigate to={redirectTo} replace />;
   }
 
   return (

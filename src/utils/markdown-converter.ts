@@ -522,14 +522,27 @@ function applyMarks(text: string, marks: TiptapMark[]): string {
   }, text);
 }
 
+// Backslash-escape the inline Markdown metacharacters so literal text round-trips
+// (e.g. "2 * 3 * 4" serializes as "2 \* 3 \* 4" and does NOT re-parse as emphasis
+// on reload). Backslash is first in the class so the escapes we add aren't doubled.
+// The parse side (inlineMarkdown) strips these escapes back out.
 function escapeMarkdownText(text: string): string {
-  return text.replace(/\\([#*_[\]()`])/g, "$1");
+  return text.replace(/([\\*_`[\]])/g, "\\$1");
 }
 
 // ─── Inline Markdown → HTML ──────────────────────────────────────────
 
 function inlineMarkdown(text: string): string {
-  let r = text;
+  // Pull backslash-escaped Markdown specials out into placeholders BEFORE any
+  // parsing so "2 \* 3" is not italicized; they're restored as literal chars at
+  // the end. Mirrors escapeMarkdownText on the serialize side. The  token
+  // never appears in note text (same technique as wikilink-resolver).
+  const NUL = String.fromCharCode(0);
+  const escaped: string[] = [];
+  let r = text.replace(/\\([\\*_`[\]])/g, (_m, ch: string) => {
+    escaped.push(ch);
+    return `${NUL}ESC${escaped.length - 1}${NUL}`;
+  });
 
   // PDF embed via explicit `![pdf](url)` syntax — render as iframe.
   r = r.replace(/!\[pdf\]\(([^)]+)\)/gi, (_, src) => {
@@ -560,8 +573,9 @@ function inlineMarkdown(text: string): string {
     return `<a href="#" data-attachment-name="${safeName}" class="attachment-link">${alt}</a>`;
   });
 
-  // Obsidian wikilinks
-  r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
+  // Obsidian wikilinks. Title is lazy and may contain a stray `]` (stops at the
+  // first `]]`); `|` still separates an optional display alias.
+  r = r.replace(/\[\[([^[\n|]+?)(?:\|([^\]\n]+))?\]\]/g, (_, target, display) => {
     const label = display || target;
     return `<span data-wikilink="true" data-note-id="" data-note-title="${encodeAttribute(target)}" data-display-text="${encodeAttribute(display || "")}" class="wikilink-node" contenteditable="false">[[${label}]]</span>`;
   });
@@ -592,6 +606,11 @@ function inlineMarkdown(text: string): string {
 
   // Hard line breaks (two trailing spaces)
   r = r.replace(/ {2,}\n/g, "<br>");
+
+  // Restore the backslash-escaped literals extracted at the top.
+  if (escaped.length) {
+    r = r.replace(new RegExp(NUL + "ESC(\\d+)" + NUL, "g"), (_m, i) => escaped[Number(i)] ?? "");
+  }
 
   return r;
 }
