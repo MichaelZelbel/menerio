@@ -709,6 +709,12 @@
    ============================================================ */
 
 .brand-cherishly {
+  /* The original Cherishly app used the browser's default sans stack,
+     not Menerio's Google fonts — keep that for pixel fidelity. */
+  --font-body: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-hero: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
   /* Core tokens */
   --primary: 340 75% 55%;
   --primary-foreground: 0 0% 100%;
@@ -856,4 +862,19 @@
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.8; }
+}
+
+/* Utility classes the original Cherishly homepage uses verbatim
+   (they were Tailwind config entries in the old repo). */
+.bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+.bg-gradient-radial {
+  background-image: radial-gradient(circle, var(--tw-gradient-stops));
+}
+.shadow-glow {
+  box-shadow: var(--shadow-glow);
+}
+.animate-float-heart {
+  animation: float-heart 25s ease-in-out infinite;
 }

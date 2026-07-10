@@ -109,8 +109,12 @@ const App = () => (
             <ErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
+                  {/* The Cherishly landing ships its own header (ported 1:1
+                      from the original app), so it renders without the shared
+                      PageLayout chrome. */}
+                  {BRAND.id === "cherishly" && <Route path="/" element={<Index />} />}
                   <Route element={<PageLayout />}>
-                    <Route path="/" element={<Index />} />
+                    {BRAND.id !== "cherishly" && <Route path="/" element={<Index />} />}
                     <Route path="/features" element={<Features />} />
                     <Route path="/docs" element={<Docs />} />
                     <Route path="/privacy" element={<Privacy />} />

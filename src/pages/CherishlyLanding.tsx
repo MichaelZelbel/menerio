@@ -1,164 +1,247 @@
-import { useNavigate } from "react-router-dom";
-import { Heart, CalendarHeart, Sprout } from "lucide-react";
+// 1:1 port of the original Cherishly homepage (old repo: src/pages/Home.tsx).
+// Markup and classes are kept verbatim for pixel fidelity; the only
+// adaptations are import paths, and the CTA/Sign In targets (the old
+// CherishWizard flow is replaced by this codebase's /auth signup).
+import { useState, useEffect, useMemo } from "react";
 import { SEOHead } from "@/components/SEOHead";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { BRAND } from "@/lib/brand";
-import cherryLeoHeart from "@/assets/brands/cherishly/cherry-leo-glowing-heart.webp";
+import { Heart, Calendar, Users } from "lucide-react";
+import cherishlyLogo from "@/assets/brands/cherishly/cherishly-logo.png";
+import cherryAvatar from "@/assets/brands/cherishly/cherry.webp";
 import leoAvatar from "@/assets/brands/cherishly/leo-avatar.webp";
-import cherryLeoHugging from "@/assets/brands/cherishly/cheery-leo-hugging.webp";
-import cherry from "@/assets/brands/cherishly/cherry.webp";
-
-// Deterministic pseudo-random placement for the floating hearts so the
-// background doesn't reshuffle on re-renders.
-const FLOATING_HEARTS = [...Array(18)].map((_, i) => ({
-  left: `${(i * 37 + 11) % 100}%`,
-  size: 14 + ((i * 13) % 22),
-  delay: `${(i * 1.7) % 18}s`,
-  duration: `${20 + ((i * 5) % 14)}s`,
-}));
-
-const STEPS = [
-  {
-    title: "Remember",
-    icon: Heart,
-    mascot: leoAvatar,
-    text: "Store the little details that make someone special — their likes, dreams, and moments that matter.",
-  },
-  {
-    title: "Celebrate",
-    icon: CalendarHeart,
-    mascot: cherryLeoHugging,
-    text: "Never miss a birthday, anniversary, or special occasion. Get gentle reminders when they matter most.",
-  },
-  {
-    title: "Grow Together",
-    icon: Sprout,
-    mascot: cherryLeoHeart,
-    text: "Build deeper connections through thoughtful gestures and shared memories that last a lifetime.",
-  },
-];
+import leoMessageReceivedAvatar from "@/assets/brands/cherishly/leo-message-received.webp";
+import cheeryLeoHuggingAvatar from "@/assets/brands/cherishly/cheery-leo-hugging.webp";
+import cherryLeoGlowingHeartAvatar from "@/assets/brands/cherishly/cherry-leo-glowing-heart.webp";
 
 const CherishlyLanding = () => {
+  const [, setIsLoggedIn] = useState(false);
   const navigate = useNavigate();
 
+  // Randomly select avatar on component mount
+  const selectedAvatar = useMemo(() => {
+    const avatars = [cherryAvatar, leoAvatar, leoMessageReceivedAvatar, cheeryLeoHuggingAvatar, cherryLeoGlowingHeartAvatar];
+    return avatars[Math.floor(Math.random() * avatars.length)];
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        navigate("/dashboard", { replace: true });
+      }
+      setIsLoggedIn(!!session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsLoggedIn(!!session);
+      if (session) {
+        navigate("/dashboard", { replace: true });
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
   return (
-    <div className="relative overflow-hidden bg-[image:var(--gradient-soft)]">
-      <SEOHead
-        title={`${BRAND.name} — Your little memory companion`}
-        description={BRAND.metaDescription}
-        jsonLd={{
-          "@context": "https://schema.org",
-          "@type": "WebApplication",
-          name: BRAND.name,
-          url: BRAND.url,
-          description: BRAND.metaDescription,
-          applicationCategory: "LifestyleApplication",
-        }}
-      />
-
-      {/* Floating hearts background */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        {FLOATING_HEARTS.map((heart, i) => (
-          <Heart
-            key={i}
-            className="absolute text-primary/30 animate-[float-heart_var(--fh-duration)_linear_infinite]"
-            style={{
-              left: heart.left,
-              bottom: "-40px",
-              width: heart.size,
-              height: heart.size,
-              animationDelay: heart.delay,
-              ["--fh-duration" as string]: heart.duration,
-              fill: "currentColor",
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Hero */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 pb-20 pt-20 text-center md:pt-28">
-        <img
-          src={cherryLeoHeart}
-          alt="Cherry and Leo, the Cherishly mascots, holding a glowing heart"
-          className="mx-auto mb-8 h-40 w-40 rounded-full object-cover shadow-[var(--shadow-glow)] animate-[pulse-soft_3s_ease-in-out_infinite] md:h-48 md:w-48"
-        />
-        <h1
-          className="bg-[image:var(--gradient-primary)] bg-clip-text pb-2 text-5xl font-bold text-transparent md:text-7xl"
-          style={{ lineHeight: 1.25 }}
-        >
-          Love deserves a little memory magic
-        </h1>
-        <p className="mx-auto mt-4 max-w-2xl text-xl font-light leading-relaxed text-foreground/80 md:text-2xl">
-          Start cherishing someone special — before the moment fades.
-        </p>
-        <div className="mt-10">
+    <>
+    <SEOHead
+      title="Cherishly — Your Relationship Companion"
+      description="Cherishly helps you remember and celebrate your loved ones — start free or upgrade for premium features like reminders, AI guidance, and more."
+    />
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#FFD9E8] via-[#FFF0F5] to-[#FFF8F5]">
+      {/* Header */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-white/40">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-center relative">
+          <div className="flex items-center gap-2">
+            <img src={cherishlyLogo} alt="Cherishly logo" className="w-8 h-8" />
+            <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+              CHERISHLY
+            </span>
+          </div>
           <Button
-            size="lg"
-            className="rounded-full bg-[image:var(--gradient-primary)] px-10 py-6 text-lg text-primary-foreground shadow-[var(--shadow-glow)] transition-transform hover:scale-105"
-            onClick={() => navigate("/auth?tab=signup")}
+            variant="ghost"
+            onClick={() => navigate("/auth")}
+            className="absolute right-4 hover:bg-primary/10"
           >
-            Cherish a Lovely Person 💕
+            Sign In
           </Button>
-          <p className="mt-4 text-sm font-light italic text-muted-foreground">
-            Your little memory companion
-          </p>
         </div>
-      </section>
+      </header>
 
-      {/* How it works */}
-      <section className="relative z-10 mx-auto max-w-5xl px-6 pb-24">
-        <div className="mb-14 space-y-4 text-center">
-          <h2 className="bg-[image:var(--gradient-primary)] bg-clip-text text-4xl font-bold text-transparent md:text-5xl">
-            How {BRAND.name} Works
-          </h2>
-          <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-            Three simple steps to deepen your connections
-          </p>
+      {/* Hero Section */}
+      <main className="relative flex-1 flex flex-col items-center justify-center pt-24 pb-20 px-4 overflow-hidden">
+        {/* Floating Hearts Background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(25)].map((_, i) => (
+            <Heart
+              key={i}
+              className="absolute text-primary/20 animate-float-heart"
+              style={{
+                left: `${(i * 9) % 100}%`,
+                top: `${100 + (i * 6)}%`,
+                width: `${24 + (i % 4) * 16}px`,
+                height: `${24 + (i % 4) * 16}px`,
+                animationDelay: `${i * 0.2}s`,
+                animationDuration: `${5 + (i % 3) * 1.5}s`,
+              }}
+              fill="currentColor"
+            />
+          ))}
+          {/* Mask to hide hearts under header */}
+          <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-[#FFD9E8] via-[#FFD9E8] to-transparent z-10 pointer-events-none" />
         </div>
-        <div className="grid gap-8 md:grid-cols-3">
-          {STEPS.map((step) => (
-            <Card
-              key={step.title}
-              className="border-primary/20 bg-card/60 backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-soft)]"
-            >
-              <CardContent className="space-y-4 pb-8 pt-8 text-center">
-                <img
-                  src={step.mascot}
-                  alt=""
-                  aria-hidden="true"
-                  className="mx-auto h-24 w-24 rounded-full object-cover shadow-[var(--shadow-soft)]"
-                />
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10">
-                  <step.icon className="h-5 w-5 text-primary" />
+
+        {/* Vignette Shadow */}
+        <div className="absolute inset-0 bg-gradient-radial from-transparent via-transparent to-black/5 pointer-events-none" />
+
+        {/* Hero Content - Centered */}
+        <div className="relative z-10 w-full max-w-4xl mx-auto text-center flex flex-col items-center animate-fade-in">
+          {/* Avatar - Above Panel */}
+          <div className="relative z-20 mb-0 pointer-events-none">
+            <img
+              src={selectedAvatar}
+              alt="Your Cherishly companion"
+              className="block w-44 md:w-72 lg:w-80 h-auto object-contain drop-shadow-2xl"
+              style={{
+                filter: 'drop-shadow(0 10px 40px rgba(0,0,0,0.2))',
+              }}
+            />
+          </div>
+
+          {/* Text Content with Glassy Panel */}
+          <div className="relative z-0 mt-0 overflow-visible bg-white/40 backdrop-blur-xl rounded-3xl border border-white/60 shadow-2xl w-full">
+            <div className="space-y-6 px-6 md:px-12 py-12 overflow-visible">
+              {/* Headline */}
+              <h1
+                className="text-5xl md:text-7xl font-bold bg-gradient-primary bg-clip-text text-transparent pb-2"
+                style={{
+                  lineHeight: '1.35',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  textRendering: 'optimizeLegibility',
+                  WebkitFontSmoothing: 'antialiased',
+                  textShadow: '0 0 1px rgba(0,0,0,0)',
+                }}
+              >
+                Love deserves a little memory magic
+              </h1>
+
+              {/* Subheadline */}
+              <p className="text-xl md:text-2xl text-gray-700/90 leading-relaxed max-w-2xl mx-auto font-light">
+                Start cherishing someone special — before the moment fades.
+              </p>
+
+              {/* CTA Button */}
+              <div className="pt-4">
+                <Button
+                  onClick={() => navigate("/auth?tab=signup")}
+                  size="lg"
+                  className="h-14 px-12 text-lg shadow-glow hover:shadow-xl transition-all duration-300 hover-scale"
+                >
+                  Cherish a Lovely Person 💕
+                </Button>
+              </div>
+
+              {/* Supporting Tagline */}
+              <p className="text-sm text-gray-600/80 italic font-light">
+                Your little memory companion
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* How Cherishly Works Section */}
+      <section className="relative py-20 px-4 bg-white/50 backdrop-blur-sm">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-16 space-y-4 animate-fade-in">
+            <h2 className="text-4xl md:text-5xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+              How CHERISHLY Works
+            </h2>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              Three simple steps to deepen your connections
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8 animate-fade-in">
+            {/* Remember Card */}
+            <Card className="border-primary/20 bg-white/60 backdrop-blur-sm hover:shadow-lg transition-all duration-300 hover-scale">
+              <CardContent className="pt-8 pb-8 text-center space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+                  <Heart className="w-8 h-8 text-primary" />
                 </div>
-                <h3 className="text-2xl font-semibold text-foreground">{step.title}</h3>
-                <p className="leading-relaxed text-muted-foreground">{step.text}</p>
+                <h3 className="text-2xl font-semibold text-gray-800">Remember</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Store the little details that make someone special — their likes, dreams, and moments that matter.
+                </p>
               </CardContent>
             </Card>
-          ))}
+
+            {/* Celebrate Card */}
+            <Card className="border-primary/20 bg-white/60 backdrop-blur-sm hover:shadow-lg transition-all duration-300 hover-scale">
+              <CardContent className="pt-8 pb-8 text-center space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+                  <Calendar className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-2xl font-semibold text-gray-800">Celebrate</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Never miss a birthday, anniversary, or special occasion. Get gentle reminders when they matter most.
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Grow Together Card */}
+            <Card className="border-primary/20 bg-white/60 backdrop-blur-sm hover:shadow-lg transition-all duration-300 hover-scale">
+              <CardContent className="pt-8 pb-8 text-center space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+                  <Users className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-2xl font-semibold text-gray-800">Grow Together</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Build deeper connections through thoughtful gestures and shared memories that last a lifetime.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </section>
 
-      {/* Closing CTA */}
-      <section className="relative z-10 mx-auto max-w-3xl px-6 pb-24 text-center">
-        <img
-          src={cherry}
-          alt="Cherry, the Cherishly mascot"
-          className="mx-auto mb-6 h-24 w-24 rounded-full object-cover shadow-[var(--shadow-soft)]"
-        />
-        <h2 className="text-3xl font-bold text-foreground md:text-4xl">
-          Every heart has a story. Keep theirs close.
-        </h2>
-        <Button
-          size="lg"
-          className="mt-8 rounded-full bg-[image:var(--gradient-primary)] px-10 py-6 text-lg text-primary-foreground shadow-[var(--shadow-glow)] transition-transform hover:scale-105"
-          onClick={() => navigate("/auth?tab=signup")}
-        >
-          Start Cherishing — Free
-        </Button>
-      </section>
+      {/* Footer — ported from the old app's global Footer; the Pricing and
+          Help & Guide links are intentionally dropped (no pricing anymore,
+          no /help route in this codebase). */}
+      <footer className="w-full border-t bg-background py-8 mt-auto">
+        <div className="container mx-auto px-4">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex flex-wrap justify-center gap-4 text-sm">
+              <a href="/privacy" className="text-muted-foreground hover:text-foreground transition-colors underline">
+                Privacy Policy
+              </a>
+              <span className="text-muted-foreground">•</span>
+              <a href="/terms" className="text-muted-foreground hover:text-foreground transition-colors underline">
+                Terms of Service
+              </a>
+              <span className="text-muted-foreground">•</span>
+              <a href="/cookies" className="text-muted-foreground hover:text-foreground transition-colors underline">
+                Cookies Policy
+              </a>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Questions or feedback? Reach us anytime at{" "}
+              <a href="mailto:support@cherishly.ai" className="text-foreground hover:text-primary transition-colors underline">
+                support@cherishly.ai
+              </a>
+              {" "}💗
+            </p>
+            <p className="text-sm text-muted-foreground">
+              © {new Date().getFullYear()} by Zelbel Ltd. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
+    </>
   );
 };
 
