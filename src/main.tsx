@@ -9,6 +9,11 @@ import "./index.css";
 // covers dev servers and the dev-only localStorage override.
 if (BRAND.themeClass) document.documentElement.classList.add(BRAND.themeClass);
 
-registerSW({ immediate: true });
+// The service worker is a web/PWA concern; in the Tauri desktop shell all
+// assets are bundled locally and SW registration on the tauri origin is
+// unreliable — skip it there.
+if (!("__TAURI_INTERNALS__" in window)) {
+  registerSW({ immediate: true });
+}
 
 createRoot(document.getElementById("root")!).render(<App />);

@@ -2,7 +2,7 @@
 
 Menerio's codebase can be built as **different brands** ("skins"): same app,
 same features, same backend — different name, domain, colors, and layout
-emphasis. The reference example is **Cherishly** (cherishly.app), a
+emphasis. The reference example is **Cherishly** (cherishly.ai), a
 people-first skin of the same app that Menerio serves notes-first.
 
 If you self-host Menerio, you can brand your own instance the same way.

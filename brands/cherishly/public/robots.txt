@@ -14,4 +14,4 @@ Disallow: /wizard
 Disallow: /auth
 Disallow: /reset-password
 
-Sitemap: https://cherishly.app/sitemap.xml
+Sitemap: https://cherishly.ai/sitemap.xml

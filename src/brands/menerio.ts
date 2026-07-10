@@ -39,8 +39,8 @@ export const MENERIO: BrandConfig = {
     "menerio.com",
     "www.menerio.com",
     "menerio.lovable.app",
-    "cherishly.app",
-    "www.cherishly.app",
+    "cherishly.ai",
+    "www.cherishly.ai",
   ],
   legal: { websiteUrl: "https://menerio.com" },
 };

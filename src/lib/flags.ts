@@ -17,7 +17,13 @@ const urlSwitch =
 if (urlSwitch === "on") localStorage.setItem("menerio:offline-core", "true");
 if (urlSwitch === "off") localStorage.removeItem("menerio:offline-core");
 
+// True when running inside the Tauri desktop shell (Menerio.exe).
+export const IS_DESKTOP =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+// The desktop client is always local-first — that's its reason to exist.
 export const OFFLINE_CORE =
+  IS_DESKTOP ||
   import.meta.env.VITE_OFFLINE_CORE === "true" ||
   (typeof localStorage !== "undefined" &&
     localStorage.getItem("menerio:offline-core") === "true");
