@@ -1,0 +1,12 @@
+-- PowerSync logical-replication publication (offline-first, Phase 1).
+-- The PowerSync service tails this publication to stream changes for the
+-- offline core subset down to devices. Writes from devices go through the
+-- normal supabase-js path (RLS + triggers unchanged); this is read-side only.
+--
+-- When a table joins the offline subset, add it here AND to
+-- src/sync/schema.ts AND to the PowerSync sync rules — a table/column missing
+-- from any of the three silently does not sync.
+--
+-- The replication role (login credentials for the PowerSync service) is NOT
+-- created here because it needs a password; see docs/offline-first.md.
+create publication powersync for table public.notes;

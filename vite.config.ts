@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => ({
         // Precache the app shell only. Data requests go to Supabase
         // (cross-origin) and are never intercepted by the service worker —
         // the TanStack Query IndexedDB persister owns data caching.
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,wasm}"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "/index.html",
         cleanupOutdatedCaches: true,
@@ -60,6 +60,13 @@ export default defineConfig(({ mode }) => ({
   // Strip console.log/debugger from production bundles to reduce
   // main-thread overhead. Dev keeps them for debugging.
   esbuild: mode === "production" ? { drop: ["console", "debugger"] } : undefined,
+  // @powersync/web ships its own web workers + wasm; pre-bundling breaks them.
+  optimizeDeps: {
+    exclude: ["@powersync/web", "@journeyapps/wa-sqlite"],
+  },
+  worker: {
+    format: "es",
+  },
   build: {
     rollupOptions: {
       output: {
@@ -72,6 +79,11 @@ export default defineConfig(({ mode }) => ({
             "@radix-ui/react-tabs",
           ],
           query: ["@tanstack/react-query"],
+          powersync: [
+            "@powersync/web",
+            "@powersync/react",
+            "@powersync/tanstack-react-query",
+          ],
           icons: ["lucide-react"],
           motion: ["framer-motion"],
           dates: ["date-fns"],

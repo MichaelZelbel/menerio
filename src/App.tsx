@@ -16,6 +16,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { RequiresOnline } from "@/components/RequiresOnline";
 import { queryPersister } from "@/lib/query-persister";
+import { MaybePowerSyncProvider } from "@/sync/PowerSyncProvider";
+import { SyncManager } from "@/sync/SyncManager";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminRoute } from "@/components/auth/AdminRoute";
 import { PageLayout } from "@/components/layout/PageLayout";
@@ -93,6 +95,7 @@ const App = () => (
     disableTransitionOnChange={false}
   >
     <QueryClientProvider client={queryClient}>
+      <MaybePowerSyncProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
@@ -205,10 +208,12 @@ const App = () => (
               </Suspense>
               <CookieConsentBanner />
               <OfflineIndicator />
+              <SyncManager />
             </ErrorBoundary>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
+      </MaybePowerSyncProvider>
     </QueryClientProvider>
   </ThemeProvider>
 );

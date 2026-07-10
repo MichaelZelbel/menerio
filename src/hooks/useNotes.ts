@@ -1,9 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery as usePowerSyncQuery } from "@powersync/tanstack-react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { ilikeContains } from "@/lib/postgrest";
+import { OFFLINE_CORE } from "@/lib/flags";
+import { getDb } from "@/sync/db";
+import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
 
 export interface RelatedItem {
   type: string;
@@ -69,6 +73,20 @@ type NoteUpdate = {
   trashed_at?: string | null;
 };
 
+const NOTE_COLUMNS =
+  "id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at";
+
+// SQL filter fragments for the local (SQLite) notes list.
+const LOCAL_FILTER_SQL: Record<"all" | "favorites" | "trash", string> = {
+  all: "is_trashed = 0",
+  favorites: "is_trashed = 0 AND is_favorite = 1",
+  trash: "is_trashed = 1",
+};
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 const wikiIngestTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const wikiIngestInFlight = new Set<string>();
 
@@ -102,7 +120,7 @@ function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE", delay
   wikiIngestTimers.set(noteId, timer);
 }
 
-export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
+function useNotesRemote(filter: "all" | "favorites" | "trash") {
   const { user } = useAuth();
 
   return useQuery<Note[]>({
@@ -111,7 +129,7 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
     queryFn: async () => {
       let query = supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at")
+        .select(NOTE_COLUMNS)
         .eq("user_id", user!.id)
         .order("is_pinned", { ascending: false })
         .order("updated_at", { ascending: false });
@@ -131,12 +149,58 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
   });
 }
 
+// Local-first variant: a live SQLite query that re-renders whenever the
+// notes table changes (local edits or background sync).
+function useNotesLocal(filter: "all" | "favorites" | "trash") {
+  const { user } = useAuth();
+
+  return usePowerSyncQuery<Note>({
+    queryKey: ["notes", filter, user?.id],
+    enabled: !!user,
+    query: `SELECT * FROM notes WHERE user_id = ? AND ${LOCAL_FILTER_SQL[filter]} ORDER BY is_pinned DESC, updated_at DESC`,
+    parameters: [user?.id ?? ""],
+    select: (rows) => (rows as unknown as NoteRow[]).map(rowToNote),
+  });
+}
+
+export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
+  // OFFLINE_CORE is constant for the lifetime of the page, so this branch is
+  // stable and hook order never changes between renders.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return OFFLINE_CORE ? useNotesLocal(filter) : useNotesRemote(filter);
+}
+
+// Inserts a note into local SQLite with the same defaults the Postgres
+// schema applies server-side; PowerSync uploads the full row on sync.
+async function createNoteLocal(userId: string, input: NoteInsert): Promise<Note> {
+  const db = getDb();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO notes (id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, '{}', ?, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?, 0, 'synced', '{}', '[]', 'visible', ?, ?)`,
+    [
+      id,
+      userId,
+      input.title ?? "",
+      input.content ?? "",
+      JSON.stringify(input.tags ?? []),
+      input.folder_path ?? "",
+      now,
+      now,
+    ],
+  );
+  const row = await db.get<NoteRow>("SELECT * FROM notes WHERE id = ?", [id]);
+  return rowToNote(row);
+}
+
 export function useCreateNote() {
   const qc = useQueryClient();
   const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (input: NoteInsert = {}) => {
+      if (OFFLINE_CORE) return createNoteLocal(user!.id, input);
       const { data, error } = await supabase
         .from("notes" as any)
         .insert({ ...input, user_id: user!.id })
@@ -162,6 +226,27 @@ export function useUpdateNote() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: NoteUpdate & { id: string }) => {
+      if (OFFLINE_CORE) {
+        const db = getDb();
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        for (const [key, value] of Object.entries(updates)) {
+          const serialized = toSqliteValue(key, value);
+          if (serialized === undefined) continue;
+          sets.push(`${key} = ?`);
+          params.push(serialized);
+        }
+        // Device-local ordering only; the connector strips updated_at on
+        // upload so the server trigger stays authoritative.
+        sets.push("updated_at = ?");
+        params.push(new Date().toISOString());
+        await db.execute(`UPDATE notes SET ${sets.join(", ")} WHERE id = ?`, [
+          ...params,
+          id,
+        ]);
+        const row = await db.get<NoteRow>("SELECT * FROM notes WHERE id = ?", [id]);
+        return rowToNote(row);
+      }
       const { data, error } = await supabase
         .from("notes" as any)
         .update(updates)
@@ -200,6 +285,10 @@ export function useDeleteNote() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      if (OFFLINE_CORE) {
+        await getDb().execute("DELETE FROM notes WHERE id = ?", [id]);
+        return;
+      }
       const { error } = await supabase
         .from("notes" as any)
         .delete()
@@ -218,12 +307,63 @@ export function useDeleteNote() {
   });
 }
 
+// Obsidian-style suffix: append " 1", incrementing if a base already ends in " N"
+function nextDuplicateTitle(base: string, existing: Set<string>): string {
+  const baseTitle = (base || "Untitled").trim();
+  const match = baseTitle.match(/^(.*?) (\d+)$/);
+  const stem = match ? match[1] : baseTitle;
+  let n = match ? parseInt(match[2], 10) + 1 : 1;
+  let candidate = `${stem} ${n}`;
+  while (existing.has(candidate)) {
+    n += 1;
+    candidate = `${stem} ${n}`;
+  }
+  return candidate;
+}
+
+async function duplicateNoteLocal(userId: string, sourceId: string): Promise<Note> {
+  const db = getDb();
+  const srcRow = await db.get<NoteRow>("SELECT * FROM notes WHERE id = ?", [sourceId]);
+  const src = rowToNote(srcRow);
+
+  const siblings = await db.getAll<{ title: string | null }>(
+    "SELECT title FROM notes WHERE user_id = ? AND folder_path = ? AND is_trashed = 0",
+    [userId, src.folder_path || ""],
+  );
+  const existing = new Set(siblings.map((r) => (r.title || "").trim()));
+  const candidate = nextDuplicateTitle(src.title, existing);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO notes (id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, NULL, NULL, NULL, ?, 0, 'synced', ?, '[]', 'visible', ?, ?)`,
+    [
+      id,
+      userId,
+      candidate,
+      src.content,
+      JSON.stringify({ ...(src.metadata || {}), duplicated_from: src.id }),
+      JSON.stringify(src.tags || []),
+      src.entity_type,
+      src.folder_path || "",
+      JSON.stringify(src.structured_fields || {}),
+      now,
+      now,
+    ],
+  );
+  const row = await db.get<NoteRow>("SELECT * FROM notes WHERE id = ?", [id]);
+  return rowToNote(row);
+}
+
 export function useDuplicateNote() {
   const qc = useQueryClient();
   const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (sourceId: string): Promise<Note> => {
+      if (OFFLINE_CORE) return duplicateNoteLocal(user!.id, sourceId);
+
       // Fetch source
       const { data: source, error: srcErr } = await supabase
         .from("notes" as any)
@@ -245,16 +385,7 @@ export function useDuplicateNote() {
         ((siblings as unknown as { title: string }[]) || []).map((r) => (r.title || "").trim()),
       );
 
-      // Obsidian-style suffix: append " 1", incrementing if a base already ends in " N"
-      const baseTitle = (src.title || "Untitled").trim();
-      const match = baseTitle.match(/^(.*?) (\d+)$/);
-      const stem = match ? match[1] : baseTitle;
-      let n = match ? parseInt(match[2], 10) + 1 : 1;
-      let candidate = `${stem} ${n}`;
-      while (existing.has(candidate)) {
-        n += 1;
-        candidate = `${stem} ${n}`;
-      }
+      const candidate = nextDuplicateTitle(src.title, existing);
 
       const insertRow = {
         user_id: user!.id,
@@ -308,6 +439,21 @@ export function useProcessNote() {
   });
 }
 
+// Case-insensitive substring search against the local SQLite replica.
+// Instant and fully offline; callers pass an already-lowercased query.
+async function searchNotesLocal(userId: string, q: string): Promise<Note[]> {
+  const pattern = `%${escapeLike(q)}%`;
+  const rows = await getDb().getAll<NoteRow>(
+    `SELECT * FROM notes
+     WHERE user_id = ? AND is_trashed = 0
+       AND (lower(title) LIKE ? ESCAPE '\\' OR lower(content) LIKE ? ESCAPE '\\')
+     ORDER BY updated_at DESC
+     LIMIT 50`,
+    [userId, pattern, pattern],
+  );
+  return rows.map(rowToNote);
+}
+
 /** ILIKE-based instant search (no AI cost) */
 export function useIlikeSearch() {
   const { user } = useAuth();
@@ -315,9 +461,13 @@ export function useIlikeSearch() {
   return useMutation({
     mutationFn: async (query: string): Promise<SemanticSearchResult[]> => {
       const q = query.toLowerCase();
+      if (OFFLINE_CORE) {
+        const notes = await searchNotesLocal(user!.id, q);
+        return notes.map((n) => ({ ...n, similarity: null }));
+      }
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at")
+        .select(NOTE_COLUMNS)
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
@@ -363,9 +513,12 @@ export function useSearchNotes() {
   return useMutation({
     mutationFn: async (query: string) => {
       const q = query.toLowerCase();
+      if (OFFLINE_CORE) {
+        return searchNotesLocal(user!.id, q);
+      }
       const { data, error } = await supabase
         .from("notes" as any)
-        .select("id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at")
+        .select(NOTE_COLUMNS)
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
         .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
