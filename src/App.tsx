@@ -24,6 +24,7 @@ import { PageLayout } from "@/components/layout/PageLayout";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
 import { PageLoader } from "@/components/LoadingStates";
+import { BRAND } from "@/lib/brand";
 
 // Lazy-loaded routes
 const Index = lazy(() => import("./pages/Index"));
@@ -90,7 +91,7 @@ const LegacyWikiRedirect = () => {
 const App = () => (
   <ThemeProvider
     attribute="class"
-    defaultTheme="dark"
+    defaultTheme={BRAND.defaultTheme}
     enableSystem
     disableTransitionOnChange={false}
   >

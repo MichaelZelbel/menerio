@@ -28,6 +28,7 @@ import { VideoEmbed } from "@/components/notes/extensions/VideoEmbed";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { WikiLinkMark } from "@/components/editor/WikiLinkMark";
 import { cn } from "@/lib/utils";
+import { BRAND } from "@/lib/brand";
 
 interface RichTextEditorProps {
   value: string;
@@ -41,7 +42,7 @@ interface RichTextEditorProps {
   onInternalNavigate?: (path: string) => void;
 }
 
-const INTERNAL_APP_HOSTS = ["menerio.com", "www.menerio.com", "menerio.lovable.app"];
+const INTERNAL_APP_HOSTS = BRAND.internalHosts;
 
 export function editorToMarkdown(editor: Pick<Editor, "getJSON">): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();

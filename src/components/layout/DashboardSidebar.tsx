@@ -24,7 +24,8 @@ import {
   LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import logoImg from "@/assets/logo.png";
+import { BRAND } from "@/lib/brand";
+import { brandLogo } from "@/lib/brand-assets";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -66,52 +67,56 @@ export function DashboardSidebar() {
       ? location.pathname === "/dashboard"
       : location.pathname.startsWith(path);
 
-  const navGroups: { items: { title: string; url: string; icon: typeof LayoutDashboard }[] }[] = [
-    {
-      items: [{ title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }],
-    },
-    {
+  // Nav groups are keyed so each brand can order them (BRAND.navGroupOrder)
+  // without duplicating the item definitions.
+  type NavItem = { title: string; url: string; icon: typeof LayoutDashboard };
+  const groupsByKey: Record<string, { items: NavItem[] }> = {
+    notes: {
       items: [
         { title: "Notes", url: "/dashboard/notes", icon: FileText },
         { title: "Note Graph", url: "/dashboard/graph", icon: Network },
         { title: "Lexicon", url: "/lexicon", icon: BookOpen },
       ],
     },
-    {
+    people: {
       items: [
         { title: "People", url: "/dashboard/people", icon: UserCircle },
         { title: "Groups", url: "/dashboard/groups", icon: Layers },
         { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
       ],
     },
-    {
+    collections: {
       items: [
         { title: "Collections", url: "/collections", icon: LayoutGrid },
         { title: "Media Library", url: "/dashboard/media", icon: Image },
       ],
     },
-    {
+    review: {
       items: [
         { title: "Review Queue", url: "/dashboard/review-queue", icon: ClipboardList },
         { title: "Weekly Review", url: "/dashboard/review", icon: Calendar },
       ],
     },
+  };
+  const navGroups: { items: NavItem[] }[] = [
+    { items: [{ title: "Dashboard", url: "/dashboard", icon: LayoutDashboard }] },
+    ...BRAND.navGroupOrder.map((key) => groupsByKey[key]),
   ];
 
   const systemItems = [
     { title: "My Profile", url: "/dashboard/profile", icon: User },
     { title: "Settings", url: "/dashboard/settings", icon: Settings },
     { title: "Connect AI", url: "/dashboard/settings?tab=mcp", icon: Plug },
-    { title: "Documentation", url: "/docs", icon: BookOpen },
+    ...(BRAND.showDocs ? [{ title: "Documentation", url: "/docs", icon: BookOpen }] : []),
   ];
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
-          <img src={logoImg} alt="Menerio" className="h-7 w-7 object-contain" />
+          <img src={brandLogo} alt={BRAND.name} className="h-7 w-7 object-contain" />
           {!collapsed && (
-            <span className="text-sm font-semibold font-display text-foreground">Menerio</span>
+            <span className="text-sm font-semibold font-display text-foreground">{BRAND.name}</span>
           )}
         </div>
       </SidebarHeader>
@@ -201,7 +206,7 @@ export function DashboardSidebar() {
           {!collapsed && <span className="ml-2">Sign Out</span>}
         </Button>
         {!collapsed && (
-          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} Menerio</p>
+          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} {BRAND.name}</p>
         )}
       </SidebarFooter>
     </Sidebar>

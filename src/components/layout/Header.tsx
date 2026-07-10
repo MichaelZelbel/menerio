@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import logoImg from "@/assets/logo.png";
+import { BRAND } from "@/lib/brand";
+import { brandLogo } from "@/lib/brand-assets";
 import { Link, useNavigate } from "react-router-dom";
 import { Menu, X, ChevronDown, Settings, LogOut, LayoutDashboard, Shield, Crown } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -18,11 +19,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
-const navLinks = [
-  { label: "Home", to: "/" },
-  { label: "Features", to: "/features" },
-  { label: "Docs", to: "/docs" },
-];
+const navLinks = BRAND.marketingNav;
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -60,8 +57,8 @@ export function Header() {
     >
       <div className="mx-auto flex h-16 max-w-[1240px] items-center justify-between px-6 md:px-9">
         <Link to="/" className="flex items-center gap-2">
-          <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
-          <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span>
+          <img src={brandLogo} alt={BRAND.name} className="h-8 w-8 object-contain" />
+          <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">{BRAND.name}</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">

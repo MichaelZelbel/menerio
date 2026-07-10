@@ -11,7 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { Link } from "react-router-dom";
-import logoImg from "@/assets/logo.png";
+import { BRAND } from "@/lib/brand";
+import { brandLogo } from "@/lib/brand-assets";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -66,9 +67,9 @@ export default function Auth() {
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <Link to="/" className="inline-flex items-center gap-2 mb-4">
-            <img src={logoImg} alt="Menerio" className="h-10 w-10 object-contain" />
+            <img src={brandLogo} alt={BRAND.name} className="h-10 w-10 object-contain" />
           </Link>
-          <h1 className="text-2xl font-bold font-display">Welcome to Menerio</h1>
+          <h1 className="text-2xl font-bold font-display">Welcome to {BRAND.name}</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign in to your account or create a new one</p>
         </div>
 

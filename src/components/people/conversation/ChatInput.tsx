@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { FileText, Paperclip, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BRAND } from "@/lib/brand";
 
 export interface ChatAttachment {
   name: string;
@@ -66,7 +67,7 @@ export function ChatInput({ input, setInput, onSend, loading, attachments, onAdd
           onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }}
           disabled={loading}
           rows={2}
-          placeholder="Ask Mira…"
+          placeholder={`Ask ${BRAND.personaName}…`}
           className="min-h-[56px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <Button size="icon" className="shrink-0" disabled={loading || (!input.trim() && attachments.length === 0)} onClick={onSend}>

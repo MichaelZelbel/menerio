@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { BRAND, applyBrandTitle } from "@/lib/brand";
 
 interface SEOHeadProps {
   title: string;
@@ -18,14 +19,17 @@ interface SEOHeadProps {
  * so every page self-declares as canonical. Never hardcode canonical in index.html.
  */
 export function SEOHead({
-  title,
+  title: rawTitle,
   description,
   canonicalUrl,
-  ogImage = "https://menerio.com/og-image.png",
+  ogImage = BRAND.ogImage,
   ogType = "website",
   noIndex = false,
   jsonLd,
 }: SEOHeadProps) {
+  // Pages pass titles as "Page — Menerio"; applyBrandTitle swaps the suffix
+  // for the active brand (a no-op on the Menerio build).
+  const title = applyBrandTitle(rawTitle);
   useEffect(() => {
     // Title
     document.title = title;

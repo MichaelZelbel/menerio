@@ -8,6 +8,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatInput, type ChatAttachment } from "./ChatInput";
 import { ChatMessages, type ChatMessage } from "./ChatMessages";
+import { BRAND } from "@/lib/brand";
 
 interface ChatProps {
   personId: string;
@@ -36,7 +37,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
         .eq("user_id", user.id)
         .eq("person_id", personId)
         .order("created_at", { ascending: true });
-      setMessages(data?.length ? data as unknown as ChatMessage[] : [{ role: "assistant", content: `Hi — I'm Mira. I can help you think through conversations, memories, and context around ${personName}.` }]);
+      setMessages(data?.length ? data as unknown as ChatMessage[] : [{ role: "assistant", content: `Hi — I'm ${BRAND.personaName}. I can help you think through conversations, memories, and context around ${personName}.` }]);
       setLoadingHistory(false);
     };
     loadHistory();
@@ -65,7 +66,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: { message: userMessage, personId, conversationContext, attachments: currentAttachments.map(({ name, content }) => ({ name, content })) },
       });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || "Mira could not reply.");
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || `${BRAND.personaName} could not reply.`);
       setMessages((prev) => [...prev, { role: "assistant", content: (data as any).reply }]);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Chat failed", description: error?.message || "Please try again." });
@@ -77,7 +78,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
   const content = (
     <Card className="flex h-[620px] flex-col">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" /> Mira with {personName}</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" /> {BRAND.personaName} with {personName}</CardTitle>
         <Button variant="ghost" size="icon" onClick={() => setFullscreen((value) => !value)}>
           {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </Button>

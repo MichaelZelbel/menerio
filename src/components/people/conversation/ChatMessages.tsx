@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
+import { BRAND } from "@/lib/brand";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -43,7 +44,7 @@ export function ChatMessages({ messages, loading, loadingHistory }: ChatMessages
           </div>
         </div>
       ))}
-      {loading && <div className="flex justify-start"><div className="rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground">Mira is thinking…</div></div>}
+      {loading && <div className="flex justify-start"><div className="rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground">{BRAND.personaName} is thinking…</div></div>}
     </div>
   );
 }

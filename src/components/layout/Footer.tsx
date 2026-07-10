@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
 import { Github, Twitter, Linkedin, Mail } from "lucide-react";
-import logoImg from "@/assets/logo.png";
+import { BRAND } from "@/lib/brand";
+import { brandLogo } from "@/lib/brand-assets";
 
 const productLinks = [
-  { label: "Docs", to: "/docs" },
+  ...(BRAND.showDocs ? [{ label: "Docs", to: "/docs" }] : []),
   { label: "Source Code", to: "https://github.com/MichaelZelbel/menerio", external: true },
 ];
 
@@ -18,7 +19,7 @@ const socialLinks = [
   { icon: Twitter, href: "https://x.com/MichaelZelbel", label: "X" },
   { icon: Github, href: "https://github.com/MichaelZelbel/menerio", label: "GitHub" },
   { icon: Linkedin, href: "https://www.linkedin.com/in/michaelzelbel/", label: "LinkedIn" },
-  { icon: Mail, href: "mailto:support@menerio.com", label: "Email" },
+  { icon: Mail, href: `mailto:${BRAND.supportEmail}`, label: "Email" },
 ];
 
 export function Footer() {
@@ -29,11 +30,11 @@ export function Footer() {
           {/* Brand + Newsletter */}
           <div>
             <Link to="/" className="mb-3 flex items-center gap-3">
-              <img src={logoImg} alt="Menerio" className="h-8 w-8 object-contain" />
-              <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">Menerio</span>
+              <img src={brandLogo} alt={BRAND.name} className="h-8 w-8 object-contain" />
+              <span className="font-display text-xl font-extrabold text-[hsl(var(--landing-text))]">{BRAND.name}</span>
             </Link>
             <p className="max-w-sm text-sm leading-relaxed text-[hsl(var(--landing-muted))]">
-              One brain. Every AI. Capture, search, and connect your thoughts.
+              {BRAND.tagline}
             </p>
           </div>
 
@@ -89,7 +90,7 @@ export function Footer() {
       <div className="border-t border-[hsl(var(--border)/.08)] dark:border-[hsl(var(--landing-plain-white)/.05)]">
         <div className="mx-auto flex max-w-[1180px] flex-col items-center justify-between gap-4 px-6 py-5 text-xs text-[hsl(var(--landing-faint))] sm:flex-row md:px-9">
           <p>
-            © {new Date().getFullYear()} Menerio. All rights reserved.
+            © {new Date().getFullYear()} {BRAND.name}. All rights reserved.
           </p>
           <div className="flex items-center gap-3">
             {socialLinks.map((social) => (

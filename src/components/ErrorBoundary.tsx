@@ -1,6 +1,7 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BRAND } from "@/lib/brand";
 
 interface Props {
   children: ReactNode;
@@ -36,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
     const body = encodeURIComponent(
       `Error: ${error?.message}\n\nStack:\n${error?.stack?.slice(0, 500) ?? "N/A"}\n\nURL: ${window.location.href}`
     );
-    window.open(`mailto:support@menerio.com?subject=${subject}&body=${body}`, "_blank");
+    window.open(`mailto:${BRAND.supportEmail}?subject=${subject}&body=${body}`, "_blank");
   };
 
   render() {
