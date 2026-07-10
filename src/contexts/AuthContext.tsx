@@ -2,6 +2,9 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { clearPersistedQueries } from "@/lib/query-persister";
+
+const LAST_USER_KEY = "menerio:last-user-id";
 
 export type AppRole = "free" | "premium" | "premium_gift" | "admin";
 
@@ -84,6 +87,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
+          // Offline cache is keyed per-origin, not per-user: wipe it when a
+          // different account signs in so no data leaks across users.
+          const lastUserId = localStorage.getItem(LAST_USER_KEY);
+          if (lastUserId && lastUserId !== newSession.user.id) {
+            void clearPersistedQueries();
+          }
+          localStorage.setItem(LAST_USER_KEY, newSession.user.id);
+          // Ask the browser to exempt our storage (IndexedDB cache, future
+          // local DB) from automatic eviction — matters most on iOS Safari.
+          void navigator.storage?.persist?.();
+
           setRoleLoading(true);
           setTimeout(() => {
             fetchProfile(newSession.user.id);
@@ -99,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(null);
           setRole(null);
           setRoleLoading(false);
+          void clearPersistedQueries();
         }
 
         setLoading(false);

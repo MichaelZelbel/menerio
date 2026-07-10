@@ -13,6 +13,9 @@ import {
 } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { OfflineIndicator } from "@/components/OfflineIndicator";
+import { RequiresOnline } from "@/components/RequiresOnline";
+import { queryPersister } from "@/lib/query-persister";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminRoute } from "@/components/auth/AdminRoute";
 import { PageLayout } from "@/components/layout/PageLayout";
@@ -64,9 +67,15 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000,
-      gcTime: 10 * 60 * 1000,
+      // Must be >= the persister's maxAge window for restored queries to
+      // stay alive; also keeps warm data around across route changes.
+      gcTime: 24 * 60 * 60 * 1000,
       refetchOnWindowFocus: false,
       retry: 1,
+      // Render cached/persisted data when offline instead of erroring;
+      // retries pause until connectivity returns.
+      networkMode: "offlineFirst",
+      persister: queryPersister.persisterFn,
     },
   },
 });
@@ -149,7 +158,9 @@ const App = () => (
                       path="admin"
                       element={
                         <AdminRoute>
-                          <Admin />
+                          <RequiresOnline>
+                            <Admin />
+                          </RequiresOnline>
                         </AdminRoute>
                       }
                     />
@@ -193,6 +204,7 @@ const App = () => (
                 </Routes>
               </Suspense>
               <CookieConsentBanner />
+              <OfflineIndicator />
             </ErrorBoundary>
           </AuthProvider>
         </BrowserRouter>
