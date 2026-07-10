@@ -30,52 +30,54 @@ Key files: `src/lib/flags.ts` (flag), `src/sync/schema.ts` (client schema),
 
 ## Enabling the flag
 
-- Per device (works on production, no rebuild):
-  `localStorage.setItem("menerio:offline-core", "true"); location.reload()`
-- Globally: build with `VITE_OFFLINE_CORE=true`, or flip the default in
-  `src/lib/flags.ts` once sync is verified.
+- Per device (works on production, no rebuild): open
+  `https://menerio.com/?offline-core=on` (or `=off` to revert) — works on
+  iPhone Safari; or `localStorage.setItem("menerio:offline-core", "true")`.
+- Globally: flip the default in `src/lib/flags.ts` once sync has soaked.
 
 Without a PowerSync endpoint configured the local database still works fully
 offline (writes queue locally); background sync just stays off.
 
-## Provisioning the PowerSync Cloud instance (one-time)
+## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified)
 
-1. Create an account/instance at <https://accounts.journeyapps.com/portal/powersync-signup>
-   (free tier). Choose a region near the Supabase project (eu-central).
-2. In Supabase (project `tjeapelvjlmbxafsmjef`) → SQL editor, create the
-   replication role (generate a strong password; store it only in PowerSync):
+Live setup: project **Menerio**, instance **Production** (EU) under Michael's
+PowerSync account (michael@zelbel.de); endpoint
+`https://6a5158557f33bac37ef5cf80.powersync.journeyapps.com` (hardcoded in
+`src/sync/config.ts`). An unused **Development** instance (us) occupies the
+second free-plan slot. Verified end-to-end: initial sync down (all notes into
+local SQLite), local insert → Postgres, server insert → local within seconds,
+local delete → Postgres, Notes UI rendering from SQLite.
+
+What the setup required (for re-provisioning or a second environment):
+
+1. Supabase SQL (privileged role, SQL editor):
 
    ```sql
    create role powersync_role with replication login password '<generated>';
    grant select on public.notes to powersync_role;
+   create publication powersync for table public.notes;  -- also in migrations
+   ALTER ROLE powersync_role BYPASSRLS;  -- else the snapshot reads 0 rows
    ```
 
-   The `powersync` publication already exists via migration. When new tables
-   join the subset: `alter publication powersync add table public.<t>;` plus
-   `grant select`.
-3. In the PowerSync dashboard, connect the instance to Supabase using the
-   direct connection string with `powersync_role`, and enable "Supabase auth"
-   (JWT validation via the project's JWT secret / JWKS).
-4. Deploy sync rules:
+   When new tables join the subset: `alter publication powersync add table
+   public.<t>;` plus `grant select`.
+2. Dashboard → Database Connections: direct connection URI
+   `postgresql://powersync_role:<pw>@db.tjeapelvjlmbxafsmjef.supabase.co:5432/postgres`.
+3. Dashboard → Client Auth: enable "Use Supabase Auth", set JWKS URI to
+   `https://tjeapelvjlmbxafsmjef.supabase.co/auth/v1/.well-known/jwks.json`
+   (user tokens are ES256), and add JWT Audience **`authenticated`** — without
+   it clients fail with `[PSYNC_S2105] Unexpected "aud" claim value`.
+4. Dashboard → Sync Streams (edition 3 — not legacy bucket_definitions):
 
    ```yaml
-   bucket_definitions:
-     user_notes:
-       parameters: select request.user_id() as user_id
-       data:
-         - select id, user_id, title, content, metadata, tags, is_favorite,
-                  is_pinned, is_trashed, trashed_at, entity_type, source_app,
-                  source_id, source_url, folder_path, is_external, sync_status,
-                  structured_fields, related, ai_visibility, created_at, updated_at
-           from notes
-           where user_id = bucket.user_id
-   ```
+   config:
+     edition: 3
 
-5. Put the instance URL into `src/sync/config.ts` (`POWERSYNC_URL`), or test a
-   single device first via
-   `localStorage.setItem("menerio:powersync-url", "https://<id>.powersync.journeyapps.com")`.
-6. Verify: sign in on two browsers with the flag on, edit a note offline in
-   one, reconnect, watch it appear in the other and in Postgres.
+   streams:
+     user_notes:
+       auto_subscribe: true
+       query: SELECT id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at FROM notes WHERE user_id = auth.user_id()
+   ```
 
 ## Rules for future schema changes
 

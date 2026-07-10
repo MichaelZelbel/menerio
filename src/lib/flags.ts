@@ -8,6 +8,15 @@
 //
 // Enable per-device without a rebuild (for testing on production):
 //   localStorage.setItem("menerio:offline-core", "true"); location.reload()
+// or — usable on devices without a console (iPhone Safari) — open:
+//   https://menerio.com/?offline-core=on   (or =off to revert)
+const urlSwitch =
+  typeof location !== "undefined"
+    ? new URLSearchParams(location.search).get("offline-core")
+    : null;
+if (urlSwitch === "on") localStorage.setItem("menerio:offline-core", "true");
+if (urlSwitch === "off") localStorage.removeItem("menerio:offline-core");
+
 export const OFFLINE_CORE =
   import.meta.env.VITE_OFFLINE_CORE === "true" ||
   (typeof localStorage !== "undefined" &&
