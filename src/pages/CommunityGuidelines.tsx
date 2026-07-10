@@ -1,5 +1,6 @@
 import { SEOHead } from "@/components/SEOHead";
 import { LegalLayout } from "@/components/legal/LegalLayout";
+import { BRAND } from "@/lib/brand";
 
 const sections = [
   { id: "not-allowed", title: "What's Not Allowed" },
@@ -19,10 +20,10 @@ export default function CommunityGuidelines() {
     <LegalLayout title="Community Guidelines" lastUpdated="April 5, 2026" sections={sections}>
       <SEOHead
         title="Community Guidelines — Menerio"
-        description="Guidelines for sharing content publicly on Menerio. Learn what's allowed and how moderation works."
+        description={`Guidelines for sharing content publicly on ${BRAND.name}. Learn what's allowed and how moderation works.`}
       />
 
-      <p>Menerio is a platform for organizing your knowledge, ideas, and notes. When you share a note publicly, it becomes visible to anyone with the link. We want shared content to be useful, respectful, and safe.</p>
+      <p>{BRAND.name} is a platform for organizing your knowledge, ideas, and notes. When you share a note publicly, it becomes visible to anyone with the link. We want shared content to be useful, respectful, and safe.</p>
       <p>These guidelines apply to all publicly shared notes. Private notes are not moderated.</p>
 
       <h2 id="not-allowed">What's not allowed</h2>
@@ -59,7 +60,7 @@ export default function CommunityGuidelines() {
       <p>Strike counts are reviewed periodically, and we may reset strikes for users who demonstrate good-faith usage.</p>
 
       <h2 id="appeals">Appeals</h2>
-      <p>If you believe your content was incorrectly flagged, please contact us at <a href="mailto:support@menerio.com" className="text-primary hover:underline">support@menerio.com</a>. We review all appeals manually and will restore your content if the moderation was in error.</p>
+      <p>If you believe your content was incorrectly flagged, please contact us at <a href={`mailto:${BRAND.supportEmail}`} className="text-primary hover:underline">{BRAND.supportEmail}</a>. We review all appeals manually and will restore your content if the moderation was in error.</p>
 
       <h2 id="changes">Changes</h2>
       <p>We may update these guidelines as our platform evolves. Significant changes will be communicated through the app.</p>

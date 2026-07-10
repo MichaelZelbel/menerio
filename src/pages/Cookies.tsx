@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SEOHead } from "@/components/SEOHead";
+import { BRAND } from "@/lib/brand";
 
 const Cookies = () => {
   const handlePrint = () => {
@@ -17,7 +18,7 @@ const Cookies = () => {
 
   return (
     <div className="container py-12 lg:py-16">
-      <SEOHead title="Cookies Policy — Menerio" description="Learn how Menerio uses cookies, what data they collect, and how to manage your cookie preferences in your browser." />
+      <SEOHead title="Cookies Policy — Menerio" description={`Learn how ${BRAND.name} uses cookies, what data they collect, and how to manage your cookie preferences in your browser.`} />
 
       <div className="flex flex-col lg:flex-row gap-12">
         {/* Table of Contents Sidebar */}
@@ -103,7 +104,7 @@ const Cookies = () => {
               <ul className="list-disc pl-6 space-y-2 mt-4">
                 <li><strong className="text-foreground">Company</strong> (referred to as either "the Company", "We", "Us" or "Our" in this Cookies Policy) refers to Zelbel Ltd., 69 Great Hampton Street Birmingham, B18 6EW United Kingdom.</li>
                 <li><strong className="text-foreground">Cookies</strong> means small files that are placed on Your computer, mobile device or any other device by a website, containing details of your browsing history on that website among its many uses.</li>
-                <li><strong className="text-foreground">Website</strong> refers to Menerio, accessible from https://menerio.com</li>
+                <li><strong className="text-foreground">Website</strong> refers to {BRAND.name}, accessible from {BRAND.url}</li>
                 <li><strong className="text-foreground">You</strong> means the individual accessing or using the Website, or a company, or any legal entity on behalf of which such individual is accessing or using the Website, as applicable.</li>
               </ul>
             </section>
@@ -191,7 +192,7 @@ const Cookies = () => {
               <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">Contact Us</h2>
               <p>If you have any questions about this Cookies Policy, You can contact us:</p>
               <ul className="list-disc pl-6 mt-2">
-                <li>By email: <a href="mailto:support@menerio.com" className="text-primary hover:underline">support@menerio.com</a></li>
+                <li>By email: <a href={`mailto:${BRAND.supportEmail}`} className="text-primary hover:underline">{BRAND.supportEmail}</a></li>
               </ul>
             </section>
 

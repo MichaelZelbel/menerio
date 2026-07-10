@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SEOHead } from "@/components/SEOHead";
+import { BRAND } from "@/lib/brand";
 
 const Terms = () => {
   const handlePrint = () => {
@@ -17,7 +18,7 @@ const Terms = () => {
 
   return (
     <div className="container py-12 lg:py-16">
-      <SEOHead title="Terms of Service — Menerio" description="Read Menerio's Terms of Service covering account usage, content ownership, subscriptions, acceptable use, and your rights as a user." />
+      <SEOHead title="Terms of Service — Menerio" description={`Read ${BRAND.name}'s Terms of Service covering account usage, content ownership, subscriptions, acceptable use, and your rights as a user.`} />
 
       <div className="flex flex-col lg:flex-row gap-12">
         {/* Table of Contents Sidebar */}
@@ -132,7 +133,7 @@ const Terms = () => {
                 <li><strong className="text-foreground">Service</strong> refers to the Website.</li>
                 <li><strong className="text-foreground">Terms and Conditions</strong> (also referred as "Terms") mean these Terms and Conditions that form the entire agreement between You and the Company regarding the use of the Service.</li>
                 <li><strong className="text-foreground">Third-party Social Media Service</strong> means any services or content (including data, information, products or services) provided by a third-party that may be displayed, included or made available by the Service.</li>
-                <li><strong className="text-foreground">Website</strong> refers to Menerio, accessible from https://menerio.com</li>
+                <li><strong className="text-foreground">Website</strong> refers to {BRAND.name}, accessible from {BRAND.url}</li>
                 <li><strong className="text-foreground">You</strong> means the individual accessing or using the Service, or the company, or other legal entity on behalf of which such individual is accessing or using the Service, as applicable.</li>
               </ul>
             </section>
@@ -193,7 +194,7 @@ const Terms = () => {
                 The withdrawal period will expire after 14 days from the day of the conclusion of the contract.
               </p>
               <p className="mt-2">
-                To exercise the right of withdrawal, you must inform us (Zelbel Ltd., 69 Great Hampton Street, Birmingham, B18 6EW, United Kingdom, Email: support@menerio.com) of your decision to withdraw from this contract by an unequivocal statement (e.g., a letter sent by post or email). You may use the model withdrawal form below, but it is not obligatory.
+                To exercise the right of withdrawal, you must inform us (Zelbel Ltd., 69 Great Hampton Street, Birmingham, B18 6EW, United Kingdom, Email: {BRAND.supportEmail}) of your decision to withdraw from this contract by an unequivocal statement (e.g., a letter sent by post or email). You may use the model withdrawal form below, but it is not obligatory.
               </p>
               <p className="mt-2">
                 To meet the withdrawal deadline, it is sufficient for you to send your communication concerning your exercise of the right of withdrawal before the withdrawal period has expired.
@@ -222,7 +223,7 @@ const Terms = () => {
               </p>
               <div className="mt-2 p-4 bg-muted/30 rounded-lg border border-border">
                 <p>To: Zelbel Ltd., 69 Great Hampton Street, Birmingham, B18 6EW, United Kingdom</p>
-                <p>Email: support@menerio.com</p>
+                <p>Email: {BRAND.supportEmail}</p>
                 <p className="mt-2">I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract for the provision of the following service (*):</p>
                 <p className="mt-2">— Ordered on (*) / received on (*):</p>
                 <p>— Name of consumer(s):</p>
@@ -316,7 +317,7 @@ const Terms = () => {
               <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">Contact Us</h2>
               <p>If you have any questions about these Terms and Conditions, You can contact us:</p>
               <ul className="list-disc pl-6 mt-2">
-                <li>By email: <a href="mailto:support@menerio.com" className="text-primary hover:underline">support@menerio.com</a></li>
+                <li>By email: <a href={`mailto:${BRAND.supportEmail}`} className="text-primary hover:underline">{BRAND.supportEmail}</a></li>
               </ul>
             </section>
 
