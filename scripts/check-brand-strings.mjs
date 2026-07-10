@@ -47,6 +47,7 @@ const EXCLUDED = [
   "src/brands/",
   "src/lib/brand.ts",
   "src/lib/__tests__/brand.test.ts",
+  "src/components/__tests__/brand-smoke.test.tsx",
 ];
 
 function walk(dir, files = []) {

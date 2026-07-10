@@ -699,3 +699,161 @@
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
 }
+
+/* ============================================================
+   Cherishly brand skin (.brand-cherishly on <html>)
+   Activated by VITE_BRAND=cherishly builds — see docs/BRANDING.md.
+   Menerio builds never add this class, so nothing below applies there.
+   Palette: rose-pink primary, purple secondary, peach accents,
+   warm cream background, extra-round corners, soft/glow shadows.
+   ============================================================ */
+
+.brand-cherishly {
+  /* Core tokens */
+  --primary: 340 75% 55%;
+  --primary-foreground: 0 0% 100%;
+  --primary-hover: 340 75% 48%;
+  --secondary: 280 60% 65%;
+  --secondary-foreground: 0 0% 100%;
+  --background: 20 40% 98%;
+  --background-soft: 340 25% 96%;
+  --surface: 0 0% 100%;
+  --surface-2: 20 40% 96%;
+  --foreground: 340 15% 25%;
+  --card: 0 0% 100%;
+  --card-foreground: 340 15% 25%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 340 15% 25%;
+  --muted: 20 30% 93%;
+  --muted-foreground: 340 10% 45%;
+  --accent: 25 85% 92%;
+  --accent-foreground: 340 15% 25%;
+  --border: 340 30% 88%;
+  --input: 340 30% 88%;
+  --ring: 340 75% 55%;
+  --radius: 1rem;
+
+  /* Landing/chrome tokens (Header, Footer, marketing surfaces) */
+  --text: 340 15% 25%;
+  --text-2: 340 12% 35%;
+  --text-muted: 340 10% 45%;
+  --text-faint: 340 12% 65%;
+  --brand: 340 75% 55%;
+  --brand-soft: 340 100% 95%;
+  --brand-gradient: linear-gradient(135deg, hsl(340 75% 55%), hsl(280 60% 65%));
+  --pill-bg: 340 75% 55%;
+  --landing-page: 20 40% 98%;
+  --landing-panel: 0 0% 100%;
+  --landing-sky-white: 340 100% 97%;
+  --landing-sky-light: 340 100% 92%;
+  --landing-sky-highlight: 340 75% 50%;
+  --landing-sky-soft: 340 80% 90%;
+  --landing-sky-mid: 340 75% 60%;
+  --landing-sky-primary: 340 75% 55%;
+  --landing-sky-deep: 340 75% 42%;
+  --landing-card-deep: 0 0% 100%;
+  --landing-lavender: 280 60% 92%;
+  --landing-violet-deep: 280 60% 55%;
+  --landing-button-top: 340 75% 60%;
+  --landing-button-bottom: 340 75% 50%;
+  --landing-text: 340 15% 25%;
+  --landing-body: 340 12% 35%;
+  --landing-muted: 340 10% 45%;
+  --landing-faint: 340 12% 65%;
+
+  /* Cherishly signature effects */
+  --gradient-primary: linear-gradient(135deg, hsl(340 75% 55%), hsl(280 60% 65%));
+  --gradient-soft: linear-gradient(180deg, hsl(20 40% 98%), hsl(340 20% 95%));
+  --shadow-soft: 0 4px 20px -2px hsl(340 30% 80% / 0.15);
+  --shadow-glow: 0 0 30px hsl(340 75% 55% / 0.2);
+
+  /* Sidebar */
+  --sidebar-background: 20 40% 97%;
+  --sidebar-foreground: 340 12% 35%;
+  --sidebar-primary: 340 75% 55%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 340 30% 93%;
+  --sidebar-accent-foreground: 340 15% 25%;
+  --sidebar-border: 340 25% 90%;
+  --sidebar-ring: 340 75% 55%;
+}
+
+.brand-cherishly.dark {
+  --primary: 340 75% 60%;
+  --primary-foreground: 0 0% 100%;
+  --primary-hover: 340 75% 67%;
+  --secondary: 280 60% 65%;
+  --secondary-foreground: 0 0% 100%;
+  --background: 340 20% 10%;
+  --background-soft: 340 20% 12%;
+  --surface: 340 20% 12%;
+  --surface-2: 340 20% 14%;
+  --foreground: 20 40% 95%;
+  --card: 340 20% 12%;
+  --card-foreground: 20 40% 95%;
+  --popover: 340 20% 12%;
+  --popover-foreground: 20 40% 95%;
+  --muted: 340 20% 18%;
+  --muted-foreground: 20 20% 65%;
+  --accent: 340 20% 18%;
+  --accent-foreground: 20 40% 95%;
+  --border: 340 20% 20%;
+  --input: 340 20% 20%;
+  --ring: 340 75% 55%;
+
+  --brand: 340 75% 60%;
+  --brand-soft: 340 40% 20%;
+  --brand-gradient: linear-gradient(135deg, hsl(340 75% 45%), hsl(280 60% 55%));
+  --landing-page: 340 22% 7%;
+  --landing-panel: 340 20% 12%;
+  --landing-sky-white: 340 60% 95%;
+  --landing-sky-light: 340 80% 85%;
+  --landing-sky-highlight: 340 90% 78%;
+  --landing-sky-soft: 340 50% 75%;
+  --landing-sky-mid: 340 70% 68%;
+  --landing-sky-primary: 340 75% 60%;
+  --landing-sky-deep: 340 70% 45%;
+  --landing-card-deep: 340 22% 9%;
+  --landing-lavender: 280 70% 83%;
+  --landing-violet-deep: 280 75% 62%;
+  --landing-button-top: 340 75% 62%;
+  --landing-button-bottom: 340 72% 48%;
+  --landing-pink: 333 100% 81%;
+  --landing-pink-deep: 339 75% 55%;
+  --landing-pink-text: 337 100% 89%;
+  --landing-text: 20 40% 95%;
+  --landing-body: 20 25% 82%;
+  --landing-muted: 340 10% 66%;
+  --landing-faint: 340 10% 48%;
+
+  --gradient-primary: linear-gradient(135deg, hsl(340 75% 45%), hsl(280 60% 55%));
+  --gradient-soft: linear-gradient(180deg, hsl(340 20% 10%), hsl(340 20% 15%));
+  --shadow-soft: 0 4px 20px -2px hsl(340 30% 10% / 0.4);
+  --shadow-glow: 0 0 30px hsl(340 75% 45% / 0.3);
+
+  --sidebar-background: 340 20% 9%;
+  --sidebar-foreground: 20 25% 75%;
+  --sidebar-primary: 340 75% 60%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 340 20% 16%;
+  --sidebar-accent-foreground: 20 40% 95%;
+  --sidebar-border: 340 20% 18%;
+  --sidebar-ring: 340 75% 60%;
+}
+
+/* Cherishly landing animations */
+@keyframes float-heart {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 0.3;
+  }
+  100% {
+    transform: translateY(-100vh) rotate(180deg);
+    opacity: 0.3;
+  }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { SEOHead } from "@/components/SEOHead";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,10 +14,68 @@ import { BridgeNotesHighlighter } from "@/components/graph/GraphAnalytics";
 import { CaptureEmptyState } from "@/components/notes/CaptureEmptyState";
 import { NotesStatsRow } from "@/components/dashboard/widgets/NotesStatsRow";
 import { RecentNotesCard } from "@/components/dashboard/widgets/RecentNotesCard";
+import { RecentPeopleCard } from "@/components/dashboard/widgets/RecentPeopleCard";
 import { ProfileWidget } from "@/components/dashboard/widgets/ProfileWidget";
 import { GroupPulseCard } from "@/components/dashboard/widgets/GroupPulseCard";
 import { GettingStartedChecklist } from "@/components/dashboard/widgets/GettingStartedChecklist";
 import { Card, CardContent } from "@/components/ui/card";
+
+interface LayoutProps {
+  notes: ReturnType<typeof useNotes>["data"] & {};
+  hasNotes: boolean;
+  hasProfile: boolean;
+  onCreateNote: () => void;
+  firstCapturesSlot?: ReactNode;
+}
+
+/** The default arrangement: notes front and center. */
+const NotesFirstLayout = ({ notes, hasNotes, hasProfile, onCreateNote, firstCapturesSlot }: LayoutProps) => (
+  <div className="grid gap-6 lg:grid-cols-3">
+    <div className="lg:col-span-2 space-y-6">
+      {!hasNotes && (
+        <Card className="border-dashed">
+          <CardContent className="py-8">
+            <CaptureEmptyState onCreateNote={onCreateNote} />
+          </CardContent>
+        </Card>
+      )}
+      {hasNotes && <RecentNotesCard notes={notes} />}
+      <ActivityFeed limit={5} showViewAll />
+    </div>
+
+    {firstCapturesSlot && <div className="lg:col-span-3">{firstCapturesSlot}</div>}
+
+    <div className="space-y-6">
+      <ProfileWidget />
+      <TodaysConnections />
+      <GroupPulseCard />
+      <DiscoveryFeed />
+      <OrphanNotesDetector compact />
+      <BridgeNotesHighlighter compact />
+      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} />
+    </div>
+  </div>
+);
+
+/** Cherishly's arrangement: the people you cherish come first. */
+const PeopleFirstLayout = ({ notes, hasNotes, hasProfile, firstCapturesSlot }: LayoutProps) => (
+  <div className="grid gap-6 lg:grid-cols-3">
+    <div className="lg:col-span-2 space-y-6">
+      <TodaysConnections />
+      <RecentPeopleCard />
+      <GroupPulseCard />
+    </div>
+
+    {firstCapturesSlot && <div className="lg:col-span-3">{firstCapturesSlot}</div>}
+
+    <div className="space-y-6">
+      {hasNotes && <RecentNotesCard notes={notes} />}
+      <ActivityFeed limit={5} />
+      <ProfileWidget />
+      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} />
+    </div>
+  </div>
+);
 
 const Dashboard = () => {
   const { profile, role, user } = useAuth();
@@ -29,6 +88,7 @@ const Dashboard = () => {
   const hasProfile = !!profile?.display_name;
   const hasNotes = notes.length > 0;
   const aiProcessedCount = notes.filter((n) => n.metadata && Object.keys(n.metadata).length > 0).length;
+  const peopleFirst = BRAND.dashboardVariant === "people-first";
 
   return (
     <div className="space-y-6">
@@ -45,49 +105,33 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <NotesStatsRow
-        notesCount={notes.length}
-        aiProcessedCount={aiProcessedCount}
-        credits={credits}
-        creditsLoading={creditsLoading}
-        role={role}
-      />
+      {!peopleFirst && (
+        <NotesStatsRow
+          notesCount={notes.length}
+          aiProcessedCount={aiProcessedCount}
+          credits={credits}
+          creditsLoading={creditsLoading}
+          role={role}
+        />
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          {/* Quick start */}
-          {!hasNotes && (
-            <Card className="border-dashed">
-              <CardContent className="py-8">
-                <CaptureEmptyState onCreateNote={() => navigate("/dashboard/notes?action=create")} />
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Recent notes */}
-          {hasNotes && <RecentNotesCard notes={notes} />}
-
-          <ActivityFeed limit={5} showViewAll />
-        </div>
-
-        {/* Right sidebar continued - First Captures */}
-        {firstCaptures.show && (
-          <div className="lg:col-span-3">
-            <FirstCapturesWizard onComplete={firstCaptures.dismiss} />
-          </div>
-        )}
-
-        {/* Right sidebar */}
-        <div className="space-y-6">
-          <ProfileWidget />
-          <TodaysConnections />
-          <GroupPulseCard />
-          <DiscoveryFeed />
-          <OrphanNotesDetector compact />
-          <BridgeNotesHighlighter compact />
-          <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} />
-        </div>
-      </div>
+      {peopleFirst ? (
+        <PeopleFirstLayout
+          notes={notes}
+          hasNotes={hasNotes}
+          hasProfile={hasProfile}
+          onCreateNote={() => navigate("/dashboard/notes?action=create")}
+          firstCapturesSlot={firstCaptures.show ? <FirstCapturesWizard onComplete={firstCaptures.dismiss} /> : undefined}
+        />
+      ) : (
+        <NotesFirstLayout
+          notes={notes}
+          hasNotes={hasNotes}
+          hasProfile={hasProfile}
+          onCreateNote={() => navigate("/dashboard/notes?action=create")}
+          firstCapturesSlot={firstCaptures.show ? <FirstCapturesWizard onComplete={firstCaptures.dismiss} /> : undefined}
+        />
+      )}
     </div>
   );
 };

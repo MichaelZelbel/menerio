@@ -27,7 +27,11 @@ import { PageLoader } from "@/components/LoadingStates";
 import { BRAND } from "@/lib/brand";
 
 // Lazy-loaded routes
-const Index = lazy(() => import("./pages/Index"));
+// The "/" landing is brand-gated at the module level so only the active
+// brand's chunk ever loads; the route table below stays brand-agnostic.
+const Index = lazy(() =>
+  BRAND.id === "cherishly" ? import("./pages/CherishlyLanding") : import("./pages/Index"),
+);
 const Features = lazy(() => import("./pages/Features"));
 const Docs = lazy(() => import("./pages/Docs"));
 const Auth = lazy(() => import("./pages/Auth"));

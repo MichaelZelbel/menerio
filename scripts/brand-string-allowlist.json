@@ -20,6 +20,7 @@
   "src/components/settings/SyncConflictsPanel.tsx": 3,
   "src/components/settings/TelegramIntegration.tsx": 2,
   "src/content/docs/registry.tsx": 39,
+  "src/lib/flags.ts": 1,
   "src/pages/CollectionDetail.tsx": 1,
   "src/pages/Collections.tsx": 1,
   "src/pages/CollectionSchema.tsx": 1,
