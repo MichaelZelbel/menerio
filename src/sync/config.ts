@@ -1,12 +1,11 @@
-// PowerSync service endpoint. Empty until the cloud instance exists — the
-// local database still works fully offline without it; background sync just
-// stays off. Once the instance is provisioned, hardcode the URL here (same
-// pattern as the Supabase URL in integrations/supabase/client.ts).
-// A localStorage override allows pointing a single device at an instance
-// without a rebuild:
+// PowerSync service endpoint (Menerio → Production instance, EU region,
+// provisioned 2026-07-10; dashboard: dashboard.powersync.com, Michael's
+// account). Hardcoded like the Supabase URL in integrations/supabase/client.ts.
+// Overridable per device for testing:
 //   localStorage.setItem("menerio:powersync-url", "https://<id>.powersync.journeyapps.com")
 export const POWERSYNC_URL: string =
   (import.meta.env.VITE_POWERSYNC_URL as string | undefined) ??
   (typeof localStorage !== "undefined"
-    ? (localStorage.getItem("menerio:powersync-url") ?? "")
-    : "");
+    ? localStorage.getItem("menerio:powersync-url")
+    : null) ??
+  "https://6a5158557f33bac37ef5cf80.powersync.journeyapps.com";
