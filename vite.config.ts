@@ -2,6 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import { brandForId } from "./src/brands";
+import { brandIndexHtml, brandStatics } from "./vite.brand";
+
+// White-label brand for this build (docs/BRANDING.md). Defaults to menerio;
+// the Cherishly deployment sets VITE_BRAND=cherishly in its build env.
+const brand = brandForId(process.env.VITE_BRAND);
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -14,6 +20,8 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    brandIndexHtml(brand),
+    brandStatics(brand, __dirname),
     VitePWA({
       registerType: "autoUpdate",
       // Kill-switch: if a deployed service worker ever breaks production,
@@ -22,12 +30,11 @@ export default defineConfig(({ mode }) => ({
       selfDestroying: false,
       includeAssets: ["favicon.png", "apple-touch-icon.png", "robots.txt"],
       manifest: {
-        name: "Menerio — AI-Powered Knowledge System",
-        short_name: "Menerio",
-        description:
-          "Menerio turns your notes into a shared knowledge system for AI.",
-        theme_color: "#0e121b",
-        background_color: "#0e121b",
+        name: brand.pwa.name,
+        short_name: brand.pwa.shortName,
+        description: brand.pwa.description,
+        theme_color: brand.pwa.themeColor,
+        background_color: brand.pwa.backgroundColor,
         display: "standalone",
         start_url: "/",
         icons: [

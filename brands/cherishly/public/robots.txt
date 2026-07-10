@@ -1,0 +1,17 @@
+# Cherishly robots.txt
+
+User-agent: *
+Allow: /
+Allow: /privacy
+Allow: /terms
+Allow: /cookies
+
+Disallow: /dashboard
+Disallow: /dashboard/*
+Disallow: /admin
+Disallow: /settings
+Disallow: /wizard
+Disallow: /auth
+Disallow: /reset-password
+
+Sitemap: https://cherishly.app/sitemap.xml

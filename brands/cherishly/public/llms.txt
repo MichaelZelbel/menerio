@@ -1,0 +1,11 @@
+# Cherishly
+
+> Cherishly is your little memory companion. It helps you remember what matters about the people you love — their favorites, love languages, important dates, and the little moments in between.
+
+Cherishly keeps person profiles, a shared timeline of moments, and gentle context for staying close to the people you care about. It runs on the open-source Menerio engine and shares its account system.
+
+## Pages
+
+- [Home](/): What Cherishly is and how it works.
+- [Privacy Policy](/privacy): How personal data is handled.
+- [Terms of Service](/terms): Usage terms.
