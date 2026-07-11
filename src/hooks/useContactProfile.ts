@@ -4,18 +4,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import type { ProfileCategory, ProfileEntry } from "./useProfile";
 
-const DEFAULT_CATEGORIES = [
-  { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
-  { name: "Location & Living", slug: "location", icon: "map-pin", description: "Current city, timezone, living situation", sort_order: 1, visibility_scope: "personal" },
-  { name: "Professional Life", slug: "professional", icon: "briefcase", description: "Job, company, industry, skills", sort_order: 2, visibility_scope: "professional" },
-  { name: "Relationships & Family", slug: "relationships", icon: "heart", description: "Close people, shared connections", sort_order: 3, visibility_scope: "personal" },
-  { name: "Communication Style", slug: "communication", icon: "message-circle", description: "Tone, preferences, humor style", sort_order: 4, visibility_scope: "all" },
-  { name: "Personality & Values", slug: "personality", icon: "compass", description: "Type indicators, core values", sort_order: 5, visibility_scope: "all" },
-  { name: "Hobbies & Interests", slug: "hobbies", icon: "palette", description: "Active hobbies, creative pursuits", sort_order: 6, visibility_scope: "personal" },
-  { name: "Food & Drink", slug: "food", icon: "utensils", description: "Cuisines, dietary style", sort_order: 7, visibility_scope: "personal" },
-  { name: "Travel & Experiences", slug: "travel", icon: "plane", description: "Countries, travel style", sort_order: 8, visibility_scope: "personal" },
-  { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Likes, dislikes, pet peeves", sort_order: 9, visibility_scope: "all" },
-];
+/**
+ * A contact profile entry, including `is_pinned` (added by the
+ * `people_ux_foundations` migration). The generated `src/integrations/
+ * supabase/types.ts` hasn't been regenerated to include this column, so
+ * queries/mutations below cast the client to `any` for it — same pattern
+ * `usePeople.ts` uses for `is_favorite`/`last_viewed_at`.
+ */
+export interface ContactProfileEntry extends ProfileEntry {
+  is_pinned: boolean;
+}
 
 export function useContactProfile(contactId: string | null) {
   const { user } = useAuth();
@@ -40,33 +38,22 @@ export function useContactProfile(contactId: string | null) {
   const entriesQuery = useQuery({
     queryKey: ["contact-profile-entries", userId, contactId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Cast to `any`: `is_pinned` (added by the people_ux_foundations
+      // migration) isn't in the generated types.ts yet — same pattern as
+      // usePeople.ts's is_favorite/last_viewed_at.
+      const { data, error } = await (supabase as any)
         .from("profile_entries")
         .select("*")
         .eq("user_id", userId!)
         .eq("contact_id", contactId!)
         .order("sort_order");
       if (error) throw error;
-      return data as ProfileEntry[];
+      return ((data ?? []) as any[]).map((d) => ({
+        ...d,
+        is_pinned: d.is_pinned ?? false,
+      })) as ContactProfileEntry[];
     },
     enabled: !!userId && !!contactId,
-  });
-
-  const seedDefaults = useMutation({
-    mutationFn: async () => {
-      const rows = DEFAULT_CATEGORIES.map((c) => ({
-        ...c,
-        user_id: userId!,
-        contact_id: contactId!,
-        is_default: true,
-      }));
-      const { error } = await supabase.from("profile_categories").insert(rows);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] }),
-    onError: (err: any) => {
-      showToast.error(`Failed to initialize profile: ${err.message ?? "Unknown error"}`);
-    },
   });
 
   const upsertCategory = useMutation({
@@ -102,16 +89,17 @@ export function useContactProfile(contactId: string | null) {
   });
 
   const upsertEntry = useMutation({
-    mutationFn: async (entry: Partial<ProfileEntry> & { id?: string }) => {
+    mutationFn: async (entry: Partial<ContactProfileEntry> & { id?: string }) => {
+      // Cast to `any`: see the entriesQuery comment above re: is_pinned.
       if (entry.id) {
-        const { error } = await supabase.from("profile_entries").update(entry).eq("id", entry.id);
+        const { error } = await (supabase as any).from("profile_entries").update(entry).eq("id", entry.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("profile_entries").insert({
+        const { error } = await (supabase as any).from("profile_entries").insert({
           ...entry,
           user_id: userId!,
           contact_id: contactId!,
-        } as any);
+        });
         if (error) throw error;
       }
     },
@@ -136,7 +124,6 @@ export function useContactProfile(contactId: string | null) {
     categories: categoriesQuery.data ?? [],
     entries: entriesQuery.data ?? [],
     isLoading: categoriesQuery.isLoading || entriesQuery.isLoading,
-    seedDefaults,
     upsertCategory,
     deleteCategory,
     upsertEntry,

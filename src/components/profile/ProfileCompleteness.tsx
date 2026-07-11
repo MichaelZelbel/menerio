@@ -6,6 +6,15 @@ import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
 interface ProfileCompletenessProps {
   categories: ProfileCategory[];
   entries: ProfileEntry[];
+  /**
+   * Override the completeness denominator instead of using the number of
+   * materialized category rows. The contact profile no longer auto-seeds
+   * all 17 taxonomy categories on first visit (Phase 3), so a contact with
+   * one materialized category would otherwise show 100% complete — pass the
+   * static taxonomy slot count (e.g. `PROFILE_TAXONOMY.length`) there. The
+   * owner page omits this prop and keeps its original per-row denominator.
+   */
+  totalSlots?: number;
 }
 
 function getCompletenessMessage(pct: number): string {
@@ -15,16 +24,17 @@ function getCompletenessMessage(pct: number): string {
   return "Impressive! Your agents have excellent context about who you are";
 }
 
-export function ProfileCompleteness({ categories, entries }: ProfileCompletenessProps) {
+export function ProfileCompleteness({ categories, entries, totalSlots }: ProfileCompletenessProps) {
   const navigate = useNavigate();
 
   const { pct, emptyCategories } = useMemo(() => {
-    if (categories.length === 0) return { pct: 0, emptyCategories: [] };
+    const denominator = totalSlots ?? categories.length;
+    if (denominator === 0) return { pct: 0, emptyCategories: [] };
     const filled = categories.filter((c) => entries.some((e) => e.category_id === c.id));
-    const pct = Math.round((filled.length / categories.length) * 100);
+    const pct = Math.round((filled.length / denominator) * 100);
     const emptyCategories = categories.filter((c) => !entries.some((e) => e.category_id === c.id));
     return { pct, emptyCategories };
-  }, [categories, entries]);
+  }, [categories, entries, totalSlots]);
 
   const radius = 36;
   const stroke = 5;
