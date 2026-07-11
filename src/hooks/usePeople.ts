@@ -38,6 +38,20 @@ export function shouldTouchViewed(lastViewedAt: string | null, now: Date): boole
   return now.getTime() - lastMs >= FIVE_MINUTES_MS;
 }
 
+/**
+ * Full touch decision including the loaded-row gate: a row that isn't in the
+ * cache yet is NOT "never viewed" — on a fresh page load the contacts query
+ * hasn't resolved, and touching blind would bypass the 5-minute throttle on
+ * every reload. Only a genuinely loaded row may be touched.
+ */
+export function shouldTouchLoadedPerson(
+  person: { last_viewed_at?: string | null } | undefined,
+  now: Date,
+): boolean {
+  if (!person) return false;
+  return shouldTouchViewed(person.last_viewed_at ?? null, now);
+}
+
 export function usePeople() {
   const { user } = useAuth();
 
@@ -162,7 +176,7 @@ export function useTouchPersonViewed() {
       const queryKey = ["contacts", user?.id];
       const people = qc.getQueryData<Person[]>(queryKey);
       const person = people?.find((p) => p.id === id);
-      if (!shouldTouchViewed(person?.last_viewed_at ?? null, new Date())) {
+      if (!shouldTouchLoadedPerson(person, new Date())) {
         return null;
       }
       const lastViewedAt = new Date().toISOString();

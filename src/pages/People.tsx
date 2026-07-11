@@ -119,10 +119,14 @@ export default function People() {
 
   // Record a view whenever the detail pane switches to a different person
   // (throttled inside the hook — skips if already touched within 5 minutes).
+  // Keyed on the LOADED row's id, not the URL param: on a fresh page load the
+  // URL id exists before the contacts query resolves, and touching then would
+  // read an empty cache and bypass the throttle on every reload.
+  const loadedPersonId = selectedPerson?.id ?? null;
   useEffect(() => {
-    if (selectedPersonId) touchPersonViewed.mutate(selectedPersonId);
+    if (loadedPersonId) touchPersonViewed.mutate(loadedPersonId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPersonId]);
+  }, [loadedPersonId]);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({
