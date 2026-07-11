@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalProfileLabel,
   isSingleValueLabel,
+  matchProfileCategoryByLabel,
   normalizeProfileValueForDedup,
   stripTrailingQualifier,
 } from "../../../supabase/functions/_shared/profile-canonical-schema";
@@ -54,5 +55,52 @@ describe("canonical schema: physical identity attributes", () => {
 
   it("canonicalizes Height even when extracted into an open category", () => {
     expect(canonicalProfileLabel("preferences", "Height")).toBe("Height");
+  });
+});
+
+describe("matchProfileCategoryByLabel", () => {
+  it("matches a canonical structured label to its category", () => {
+    expect(matchProfileCategoryByLabel("Hair color")).toEqual({
+      slug: "identity",
+      canonicalLabel: "Hair color",
+    });
+  });
+
+  it("matches a case/whitespace-insensitive alias to its canonical home", () => {
+    expect(matchProfileCategoryByLabel("  EMAIL ")).toEqual({
+      slug: "communication",
+      canonicalLabel: "Email",
+    });
+    expect(matchProfileCategoryByLabel("birthday")).toEqual({
+      slug: "identity",
+      canonicalLabel: "Date of birth",
+    });
+  });
+
+  it("routes re-homed labels to their true category (not identity)", () => {
+    expect(matchProfileCategoryByLabel("wedding date")).toEqual({
+      slug: "relationships",
+      canonicalLabel: "Wedding date",
+    });
+    expect(matchProfileCategoryByLabel("place of birth")).toEqual({
+      slug: "identity",
+      canonicalLabel: "Place of birth",
+    });
+  });
+
+  it("returns null for unknown labels (defer to the LLM)", () => {
+    expect(matchProfileCategoryByLabel("favorite hair color")).toBeNull();
+    expect(matchProfileCategoryByLabel("loves hotpot")).toBeNull();
+  });
+
+  it("returns null for an empty/whitespace label", () => {
+    expect(matchProfileCategoryByLabel("")).toBeNull();
+    expect(matchProfileCategoryByLabel("   ")).toBeNull();
+  });
+
+  it("never resolves to an open category (those always defer to the LLM)", () => {
+    // "hotpot" and other open-category topics have no structured label, so the
+    // matcher must return null rather than guessing an open slug.
+    expect(matchProfileCategoryByLabel("hotpot")).toBeNull();
   });
 });

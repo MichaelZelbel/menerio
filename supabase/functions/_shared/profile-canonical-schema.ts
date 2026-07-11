@@ -210,6 +210,49 @@ export function normalizeProfileValueForDedup(value: string): string {
   return stripTrailingQualifier(value).toLowerCase().replace(/\s+/g, " ");
 }
 
+// Deterministic label→category home for the contact quick-add pre-pass. Maps
+// every structured-category alias/canonical (normalized) to its owning slug +
+// canonical label. A key claimed by two *different* structured categories is
+// flagged ambiguous and never resolved deterministically (deferred to the LLM).
+type StructuredLabelHome = { slug: string; canonical: string; ambiguous: boolean };
+const STRUCTURED_LABEL_HOME: Map<string, StructuredLabelHome> = (() => {
+  const m = new Map<string, StructuredLabelHome>();
+  for (const [slug, schema] of Object.entries(PROFILE_CANONICAL_SCHEMA)) {
+    if (schema.shape !== "structured") continue;
+    for (const def of schema.labels) {
+      for (const key of [def.canonical, ...def.aliases]) {
+        const nk = normalizeKey(key);
+        if (!nk) continue;
+        const existing = m.get(nk);
+        if (!existing) {
+          m.set(nk, { slug, canonical: def.canonical, ambiguous: false });
+        } else if (existing.slug !== slug) {
+          existing.ambiguous = true;
+        }
+      }
+    }
+  }
+  return m;
+})();
+
+/**
+ * Deterministic label→category match for the contact quick-add pre-pass. When
+ * `label` is a known, unambiguous alias/canonical of exactly one STRUCTURED
+ * category, returns that category slug plus its canonical label; otherwise
+ * returns null so the caller falls back to the LLM. Open categories (which have
+ * no fixed labels) never match here — freeform topics always defer to the LLM.
+ * Pure — no I/O.
+ */
+export function matchProfileCategoryByLabel(
+  label: string,
+): { slug: string; canonicalLabel: string } | null {
+  const key = normalizeKey(label);
+  if (!key) return null;
+  const hit = STRUCTURED_LABEL_HOME.get(key);
+  if (!hit || hit.ambiguous) return null;
+  return { slug: hit.slug, canonicalLabel: hit.canonical };
+}
+
 // Compact human-readable list grouped by category — for LLM system prompts.
 export const CANONICAL_LABELS_FOR_PROMPT: string = (() => {
   const lines: string[] = [];

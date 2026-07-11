@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { useCreateGroup, useGroups } from "@/hooks/useGroups";
-import { useGroupMemberships } from "@/hooks/useGroupMemberships";
+import { useAllMemberships } from "@/hooks/useGroupMemberships";
 import { GROUP_TEMPLATES, getTemplateById, instantiateTemplate, type GroupTemplate } from "@/lib/group-templates";
 import { showToast } from "@/lib/toast";
 import { InitialMigrationCard } from "@/components/groups/InitialMigrationCard";
@@ -32,9 +32,8 @@ function TemplateIcon({ icon, className = "h-5 w-5" }: { icon?: string | null; c
   return <Icon className={className} />;
 }
 
-function GroupCard({ group }: { group: ContactGroup }) {
+function GroupCard({ group, memberCount }: { group: ContactGroup; memberCount: number }) {
   const navigate = useNavigate();
-  const { data: memberships = [] } = useGroupMemberships(group.id);
   const firstCriterion = parseArray<SuccessCriterion>(group.success_criteria)[0];
   const target = Number(firstCriterion?.target || 0);
   const current = Number(firstCriterion?.current || 0);
@@ -55,7 +54,7 @@ function GroupCard({ group }: { group: ContactGroup }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span>
+          <span>{memberCount} member{memberCount === 1 ? "" : "s"}</span>
           {group.archived_at && <Badge variant="secondary">Archived</Badge>}
         </div>
         {firstCriterion ? (
@@ -182,8 +181,17 @@ function NewGroupDialog() {
 
 export default function Groups() {
   const { data: groups = [], isLoading } = useGroups();
+  // One aggregate membership query for the whole page instead of one per card
+  // (kills the N+1). Per-group counts are derived from this single index.
+  const { data: memberships = [] } = useAllMemberships();
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState("active");
+
+  const memberCountByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of memberships) counts.set(m.group_id, (counts.get(m.group_id) ?? 0) + 1);
+    return counts;
+  }, [memberships]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -233,7 +241,9 @@ export default function Groups() {
         </>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {filtered.map((group) => <GroupCard key={group.id} group={group} />)}
+          {filtered.map((group) => (
+            <GroupCard key={group.id} group={group} memberCount={memberCountByGroup.get(group.id) ?? 0} />
+          ))}
         </div>
       )}
     </div>
