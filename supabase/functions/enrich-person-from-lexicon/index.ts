@@ -21,6 +21,18 @@ import {
   isSelfName,
   type EntityRef,
 } from "../_shared/relationship-canonical.ts";
+import {
+  CANONICAL_LABELS_FOR_PROMPT,
+  canonicalProfileLabel,
+  correctProfileCategory,
+  isSingleValueLabel,
+  normalizeProfileValueForDedup,
+} from "../_shared/profile-canonical-schema.ts";
+import {
+  applyNormalization,
+  createNormalizationSuggestions,
+  type NormalizationPayload,
+} from "../_shared/profile-normalization.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -59,7 +71,13 @@ Reasoning rules — apply common sense across ALL evidence, not just one source:
 - If multiple sources independently support a relationship, you should still emit it once.
 - Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Do NOT invent facts. If unsure, skip.
-- Return empty arrays if nothing qualifies.`;
+- "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
+- Emit each distinct fact ONCE, even when several sources state it.
+- Return empty arrays if nothing qualifies.
+
+CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
+${CANONICAL_LABELS_FOR_PROMPT}
+When one of these fits, USE IT EXACTLY. Only use a natural label if none fits.`;
 
 async function loadEvidence(userId: string, contactId: string) {
   const { data: contact } = await supabase
@@ -295,6 +313,64 @@ function threshold(type: string, sensitivity: string) {
   return AUTO_APPLY[type]?.[sensitivity] ?? 0.7;
 }
 
+// ── Normalization plumbing (mirrors normalize-profile/index.ts so the
+// suppression keys and auto-apply thresholds stay compatible) ──
+
+const SENSITIVE_TERMS = [
+  "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
+  "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
+  "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
+];
+
+function normalizeSuggestionValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim().toLowerCase();
+  try { return JSON.stringify(value).toLowerCase(); } catch { return String(value).toLowerCase(); }
+}
+
+function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
+  return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
+}
+
+function isSensitiveSuggestion(suggestionType: string, payload: Record<string, unknown>, text = "") {
+  const haystack = `${suggestionType} ${text} ${Object.values(payload).join(" ")}`.toLowerCase();
+  return SENSITIVE_TERMS.some((t) => haystack.includes(t));
+}
+
+async function filterSuppressedSuggestions(userId: string, suggestions: any[]) {
+  if (suggestions.length === 0) return suggestions;
+  const keys = suggestions.map((s) => s.suppression_key).filter(Boolean);
+  if (keys.length === 0) return suggestions;
+  const { data } = await supabase
+    .from("ai_suggestion_suppressions")
+    .select("suppression_key")
+    .eq("user_id", userId)
+    .in("suppression_key", keys);
+  const blocked = new Set(((data || []) as any[]).map((r) => r.suppression_key));
+  return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
+}
+
+const NORMALIZE_AUTO_APPLY: Record<string, number> = { conservative: 0.92, balanced: 0.85, exploratory: 0.75 };
+
+async function prepareNormalizationSuggestion(
+  s: any,
+  prefs: { mode: string; sensitivity: string; autoAddSensitive: boolean },
+) {
+  const t = NORMALIZE_AUTO_APPLY[prefs.sensitivity] ?? 0.85;
+  const confidence = s.confidence_score ?? 0;
+  const canAuto = prefs.mode === "auto" && confidence >= t && (!s.is_sensitive || prefs.autoAddSensitive);
+  if (!canAuto) return { ...s, status: "pending_review" };
+  try {
+    const result = await applyNormalization(supabase, s.payload as NormalizationPayload);
+    if (result.ok && result.entryId) {
+      return { ...s, status: "auto_applied_unreviewed", target_entity_id: result.entryId, applied_at: new Date().toISOString() };
+    }
+  } catch (e) {
+    console.error("[enrich-person] normalize auto-apply failed:", e);
+  }
+  return { ...s, status: "pending_review" };
+}
+
 async function run(userId: string, contactId: string) {
   const balance = await checkBalance(supabase as any, userId);
   if (!balance.allowed) return { ok: false, reason: "insufficient_credits" };
@@ -353,12 +429,43 @@ async function run(userId: string, contactId: string) {
     relSeen.add(relationshipPairKey(userId, a, b, p.label));
   }
 
+  // Dedup keys for existing entries — canonical label + normalized value, so
+  // "height | 5'4\" (fun sized)" and "Height | 5'4\"" collide instead of both
+  // being inserted.
+  const slugByCategoryId = new Map<string, string>(
+    (evidence.existingCategories as any[]).map((c: any) => [c.id, c.slug]),
+  );
+  const canonLabelOfRow = (e: any): string => {
+    const slug = slugByCategoryId.get(e.category_id) || "preferences";
+    return canonicalProfileLabel(correctProfileCategory(e.label || "", slug), e.label || "");
+  };
   const entrySeen = new Set<string>(
-    evidence.existingEntries.map((e: any) => `${(e.label || "").toLowerCase()}|${(e.value || "").toLowerCase()}`),
+    evidence.existingEntries.map((e: any) =>
+      `${canonLabelOfRow(e).toLowerCase()}|${normalizeProfileValueForDedup(e.value || "")}`),
   );
-  const singletonEntry = new Set<string>(
-    evidence.existingEntries.map((e: any) => (e.label || "").toLowerCase()),
+  // Canonical labels this person already has a value for — consulted for
+  // [single] labels so we never add a second Height / Date of birth / etc.
+  const singletonTaken = new Set<string>(
+    evidence.existingEntries.map((e: any) => canonLabelOfRow(e).toLowerCase()),
   );
+
+  // Also dedup against profile-entry suggestions already in the review queue
+  // (re-running enrichment must not stack duplicate suggestions).
+  const { data: queueEntries } = await supabase
+    .from("review_queue")
+    .select("payload, status")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "add_profile_entry")
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
+  for (const q of (queueEntries || []) as any[]) {
+    if (q.payload?.contact_id !== contactId) continue;
+    const qSlug = String(q.payload?.category_slug || "preferences");
+    const qLabel = canonicalProfileLabel(correctProfileCategory(String(q.payload?.label || ""), qSlug), String(q.payload?.label || ""));
+    entrySeen.add(`${qLabel.toLowerCase()}|${normalizeProfileValueForDedup(String(q.payload?.value || ""))}`);
+    if (["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)) {
+      singletonTaken.add(qLabel.toLowerCase());
+    }
+  }
 
   const targetNameLower = evidence.contact.name.toLowerCase();
   const aliasLowerSet = new Set<string>(
@@ -370,15 +477,25 @@ async function run(userId: string, contactId: string) {
   // Build profile facts (only for this contact)
   for (const f of rawFacts) {
     const name = String(f?.contact_name || "").trim().toLowerCase();
-    const slug = String(f?.category_slug || "").trim().toLowerCase();
-    const label = String(f?.label || "").trim();
+    let slug = String(f?.category_slug || "").trim().toLowerCase();
+    let label = String(f?.label || "").trim();
     const value = String(f?.value || "").trim();
     if (!name || !slug || !label || !value) continue;
     if (!PROFILE_CATEGORY_SLUGS.includes(slug)) continue;
     // Only accept facts about THIS person (alias-aware)
     if (!aliasLowerSet.has(name) && name !== targetNameLower) continue;
-    const key = `${label.toLowerCase()}|${value.toLowerCase()}`;
+
+    // Canonicalize: fix obviously-wrong categories, then map the label onto
+    // the shared canonical vocabulary (same post-pass as process-note).
+    const correctedSlug = correctProfileCategory(label, slug);
+    if (PROFILE_CATEGORY_SLUGS.includes(correctedSlug)) slug = correctedSlug;
+    label = canonicalProfileLabel(slug, label);
+    const labelLower = label.toLowerCase();
+
+    const key = `${labelLower}|${normalizeProfileValueForDedup(value)}`;
     if (entrySeen.has(key)) continue;
+    // One-truth-per-subject labels: never add a second Height / DOB / etc.
+    if (isSingleValueLabel(label) && singletonTaken.has(labelLower)) continue;
 
     const catRow = evidence.existingCategories.find((c: any) => c.slug === slug);
     suggestions.push({
@@ -404,7 +521,7 @@ async function run(userId: string, contactId: string) {
       is_sensitive: false,
     });
     entrySeen.add(key);
-    singletonEntry.add(label.toLowerCase());
+    singletonTaken.add(labelLower);
   }
 
   // Relationships (allow self↔contact)
@@ -513,8 +630,6 @@ async function run(userId: string, contactId: string) {
     }
   }
 
-  if (suggestions.length === 0) return { ok: true, suggestions_created: 0, auto_applied: 0 };
-
   // Auto-apply where confidence + prefs allow
   let autoApplied = 0;
   const prepared: any[] = [];
@@ -552,10 +667,46 @@ async function run(userId: string, contactId: string) {
     }
   }
 
-  const { error: insErr } = await supabase.from("review_queue").insert(prepared);
-  if (insErr) console.error("[enrich-person] review_queue insert error", insErr);
+  if (prepared.length > 0) {
+    const { error: insErr } = await supabase.from("review_queue").insert(prepared);
+    if (insErr) console.error("[enrich-person] review_queue insert error", insErr);
+  }
 
-  return { ok: true, suggestions_created: prepared.length, auto_applied: autoApplied };
+  // Phase B mirror (same as process-note): normalize this contact's saved
+  // profile so near-duplicate entries — same fact, different phrasing — get
+  // merged, or queued for review when uncertain. Runs even when no new facts
+  // were extracted, so enrichment doubles as a cleanup trigger for profiles
+  // that already contain duplicates. Best-effort: never fail the run.
+  let normalizeCreated = 0;
+  let normalizeAuto = 0;
+  try {
+    const res = await createNormalizationSuggestions({
+      supabase,
+      userId,
+      contactId,
+      preferences: prefs,
+      sourceNoteId: null,
+      includeNotesContext: true,
+      helpers: {
+        filterSuppressedSuggestions,
+        prepareSuggestionForInsert: prepareNormalizationSuggestion,
+        isSensitiveSuggestion,
+        buildSuppressionKey,
+      },
+    });
+    normalizeCreated = res.created;
+    normalizeAuto = res.autoApplied;
+  } catch (e) {
+    console.error("[enrich-person] normalization pass failed:", e);
+  }
+
+  return {
+    ok: true,
+    suggestions_created: prepared.length,
+    auto_applied: autoApplied,
+    normalization_suggestions: normalizeCreated,
+    normalization_auto_applied: normalizeAuto,
+  };
 }
 
 Deno.serve(async (req: Request) => {

@@ -22,7 +22,7 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
     labels: [
       { canonical: "Full name", single: true, aliases: ["legal name", "name", "full legal name"] },
       { canonical: "Preferred name", single: true, aliases: ["first name", "goes by", "preferred name"] },
-      { canonical: "Nickname", single: false, aliases: ["nickname", "alias", "handle", "pet name"] },
+      { canonical: "Nickname", single: false, aliases: ["nickname", "alias", "handle", "pet name", "aka", "also known as", "known as"] },
       { canonical: "Date of birth", single: true, aliases: ["birthday", "dob", "born on", "geburtsdatum", "geburtstag", "date of birth", "birth date"] },
       { canonical: "Place of birth", single: true, aliases: ["birthplace", "born in", "place of birth"] },
       { canonical: "Nationality", single: false, aliases: ["citizenship", "nationality"] },
@@ -32,6 +32,11 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
       { canonical: "Maiden name", single: true, aliases: ["nee", "née", "birth surname", "maiden name"] },
       { canonical: "Married surname", single: true, aliases: ["married name", "married surname"] },
       { canonical: "Religion", single: true, aliases: ["faith", "religion"] },
+      { canonical: "Height", single: true, aliases: ["height", "körpergröße", "koerpergroesse", "größe"] },
+      { canonical: "Eye color", single: true, aliases: ["eye color", "eye colour", "augenfarbe"] },
+      { canonical: "Hair color", single: true, aliases: ["hair color", "hair colour", "haarfarbe"] },
+      { canonical: "Blood type", single: true, aliases: ["blood type", "blood group", "blutgruppe"] },
+      { canonical: "Pronunciation", single: true, aliases: ["pronunciation", "name pronunciation", "pronounced"] },
     ],
   },
   location: {
@@ -182,6 +187,27 @@ export function correctProfileCategory(label: string, currentSlug: string): stri
 
 export function isSingleValueLabel(canonicalLabel: string): boolean {
   return SINGLE_VALUE_CANONICAL.has(String(canonicalLabel || "").trim().toLowerCase());
+}
+
+/**
+ * Strip ONE trailing parenthetical qualifier from a value:
+ * `5'4" (fun sized)` → `5'4"`. Values that are entirely parenthetical
+ * (e.g. `(unknown)`) are returned unchanged so we never strip to empty.
+ */
+export function stripTrailingQualifier(value: string): string {
+  const raw = String(value || "").trim();
+  const stripped = raw.replace(/\s*\([^()]*\)$/u, "").trim();
+  return stripped.length > 0 ? stripped : raw;
+}
+
+/**
+ * Normalize a profile value for DEDUP COMPARISON only (never for storage):
+ * trailing parenthetical qualifiers removed, whitespace collapsed, lowercased.
+ * Makes `5'4"` and `5'4" (fun sized)` compare equal so extraction pipelines
+ * don't insert semantically duplicate entries.
+ */
+export function normalizeProfileValueForDedup(value: string): string {
+  return stripTrailingQualifier(value).toLowerCase().replace(/\s+/g, " ");
 }
 
 // Compact human-readable list grouped by category — for LLM system prompts.

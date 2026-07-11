@@ -10,6 +10,8 @@ import {
   canonicalProfileLabel,
   correctProfileCategory,
   isSingleValueLabel,
+  normalizeProfileValueForDedup,
+  stripTrailingQualifier,
 } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
@@ -123,9 +125,10 @@ export async function planSubjectNormalization(args: {
   for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
 
   // --- Deterministic exact-duplicate collapser (runs BEFORE the LLM) ---
-  // Cluster rows by (correctedCategorySlug, canonicalLabel, trimmed-lowercased value).
-  // Any cluster of size > 1 is an unambiguous exact duplicate we can collapse
-  // safely without asking the LLM.
+  // Cluster rows by (correctedCategorySlug, canonicalLabel, dedup-normalized
+  // value). Value normalization strips trailing parenthetical qualifiers, so
+  // `5'4"` and `5'4" (fun sized)` land in the same cluster. Any cluster of
+  // size > 1 is an unambiguous duplicate we can collapse without the LLM.
   type ClusterMember = {
     row: ProfileEntryRow;
     currentSlug: string;
@@ -137,7 +140,7 @@ export async function planSubjectNormalization(args: {
     const currentSlug = slugById.get(row.category_id) || "preferences";
     const correctedSlug = correctProfileCategory(row.label, currentSlug);
     const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
-    const normValue = (row.value || "").trim().toLowerCase();
+    const normValue = normalizeProfileValueForDedup(row.value || "");
     const clusterKey = `${correctedSlug}||${canonLabel.toLowerCase()}||${normValue}`;
     const bucket = clusters.get(clusterKey);
     const entry: ClusterMember = { row, currentSlug, correctedSlug, canonLabel };
@@ -149,11 +152,35 @@ export async function planSubjectNormalization(args: {
   const deterministicIds = new Set<string>();
   for (const members of clusters.values()) {
     if (members.length < 2) continue;
-    // Survivor preference: already in correct category AND already carrying canonical label.
-    let survivor = members.find(
-      (m) => m.currentSlug === m.correctedSlug && m.row.label === m.canonLabel,
+
+    // Cluster values are equal after qualifier-stripping but may carry
+    // DIFFERENT qualifiers ("Anna (goddaughter)" vs "Anna (from first
+    // marriage)") — that can be two facts, so leave those for the LLM /
+    // soft-single passes instead of merging blindly.
+    const qualifiers = new Set(
+      members
+        .map((m) => {
+          const raw = (m.row.value || "").trim();
+          const base = stripTrailingQualifier(raw);
+          return raw === base ? "" : raw.slice(base.length).trim().toLowerCase();
+        })
+        .filter((q) => q !== ""),
     );
-    if (!survivor) survivor = members[0];
+    if (qualifiers.size > 1) continue;
+
+    // Survivor preference: clean value (no trailing qualifier) already in the
+    // correct category with the canonical label; then any clean value; then
+    // canonical position. Because clean members win, the merged entry keeps
+    // the qualifier-free value whenever one exists.
+    const isClean = (m: ClusterMember) =>
+      (m.row.value || "").trim() === stripTrailingQualifier(m.row.value || "");
+    const isCanonicalPos = (m: ClusterMember) =>
+      m.currentSlug === m.correctedSlug && m.row.label === m.canonLabel;
+    const survivor =
+      members.find((m) => isClean(m) && isCanonicalPos(m)) ||
+      members.find(isClean) ||
+      members.find(isCanonicalPos) ||
+      members[0];
     const memberIds = members.map((m) => m.row.id);
     for (const id of memberIds) deterministicIds.add(id);
     deterministicGroups.push({
@@ -166,7 +193,7 @@ export async function planSubjectNormalization(args: {
       canonical_value: survivor.row.value, // original, non-lowercased
       operation: "merge",
       confidence: 1.0,
-      rationale: "Exact duplicate entries collapsed to the canonical label/category.",
+      rationale: "Duplicate entries (same fact) collapsed to the canonical label/category.",
     });
   }
 

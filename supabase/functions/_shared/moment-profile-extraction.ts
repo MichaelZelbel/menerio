@@ -17,6 +17,7 @@ import {
   isSelfName,
   type EntityRef,
 } from "./relationship-canonical.ts";
+import { normalizeProfileValueForDedup } from "./profile-canonical-schema.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
@@ -426,7 +427,7 @@ export async function extractProfileFromMoment(
     .eq("user_id", userId)
     .in("contact_id", contactIds);
   const entrySet = new Set(
-    (existingEntries || []).map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}|${(e.value || "").toLowerCase()}`),
+    (existingEntries || []).map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}|${normalizeProfileValueForDedup(e.value || "")}`),
   );
   const singletonEntrySet = new Set(
     (existingEntries || [])
@@ -442,7 +443,7 @@ export async function extractProfileFromMoment(
     .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
   const queueSet = new Set(
     (existingQueue || []).map((q: any) =>
-      `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}|${(q.payload?.value || "").toLowerCase()}`
+      `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}|${normalizeProfileValueForDedup(q.payload?.value || "")}`
     ),
   );
   const singletonQueueSet = new Set(
@@ -494,7 +495,7 @@ export async function extractProfileFromMoment(
       continue;
     }
 
-    const dedupKey = `${contact.contact_id}|${labelLower}|${value.toLowerCase()}`;
+    const dedupKey = `${contact.contact_id}|${labelLower}|${normalizeProfileValueForDedup(value)}`;
     if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
     const singletonKey = `${contact.contact_id}|${labelLower}`;
     if (SINGLETON_PROFILE_LABELS.has(labelLower) && (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey))) {

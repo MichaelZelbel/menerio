@@ -17,6 +17,7 @@ import {
   PROFILE_CANONICAL_SCHEMA,
   canonicalProfileLabel,
   correctProfileCategory,
+  normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
 import {
   applyNormalization,
@@ -748,6 +749,7 @@ DERIVED FACTS — compute the canonical underlying fact when possible:
 - If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
 - If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact.
 - Always normalize date values to ISO YYYY-MM-DD.
+- The "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
 
 CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
 ${CANONICAL_LABELS_FOR_PROMPT}
@@ -1329,8 +1331,10 @@ async function generateProfileSuggestions(
       existingCategories.push(...(c2 || []));
     }
 
+    // Value is dedup-normalized (trailing parenthetical qualifiers stripped)
+    // so "5'4\"" and "5'4\" (fun sized)" register as the same fact.
     const entryKey = (cid: string | null, label: string, value: string) =>
-      `${cid || OWNER_KEY}|${label.toLowerCase()}|${value.toLowerCase()}`;
+      `${cid || OWNER_KEY}|${label.toLowerCase()}|${normalizeProfileValueForDedup(value)}`;
     const singletonEntryKey = (cid: string | null, label: string) =>
       `${cid || OWNER_KEY}|${label.toLowerCase()}`;
 
