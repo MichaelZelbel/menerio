@@ -81,3 +81,11 @@ manifest and `index.html`.
   (`scripts/brand-string-allowlist.json`). After refactoring strings away,
   shrink the allowlist with `node scripts/check-brand-strings.mjs --update`
   (counts should only go down).
+
+## Auth emails
+
+Supabase auth emails (confirm signup, reset password, magic link) are
+brand-aware: the templates branch on the `brand` key in `user_metadata`
+(written at signup) with a fallback on the signup origin. The templates live in
+the Supabase dashboard; a versioned copy plus the template-engine gotchas is in
+[auth-email-templates.md](auth-email-templates.md).
