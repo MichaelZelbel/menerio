@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import {
   loadChatState,
@@ -27,22 +28,49 @@ import {
   Wrench,
   AlertCircle,
   Trash2,
+  Maximize2,
+  Minimize2,
+  Expand,
+  Shrink,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
 type ChatMessage = PersistedChatMessage;
+type SizeMode = "docked" | "expanded" | "fullscreen";
+
+const SIZE_STORAGE_KEY = "menerio:chat-fab-size";
+
+function loadSizeMode(): SizeMode {
+  if (typeof window === "undefined") return "docked";
+  const v = window.localStorage.getItem(SIZE_STORAGE_KEY);
+  return v === "expanded" || v === "fullscreen" ? v : "docked";
+}
 
 export function GlobalAIChatFAB() {
   const { user, session } = useAuth();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sizeMode, setSizeModeState] = useState<SizeMode>(() => loadSizeMode());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const setSizeMode = useCallback((m: SizeMode) => {
+    setSizeModeState(m);
+    try {
+      window.localStorage.setItem(SIZE_STORAGE_KEY, m);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Force docked on mobile (expanded == docked visually there)
+  const effectiveMode: SizeMode = isMobile && sizeMode === "expanded" ? "docked" : sizeMode;
 
   // Detect note context from the current route
   const noteId = useMemo(() => {
@@ -75,20 +103,27 @@ export function GlobalAIChatFAB() {
     saveChatState(user?.id, contextKey, state);
   }, [state, contextKey, user?.id]);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+K
+  // Keyboard shortcut: Cmd/Ctrl+Shift+K; Escape steps size down before closing
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "K") {
         e.preventDefault();
         setOpen((prev) => !prev);
+        return;
       }
       if (e.key === "Escape" && open) {
-        setOpen(false);
+        if (effectiveMode === "fullscreen") {
+          setSizeMode(isMobile ? "docked" : "expanded");
+        } else if (effectiveMode === "expanded") {
+          setSizeMode("docked");
+        } else {
+          setOpen(false);
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open]);
+  }, [open, effectiveMode, isMobile, setSizeMode]);
 
   // Focus textarea when opened
   useEffect(() => {
@@ -225,6 +260,32 @@ export function GlobalAIChatFAB() {
       ? "Ask me about this person or anything in your knowledge base."
       : "Ask me anything about your notes, people, and media.";
 
+  // Dimensions per mode
+  const isLarge = effectiveMode !== "docked";
+  const panelStyle: React.CSSProperties =
+    effectiveMode === "fullscreen"
+      ? {
+          top: 16,
+          right: 16,
+          bottom: 16,
+          left: 16,
+          width: "auto",
+          height: "auto",
+        }
+      : effectiveMode === "expanded"
+        ? {
+            bottom: 24,
+            right: 24,
+            width: "min(720px, calc(100vw - 48px))",
+            height: "min(85dvh, calc(100dvh - 80px))",
+          }
+        : {
+            bottom: 24,
+            right: 24,
+            width: isMobile ? "calc(100vw - 24px)" : "min(420px, calc(100vw - 48px))",
+            height: "min(560px, calc(100dvh - 80px))",
+          };
+
   return (
     <>
       {/* FAB button */}
@@ -243,13 +304,21 @@ export function GlobalAIChatFAB() {
         </button>
       )}
 
-      {/* Docked chat panel — non-blocking, no backdrop, note stays visible */}
+      {/* Optional backdrop in fullscreen for focus */}
+      {open && effectiveMode === "fullscreen" && (
+        <div
+          className="fixed inset-0 z-40 bg-background/40 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setSizeMode(isMobile ? "docked" : "expanded")}
+        />
+      )}
+
+      {/* Docked / expanded / fullscreen panel */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 w-[min(420px,calc(100vw-48px))] animate-in slide-in-from-bottom-4 fade-in duration-200">
-          <div
-            className="bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col"
-            style={{ height: "min(500px, calc(100vh - 80px))" }}
-          >
+        <div
+          className="fixed z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={panelStyle}
+        >
+          <div className="bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col h-full w-full">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
               <div className="flex items-center gap-2 min-w-0">
@@ -264,7 +333,7 @@ export function GlobalAIChatFAB() {
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-[10px] text-muted-foreground hidden sm:inline">⌘⇧K</span>
+                <span className="text-[10px] text-muted-foreground hidden sm:inline mr-1">⌘⇧K</span>
                 {state.messages.length > 0 && (
                   <Button
                     variant="ghost"
@@ -276,14 +345,52 @@ export function GlobalAIChatFAB() {
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 )}
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
+                {!isMobile && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setSizeMode(effectiveMode === "docked" ? "expanded" : "docked")}
+                    title={effectiveMode === "docked" ? "Expand" : "Collapse"}
+                  >
+                    {effectiveMode === "docked" ? (
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Minimize2 className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() =>
+                    setSizeMode(
+                      effectiveMode === "fullscreen" ? (isMobile ? "docked" : "expanded") : "fullscreen",
+                    )
+                  }
+                  title={effectiveMode === "fullscreen" ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {effectiveMode === "fullscreen" ? (
+                    <Shrink className="h-3.5 w-3.5" />
+                  ) : (
+                    <Expand className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)} title="Close">
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
 
             {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-3 space-y-3">
+            <div
+              ref={scrollRef}
+              className={cn(
+                "flex-1 overflow-y-auto min-h-0 space-y-3",
+                isLarge ? "px-5 py-4" : "p-3",
+              )}
+            >
               {state.messages.length === 0 && (
                 <div className="text-center text-muted-foreground text-xs py-8 space-y-2">
                   <Bot className="h-8 w-8 mx-auto opacity-40" />
@@ -300,14 +407,18 @@ export function GlobalAIChatFAB() {
                     <Bot className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                   )}
                   <div
-                    className={`rounded-lg px-3 py-2 text-sm max-w-[85%] ${
+                    className={cn(
+                      "rounded-lg px-3 py-2 text-sm",
                       msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    }`}
+                        ? "bg-primary text-primary-foreground max-w-[85%]"
+                        : cn(
+                            "bg-muted",
+                            isLarge ? "max-w-[85%] md:max-w-[75ch]" : "max-w-[85%]",
+                          ),
+                    )}
                   >
                     {msg.role === "assistant" ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:mb-1 [&>p:last-child]:mb-0">
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
                         <ReactMarkdown remarkPlugins={chatMarkdownPlugins} components={chatMarkdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
@@ -357,7 +468,7 @@ export function GlobalAIChatFAB() {
             </div>
 
             {/* Input */}
-            <div className="p-3 border-t border-border shrink-0">
+            <div className={cn("border-t border-border shrink-0", isLarge ? "p-4" : "p-3")}>
               <div className="flex gap-2">
                 <Textarea
                   ref={textareaRef}
@@ -365,7 +476,10 @@ export function GlobalAIChatFAB() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask something…"
-                  className="min-h-[40px] max-h-[120px] resize-none text-sm"
+                  className={cn(
+                    "min-h-[40px] resize-none text-sm",
+                    isLarge ? "max-h-[200px]" : "max-h-[120px]",
+                  )}
                   rows={1}
                   disabled={isLoading}
                 />
