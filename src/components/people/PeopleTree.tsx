@@ -177,15 +177,31 @@ const PersonRow = memo(function PersonRow({
           )}
           style={{ paddingLeft: `${basePad + depth * depthStep}px` }}
         >
-          <span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+          {/* The row is an <a href>: any click that isn't explicitly
+              preventDefault-ed triggers a NATIVE full-page navigation (the
+              span's stopPropagation alone only silences the React handler —
+              the browser still follows the link and wipes all state). So the
+              checkbox handles its own click: preventDefault kills the anchor's
+              default action, stopPropagation keeps the row handler out, and
+              the toggle is driven directly from here. Radix skips its internal
+              toggle on defaultPrevented events, so state stays fully ours. */}
+          <span
+            className="shrink-0"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
             <Checkbox
               checked={isChecked}
-              onCheckedChange={() =>
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
                 bulkClick(
                   { metaKey: true, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent,
                   person.id,
-                )
-              }
+                );
+              }}
               aria-label={`Select ${person.name}`}
               className={cn("h-3.5 w-3.5", multiActive ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
             />
