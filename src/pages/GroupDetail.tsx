@@ -58,11 +58,13 @@ export default function GroupDetail() {
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<GroupStage>(group?.stages ?? []);
   // A stage-less group has no pipeline board; hide the tab and fall back to the
-  // flat list (the group may load after the initial "pipeline" default).
+  // flat list. Gate on the LOADED group: while the query is resolving, `group`
+  // is undefined and stages parse to [], so flipping then would strand pipeline
+  // groups on the List tab before their stages ever arrive.
   const hasPipeline = stages.length > 0;
   useEffect(() => {
-    if (!hasPipeline && activeTab === "pipeline") setActiveTab("list");
-  }, [hasPipeline, activeTab]);
+    if (group && !hasPipeline && activeTab === "pipeline") setActiveTab("list");
+  }, [group, hasPipeline, activeTab]);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.contact_id)), [memberships]);
   const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
