@@ -280,11 +280,11 @@ async function processDigestForUser(
       });
 
     let resp = await sendDigest(brand.from);
-    // If the brand's From domain is not verified in Resend, fall back to the
-    // Menerio sender so the digest still arrives.
-    if (!resp.ok && brandId !== "menerio") {
-      console.error(`daily-digest: send as "${brand.from}" failed (${resp.status}): ${await resp.text()} — retrying with Menerio sender`);
-      resp = await sendDigest(DIGEST_BRANDS.menerio.from);
+    // If the brand's From domain is not verified in Resend, fall back to a
+    // Cherishly-named sender on the verified menerio.com domain.
+    if (!resp.ok && brandId === "cherishly") {
+      console.error(`daily-digest: send as "${brand.from}" failed (${resp.status}): ${await resp.text()} — retrying with fallback sender`);
+      resp = await sendDigest("Cherishly <cherishly@menerio.com>");
     }
     if (!resp.ok) {
       console.error(`daily-digest: Resend error ${resp.status}: ${await resp.text()}`);
