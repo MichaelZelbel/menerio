@@ -150,6 +150,25 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_person_profile",
+      description:
+        "Look up a person from the user's People list by name and return their full profile: attribute entries (label/value by category), relationships, and aliases. Use this FIRST for any question about a specific person or their profile data — profiles are structured data that note search cannot see.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The person's name (or nickname/alias) to look up",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "add_wikilink",
       description:
         "Create a wikilink connection from the current note to another note by its ID.",
@@ -175,6 +194,62 @@ const TOOLS = [
 // System prompts now resolved at runtime from llm_call_configs
 // (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
 // Falls back to constants in llm-defaults.ts.
+
+// Load a contact's structured profile (entries + relationships) for the
+// get_person_profile tool and for person-page context injection.
+async function loadPersonProfile(userId: string, contactId: string) {
+  const { data: contact } = await db
+    .from("contacts")
+    .select("id, name, aliases")
+    .eq("id", contactId)
+    .eq("user_id", userId)
+    .is("merged_into", null)
+    .maybeSingle();
+  if (!contact) return null;
+
+  const { data: entries } = await db
+    .from("profile_entries")
+    .select("label, value, profile_categories(name, slug)")
+    .eq("user_id", userId)
+    .eq("contact_id", contactId)
+    .limit(100);
+
+  const { data: rels } = await db
+    .from("contact_relationships")
+    .select("source_type, source_id, target_type, target_id, label")
+    .eq("user_id", userId)
+    .or(`source_id.eq.${contactId},target_id.eq.${contactId}`);
+
+  const otherIds = new Set<string>();
+  for (const r of (rels || []) as any[]) {
+    if (r.source_type === "contact" && r.source_id && r.source_id !== contactId) otherIds.add(r.source_id);
+    if (r.target_type === "contact" && r.target_id && r.target_id !== contactId) otherIds.add(r.target_id);
+  }
+  let names: Record<string, string> = {};
+  if (otherIds.size > 0) {
+    const { data: others } = await db
+      .from("contacts")
+      .select("id, name")
+      .in("id", [...otherIds]);
+    names = Object.fromEntries((others || []).map((c: any) => [c.id, c.name]));
+  }
+  const describe = (type: string, id: string | null) =>
+    type === "self" ? "the user" : id === contactId ? contact.name : names[id || ""] || "unknown";
+
+  return {
+    person: { id: contact.id, name: contact.name, aliases: (contact.aliases || []) as string[] },
+    profile_entries: ((entries || []) as any[]).map((e: any) => ({
+      category: e.profile_categories?.name || e.profile_categories?.slug || "other",
+      label: e.label,
+      value: e.value,
+    })),
+    relationships: ((rels || []) as any[]).map((r: any) => ({
+      from: describe(r.source_type, r.source_id),
+      label: r.label,
+      to: describe(r.target_type, r.target_id),
+    })),
+  };
+}
 
 // Execute tool calls
 async function executeTool(
@@ -358,6 +433,49 @@ async function executeTool(
       return JSON.stringify({ results, count: results.length });
     }
 
+    case "get_person_profile": {
+      const rawName = String(args.name || "").trim();
+      if (!rawName) return JSON.stringify({ error: "name required" });
+      const q = rawName.toLowerCase();
+      let matches: any[] = [];
+      const { data: byName } = await db
+        .from("contacts")
+        .select("id, name, aliases")
+        .eq("user_id", userId)
+        .is("merged_into", null)
+        .ilike("name", `%${q}%`)
+        .limit(5);
+      matches = byName || [];
+      if (matches.length === 0) {
+        // Fall back to alias matching (aliases is an array column, so filter in JS).
+        const { data: all } = await db
+          .from("contacts")
+          .select("id, name, aliases")
+          .eq("user_id", userId)
+          .is("merged_into", null)
+          .limit(500);
+        matches = ((all || []) as any[])
+          .filter((c) => (c.aliases || []).some((a: string) => String(a).toLowerCase().includes(q)))
+          .slice(0, 5);
+      }
+      if (matches.length === 0) {
+        return JSON.stringify({
+          found: false,
+          message: `No person named "${rawName}" in the user's People list.`,
+        });
+      }
+      if (matches.length > 1) {
+        return JSON.stringify({
+          ambiguous: true,
+          candidates: matches.map((m) => ({ id: m.id, name: m.name })),
+          hint: "Multiple people matched — call again with a more specific name.",
+        });
+      }
+      const profile = await loadPersonProfile(userId, matches[0].id);
+      if (!profile) return JSON.stringify({ found: false, message: "Person not found." });
+      return JSON.stringify({ found: true, ...profile });
+    }
+
     case "add_wikilink": {
       const targetId = args.target_note_id as string;
       const targetTitle = args.target_note_title as string;
@@ -400,7 +518,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
-    const { note_id, messages: chatMessages, mode } = body;
+    const { note_id, person_id, messages: chatMessages, mode } = body;
 
     if (!chatMessages || !Array.isArray(chatMessages))
       return json({ error: "messages required" }, 400);
@@ -514,14 +632,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
       };
       activeTools = TOOLS;
     } else {
-      // General knowledge base mode — search-only tools
-      systemMessage = {
-        role: "system",
-        content: await resolveSystemPrompt(db, "note-chat.general", NOTE_CHAT_GENERAL_MODE_PROMPT),
-      };
+      // General assistant mode — read tools over notes, media, and people.
+      let systemContent = await resolveSystemPrompt(db, "note-chat.general", NOTE_CHAT_GENERAL_MODE_PROMPT);
 
-      const SEARCH_TOOL_NAMES = ["search_notes_semantic", "search_notes_text", "search_media_text"];
-      activeTools = TOOLS.filter((t) => SEARCH_TOOL_NAMES.includes(t.function.name));
+      // If the user is on a person's profile page, inject that page's data
+      // directly so questions about "this person" are answerable without the
+      // model having to guess where to look. Appended in code (not via a
+      // prompt placeholder) so it works regardless of the DB prompt config.
+      if (person_id && typeof person_id === "string") {
+        const p = await loadPersonProfile(user.id, person_id);
+        if (p) {
+          const entryLines = p.profile_entries
+            .map((e) => `- [${e.category}] ${e.label}: ${e.value}`)
+            .join("\n");
+          const relLines = p.relationships
+            .map((r) => `- ${r.from} — ${r.label} → ${r.to}`)
+            .join("\n");
+          systemContent += `\n\n--- CURRENT PERSON (the user is viewing this profile page) ---\nName: ${p.person.name}${p.person.aliases.length ? `\nAliases: ${p.person.aliases.join(", ")}` : ""}\nProfile entries:\n${entryLines || "(none)"}\nRelationships:\n${relLines || "(none)"}\n--- END CURRENT PERSON ---\nWhen the user says "this person" or refers to the profile they are looking at, they mean ${p.person.name}. Answer from this data directly when it already contains the answer — no tool calls needed for that.`;
+        }
+      }
+
+      systemMessage = { role: "system", content: systemContent };
+
+      const READ_TOOL_NAMES = [
+        "search_notes_semantic",
+        "search_notes_text",
+        "search_media_text",
+        "get_person_profile",
+      ];
+      activeTools = TOOLS.filter((t) => READ_TOOL_NAMES.includes(t.function.name));
     }
 
     // Build messages array: system + user conversation
@@ -610,10 +749,54 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
-    // If we exhausted iterations, return whatever we have
+    // Iteration budget exhausted while the model still wanted more tool calls.
+    // Never return a canned "actions completed" line — the user likely asked a
+    // question. Force one final text answer synthesized from what was gathered.
+    try {
+      const synthResult = await openRouterWithCredits(
+        db,
+        OPENROUTER_API_KEY,
+        user.id,
+        "note-chat",
+        "chat/completions",
+        {
+          model: "minimax/minimax-m2.7",
+          messages: [
+            ...llmMessages,
+            {
+              role: "system",
+              content:
+                "Tool budget exhausted — you cannot call more tools. Using everything gathered above, answer the user's last message directly now. If the gathered results don't contain the answer, say so plainly and suggest what to try instead. Do not claim to have completed any actions.",
+            },
+          ],
+          tools: activeTools,
+          tool_choice: "none",
+        }
+      );
+      lastCredits = synthResult.credits ?? lastCredits;
+      const synthReply = synthResult.result.choices?.[0]?.message?.content?.trim();
+      if (synthReply) {
+        return json({
+          reply: synthReply,
+          tool_results: toolResults,
+          credits: lastCredits
+            ? {
+                remaining_tokens: lastCredits.remaining_tokens,
+                remaining_credits: lastCredits.remaining_credits,
+              }
+            : null,
+        });
+      }
+    } catch (err: any) {
+      if (err.message === "INSUFFICIENT_CREDITS") {
+        return insufficientCreditsResponse(corsHeaders);
+      }
+      console.error("note-chat synthesis error:", err);
+    }
+
     return json({
       reply:
-        "I completed the requested actions. Please check the results above.",
+        "I couldn't finish researching that within my step budget. Try rephrasing, or point me at a specific note or person to look at.",
       tool_results: toolResults,
       credits: lastCredits
         ? {

@@ -50,7 +50,14 @@ export function GlobalAIChatFAB() {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  const contextKey = noteId ? `note:${noteId}` : "general";
+  // Detect person context (People profile page) so the assistant knows whose
+  // profile the user is looking at
+  const personId = useMemo(() => {
+    const match = location.pathname.match(/^\/dashboard\/people\/([^/]+)$/);
+    return match ? match[1] : null;
+  }, [location.pathname]);
+
+  const contextKey = noteId ? `note:${noteId}` : personId ? `person:${personId}` : "general";
 
   // Persisted chat state for the current context
   const [state, setState] = useState<PersistedChatState>(() =>
@@ -142,6 +149,7 @@ export function GlobalAIChatFAB() {
       const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
         body: {
           note_id: noteId || undefined,
+          person_id: personId || undefined,
           messages: apiMessages,
         },
       });
@@ -193,7 +201,7 @@ export function GlobalAIChatFAB() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -213,7 +221,9 @@ export function GlobalAIChatFAB() {
 
   const emptyText = noteId
     ? "Ask me about this note or your knowledge base."
-    : "Ask me anything about your knowledge base.";
+    : personId
+      ? "Ask me about this person or anything in your knowledge base."
+      : "Ask me anything about your notes, people, and media.";
 
   return (
     <>
@@ -245,7 +255,7 @@ export function GlobalAIChatFAB() {
               <div className="flex items-center gap-2 min-w-0">
                 <Bot className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-sm font-semibold truncate">
-                  {noteId ? "Editing current note" : "Knowledge Base"}
+                  {noteId ? "Editing current note" : "AI Assistant"}
                 </span>
                 {state.messages.length > 0 && (
                   <span className="text-[10px] text-muted-foreground shrink-0">
@@ -279,7 +289,7 @@ export function GlobalAIChatFAB() {
                   <Bot className="h-8 w-8 mx-auto opacity-40" />
                   <p>{emptyText}</p>
                   <p className="text-[10px]">
-                    I can search your notes, media, and knowledge graph.
+                    I can search your notes and media, and look up people's profiles.
                   </p>
                 </div>
               )}
