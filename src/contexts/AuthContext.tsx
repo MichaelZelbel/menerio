@@ -3,6 +3,7 @@ import { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { clearPersistedQueries } from "@/lib/query-persister";
+import { BRAND } from "@/lib/brand";
 
 const LAST_USER_KEY = "menerio:last-user-id";
 
@@ -157,7 +158,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string, displayName: string): Promise<{ success: boolean; alreadyExists?: boolean }> => {
     const { data, error } = await supabase.auth.signUp({
       email, password,
-      options: { emailRedirectTo: window.location.origin, data: { full_name: displayName } },
+      // `brand` records which brand the user signed up on; the Supabase auth
+      // email templates branch on it ({{ .Data.brand }}) and backend emails
+      // can use it as the per-user brand signal.
+      options: { emailRedirectTo: window.location.origin, data: { full_name: displayName, brand: BRAND.id } },
     });
     if (error) { handleAuthError(error); throw error; }
     if (data.user?.identities?.length === 0) {
