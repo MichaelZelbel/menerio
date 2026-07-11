@@ -84,8 +84,20 @@ manifest and `index.html`.
 
 ## Auth emails
 
-Supabase auth emails (confirm signup, reset password, magic link) are
-brand-aware: the templates branch on the `brand` key in `user_metadata`
-(written at signup) with a fallback on the signup origin. The templates live in
-the Supabase dashboard; a versioned copy plus the template-engine gotchas is in
-[auth-email-templates.md](auth-email-templates.md).
+Auth emails (confirm signup, reset password, magic link, invite, email change,
+reauthentication) are brand-aware end to end:
+
+- **Primary:** the `send-auth-email` edge function
+  ([supabase/functions/send-auth-email](../supabase/functions/send-auth-email/index.ts)),
+  wired as the Supabase Auth "Send Email" hook. It resolves the brand from the
+  `brand` key in `user_metadata` (written at signup) with a fallback on the
+  signup origin, renders the branded HTML in code, and sends through the Resend
+  API with a per-brand From address ("Cherishly <support@cherishly.ai>" vs
+  "Menerio <support@menerio.com>"). If a brand's domain is not verified in
+  Resend it retries with the Menerio sender so delivery never depends on it.
+- **Fallback:** brand-conditional templates in the Supabase dashboard, kept in
+  sync in [auth-email-templates.md](auth-email-templates.md). Disabling the
+  hook in the dashboard (Authentication → Auth Hooks) instantly reverts to
+  them — that is the rollback path.
+
+The `daily-digest` function applies the same brand resolution to digest emails.

@@ -1,5 +1,10 @@
 project_id = "tjeapelvjlmbxafsmjef"
 
+# Auth hook target: called by Supabase Auth with a standardwebhooks
+# signature, not a JWT.
+[functions.send-auth-email]
+verify_jwt = false
+
 [functions.delete-my-account]
 verify_jwt = false
 

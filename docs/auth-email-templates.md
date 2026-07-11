@@ -1,10 +1,18 @@
 # Auth email templates (Supabase)
 
-**Source of truth:** the Supabase dashboard — Authentication → Emails → Templates
-(project `tjeapelvjlmbxafsmjef`). This file is a versioned copy so the templates
-survive a dashboard mishap and so contributors can see how the two-brand email
-switching works. If you edit a template in the dashboard, update this file in the
-same change.
+> **Status (2026-07-11): these dashboard templates are now the FALLBACK path.**
+> Auth emails are sent by the `send-auth-email` edge function (Supabase Auth
+> "Send Email" hook → Resend API), which renders both brands in code and uses a
+> per-brand From address. The dashboard templates below only take over if that
+> hook is disabled (Dashboard → Authentication → Auth Hooks) — which is also
+> the rollback path if the function ever misbehaves. Keep both in sync when
+> changing email copy.
+
+**Source of truth for the fallback:** the Supabase dashboard — Authentication →
+Emails → Templates (project `tjeapelvjlmbxafsmjef`). This file is a versioned
+copy so the templates survive a dashboard mishap and so contributors can see how
+the two-brand email switching works. If you edit a template in the dashboard,
+update this file in the same change.
 
 ## How brand switching works
 

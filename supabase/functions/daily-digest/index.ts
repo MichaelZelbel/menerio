@@ -148,7 +148,39 @@ async function triggerWeeklyReviewSchedule(): Promise<void> {
   }
 }
 
-async function processDigestForUser(userId: string, email: string, userName: string): Promise<void> {
+// Per-brand digest styling: users who signed up on Cherishly (user_metadata.brand)
+// get the Cherishly look and sender; everyone else gets Menerio. See docs/BRANDING.md.
+const DIGEST_BRANDS = {
+  menerio: {
+    name: "Menerio",
+    from: "Menerio <support@menerio.com>",
+    url: "https://menerio.com",
+    accent: "#1a56db",
+    logoHtml:
+      '<div style="display:inline-block;padding:6px 12px;background:#1a56db;border-radius:8px;"><span style="color:#fff;font-weight:700;font-size:14px;">M</span></div><span style="margin-left:8px;font-weight:600;font-size:18px;color:#1e293b;">Menerio</span>',
+  },
+  cherishly: {
+    name: "Cherishly",
+    from: "Cherishly <support@cherishly.ai>",
+    url: "https://cherishly.ai",
+    accent: "#e23670",
+    logoHtml:
+      '<img src="https://cherishly.ai/apple-touch-icon.png" alt="Cherishly" width="28" height="28" style="border-radius:8px;vertical-align:middle;"><span style="margin-left:8px;font-weight:600;font-size:18px;color:#e23670;vertical-align:middle;">Cherishly</span>',
+  },
+} as const;
+
+type DigestBrandId = keyof typeof DIGEST_BRANDS;
+
+function digestBrandFor(userMetadata: Record<string, unknown> | undefined): DigestBrandId {
+  return userMetadata?.brand === "cherishly" ? "cherishly" : "menerio";
+}
+
+async function processDigestForUser(
+  userId: string,
+  email: string,
+  userName: string,
+  brandId: DigestBrandId = "menerio",
+): Promise<void> {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStart = new Date(yesterday.setHours(0, 0, 0, 0)).toISOString();
@@ -219,34 +251,44 @@ async function processDigestForUser(userId: string, email: string, userName: str
   // Send email via Resend (if configured)
   const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
   if (RESEND_API_KEY) {
+    const brand = DIGEST_BRANDS[brandId];
     const htmlBullets = bullets.map((b) => `<li style="margin-bottom:8px;color:#334155;">${b}</li>`).join("");
     const html = `
       <div style="font-family:'Inter',system-ui,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
         <div style="margin-bottom:24px;">
-          <div style="display:inline-block;padding:6px 12px;background:#1a56db;border-radius:8px;">
-            <span style="color:#fff;font-weight:700;font-size:14px;">M</span>
-          </div>
-          <span style="margin-left:8px;font-weight:600;font-size:18px;color:#1e293b;">Menerio</span>
+          ${brand.logoHtml}
         </div>
         <h2 style="font-size:20px;font-weight:700;color:#1e293b;margin:0 0 16px;">Your Daily Digest</h2>
         <ul style="padding-left:20px;margin:0 0 24px;line-height:1.7;font-size:14px;">${htmlBullets}</ul>
-        <a href="https://menerio.lovable.app/dashboard" style="display:inline-block;padding:10px 24px;background:#1a56db;color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">Open Menerio</a>
-        <p style="margin-top:24px;font-size:12px;color:#94a3b8;">You're receiving this because you enabled daily digests in Menerio settings.</p>
+        <a href="${brand.url}/dashboard" style="display:inline-block;padding:10px 24px;background:${brand.accent};color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">Open ${brand.name}</a>
+        <p style="margin-top:24px;font-size:12px;color:#94a3b8;">You're receiving this because you enabled daily digests in ${brand.name} settings.</p>
       </div>`;
 
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "Menerio <support@menerio.com>",
-        to: [email],
-        subject: `Your Daily Digest — ${new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`,
-        html,
-      }),
-    });
+    const sendDigest = (from: string) =>
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [email],
+          subject: `Your Daily Digest — ${new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`,
+          html,
+        }),
+      });
+
+    let resp = await sendDigest(brand.from);
+    // If the brand's From domain is not verified in Resend, fall back to the
+    // Menerio sender so the digest still arrives.
+    if (!resp.ok && brandId !== "menerio") {
+      console.error(`daily-digest: send as "${brand.from}" failed (${resp.status}): ${await resp.text()} — retrying with Menerio sender`);
+      resp = await sendDigest(DIGEST_BRANDS.menerio.from);
+    }
+    if (!resp.ok) {
+      console.error(`daily-digest: Resend error ${resp.status}: ${await resp.text()}`);
+    }
   }
 }
 
@@ -285,7 +327,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       if (email) {
         await Promise.all([
-          processDigestForUser(targetUserId, email, profile?.display_name || "there"),
+          processDigestForUser(
+            targetUserId,
+            email,
+            profile?.display_name || "there",
+            digestBrandFor(authUser?.user?.user_metadata),
+          ),
           generateInAppNotifications(targetUserId),
         ]);
       }
@@ -313,7 +360,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
         if (email) {
           await Promise.all([
-            processDigestForUser(pref.user_id, email, profile?.display_name || "there"),
+            processDigestForUser(
+              pref.user_id,
+              email,
+              profile?.display_name || "there",
+              digestBrandFor(authUser?.user?.user_metadata),
+            ),
             generateInAppNotifications(pref.user_id),
           ]);
           processed++;
