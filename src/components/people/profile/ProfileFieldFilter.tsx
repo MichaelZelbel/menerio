@@ -26,7 +26,9 @@ export function ProfileFieldFilter({ value, onChange }: ProfileFieldFilterProps)
       const isEditableTarget = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable;
       if (isEditableTarget) return;
 
-      if (document.querySelector('[role="dialog"]')) return;
+      // Radix Dialog renders role="dialog", but AlertDialog (e.g. the
+      // delete-category confirmation) renders role="alertdialog" — guard both.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
 
       e.preventDefault();
       inputRef.current?.focus();
