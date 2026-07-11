@@ -5,15 +5,20 @@ import { getTemplateById, instantiateTemplate } from "@/lib/group-templates";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 
-type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
+export type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type ContactGroupInsert = Database["public"]["Tables"]["contact_groups"]["Insert"];
 type ContactGroupUpdate = Database["public"]["Tables"]["contact_groups"]["Update"];
 
-type CreateGroupInput =
-  | (Omit<ContactGroupInsert, "user_id" | "slug"> & { slug?: string })
-  | { templateId: string; name?: string };
+// `parent_group_id` lives in the DB (Phase 1 migration) but not yet in the
+// generated types — surface it here so callers can nest groups.
+type CreateGroupFields = Omit<ContactGroupInsert, "user_id" | "slug"> & {
+  slug?: string;
+  parent_group_id?: string | null;
+};
 
-type CreateGroupBase = Omit<ContactGroupInsert, "user_id" | "slug"> & { slug?: string };
+type CreateGroupInput = CreateGroupFields | { templateId: string; name?: string };
+
+type CreateGroupBase = CreateGroupFields;
 
 const slugify = (value: string) =>
   value
@@ -53,7 +58,9 @@ export function useGroups() {
         .select("*")
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
-        .order("updated_at", { ascending: false });
+        // Alpha order gives the People tree a stable sidebar; no consumer
+        // depends on recency ordering here.
+        .order("name", { ascending: true });
 
       if (error) throw error;
       return (data || []) as ContactGroupRow[];
@@ -100,25 +107,45 @@ export function useCreateGroup() {
         : input as CreateGroupBase;
 
       const name = base.name.trim();
-      const row: ContactGroupInsert = {
-        ...base,
-        user_id: user.id,
-        name,
-        slug: "slug" in base && base.slug ? base.slug : slugify(name),
-        success_criteria: base.success_criteria as Json,
-        stages: base.stages as Json,
-        attributes_schema: base.attributes_schema as Json,
-      };
+      const baseSlug = "slug" in base && base.slug ? base.slug : slugify(name);
 
-      const { data, error } = await supabase
-        .from("contact_groups")
-        .insert(row)
-        .select()
-        .single();
+      // Slug-collision retry: nesting invites same-name groups under different
+      // parents, and the DB enforces UNIQUE (user_id, slug). On 23505 we retry
+      // with a -2, -3, … suffix; any other error aborts immediately.
+      let group: ContactGroupRow | null = null;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 25 && !group; attempt++) {
+        const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+        const row = {
+          ...base,
+          user_id: user.id,
+          name,
+          slug,
+          success_criteria: base.success_criteria as Json,
+          stages: base.stages as Json,
+          attributes_schema: base.attributes_schema as Json,
+        } as ContactGroupInsert;
 
-      if (error) throw error;
-      const group = data as ContactGroupRow;
+        const { data, error } = await supabase
+          .from("contact_groups")
+          .insert(row)
+          .select()
+          .single();
 
+        if (!error) {
+          group = data as ContactGroupRow;
+          break;
+        }
+        if ((error as { code?: string }).code === "23505") {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+      if (!group) throw lastError ?? new Error("Could not create group");
+
+      // The wiki page is a best-effort side effect: a failure here must not
+      // roll back a successfully created group. Log + toast, then carry on.
       const { error: wikiError } = await supabase.from("wiki_pages").insert({
         user_id: user.id,
         slug: `group-${group.slug}`,
@@ -129,7 +156,10 @@ export function useCreateGroup() {
         content: groupWikiSkeleton(group),
       });
 
-      if (wikiError) throw wikiError;
+      if (wikiError) {
+        console.error("Group wiki page insert failed", wikiError);
+        showToast.error("Group created; wiki page failed");
+      }
       return group;
     },
     onSuccess: (group) => {

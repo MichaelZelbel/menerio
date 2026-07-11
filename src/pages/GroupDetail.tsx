@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent } from "@dnd-kit/core";
@@ -57,6 +57,12 @@ export default function GroupDetail() {
   const [activeTab, setActiveTab] = useState(() => window.matchMedia("(max-width: 767px)").matches ? "list" : "pipeline");
   const selectedMembership = memberships.find((m) => m.id === selectedMembershipId) || null;
   const stages = parseArray<GroupStage>(group?.stages ?? []);
+  // A stage-less group has no pipeline board; hide the tab and fall back to the
+  // flat list (the group may load after the initial "pipeline" default).
+  const hasPipeline = stages.length > 0;
+  useEffect(() => {
+    if (!hasPipeline && activeTab === "pipeline") setActiveTab("list");
+  }, [hasPipeline, activeTab]);
   const existingPersonIds = useMemo(() => new Set(memberships.map((m) => m.contact_id)), [memberships]);
   const membershipCounts = useMemo(() => memberships.reduce<Record<string, number>>((acc, m) => { const k = m.status || ""; acc[k] = (acc[k] || 0) + 1; return acc; }, {}), [memberships]);
   const sourceNoteIds = selectedMembership?.source_note_ids || [];
@@ -115,7 +121,8 @@ export default function GroupDetail() {
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="flex h-auto flex-wrap"><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="goals">Goals</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        <TabsList className="flex h-auto flex-wrap">{hasPipeline && <TabsTrigger value="pipeline">Pipeline</TabsTrigger>}<TabsTrigger value="briefing">Briefing</TabsTrigger><TabsTrigger value="list">List</TabsTrigger><TabsTrigger value="goals">Goals</TabsTrigger><TabsTrigger value="about">About</TabsTrigger></TabsList>
+        {hasPipeline && (
         <TabsContent value="pipeline" className="mt-0">
           <div className="mb-4 flex justify-end"><SuggestMembersButton groupId={group.id} /></div>
           <DndContext onDragEnd={onDragEnd}>
@@ -124,6 +131,7 @@ export default function GroupDetail() {
             </div>
           </DndContext>
         </TabsContent>
+        )}
         <TabsContent value="briefing" className="mt-0">
           <BriefingTab groupId={group.id} />
         </TabsContent>

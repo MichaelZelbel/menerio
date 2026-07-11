@@ -22,6 +22,9 @@ export type PersonGroupMembership = MembershipRow & {
   contact_groups: ContactGroupRow | null;
 };
 
+/** Slim shape for the aggregate membership query that powers the People tree. */
+export type MembershipLite = Pick<MembershipRow, "id" | "group_id" | "contact_id" | "status">;
+
 type AddMembershipInput = {
   groupId: string;
   personId: string;
@@ -42,6 +45,9 @@ function invalidateMembershipQueries(
 ) {
   if (groupId) qc.invalidateQueries({ queryKey: ["contact_group_memberships", groupId] });
   if (personId) qc.invalidateQueries({ queryKey: ["person_groups", personId] });
+  // The People tree reads every membership from one aggregate query; keep it
+  // fresh after any single-membership mutation.
+  qc.invalidateQueries({ queryKey: ["contact_group_memberships", "all"] });
 }
 
 export function useGroupMemberships(groupId: string | null | undefined) {
@@ -58,6 +64,30 @@ export function useGroupMemberships(groupId: string | null | undefined) {
 
       if (error) throw error;
       return ((data || []) as unknown) as GroupMembershipWithPerson[];
+    },
+  });
+}
+
+/**
+ * Every non-archived membership for the current user in a single query. Powers
+ * the People group tree, which needs the whole membership graph at once to
+ * compute per-group and per-subtree counts.
+ */
+export function useAllMemberships() {
+  const { user } = useAuth();
+
+  return useQuery<MembershipLite[]>({
+    queryKey: ["contact_group_memberships", "all", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contact_group_memberships")
+        .select("id, group_id, contact_id, status")
+        .eq("user_id", user!.id)
+        .is("archived_at", null);
+
+      if (error) throw error;
+      return ((data || []) as unknown) as MembershipLite[];
     },
   });
 }
@@ -118,7 +148,13 @@ export function useAddMembership() {
     onSuccess: (membership) => {
       invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => {
+      // A UNIQUE (group_id, contact_id) violation (Postgres 23505) surfaces as
+      // a "duplicate key" message — translate it to a friendly line, since the
+      // person is simply already a member.
+      const message = String(error?.message || "").toLowerCase();
+      showToast.error(message.includes("duplicate") ? "Already a member" : error.message);
+    },
   });
 }
 

@@ -83,13 +83,20 @@ export function useCreatePerson() {
 
   return useMutation({
     mutationFn: async (name: string) => {
-      const { error } = await supabase.from("contacts").insert({
-        user_id: user!.id,
-        name: name.trim(),
-        aliases: [],
-        app_mappings: {},
-      } as any);
+      // Returns the created row so callers (e.g. "Add person here" in the group
+      // tree) can chain a membership insert on the new id.
+      const { data, error } = await (supabase as any)
+        .from("contacts")
+        .insert({
+          user_id: user!.id,
+          name: name.trim(),
+          aliases: [],
+          app_mappings: {},
+        })
+        .select()
+        .single();
       if (error) throw error;
+      return data as Person;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
