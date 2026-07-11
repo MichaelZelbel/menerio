@@ -212,12 +212,19 @@ function renderHtml(brand: BrandTheme, c: EmailContent, actionUrl: string | null
 </html>`;
 }
 
+// Interim Cherishly sender while cherishly.ai is not verified in Resend
+// (free plan = 1 domain, taken by menerio.com): branded display name on the
+// verified domain, replies routed to the real Cherishly mailbox.
+const CHERISHLY_FALLBACK_FROM = "Cherishly <cherishly@menerio.com>";
+const CHERISHLY_REPLY_TO = "support@cherishly.ai";
+
 async function sendViaResend(payload: {
   from: string;
   to: string[];
   subject: string;
   html: string;
   text: string;
+  reply_to?: string;
 }): Promise<{ ok: boolean; status: number; body: string }> {
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -231,20 +238,29 @@ async function sendViaResend(payload: {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  // Ops helper: list the Resend account's verified domains.
-  // GET ?debug=domains, service-role protected.
+  // Ops helper: list the verified domains each configured Resend key can see.
+  // GET ?debug=domains, protected by the EMAIL_DEBUG_KEY secret.
   if (req.method === "GET") {
     const url = new URL(req.url);
     if (url.searchParams.get("debug") === "domains") {
+      const debugKey = Deno.env.get("EMAIL_DEBUG_KEY") ?? "";
       const auth = req.headers.get("Authorization") ?? "";
-      if (!SERVICE_ROLE_KEY || auth !== `Bearer ${SERVICE_ROLE_KEY}`) {
+      if (!debugKey || auth !== `Bearer ${debugKey}`) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
       }
-      const resp = await fetch("https://api.resend.com/domains", {
-        headers: { Authorization: `Bearer ${RESEND_API_KEY}` },
-      });
-      return new Response(await resp.text(), {
-        status: resp.status,
+      const probe = async (key: string | undefined) => {
+        if (!key) return { configured: false };
+        const resp = await fetch("https://api.resend.com/domains", {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        return { configured: true, status: resp.status, body: (await resp.text()).slice(0, 1500) };
+      };
+      const result = {
+        RESEND_API_KEY: await probe(Deno.env.get("RESEND_API_KEY")),
+        RESEND_API_KEY_1: await probe(Deno.env.get("RESEND_API_KEY_1")),
+      };
+      return new Response(JSON.stringify(result), {
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -303,12 +319,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let result = await sendViaResend({ from: brand.from, to: [to], subject: content.subject, html, text });
 
   // If the brand's From domain is not verified in this Resend account,
-  // retry once with the Menerio sender so the email still arrives.
-  if (!result.ok && brand.id !== "menerio") {
+  // retry once from the verified menerio.com domain — keeping the Cherishly
+  // display name and routing replies to the real Cherishly mailbox.
+  if (!result.ok && brand.id === "cherishly") {
     console.error(
-      `[SEND-AUTH-EMAIL] Send as "${brand.from}" failed (${result.status}): ${result.body} — retrying with Menerio sender`,
+      `[SEND-AUTH-EMAIL] Send as "${brand.from}" failed (${result.status}): ${result.body} — retrying with fallback sender`,
     );
-    result = await sendViaResend({ from: MENERIO.from, to: [to], subject: content.subject, html, text });
+    result = await sendViaResend({
+      from: CHERISHLY_FALLBACK_FROM,
+      reply_to: CHERISHLY_REPLY_TO,
+      to: [to],
+      subject: content.subject,
+      html,
+      text,
+    });
   }
 
   if (!result.ok) {
