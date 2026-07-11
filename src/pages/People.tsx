@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,7 @@ import {
   Loader2,
   Trash2,
   X,
-  
+  Star,
   Merge,
 } from "lucide-react";
 
@@ -47,20 +48,15 @@ import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
 import { useGroups } from "@/hooks/useGroups";
 import { useAddMembership, useGroupMemberships } from "@/hooks/useGroupMemberships";
 import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
-
-interface Person {
-  id: string;
-  user_id: string;
-  name: string;
-  notes: string | null;
-  tags: string[];
-  aliases: string[];
-  app_mappings: Record<string, { display_name?: string }>;
-  metadata: Record<string, unknown>;
-  merged_into: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import {
+  usePeople,
+  useCreatePerson,
+  useUpdatePerson,
+  useDeletePerson,
+  useToggleFavoritePerson,
+  useTouchPersonViewed,
+  Person,
+} from "@/hooks/usePeople";
 
 export default function People() {
   const { user } = useAuth();
@@ -113,28 +109,20 @@ export default function People() {
   }, [searchParams, navigate, setSearchParams]);
 
   // ── Queries ──
-  const { data: people = [], isLoading } = useQuery<Person[]>({
-    queryKey: ["contacts", user?.id],
-    enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("id, user_id, name, notes, tags, aliases, app_mappings, metadata, merged_into, created_at, updated_at, is_sensitive")
-        .eq("user_id", user!.id)
-        .is("merged_into", null)
-        .order("name");
-      if (error) throw error;
-      return (data || []).map((d: any) => ({
-        ...d,
-        aliases: d.aliases || [],
-        app_mappings: d.app_mappings || {},
-      })) as Person[];
-    },
-  });
+  const { data: people = [], isLoading } = usePeople();
 
   const selectedPerson = people.find((p) => p.id === selectedPersonId);
+  const toggleFavorite = useToggleFavoritePerson();
+  const touchPersonViewed = useTouchPersonViewed();
   const { data: groups = [] } = useGroups();
   const { data: groupFilterMemberships = [] } = useGroupMemberships(groupFilter === "all" ? null : groupFilter);
+
+  // Record a view whenever the detail pane switches to a different person
+  // (throttled inside the hook — skips if already touched within 5 minutes).
+  useEffect(() => {
+    if (selectedPersonId) touchPersonViewed.mutate(selectedPersonId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPersonId]);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({
@@ -161,50 +149,21 @@ export default function People() {
   });
 
   // ── Mutations ──
-  const createPerson = useMutation({
-    mutationFn: async (name: string) => {
-      const { error } = await supabase.from("contacts").insert({
-        user_id: user!.id,
-        name: name.trim(),
-        aliases: [],
-        app_mappings: {},
-      } as any);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["contacts"] });
-      setCreateOpen(false);
-      setCreateName("");
-      showToast.success("Person added");
-    },
-    onError: (e: any) => showToast.error(e.message),
-  });
+  const createPerson = useCreatePerson();
+  const updatePerson = useUpdatePerson();
+  const deletePerson = useDeletePerson();
 
-  const updatePerson = useMutation({
-    mutationFn: async (updates: Partial<Pick<Person, "name" | "notes" | "aliases" | "app_mappings">>) => {
-      const { error } = await supabase
-        .from("contacts")
-        .update(updates as any)
-        .eq("id", selectedPersonId!);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["contacts"] });
-    },
-    onError: (e: any) => showToast.error(e.message),
-  });
-
-  const deletePerson = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("contacts").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["contacts"] });
-      closePerson();
-      showToast.success("Person removed");
-    },
-  });
+  // Dialog-local state reset lives here (not in the hook) since the hook is
+  // shared across pages that don't have a create dialog to close.
+  const submitCreatePerson = () => {
+    if (!createName.trim()) return;
+    createPerson.mutate(createName, {
+      onSuccess: () => {
+        setCreateOpen(false);
+        setCreateName("");
+      },
+    });
+  };
 
   // ── Filtered list ──
   const filtered = people.filter((p) => {
@@ -275,14 +234,17 @@ export default function People() {
       }
       updates.name = trimmed;
     }
-    updatePerson.mutate(updates, {
-      onSuccess: () => {
-        showToast.success("Saved");
-        setEditingAliases(null);
-        setEditingNotes(null);
-        setEditingName(null);
+    updatePerson.mutate(
+      { id: selectedPerson.id, ...updates },
+      {
+        onSuccess: () => {
+          showToast.success("Saved");
+          setEditingAliases(null);
+          setEditingNotes(null);
+          setEditingName(null);
+        },
       },
-    });
+    );
   };
 
   const isEditing = editingAliases !== null;
@@ -356,6 +318,17 @@ export default function People() {
                 <div className="flex gap-1 items-center">
                   {!isEditing ? (
                     <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="mr-1"
+                        onClick={() =>
+                          toggleFavorite.mutate({ id: selectedPerson.id, isFavorite: !selectedPerson.is_favorite })
+                        }
+                        title={selectedPerson.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                      >
+                        <Star className={cn("h-4 w-4", selectedPerson.is_favorite && "fill-warning text-warning")} />
+                      </Button>
                       <AiVisibilityButton
                         kind="person"
                         id={selectedPerson.id}
@@ -380,7 +353,12 @@ export default function People() {
                       </Button>
                     </>
                   )}
-                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deletePerson.mutate(selectedPerson.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive"
+                    onClick={() => deletePerson.mutate(selectedPerson.id, { onSuccess: () => closePerson() })}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -469,7 +447,9 @@ export default function People() {
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-normal">People</h1>
+          <h1 className="text-2xl font-semibold tracking-normal">
+            People <span className="text-muted-foreground font-normal">· {people.length}</span>
+          </h1>
           <p className="text-sm text-muted-foreground">Manage the people connected to your notes.</p>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -491,7 +471,7 @@ export default function People() {
                 onChange={(event) => setCreateName(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && createName.trim()) {
-                    createPerson.mutate(createName);
+                    submitCreatePerson();
                   }
                 }}
                 placeholder="Ada Lovelace"
@@ -499,7 +479,7 @@ export default function People() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-              <Button onClick={() => createPerson.mutate(createName)} disabled={!createName.trim() || createPerson.isPending}>
+              <Button onClick={submitCreatePerson} disabled={!createName.trim() || createPerson.isPending}>
                 {createPerson.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create
               </Button>
@@ -580,9 +560,23 @@ export default function People() {
                   )}
                 </button>
               </div>
-              {(person.tags || []).length > 0 && (
-                <Badge variant="secondary" className="ml-3 shrink-0">{person.tags[0]}</Badge>
-              )}
+              <div className="ml-3 flex shrink-0 items-center gap-2">
+                {(person.tags || []).length > 0 && (
+                  <Badge variant="secondary">{person.tags[0]}</Badge>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleFavorite.mutate({ id: person.id, isFavorite: !person.is_favorite });
+                  }}
+                  title={person.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <Star className={cn("h-4 w-4", person.is_favorite && "fill-warning text-warning")} />
+                </Button>
+              </div>
             </div>
           ))}
         </div>
