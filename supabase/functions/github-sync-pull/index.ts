@@ -1,5 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildBlobLookup, importNoteAttachments } from "../_shared/obsidian-attachments.ts";
+import {
+  ensureGithubRepository,
+  githubDeleteFile,
+  githubGetFile,
+  githubGetFileContent,
+  githubPutFile,
+} from "../_shared/github-api.ts";
+import {
+  GhCtx,
+  pullPeopleAndGroups,
+  sweepPeopleExport,
+  vaultPrefixes,
+} from "../_shared/people-sync-core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -219,7 +232,9 @@ Deno.serve(async (req) => {
     // ── Default action: pull remote changes ──
     const basePath = vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
 
-    // 1. Get all current sync log entries
+    // 1. Get all current sync log entries. Note rows drive the loops below;
+    // person/group rows are handled by pullPeopleAndGroups, but their paths
+    // still count as "tracked" so they are never imported as notes.
     const { data: syncEntries } = await serviceClient
       .from("github_sync_log")
       .select("*")
@@ -227,9 +242,13 @@ Deno.serve(async (req) => {
 
     const syncByPath = new Map<string, any>();
     const syncByNoteId = new Map<string, any>();
+    const trackedPaths = new Set<string>();
     for (const e of syncEntries || []) {
-      syncByPath.set(e.github_path, e);
-      syncByNoteId.set(e.note_id, e);
+      trackedPaths.add(e.github_path);
+      if (!e.entity_type || e.entity_type === "note") {
+        syncByPath.set(e.github_path, e);
+        syncByNoteId.set(e.note_id, e);
+      }
     }
 
     // 2. Get the current tree from GitHub
@@ -249,6 +268,12 @@ Deno.serve(async (req) => {
 
     const remoteByPath = new Map<string, any>();
     for (const f of remoteFiles) remoteByPath.set(f.path, f);
+
+    // People/Groups namespace: these paths belong to the people mirror and are
+    // excluded from the notes loops below.
+    const peoplePrefixes = vaultPrefixes(vaultPath);
+    const isPeopleSpacePath = (p: string) =>
+      p.startsWith(peoplePrefixes.people) || p.startsWith(peoplePrefixes.groups);
 
     // Phase D: full blob lookup (incl. binaries) for attachment resolution
     const blobs = buildBlobLookup(treeData.tree || []);
@@ -356,7 +381,8 @@ Deno.serve(async (req) => {
 
     // 4. Check for new files in remote (not in sync log)
     for (const [path, remoteFile] of remoteByPath) {
-      if (syncByPath.has(path)) continue;
+      if (trackedPaths.has(path)) continue;
+      if (isPeopleSpacePath(path)) continue; // handled by pullPeopleAndGroups
 
       try {
         const content = await githubGetFileContent(ghToken, owner, repo, path, branch);
@@ -393,6 +419,8 @@ Deno.serve(async (req) => {
         await serviceClient.from("github_sync_log").upsert({
           user_id: userId,
           note_id: inserted.id,
+          entity_type: "note",
+          entity_id: inserted.id,
           github_path: path,
           github_sha: remoteFile.sha,
           sync_status: "synced",
@@ -418,6 +446,40 @@ Deno.serve(async (req) => {
       } catch (err) {
         results.errors++;
         results.details.push({ path, action: "error", error: String(err) });
+      }
+    }
+
+    // 4b. People & Groups mirror: pull remote edits, then sweep-export
+    // pending local changes (covers server-side writers too).
+    const gh: GhCtx = { token: ghToken, owner, repo, branch, vaultPath };
+    let peopleResults: Record<string, unknown> | null = null;
+    if (ghConn.sync_people !== false) {
+      try {
+        const entityRemoteByPath = new Map<string, { path: string; sha: string }>();
+        for (const [p, f] of remoteByPath) entityRemoteByPath.set(p, { path: p, sha: f.sha });
+        const pullCounters = await pullPeopleAndGroups(serviceClient, userId, gh, {
+          remoteByPath: entityRemoteByPath,
+          trackedPaths,
+        });
+        const allowExport = ["export", "bidirectional"].includes(ghConn.sync_direction || "export");
+        const sweep = allowExport
+          ? await sweepPeopleExport(serviceClient, userId, gh, {})
+          : { exported_people: 0, exported_groups: 0, retired: 0, errors: 0, details: [] };
+        peopleResults = {
+          people_pulled: pullCounters.people_pulled + pullCounters.groups_pulled,
+          people_imported: pullCounters.people_imported + pullCounters.groups_imported,
+          people_conflicts: pullCounters.people_conflicts + pullCounters.groups_conflicts,
+          people_deleted_remote: pullCounters.people_deleted_remote + pullCounters.groups_deleted_remote,
+          people_pushed: sweep.exported_people + sweep.exported_groups,
+          people_retired: sweep.retired,
+          people_errors: pullCounters.errors + sweep.errors,
+          people_details: [...pullCounters.details, ...sweep.details],
+        };
+        results.errors += pullCounters.errors + sweep.errors;
+      } catch (err) {
+        console.error("people sync phase failed:", err);
+        results.errors++;
+        results.details.push({ action: "people_sync_error", error: String(err) });
       }
     }
 
@@ -478,6 +540,8 @@ Deno.serve(async (req) => {
         await serviceClient.from("github_sync_log").upsert({
           user_id: userId,
           note_id: note.id,
+          entity_type: "note",
+          entity_id: note.id,
           github_path: filePath,
           github_sha: result.content?.sha || null,
           last_commit_sha: result.commit?.sha || null,
@@ -504,6 +568,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       ...results,
+      ...(peopleResults || {}),
       pushed,
       attachments: attachmentSummary,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -700,98 +765,4 @@ function decode(text: string): string {
   return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ");
 }
 
-// ─── GitHub API helpers ──────────────────────────────────────────────
-
-async function ensureGithubRepository(token: string, owner: string, repo: string, branch: string) {
-  const existing = await githubGetRepo(token, owner, repo);
-  if (existing) return { created: false, repository: existing };
-
-  const user = await githubGetAuthenticatedUser(token);
-  const created = user.login?.toLowerCase() === owner.toLowerCase()
-    ? await githubCreateUserRepo(token, repo, branch)
-    : await githubCreateOrgRepo(token, owner, repo, branch);
-
-  return { created: true, repository: created };
-}
-
-async function githubGetAuthenticatedUser(token: string) {
-  const res = await fetch("https://api.github.com/user", {
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
-  });
-  if (!res.ok) throw new Error(`GitHub authentication failed (${res.status}): ${await res.text()}`);
-  return await res.json();
-}
-
-async function githubGetRepo(token: string, owner: string, repo: string) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub repository check failed (${res.status}): ${await res.text()}`);
-  return await res.json();
-}
-
-async function githubCreateUserRepo(token: string, repo: string, branch: string) {
-  const res = await fetch("https://api.github.com/user/repos", {
-    method: "POST",
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
-    body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
-  });
-  if (!res.ok) throw new Error(`GitHub repository creation failed (${res.status}): ${await res.text()}`);
-  return await res.json();
-}
-
-async function githubCreateOrgRepo(token: string, org: string, repo: string, branch: string) {
-  const res = await fetch(`https://api.github.com/orgs/${org}/repos`, {
-    method: "POST",
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
-    body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
-  });
-  if (!res.ok) throw new Error(`GitHub organization repository creation failed (${res.status}): ${await res.text()}`);
-  return await res.json();
-}
-
-async function githubGetFile(token: string, owner: string, repo: string, path: string, ref: string) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`, {
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub GET file failed: ${res.status}`);
-  return await res.json();
-}
-
-async function githubGetFileContent(token: string, owner: string, repo: string, path: string, ref: string): Promise<string | null> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`, {
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data.content) return null;
-  return decodeURIComponent(escape(atob(data.content.replace(/\n/g, ""))));
-}
-
-async function githubPutFile(token: string, owner: string, repo: string, path: string, content: string, message: string, branch: string, sha?: string) {
-  const body: Record<string, unknown> = {
-    message,
-    content: btoa(unescape(encodeURIComponent(content))),
-    branch,
-  };
-  if (sha) body.sha = sha;
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
-    method: "PUT",
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`GitHub PUT failed: ${res.status} ${await res.text()}`);
-  return await res.json();
-}
-
-async function githubDeleteFile(token: string, owner: string, repo: string, path: string, sha: string, message: string, branch: string) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
-    method: "DELETE",
-    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
-    body: JSON.stringify({ message, sha, branch }),
-  });
-  if (!res.ok) throw new Error(`GitHub DELETE failed: ${res.status}`);
-  return await res.json();
-}
+// GitHub API helpers live in ../_shared/github-api.ts (imported above).

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeopleSync } from "@/hooks/usePeopleSync";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -50,6 +51,7 @@ export function MergePersonDialog({
 }: MergePersonDialogProps) {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
   const [search, setSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [mergeIntoSelf, setMergeIntoSelf] = useState(false);
@@ -101,6 +103,9 @@ export function MergePersonDialog({
       // badges stop counting a now-merged contact as a ghost member.
       qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
       qc.invalidateQueries({ queryKey: ["person_groups"] });
+      // The sweep's retire pass drops the merged person's vault file and
+      // refreshes the survivor + affected group pages.
+      triggerPeopleSync();
       showToast.success(
         `Merged ${sourcePerson.name} into ${mergeIntoSelf ? "your profile" : targetPerson?.name || "target"}`
       );

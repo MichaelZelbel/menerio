@@ -12,6 +12,7 @@ export interface GitHubConnection {
   vault_path: string;
   sync_enabled: boolean;
   sync_direction: string;
+  sync_people: boolean;
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
@@ -37,7 +38,7 @@ export function useGitHubConnection() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("github_connections" as any)
-        .select("id, user_id, github_username, repo_owner, repo_name, branch, vault_path, sync_enabled, sync_direction, last_sync_at, created_at, updated_at")
+        .select("id, user_id, github_username, repo_owner, repo_name, branch, vault_path, sync_enabled, sync_direction, sync_people, last_sync_at, created_at, updated_at")
         .eq("user_id", user!.id)
         .maybeSingle();
       if (error) throw error;

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeopleSync } from "@/hooks/usePeopleSync";
 import type { ProfileCategory, ProfileEntry } from "./useProfile";
 
 /**
@@ -19,6 +20,7 @@ export function useContactProfile(contactId: string | null) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const userId = user?.id;
+  const { triggerPeopleSync } = usePeopleSync();
 
   const categoriesQuery = useQuery({
     queryKey: ["contact-profile-categories", userId, contactId],
@@ -72,6 +74,7 @@ export function useContactProfile(contactId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
+      triggerPeopleSync();
       showToast.success("Category saved");
     },
   });
@@ -84,6 +87,8 @@ export function useContactProfile(contactId: string | null) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
       qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+      // Hard delete (cascades entries) — no updated_at trace; force the page.
+      triggerPeopleSync(contactId ? { people: [contactId] } : undefined);
       showToast.success("Category deleted");
     },
   });
@@ -112,6 +117,7 @@ export function useContactProfile(contactId: string | null) {
       // whose category_id is in that cache — so refresh it too, or the
       // just-added fact stays invisible until the next refetch.
       qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
+      triggerPeopleSync();
       showToast.success("Entry saved");
     },
   });
@@ -123,6 +129,8 @@ export function useContactProfile(contactId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+      // Hard delete — no updated_at trace; force the page.
+      triggerPeopleSync(contactId ? { people: [contactId] } : undefined);
       showToast.success("Entry deleted");
     },
   });

@@ -32,6 +32,16 @@ interface ConflictEntry {
   };
 }
 
+interface EntityConflictEntry {
+  id: string;
+  entity_type: "person" | "group";
+  entity_id: string;
+  github_path: string;
+  error_message: string | null;
+  synced_at: string;
+  name: string;
+}
+
 export function SyncConflictsPanel() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -47,6 +57,45 @@ export function SyncConflictsPanel() {
       return (data?.conflicts || []) as ConflictEntry[];
     },
     staleTime: 30_000,
+  });
+
+  const { data: entityConflicts = [], refetch: refetchEntities } = useQuery<EntityConflictEntry[]>({
+    queryKey: ["github-people-conflicts", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("github-people-sync", {
+        body: { action: "get-conflicts" },
+      });
+      if (error) throw error;
+      return (data?.conflicts || []) as EntityConflictEntry[];
+    },
+    staleTime: 30_000,
+  });
+
+  const resolveEntityMutation = useMutation({
+    mutationFn: async ({ entry, resolution }: { entry: EntityConflictEntry; resolution: string }) => {
+      const { data, error } = await supabase.functions.invoke("github-people-sync", {
+        body: {
+          action: "resolve-conflict",
+          entity_type: entry.entity_type,
+          entity_id: entry.entity_id,
+          resolution,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      refetchEntities();
+      qc.invalidateQueries({ queryKey: ["github-sync-log"] });
+      qc.invalidateQueries({ queryKey: ["github-sync-conflict-count"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+      showToast.success("Conflict resolved");
+    },
+    onError: (err: any) => showToast.error(err?.message || "Failed to resolve conflict"),
   });
 
   const resolveMutation = useMutation({
@@ -93,7 +142,7 @@ export function SyncConflictsPanel() {
     );
   }
 
-  if (conflicts.length === 0) return null;
+  if (conflicts.length === 0 && entityConflicts.length === 0) return null;
 
   return (
     <Card className="border-warning/50">
@@ -101,35 +150,39 @@ export function SyncConflictsPanel() {
         <CardTitle className="flex items-center gap-2 text-base">
           <GitCompare className="h-4 w-4 text-warning" />
           Sync Conflicts
-          <Badge variant="destructive" className="ml-auto">{conflicts.length}</Badge>
+          <Badge variant="destructive" className="ml-auto">{conflicts.length + entityConflicts.length}</Badge>
         </CardTitle>
         <CardDescription>
-          These notes were edited in both Menerio and GitHub since the last sync.
+          These items were edited in both Menerio and GitHub since the last sync.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Bulk actions */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={resolveAllMutation.isPending}
-            onClick={() => resolveAllMutation.mutate("keep_local")}
-          >
-            {resolveAllMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-            Keep all Menerio
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={resolveAllMutation.isPending}
-            onClick={() => resolveAllMutation.mutate("keep_remote")}
-          >
-            Keep all GitHub
-          </Button>
-        </div>
+        {/* Bulk actions (notes only) */}
+        {conflicts.length > 0 && (
+          <>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={resolveAllMutation.isPending}
+                onClick={() => resolveAllMutation.mutate("keep_local")}
+              >
+                {resolveAllMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                Keep all Menerio
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={resolveAllMutation.isPending}
+                onClick={() => resolveAllMutation.mutate("keep_remote")}
+              >
+                Keep all GitHub
+              </Button>
+            </div>
 
-        <Separator />
+            <Separator />
+          </>
+        )}
 
         <ScrollArea className="max-h-[400px]">
           <div className="space-y-3">
@@ -173,6 +226,47 @@ export function SyncConflictsPanel() {
                   >
                     <Copy className="h-3 w-3" />
                     Keep Both
+                  </Button>
+                </div>
+              </div>
+            ))}
+
+            {entityConflicts.map((entry) => (
+              <div key={entry.id} className="border rounded-lg p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">
+                      {entry.name}
+                      <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1 align-middle">
+                        {entry.entity_type === "person" ? "Person" : "Group"}
+                      </Badge>
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{entry.github_path}</p>
+                  </div>
+                  <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
+                </div>
+
+                {/* keep_both is not offered for people/groups — it would create a duplicate entity. */}
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    disabled={resolveEntityMutation.isPending}
+                    onClick={() => resolveEntityMutation.mutate({ entry, resolution: "keep_local" })}
+                  >
+                    <ArrowRight className="h-3 w-3" />
+                    Keep Menerio
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    disabled={resolveEntityMutation.isPending}
+                    onClick={() => resolveEntityMutation.mutate({ entry, resolution: "keep_remote" })}
+                  >
+                    <ArrowRight className="h-3 w-3 rotate-180" />
+                    Keep GitHub
                   </Button>
                 </div>
               </div>

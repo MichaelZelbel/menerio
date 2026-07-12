@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeopleSync } from "@/hooks/usePeopleSync";
 
 export interface Person {
   id: string;
@@ -80,6 +81,7 @@ export function usePeople() {
 export function useCreatePerson() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (name: string) => {
@@ -100,6 +102,7 @@ export function useCreatePerson() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      triggerPeopleSync();
       showToast.success("Person added");
     },
     onError: (e: any) => showToast.error(e.message),
@@ -108,6 +111,7 @@ export function useCreatePerson() {
 
 export function useUpdatePerson() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({
@@ -122,6 +126,7 @@ export function useUpdatePerson() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      triggerPeopleSync();
     },
     onError: (e: any) => showToast.error(e.message),
   });
@@ -129,14 +134,22 @@ export function useUpdatePerson() {
 
 export function useDeletePerson() {
   const qc = useQueryClient();
+  const { triggerPeopleSync, deleteEntityFile } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Remove the mirrored vault file first — the sync log still knows its
+      // path. Best-effort; the sweep's retire pass is the backstop.
+      const affectedGroupIds = await deleteEntityFile("person", id);
       const { error } = await supabase.from("contacts").delete().eq("id", id);
       if (error) throw error;
+      return affectedGroupIds;
     },
-    onSuccess: () => {
+    onSuccess: (affectedGroupIds) => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      // Member tables of the person's former groups need a refresh now that
+      // the memberships cascaded away.
+      triggerPeopleSync({ groups: affectedGroupIds });
       // The DB cascades this person's contact_group_memberships rows, but
       // the aggregate membership query that powers the People tree's group
       // counts never hears about it on its own — with a 5-minute staleTime,
@@ -151,6 +164,7 @@ export function useDeletePerson() {
 export function useToggleFavoritePerson() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ id, isFavorite }: { id: string; isFavorite: boolean }) => {
@@ -177,6 +191,7 @@ export function useToggleFavoritePerson() {
     onSettled: (_data, _err, _vars, context) => {
       qc.invalidateQueries({ queryKey: context?.queryKey ?? ["contacts", user?.id] });
     },
+    onSuccess: () => triggerPeopleSync(),
   });
 }
 

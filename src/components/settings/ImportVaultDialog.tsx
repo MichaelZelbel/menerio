@@ -133,6 +133,7 @@ export function ImportVaultDialog() {
           <DialogTitle>Import from Obsidian Vault</DialogTitle>
           <DialogDescription>
             Import Markdown files from your connected GitHub repository into Menerio.
+            The People/ and Groups/ folders are skipped — they belong to People &amp; Groups sync.
           </DialogDescription>
         </DialogHeader>
 

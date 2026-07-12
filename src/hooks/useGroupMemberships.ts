@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeopleSync } from "@/hooks/usePeopleSync";
 
 type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type MembershipRow = Database["public"]["Tables"]["contact_group_memberships"]["Row"];
@@ -113,6 +114,7 @@ export function usePersonGroupMemberships(personId: string | null | undefined) {
 export function useAddMembership() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ groupId, personId, status, priority = "normal" }: AddMembershipInput) => {
@@ -147,6 +149,7 @@ export function useAddMembership() {
     },
     onSuccess: (membership) => {
       invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
+      triggerPeopleSync();
     },
     onError: (error: Error) => {
       // A UNIQUE (group_id, contact_id) violation (Postgres 23505) surfaces as
@@ -160,6 +163,7 @@ export function useAddMembership() {
 
 export function useUpdateMembership() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ id, groupId, personId, ...updates }: UpdateMembershipInput) => {
@@ -180,6 +184,7 @@ export function useUpdateMembership() {
     },
     onSuccess: ({ membership, groupId, personId }) => {
       invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -187,6 +192,7 @@ export function useUpdateMembership() {
 
 export function useRemoveMembership() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ id, groupId, personId }: { id: string; groupId: string; personId: string }) => {
@@ -200,6 +206,9 @@ export function useRemoveMembership() {
     },
     onSuccess: ({ groupId, personId }) => {
       invalidateMembershipQueries(qc, groupId, personId);
+      // Hard delete leaves no updated_at trace for the sweep's dirty
+      // detection — force both affected pages.
+      triggerPeopleSync({ people: [personId], groups: [groupId] });
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -207,6 +216,7 @@ export function useRemoveMembership() {
 
 export function useArchiveMembership() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ id, groupId, personId }: { id: string; groupId: string; personId: string }) => {
@@ -222,6 +232,7 @@ export function useArchiveMembership() {
     },
     onSuccess: ({ membership, groupId, personId }) => {
       invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -229,6 +240,7 @@ export function useArchiveMembership() {
 
 export function useReorderMemberships() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ groupId, orderedIds }: { groupId: string; orderedIds: string[] }) => {
@@ -254,6 +266,7 @@ export function useReorderMemberships() {
     onSuccess: ({ groupId, personIds }) => {
       qc.invalidateQueries({ queryKey: ["contact_group_memberships", groupId] });
       personIds.forEach((personId) => qc.invalidateQueries({ queryKey: ["person_groups", personId] }));
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -261,6 +274,7 @@ export function useReorderMemberships() {
 
 export function useMoveMembershipStage() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ membershipId, newStatus }: { membershipId: string; newStatus: string | null }) => {
@@ -276,6 +290,7 @@ export function useMoveMembershipStage() {
     },
     onSuccess: (membership) => {
       invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });

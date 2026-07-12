@@ -4,6 +4,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { getTemplateById, instantiateTemplate } from "@/lib/group-templates";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeopleSync } from "@/hooks/usePeopleSync";
 
 export type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
 type ContactGroupInsert = Database["public"]["Tables"]["contact_groups"]["Insert"];
@@ -92,6 +93,7 @@ export function useGroup(idOrSlug: string | null | undefined) {
 export function useCreateGroup() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (input: CreateGroupInput) => {
@@ -166,6 +168,7 @@ export function useCreateGroup() {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -173,6 +176,7 @@ export function useCreateGroup() {
 
 export function useUpdateGroup() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: ContactGroupUpdate & { id: string }) => {
@@ -190,6 +194,7 @@ export function useUpdateGroup() {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      triggerPeopleSync();
     },
     onError: (error: Error) => showToast.error(error.message),
   });
@@ -197,6 +202,7 @@ export function useUpdateGroup() {
 
 export function useTrashGroup() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -214,12 +220,15 @@ export function useTrashGroup() {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      // Trash retires the group's vault file via the sweep's retire pass.
+      triggerPeopleSync();
     },
   });
 }
 
 export function useArchiveGroup() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -237,12 +246,14 @@ export function useArchiveGroup() {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      triggerPeopleSync();
     },
   });
 }
 
 export function useRestoreGroup() {
   const qc = useQueryClient();
+  const { triggerPeopleSync } = usePeopleSync();
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -260,6 +271,7 @@ export function useRestoreGroup() {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      triggerPeopleSync();
     },
   });
 }

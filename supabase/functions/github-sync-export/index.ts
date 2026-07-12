@@ -475,6 +475,8 @@ async function syncSingleNote(
       {
         user_id: userId,
         note_id: note.id,
+        entity_type: "note",
+        entity_id: note.id,
         github_path: filePath,
         github_sha: result.content?.sha || null,
         last_commit_sha: result.commit?.sha || null,
@@ -493,6 +495,8 @@ async function syncSingleNote(
       {
         user_id: userId,
         note_id: note.id,
+        entity_type: "note",
+        entity_id: note.id,
         github_path: filePath,
         sync_status: "error",
         sync_direction: "export",

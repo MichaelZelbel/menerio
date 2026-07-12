@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useGitHubConnection, useGitHubBulkSync } from "@/hooks/useGitHubSync";
+import { useGitHubPeopleBulkSync } from "@/hooks/usePeopleSync";
 import { SyncDashboard, FolderMappingSettings } from "./SyncDashboard";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -28,6 +30,7 @@ export function GitHubSyncSettings() {
   const { user } = useAuth();
   const { data: connection, isLoading, refetch } = useGitHubConnection();
   const bulkSync = useGitHubBulkSync();
+  const peopleBulkSync = useGitHubPeopleBulkSync();
   const qc = useQueryClient();
 
   const [token, setToken] = useState("");
@@ -36,6 +39,7 @@ export function GitHubSyncSettings() {
   const [branch, setBranch] = useState("main");
   const [vaultPath, setVaultPath] = useState("/");
   const [syncDirection, setSyncDirection] = useState("export");
+  const [syncPeople, setSyncPeople] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "missing" | "error" | null>(null);
@@ -48,6 +52,7 @@ export function GitHubSyncSettings() {
       setBranch(connection.branch || "main");
       setVaultPath(connection.vault_path || "/");
       setSyncDirection(connection.sync_direction || "export");
+      setSyncPeople(connection.sync_people !== false);
     }
   }, [connection]);
 
@@ -63,13 +68,21 @@ export function GitHubSyncSettings() {
       refetch();
       qc.invalidateQueries({ queryKey: ["github-sync-log"] });
       qc.invalidateQueries({ queryKey: ["github-sync-conflicts"] });
+      qc.invalidateQueries({ queryKey: ["github-people-conflicts"] });
       qc.invalidateQueries({ queryKey: ["github-sync-conflict-count"] });
       qc.invalidateQueries({ queryKey: ["notes"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
       const parts: string[] = [];
       if (data.pulled > 0) parts.push(`${data.pulled} pulled`);
       if (data.pushed > 0) parts.push(`${data.pushed} pushed`);
       if (data.new_imports > 0) parts.push(`${data.new_imports} imported`);
       if (data.conflicts > 0) parts.push(`${data.conflicts} conflicts`);
+      const peopleTouched =
+        (data.people_pulled || 0) + (data.people_pushed || 0) + (data.people_imported || 0);
+      if (peopleTouched > 0) parts.push(`${peopleTouched} people/groups`);
+      if (data.people_conflicts > 0) parts.push(`${data.people_conflicts} people conflicts`);
       showToast.success(parts.length > 0 ? `Sync complete: ${parts.join(", ")}` : "Everything is up to date");
     },
     onError: () => showToast.error("Sync failed"),
@@ -86,6 +99,7 @@ export function GitHubSyncSettings() {
           branch,
           vault_path: vaultPath,
           sync_direction: syncDirection,
+          sync_people: syncPeople,
         };
         if (token) updates.github_token = token;
         await supabase.from("github_connections" as any).update(updates).eq("user_id", user.id);
@@ -108,6 +122,7 @@ export function GitHubSyncSettings() {
           branch,
           vault_path: vaultPath,
           sync_direction: syncDirection,
+          sync_people: syncPeople,
         });
       }
       setToken("");
@@ -182,6 +197,16 @@ export function GitHubSyncSettings() {
         if (data.failed > 0) {
           const firstError = data.results?.find((r: any) => r.error)?.error;
           showToast.error(firstError || `${data.failed} notes failed to sync`);
+        }
+        if (connection?.sync_people !== false) {
+          peopleBulkSync.mutate(undefined, {
+            onSuccess: (p) => {
+              const total = (p.exported_people || 0) + (p.exported_groups || 0);
+              if (total > 0) showToast.success(`Exported ${total} people & groups`);
+              if (p.errors > 0) showToast.error(`${p.errors} people/groups failed to sync`);
+            },
+            onError: (err: any) => showToast.error(err?.message || "People export failed"),
+          });
         }
       },
       onError: (err: any) => showToast.error(err?.message || "Bulk sync failed"),
@@ -300,6 +325,19 @@ export function GitHubSyncSettings() {
             )}
           </div>
 
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="gh-sync-people">Sync People &amp; Groups</Label>
+              <p className="text-xs text-muted-foreground">
+                Mirror people as <code className="text-[10px] bg-muted px-1 rounded">People/&lt;Name&gt;.md</code> and
+                groups as <code className="text-[10px] bg-muted px-1 rounded">Groups/&lt;Name&gt;.md</code>. A person's
+                group memberships live in their page's <code className="text-[10px] bg-muted px-1 rounded">groups:</code> frontmatter
+                and can be edited in Obsidian.
+              </p>
+            </div>
+            <Switch id="gh-sync-people" checked={syncPeople} onCheckedChange={setSyncPeople} />
+          </div>
+
           <Separator />
 
           {/* Actions */}
@@ -323,9 +361,9 @@ export function GitHubSyncSettings() {
                     Sync Now
                   </Button>
                 )}
-                <Button variant="outline" onClick={handleBulkSync} disabled={bulkSync.isPending}>
-                  {bulkSync.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  Export All Notes
+                <Button variant="outline" onClick={handleBulkSync} disabled={bulkSync.isPending || peopleBulkSync.isPending}>
+                  {(bulkSync.isPending || peopleBulkSync.isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  {connection?.sync_people !== false ? "Export All" : "Export All Notes"}
                 </Button>
                 <ImportVaultDialog />
                 <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
@@ -343,6 +381,12 @@ export function GitHubSyncSettings() {
               {syncNow.data.pushed > 0 && <span>📤 {syncNow.data.pushed} pushed </span>}
               {syncNow.data.new_imports > 0 && <span>🆕 {syncNow.data.new_imports} imported </span>}
               {syncNow.data.conflicts > 0 && <span className="text-destructive">⚠️ {syncNow.data.conflicts} conflicts </span>}
+              {((syncNow.data.people_pulled || 0) + (syncNow.data.people_pushed || 0) + (syncNow.data.people_imported || 0)) > 0 && (
+                <span>👥 {(syncNow.data.people_pulled || 0) + (syncNow.data.people_pushed || 0) + (syncNow.data.people_imported || 0)} people/groups </span>
+              )}
+              {(syncNow.data.people_conflicts || 0) > 0 && (
+                <span className="text-destructive">⚠️ {syncNow.data.people_conflicts} people conflicts </span>
+              )}
             </div>
           )}
 

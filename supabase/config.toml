@@ -38,6 +38,9 @@ verify_jwt = false
 [functions.github-sync-pull]
 verify_jwt = false
 
+[functions.github-people-sync]
+verify_jwt = false
+
 [functions.github-sync-scheduled]
 verify_jwt = false
 

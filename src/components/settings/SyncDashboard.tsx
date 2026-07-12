@@ -23,6 +23,7 @@ import {
   FileText,
   GitCommit,
   FolderTree,
+  Users,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -32,6 +33,10 @@ interface SyncStats {
   pendingNotes: number;
   conflictNotes: number;
   errorNotes: number;
+  totalEntities: number;
+  syncedEntities: number;
+  pendingEntities: number;
+  conflictEntities: number;
 }
 
 export function SyncDashboard() {
@@ -42,26 +47,53 @@ export function SyncDashboard() {
     queryKey: ["github-sync-stats", user?.id],
     enabled: !!user && !!connection,
     queryFn: async () => {
-      const [notesRes, syncRes] = await Promise.all([
+      const [notesRes, contactsRes, groupsRes, syncRes] = await Promise.all([
         supabase
           .from("notes")
           .select("id", { count: "exact", head: true })
           .eq("user_id", user!.id)
           .eq("is_trashed", false),
         supabase
+          .from("contacts")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user!.id)
+          .is("merged_into", null),
+        supabase
+          .from("contact_groups")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user!.id)
+          .eq("is_trashed", false),
+        supabase
           .from("github_sync_log" as any)
-          .select("sync_status")
+          .select("sync_status, entity_type")
           .eq("user_id", user!.id),
       ]);
 
       const totalNotes = (notesRes as any).count || 0;
+      const totalEntities = ((contactsRes as any).count || 0) + ((groupsRes as any).count || 0);
       const syncEntries = (syncRes.data || []) as any[];
-      const syncedNotes = syncEntries.filter((e: any) => e.sync_status === "synced").length;
-      const conflictNotes = syncEntries.filter((e: any) => e.sync_status === "conflict").length;
-      const errorNotes = syncEntries.filter((e: any) => e.sync_status === "error").length;
-      const pendingNotes = totalNotes - syncedNotes;
+      const isNote = (e: any) => !e.entity_type || e.entity_type === "note";
 
-      return { totalNotes, syncedNotes, pendingNotes, conflictNotes, errorNotes };
+      const noteEntries = syncEntries.filter(isNote);
+      const entityEntries = syncEntries.filter((e) => !isNote(e));
+
+      const syncedNotes = noteEntries.filter((e: any) => e.sync_status === "synced").length;
+      const conflictNotes = noteEntries.filter((e: any) => e.sync_status === "conflict").length;
+      const errorNotes = noteEntries.filter((e: any) => e.sync_status === "error").length;
+      const syncedEntities = entityEntries.filter((e: any) => e.sync_status === "synced").length;
+      const conflictEntities = entityEntries.filter((e: any) => e.sync_status === "conflict").length;
+
+      return {
+        totalNotes,
+        syncedNotes,
+        pendingNotes: totalNotes - syncedNotes,
+        conflictNotes,
+        errorNotes,
+        totalEntities,
+        syncedEntities,
+        pendingEntities: Math.max(0, totalEntities - syncedEntities),
+        conflictEntities,
+      };
     },
     staleTime: 30_000,
   });
@@ -72,7 +104,7 @@ export function SyncDashboard() {
     queryFn: async () => {
       const { data } = await supabase
         .from("github_sync_log" as any)
-        .select("id, note_id, github_path, sync_status, sync_direction, synced_at, error_message")
+        .select("id, note_id, entity_type, github_path, sync_status, sync_direction, synced_at, error_message")
         .eq("user_id", user!.id)
         .order("synced_at", { ascending: false })
         .limit(20);
@@ -122,6 +154,16 @@ export function SyncDashboard() {
           </div>
         )}
 
+        {stats && connection.sync_people !== false && (
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Users className="h-3 w-3" />
+            People &amp; Groups: {stats.syncedEntities} synced · {stats.pendingEntities} pending
+            {stats.conflictEntities > 0 && (
+              <span className="text-destructive"> · {stats.conflictEntities} conflicts</span>
+            )}
+          </p>
+        )}
+
         {connection.last_sync_at && (
           <p className="text-xs text-muted-foreground">
             Last sync: {formatDistanceToNow(new Date(connection.last_sync_at), { addSuffix: true })}
@@ -136,7 +178,11 @@ export function SyncDashboard() {
           <ScrollArea className="h-40">
             {recentActivity?.map((entry: any) => (
               <div key={entry.id} className="flex items-center gap-2 py-1 text-xs">
-                <GitCommit className="h-3 w-3 shrink-0 text-muted-foreground" />
+                {entry.entity_type === "person" || entry.entity_type === "group" ? (
+                  <Users className="h-3 w-3 shrink-0 text-muted-foreground" />
+                ) : (
+                  <GitCommit className="h-3 w-3 shrink-0 text-muted-foreground" />
+                )}
                 <span className="truncate flex-1">
                   {(entry.github_path || "").split("/").pop()?.replace(".md", "") || "Unknown"}
                 </span>

@@ -398,6 +398,8 @@ Deno.serve(async (req) => {
             {
               user_id: userId,
               note_id: noteId,
+              entity_type: "note",
+              entity_id: noteId,
               github_path: file.path,
               github_sha: file.sha || null,
               sync_status: "synced",
@@ -522,6 +524,14 @@ async function listVaultFiles(
       // Skip dotfiles and .obsidian config
       if (item.path.includes("/.") || item.path.startsWith(".")) return false;
       if (item.path.includes(".obsidian/")) return false;
+      // Skip the People/Groups mirror — those files belong to people sync,
+      // not the note importer (see github-people-sync).
+      {
+        const rel = basePath && item.path.startsWith(basePath + "/")
+          ? item.path.slice(basePath.length + 1)
+          : item.path;
+        if (rel.startsWith("People/") || rel.startsWith("Groups/")) return false;
+      }
       // Apply vault path prefix
       if (basePath && !item.path.startsWith(basePath + "/") && item.path !== basePath) return false;
       // Apply path filter
