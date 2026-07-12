@@ -57,6 +57,11 @@ export function resolveWikilinksInHtml(
   titleMap: Map<string, string>
 ): string {
   if (!html || !html.includes("[[")) return html;
+  // The IndexedDB query persister JSON-serializes query data; a Map that went
+  // through it comes back as a plain object. Never crash the editor over an
+  // unusable lookup — leave the raw [[links]] in place; they resolve once a
+  // real Map arrives.
+  if (!(titleMap instanceof Map)) return html;
 
   html = html.replace(/<span\b[^>]*data-wikilink="true"[^>]*>/gi, (tag) => {
     const existingId = tag.match(/\bdata-note-id="([^"]*)"/i)?.[1];

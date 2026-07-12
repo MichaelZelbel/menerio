@@ -112,7 +112,7 @@ import { showToast } from "@/lib/toast";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
-import { resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
+import { buildTitleMap, resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -331,7 +331,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const ghSync = useGitHubSyncExport();
   const { data: syncLog } = useSyncLogForNote(note.id);
 
-  // Title -> id map for resolving raw `[[Title]]` markdown into clickable wikilink nodes
+  // Title -> id map for resolving raw `[[Title]]` markdown into clickable
+  // wikilink nodes. The queryFn must return JSON-safe rows: the global
+  // IndexedDB persister serializes query data, and a Map would come back as a
+  // plain object on the next cold boot (the "r.get is not a function" crash).
+  // `select` rebuilds a real Map from both fetched and restored rows.
   const { data: titleMap } = useQuery({
     queryKey: ["wikilink-title-map", user?.id],
     enabled: !!user,
@@ -342,15 +346,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         .select("id, title")
         .eq("user_id", user!.id)
         .eq("is_trashed", false);
-      const map = new Map<string, string>();
-      (data || []).forEach((n: any) => {
-        if (n.title) {
-          const k = String(n.title).trim().toLowerCase();
-          if (k && !map.has(k)) map.set(k, n.id);
-        }
-      });
-      return map;
+      return (data || []) as Array<{ id: string; title: string | null }>;
     },
+    select: buildTitleMap,
   });
   const titleMapRef = useRef(titleMap);
   useEffect(() => { titleMapRef.current = titleMap; }, [titleMap]);
