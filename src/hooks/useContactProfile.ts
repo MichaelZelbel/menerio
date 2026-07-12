@@ -105,6 +105,13 @@ export function useContactProfile(contactId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+      // Saving an entry can materialize a NEW profile_categories row first
+      // (the quick-add flow runs ensureProfileCategory, which inserts via the
+      // raw client, right before committing). The categories cache has a long
+      // staleTime, and ProfileFactsPanel only renders a section for entries
+      // whose category_id is in that cache — so refresh it too, or the
+      // just-added fact stays invisible until the next refetch.
+      qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
       showToast.success("Entry saved");
     },
   });
