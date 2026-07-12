@@ -72,10 +72,12 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 }
 
 /**
- * Contact-only replacement for CategorySection: rendered only for
- * categories that already have entries (empty categories are filtered out
- * by the caller), default-expanded, with a compact one-line-per-entry list
- * instead of always-visible add forms.
+ * Contact-only replacement for CategorySection: rendered for categories
+ * that have entries, plus empty custom (non-taxonomy) categories — see
+ * `isCategorySectionVisible` in the caller — default-expanded, with a
+ * compact one-line-per-entry list instead of always-visible add forms. An
+ * empty section shows a "no facts yet" hint with its own Add affordance so
+ * a newly created custom category is never a dead end.
  */
 export function CompactCategorySection({
   category,
@@ -217,6 +219,26 @@ export function CompactCategorySection({
             onSave={handleSaveEntry}
             onCancel={() => setAddingEntry(false)}
           />
+        </div>
+      )}
+
+      {/* Empty-state hint: shown for a rendered-but-empty section (always a
+          custom category — see isCategorySectionVisible) so there's an
+          obvious path to file its first entry, instead of a silent dead end. */}
+      {isOpen && !addingEntry && visibleEntries.length === 0 && (
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+          <span className="text-sm text-muted-foreground">No facts yet — add one</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 shrink-0"
+            onClick={() => {
+              setAddingEntry(true);
+              setExpanded(true);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add
+          </Button>
         </div>
       )}
 

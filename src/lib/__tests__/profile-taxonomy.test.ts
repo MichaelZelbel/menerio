@@ -4,6 +4,7 @@ import {
   taxonomyBySlug,
   taxonomyOrder,
   compareCategoriesForDisplay,
+  isCategorySectionVisible,
 } from "../profile-taxonomy";
 
 const EXPECTED_SLUGS = [
@@ -81,5 +82,26 @@ describe("compareCategoriesForDisplay", () => {
     const b = { slug: "custom-b", name: "Apple Club" };
     expect(compareCategoriesForDisplay(a, b)).toBeGreaterThan(0);
     expect(compareCategoriesForDisplay(b, a)).toBeLessThan(0);
+  });
+});
+
+describe("isCategorySectionVisible", () => {
+  // Regression: "Add custom category" created a section that could never
+  // render (empty + not in the 17-slug taxonomy) and had no path to file an
+  // entry into it — a silent dead end.
+  it("hides an empty taxonomy category (quick-add is how those first get an entry)", () => {
+    expect(isCategorySectionVisible({ slug: "identity" }, false)).toBe(false);
+  });
+
+  it("shows an empty custom (non-taxonomy) category so it's never a dead end", () => {
+    expect(isCategorySectionVisible({ slug: "my-custom-cat" }, false)).toBe(true);
+  });
+
+  it("shows a taxonomy category once it has an entry", () => {
+    expect(isCategorySectionVisible({ slug: "identity" }, true)).toBe(true);
+  });
+
+  it("shows a custom category once it has an entry (entries always win)", () => {
+    expect(isCategorySectionVisible({ slug: "my-custom-cat" }, true)).toBe(true);
   });
 });

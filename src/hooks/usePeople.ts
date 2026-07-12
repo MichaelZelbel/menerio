@@ -137,6 +137,12 @@ export function useDeletePerson() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      // The DB cascades this person's contact_group_memberships rows, but
+      // the aggregate membership query that powers the People tree's group
+      // counts never hears about it on its own — with a 5-minute staleTime,
+      // no focus refetch, and a 24h persister, stale counts would otherwise
+      // linger for the rest of the session.
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
       showToast.success("Person removed");
     },
   });

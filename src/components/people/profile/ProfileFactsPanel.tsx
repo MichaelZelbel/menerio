@@ -13,7 +13,7 @@ import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PinnedHighlights } from "./PinnedHighlights";
 import { ProfileFieldFilter } from "./ProfileFieldFilter";
 import { CompactCategorySection } from "./CompactCategorySection";
-import { compareCategoriesForDisplay } from "@/lib/profile-taxonomy";
+import { compareCategoriesForDisplay, isCategorySectionVisible } from "@/lib/profile-taxonomy";
 import { filterEntries } from "@/lib/profile-field-filter";
 import type { ProfileCategory } from "@/hooks/useProfile";
 import type { ContactProfileEntry } from "@/hooks/useContactProfile";
@@ -37,9 +37,10 @@ interface ProfileFactsPanelProps {
 
 /**
  * Contact profile's two-tier presentation: pinned highlights, a live field
- * filter, then a compact list of fact sections (only categories that have
- * at least one entry are shown — empty taxonomy categories stay hidden
- * until something is filed into them).
+ * filter, then a compact list of fact sections. A section renders once it
+ * has at least one entry, OR always for a true custom (non-taxonomy)
+ * category — see `isCategorySectionVisible`. Empty taxonomy categories stay
+ * hidden until something is filed into them via quick-add.
  */
 export function ProfileFactsPanel({
   categories,
@@ -58,10 +59,10 @@ export function ProfileFactsPanel({
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
 
-  const categoriesWithEntries = useMemo(
+  const sectionCategories = useMemo(
     () =>
       categories
-        .filter((c) => entries.some((e) => e.category_id === c.id))
+        .filter((c) => isCategorySectionVisible(c, entries.some((e) => e.category_id === c.id)))
         .slice()
         .sort(compareCategoriesForDisplay),
     [categories, entries],
@@ -70,9 +71,12 @@ export function ProfileFactsPanel({
   const matches = useMemo(() => filterEntries(entries, filterQuery), [entries, filterQuery]);
   const isFiltering = filterQuery.trim().length > 0;
 
+  // While filtering, only show sections with a matching entry — an empty
+  // custom category has nothing to match, so it drops out of an active
+  // search rather than showing a confusing "no facts" hint mid-filter.
   const visibleCategories = isFiltering
-    ? categoriesWithEntries.filter((c) => entries.some((e) => e.category_id === c.id && matches.has(e.id)))
-    : categoriesWithEntries;
+    ? sectionCategories.filter((c) => entries.some((e) => e.category_id === c.id && matches.has(e.id)))
+    : sectionCategories;
 
   const handleAddCategory = () => {
     if (!newCatName.trim()) return;

@@ -95,6 +95,12 @@ export function MergePersonDialog({
       qc.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       qc.invalidateQueries({ queryKey: ["profile-categories"] });
       qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      // merge-contacts doesn't touch contact_group_memberships rows for the
+      // merged-away source person — invalidate the aggregate membership
+      // query (and the source's own group list) so the People tree's group
+      // badges stop counting a now-merged contact as a ghost member.
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+      qc.invalidateQueries({ queryKey: ["person_groups"] });
       showToast.success(
         `Merged ${sourcePerson.name} into ${mergeIntoSelf ? "your profile" : targetPerson?.name || "target"}`
       );

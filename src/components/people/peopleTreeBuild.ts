@@ -93,6 +93,12 @@ export function buildPeopleTree(input: {
   memberships.forEach(({ group_id, contact_id }) => {
     const node = nodeById.get(group_id);
     if (!node) return; // membership to an excluded/missing group — ignore
+    const person = peopleById.get(contact_id);
+    // Ghost membership: the contact was merged or deleted, so its row was
+    // cascaded/filtered out of `people` but the membership row itself is
+    // stale (merge-contacts doesn't clean these up). Ignore it entirely so
+    // it never inflates a group's counts or member list.
+    if (!person) return;
     groupedContactIds.add(contact_id);
     let set = directIdsByGroup.get(group_id);
     if (!set) {
@@ -101,8 +107,7 @@ export function buildPeopleTree(input: {
     }
     if (set.has(contact_id)) return; // duplicate row — dedupe
     set.add(contact_id);
-    const person = peopleById.get(contact_id);
-    if (person) node.people.push(person);
+    node.people.push(person);
   });
 
   directIdsByGroup.forEach((set, groupId) => {

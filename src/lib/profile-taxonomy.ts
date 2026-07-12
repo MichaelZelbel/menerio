@@ -64,3 +64,25 @@ export function compareCategoriesForDisplay(
   if (orderDiff !== 0) return orderDiff;
   return a.name.localeCompare(b.name);
 }
+
+/**
+ * Whether a category's section should render in the contact profile's
+ * compact facts panel.
+ *
+ * - A category with at least one entry always renders (entries win).
+ * - An empty category renders only when its slug is NOT one of the 17
+ *   taxonomy slugs — i.e. it's a genuine user-created custom category.
+ *   Empty taxonomy categories stay hidden; QuickAddFact is how those first
+ *   get an entry filed into them.
+ *
+ * Without this, "Add custom category" created a section that could never
+ * render (empty + taxonomy-shaped filtering hid it) and had no path to file
+ * an entry into it — a silent dead end.
+ */
+export function isCategorySectionVisible(
+  category: { slug: string },
+  hasEntries: boolean,
+): boolean {
+  if (hasEntries) return true;
+  return !(category.slug in taxonomyBySlug);
+}

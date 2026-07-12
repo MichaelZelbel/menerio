@@ -161,6 +161,50 @@ describe("buildPeopleTree — ungrouped", () => {
   });
 });
 
+describe("buildPeopleTree — ghost memberships (merged/deleted contact rows)", () => {
+  // merge-contacts and contact deletion don't (or can't, via cascade timing)
+  // clean up contact_group_memberships synchronously with the people cache,
+  // so buildPeopleTree can be handed membership rows whose contact_id no
+  // longer has a matching entry in `people`. Those rows must be inert.
+  it("excludes a ghost membership's contact from direct/subtree counts and the group's people list", () => {
+    const groups = [group("a")];
+    const memberships = [membership("a", "p1"), membership("a", "ghost")];
+    const { roots } = buildPeopleTree({ people: [person("p1")], groups, memberships });
+
+    expect(roots[0].directCount).toBe(1);
+    expect(roots[0].subtreeCount).toBe(1);
+    expect(roots[0].people.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("does not let a ghost membership contribute to a nested subtree's dedup union", () => {
+    const groups = [group("a"), group("b", { parent_group_id: "a" })];
+    const memberships = [membership("b", "ghost")];
+    const { roots } = buildPeopleTree({ people: [], groups, memberships });
+
+    const a = roots[0];
+    expect(a.subtreeCount).toBe(0);
+    const b = a.children[0];
+    expect(b.directCount).toBe(0);
+    expect(b.subtreeCount).toBe(0);
+  });
+
+  it("does not mark unrelated real people as grouped because of a ghost membership row", () => {
+    const groups = [group("a")];
+    const people = [person("p1")];
+    const memberships = [membership("a", "ghost")];
+    const { ungrouped } = buildPeopleTree({ people, groups, memberships });
+    expect(ungrouped.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("still dedupes a real duplicate row alongside an unrelated ghost row", () => {
+    const groups = [group("a")];
+    const memberships = [membership("a", "p1"), membership("a", "p1"), membership("a", "ghost")];
+    const { roots } = buildPeopleTree({ people: [person("p1")], groups, memberships });
+    expect(roots[0].directCount).toBe(1);
+    expect(roots[0].people).toHaveLength(1);
+  });
+});
+
 describe("wouldCreateCycle", () => {
   const chain: GroupLite[] = [
     group("a"),
