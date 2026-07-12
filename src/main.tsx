@@ -30,6 +30,39 @@ if (!("__TAURI_INTERNALS__" in window)) {
       });
     },
   });
+
+  // Ghost-shell self-heal. If a service worker installs while the CDN is
+  // still propagating a deploy, it can freeze a stale index.html into its
+  // precache and then report "up to date" forever — the app keeps running a
+  // build that no longer exists (observed live 2026-07-12: page ran a chunk
+  // absent from every sw.js manifest). Signature: our own index chunk is
+  // missing from the live sw.js. Remedy: drop the worker + caches and reload
+  // once; a sessionStorage guard prevents reload loops while the CDN is
+  // still inconsistent.
+  const GHOST_SHELL_KEY = "menerio:ghost-shell-healed";
+  setTimeout(async () => {
+    try {
+      if (!("serviceWorker" in navigator)) return;
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg?.active) return;
+      const ownChunk = [...document.querySelectorAll<HTMLScriptElement>("script[src]")]
+        .map((s) => s.src)
+        .map((src) => src.match(/\/assets\/(index-[\w-]+\.js)/)?.[1])
+        .find(Boolean);
+      if (!ownChunk) return; // dev server or unexpected layout — not our case
+      const res = await fetch("/sw.js", { cache: "no-store" });
+      if (!res.ok) return;
+      const manifest = await res.text();
+      if (manifest.includes(ownChunk)) return; // healthy: SW knows this build
+      if (sessionStorage.getItem(GHOST_SHELL_KEY) === "1") return;
+      sessionStorage.setItem(GHOST_SHELL_KEY, "1");
+      for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+      for (const key of await caches.keys()) await caches.delete(key);
+      window.location.reload();
+    } catch {
+      // Self-heal must never break boot.
+    }
+  }, 5000);
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
