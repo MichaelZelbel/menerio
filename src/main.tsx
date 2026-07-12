@@ -13,7 +13,23 @@ if (BRAND.themeClass) document.documentElement.classList.add(BRAND.themeClass);
 // assets are bundled locally and SW registration on the tauri origin is
 // unreliable — skip it there.
 if (!("__TAURI_INTERNALS__" in window)) {
-  registerSW({ immediate: true });
+  // Without explicit checks, a browser only looks for a new service worker on
+  // navigation — tabs (and installed PWA windows) left open for days keep
+  // running a ghost build long after deploys. Poll every 30 minutes and on
+  // every return to the tab; registerType "autoUpdate" then activates the new
+  // worker and reloads controlled tabs automatically.
+  const SW_UPDATE_INTERVAL_MS = 30 * 60 * 1000;
+  registerSW({
+    immediate: true,
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return;
+      const checkForUpdate = () => registration.update().catch(() => {});
+      setInterval(checkForUpdate, SW_UPDATE_INTERVAL_MS);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") checkForUpdate();
+      });
+    },
+  });
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
