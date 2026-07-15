@@ -11,7 +11,7 @@ vi.mock("@/lib/toast", () => ({
   showToast: { success: vi.fn(), error: vi.fn() },
 }));
 
-const invokeMock = vi.fn(async () => ({ data: { success: true }, error: null }));
+const invokeMock = vi.fn(async (..._args: unknown[]) => ({ data: { success: true }, error: null }));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
