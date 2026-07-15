@@ -2494,6 +2494,39 @@ export type Database = {
         }
         Relationships: []
       }
+      user_mcp_servers: {
+        Row: {
+          auth: Json
+          created_at: string
+          enabled: boolean
+          id: string
+          name: string
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          auth?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name: string
+          updated_at?: string
+          url: string
+          user_id?: string
+        }
+        Update: {
+          auth?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name?: string
+          updated_at?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
