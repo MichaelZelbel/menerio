@@ -240,7 +240,10 @@ export function GlobalAIChatFAB() {
   }, [input, isLoading, session, state, noteId, personId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    // Enter sends; Shift+Enter inserts a newline. This matches the in-note and
+    // Mira chats and the usual convention (ChatGPT/Claude/etc.). Cmd/Ctrl+Enter
+    // still sends too, since it has no Shift — so the old shortcut keeps working.
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
