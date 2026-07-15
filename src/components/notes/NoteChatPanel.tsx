@@ -111,7 +111,11 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     try {
       const apiMessages = buildApiMessages(nextState);
       const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
-        body: { note_id: note.id, messages: apiMessages },
+        body: {
+          note_id: note.id,
+          messages: apiMessages,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
       });
 
       if (fnErr) {

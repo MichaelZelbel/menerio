@@ -186,6 +186,7 @@ export function GlobalAIChatFAB() {
           note_id: noteId || undefined,
           person_id: personId || undefined,
           messages: apiMessages,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
       });
 

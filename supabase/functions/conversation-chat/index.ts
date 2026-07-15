@@ -1,11 +1,22 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { resolveSystemPrompt, resolveConfig } from "../_shared/llm-router.ts";
 import { CONVERSATION_CHAT_PROMPT } from "../_shared/llm-defaults.ts";
+import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import { getUserProfile, formatUserProfileDigest } from "../_shared/user-profile.ts";
+import { buildAwarenessContext } from "../_shared/awareness.ts";
+import { webSearchTool, runWebSearch } from "../_shared/web-search.ts";
+import { loadUserMcpTools, type LoadedMcpTools } from "../_shared/mcp-client.ts";
+import { runAgentLoop } from "../_shared/agent-loop.ts";
+import { READ_TOOL_SCHEMAS, READ_TOOL_NAMES, executeReadTool } from "../_shared/read-tools.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+// Fallback model for Mira. Overridable via the "conversation-chat.main" row in
+// the admin LLM panel — set a fast, capable model there.
+const CONVERSATION_CHAT_DEFAULT_MODEL = "minimax/minimax-m2.7";
 
 type Attachment = { name: string; content: string };
 type ConversationContext = { context?: string; intent?: string; presetTone?: string; customTone?: string };
@@ -17,8 +28,9 @@ function json(body: Record<string, unknown>, status = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  let mcp: LoadedMcpTools | null = null;
   try {
-    const { message, personId, conversationContext, attachments } = await req.json();
+    const { message, personId, conversationContext, attachments, timezone } = await req.json();
     if (!message || typeof message !== "string") return json({ error: "message required" }, 400);
     if (personId && typeof personId !== "string") return json({ error: "personId must be a string" }, 400);
 
@@ -29,8 +41,16 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
 
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+    const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
+    if (!openRouterKey) throw new Error("OPENROUTER_API_KEY not configured");
+    // Long-term memory embeddings were generated via the Lovable gateway; keep
+    // using it for the RAG lookup so vectors stay in the same space. Optional —
+    // if absent, we simply skip long-term memory.
+    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+
+    // Enforce credits (Mira now runs on OpenRouter with credit accounting).
+    const balance = await checkBalance(supabase, user.id);
+    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
 
     const [historyResult, personResult, profileResult, notesResult, momentsResult, shortDocsResult] = await Promise.all([
       supabase.from("conversation_messages").select("role, content").eq("user_id", user.id).eq("person_id", personId).order("created_at", { ascending: false }).limit(10),
@@ -55,7 +75,7 @@ Deno.serve(async (req) => {
     }).slice(0, 10);
 
     let longTermContext = "";
-    if (personId) longTermContext = await searchLongTermMemory(supabase, apiKey, message, personId, user.id);
+    if (personId && lovableKey) longTermContext = await searchLongTermMemory(supabase, lovableKey, message, personId, user.id);
 
     const personContext = [
       buildPersonContext(person, profileResult.data || [], relatedNotes, relatedMoments),
@@ -65,31 +85,63 @@ Deno.serve(async (req) => {
       buildConversationContext(conversationContext),
     ].filter(Boolean).join("\n\n");
 
-    const systemPrompt = await resolveSystemPrompt(
+    // System prompt: base (with person context) + who-the-user-is + date/time.
+    let systemPrompt = await resolveSystemPrompt(
       supabase,
       "conversation-chat.main",
       CONVERSATION_CHAT_PROMPT,
       { personContext },
     );
+    let profileDigest = "";
+    try {
+      profileDigest = formatUserProfileDigest(await getUserProfile(supabase, user.id));
+    } catch (e) {
+      console.warn("conversation-chat: profile load failed:", (e as Error)?.message);
+    }
+    systemPrompt += buildAwarenessContext(typeof timezone === "string" ? timezone : undefined) + profileDigest;
 
-    const history = (historyResult.data || []).reverse().map((m: any) => ({ role: m.role, content: m.content }));
-    const gatewayResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [{ role: "system", content: systemPrompt }, ...history, { role: "user", content: message }],
-      }),
+    // Model (configurable) + tools. Mira gets read/lookup tools + web search +
+    // the user's MCP servers — no note-mutating tools (there's no current note).
+    const { effective: cfg } = await resolveConfig(supabase, "conversation-chat.main", {
+      provider: "openrouter",
+      model: CONVERSATION_CHAT_DEFAULT_MODEL,
     });
 
-    if (!gatewayResponse.ok) {
-      if (gatewayResponse.status === 429) return json({ error: "Rate limit hit — try again shortly." }, 429);
-      if (gatewayResponse.status === 402) return json({ error: "AI usage limit reached. Add credits in Settings → Workspace → Usage." }, 402);
-      return json({ error: `AI request failed (${gatewayResponse.status})` }, 500);
+    try {
+      mcp = await loadUserMcpTools(supabase, user.id);
+    } catch (e) {
+      console.warn("conversation-chat: MCP load failed:", (e as Error)?.message);
     }
+    const tools = [...READ_TOOL_SCHEMAS, webSearchTool, ...(mcp?.tools ?? [])];
 
-    const gatewayData = await gatewayResponse.json();
-    const reply = gatewayData.choices?.[0]?.message?.content || "I couldn't generate a reply.";
+    const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      if (name === "web_search") return runWebSearch(supabase, openRouterKey, user.id, String(args.query ?? ""));
+      if (mcp && mcp.hasTool(name)) return mcp.call(name, args);
+      if (READ_TOOL_NAMES.includes(name)) return executeReadTool(supabase, openRouterKey, user.id, name, args);
+      return JSON.stringify({ error: `Unknown tool: ${name}` });
+    };
+
+    const history = (historyResult.data || []).reverse().map((m: any) => ({ role: m.role, content: m.content }));
+    const chatMessages = [...history, { role: "user", content: message }];
+
+    let reply: string;
+    try {
+      const loopResult = await runAgentLoop({
+        db: supabase,
+        apiKey: openRouterKey,
+        userId: user.id,
+        creditFeature: "conversation-chat",
+        model: cfg.model,
+        systemPrompt,
+        chatMessages,
+        tools,
+        executeTool: runTool,
+      });
+      reply = loopResult.reply || "I couldn't generate a reply.";
+    } catch (err: any) {
+      if (err?.message === "INSUFFICIENT_CREDITS") return insufficientCreditsResponse(corsHeaders);
+      throw err;
+    }
 
     if (personId) {
       await supabase.from("conversation_messages").insert([
@@ -102,6 +154,8 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("conversation-chat error:", error);
     return json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  } finally {
+    await mcp?.close();
   }
 });
 

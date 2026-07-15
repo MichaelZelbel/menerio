@@ -64,7 +64,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
       if (!session) throw new Error("Please sign in again.");
       const { data, error } = await supabase.functions.invoke("conversation-chat", {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { message: userMessage, personId, conversationContext, attachments: currentAttachments.map(({ name, content }) => ({ name, content })) },
+        body: { message: userMessage, personId, conversationContext, attachments: currentAttachments.map(({ name, content }) => ({ name, content })), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
       });
       if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || `${BRAND.personaName} could not reply.`);
       setMessages((prev) => [...prev, { role: "assistant", content: (data as any).reply }]);
