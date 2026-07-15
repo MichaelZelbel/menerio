@@ -555,6 +555,7 @@ export type Database = {
           id: string
           is_trashed: boolean
           name: string
+          parent_group_id: string | null
           purpose: string | null
           sensitivity: string
           slug: string
@@ -575,6 +576,7 @@ export type Database = {
           id?: string
           is_trashed?: boolean
           name: string
+          parent_group_id?: string | null
           purpose?: string | null
           sensitivity?: string
           slug: string
@@ -595,6 +597,7 @@ export type Database = {
           id?: string
           is_trashed?: boolean
           name?: string
+          parent_group_id?: string | null
           purpose?: string | null
           sensitivity?: string
           slug?: string
@@ -606,6 +609,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "contact_groups_parent_group_id_fkey"
+            columns: ["parent_group_id"]
+            isOneToOne: false
+            referencedRelation: "contact_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contact_groups_user_id_profiles_fkey"
             columns: ["user_id"]
@@ -755,8 +765,10 @@ export type Database = {
           created_at: string | null
           email: string | null
           id: string
+          is_favorite: boolean
           is_sensitive: boolean
           last_contact_date: string | null
+          last_viewed_at: string | null
           merged_at: string | null
           merged_into: string | null
           metadata: Json | null
@@ -783,8 +795,10 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           id?: string
+          is_favorite?: boolean
           is_sensitive?: boolean
           last_contact_date?: string | null
+          last_viewed_at?: string | null
           merged_at?: string | null
           merged_into?: string | null
           metadata?: Json | null
@@ -811,8 +825,10 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           id?: string
+          is_favorite?: boolean
           is_sensitive?: boolean
           last_contact_date?: string | null
+          last_viewed_at?: string | null
           merged_at?: string | null
           merged_into?: string | null
           metadata?: Json | null
@@ -977,6 +993,7 @@ export type Database = {
           repo_owner: string | null
           sync_direction: string | null
           sync_enabled: boolean | null
+          sync_people: boolean
           updated_at: string | null
           user_id: string
           vault_path: string | null
@@ -993,6 +1010,7 @@ export type Database = {
           repo_owner?: string | null
           sync_direction?: string | null
           sync_enabled?: boolean | null
+          sync_people?: boolean
           updated_at?: string | null
           user_id: string
           vault_path?: string | null
@@ -1009,6 +1027,7 @@ export type Database = {
           repo_owner?: string | null
           sync_direction?: string | null
           sync_enabled?: boolean | null
+          sync_people?: boolean
           updated_at?: string | null
           user_id?: string
           vault_path?: string | null
@@ -1017,36 +1036,42 @@ export type Database = {
       }
       github_sync_log: {
         Row: {
+          entity_id: string
+          entity_type: string
           error_message: string | null
           github_path: string
           github_sha: string | null
           id: string
           last_commit_sha: string | null
-          note_id: string
+          note_id: string | null
           sync_direction: string | null
           sync_status: string | null
           synced_at: string | null
           user_id: string
         }
         Insert: {
+          entity_id: string
+          entity_type?: string
           error_message?: string | null
           github_path: string
           github_sha?: string | null
           id?: string
           last_commit_sha?: string | null
-          note_id: string
+          note_id?: string | null
           sync_direction?: string | null
           sync_status?: string | null
           synced_at?: string | null
           user_id: string
         }
         Update: {
+          entity_id?: string
+          entity_type?: string
           error_message?: string | null
           github_path?: string
           github_sha?: string | null
           id?: string
           last_commit_sha?: string | null
-          note_id?: string
+          note_id?: string | null
           sync_direction?: string | null
           sync_status?: string | null
           synced_at?: string | null
@@ -2156,6 +2181,7 @@ export type Database = {
           contact_id: string | null
           created_at: string | null
           id: string
+          is_pinned: boolean
           label: string
           linked_note_id: string | null
           sort_order: number | null
@@ -2168,6 +2194,7 @@ export type Database = {
           contact_id?: string | null
           created_at?: string | null
           id?: string
+          is_pinned?: boolean
           label: string
           linked_note_id?: string | null
           sort_order?: number | null
@@ -2180,6 +2207,7 @@ export type Database = {
           contact_id?: string | null
           created_at?: string | null
           id?: string
+          is_pinned?: boolean
           label?: string
           linked_note_id?: string | null
           sort_order?: number | null
@@ -2463,6 +2491,39 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
           webhook_secret?: string
+        }
+        Relationships: []
+      }
+      user_mcp_servers: {
+        Row: {
+          auth: Json
+          created_at: string
+          enabled: boolean
+          id: string
+          name: string
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          auth?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name: string
+          updated_at?: string
+          url: string
+          user_id?: string
+        }
+        Update: {
+          auth?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name?: string
+          updated_at?: string
+          url?: string
+          user_id?: string
         }
         Relationships: []
       }

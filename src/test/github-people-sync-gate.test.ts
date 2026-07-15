@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { GitHubConnection } from "@/hooks/useGitHubSync";
 
-const invokeMock = vi.fn(async () => ({ data: {}, error: null }));
+const invokeMock = vi.fn(async (..._args: unknown[]) => ({ data: {}, error: null }));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
