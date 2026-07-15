@@ -12,10 +12,32 @@
  *  - connects with a short timeout and SKIPS any server that fails rather than
  *    breaking the chat.
  *
- * SDK pinned to match the server side (open-brain-mcp/deno.json → 1.24.3).
+ * The MCP SDK is loaded LAZILY (dynamic import) and ONLY when the user actually
+ * has enabled servers. This keeps the SDK — a heavy npm dependency with Node
+ * internals — out of the function's boot path entirely, so it can never crash
+ * the chat for the common case (no MCP servers). SDK pinned to match the server
+ * side (open-brain-mcp/deno.json → 1.24.3), loaded via `npm:` like the server.
  */
-import { Client } from "https://esm.sh/@modelcontextprotocol/sdk@1.24.3/client/index.js";
-import { StreamableHTTPClientTransport } from "https://esm.sh/@modelcontextprotocol/sdk@1.24.3/client/streamableHttp.js";
+
+// Specifiers held as variables so `deno check` doesn't eagerly resolve them
+// (the root package.json makes local npm: resolution fail); Supabase's runtime
+// resolves `npm:` specifiers natively, as open-brain-mcp already relies on.
+const CLIENT_SPEC = "npm:@modelcontextprotocol/sdk@1.24.3/client/index.js";
+const TRANSPORT_SPEC = "npm:@modelcontextprotocol/sdk@1.24.3/client/streamableHttp.js";
+
+// deno-lint-ignore no-explicit-any
+type Any = any;
+
+async function loadSdk(): Promise<{ Client: Any; StreamableHTTPClientTransport: Any }> {
+  const [clientMod, transportMod] = await Promise.all([
+    import(CLIENT_SPEC),
+    import(TRANSPORT_SPEC),
+  ]);
+  return {
+    Client: clientMod.Client,
+    StreamableHTTPClientTransport: transportMod.StreamableHTTPClientTransport,
+  };
+}
 
 const MAX_SERVERS = 5;
 const MAX_TOOLS = 15;
@@ -108,16 +130,26 @@ export async function loadUserMcpTools(
   }
   if (rows.length === 0) return EMPTY;
 
-  const clients: Client[] = [];
+  // The user has servers → now (and only now) load the MCP SDK. If it can't be
+  // loaded in this runtime, degrade to no MCP tools rather than crash the chat.
+  let Client: Any, StreamableHTTPClientTransport: Any;
+  try {
+    ({ Client, StreamableHTTPClientTransport } = await loadSdk());
+  } catch (err: any) {
+    console.warn("[mcp-client] MCP SDK failed to load; skipping MCP tools:", err?.message);
+    return EMPTY;
+  }
+
+  const clients: Any[] = [];
   const tools: any[] = [];
   // namespaced tool name -> { client, originalName }
-  const routing = new Map<string, { client: Client; originalName: string }>();
+  const routing = new Map<string, { client: Any; originalName: string }>();
   const usedNames = new Set<string>();
 
   // Connect + list tools for all servers in parallel; skip failures.
   await Promise.all(
     rows.map(async (row) => {
-      let client: Client | null = null;
+      let client: Any = null;
       try {
         client = new Client(
           { name: "menerio-chat", version: "1.0.0" },
@@ -127,7 +159,7 @@ export async function loadUserMcpTools(
           requestInit: { headers: headersFor(row.auth) },
         });
         await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connect ${row.name}`);
-        const listed = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listTools ${row.name}`);
+        const listed: any = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listTools ${row.name}`);
         clients.push(client);
 
         const serverSlug = sanitize(row.name, 20) || `srv-${row.id.slice(0, 6)}`;
