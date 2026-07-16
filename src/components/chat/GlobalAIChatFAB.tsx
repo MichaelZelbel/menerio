@@ -132,12 +132,22 @@ export function GlobalAIChatFAB() {
     }
   }, [open]);
 
-  // Auto-scroll
+  // Auto-scroll to the newest message. Runs on new messages, while loading,
+  // AND when the panel is (re)opened or resized — reopening remounts the
+  // scroll container at the top, so without `open`/`effectiveMode` here you'd
+  // land on the first message and have to scroll down manually. The rAF waits
+  // for layout (and markdown/images) to settle before pinning to the bottom.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [state.messages, isLoading]);
+    if (!open) return;
+    const pinToBottom = () => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    };
+    pinToBottom();
+    const raf = requestAnimationFrame(pinToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [state.messages, isLoading, open, effectiveMode]);
 
   const refreshSummaryIfNeeded = useCallback(
     async (current: PersistedChatState): Promise<PersistedChatState> => {
