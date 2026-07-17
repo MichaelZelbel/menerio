@@ -2406,7 +2406,7 @@ export default function CollectionDetail() {
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters]);
+  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters, reloadTick]);
 
 
   useEffect(() => {
