@@ -191,7 +191,8 @@ export function GlobalAIChatFAB() {
       try {
         const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
         const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
-        const { data } = await supabase.functions.invoke("note-chat", {
+        const chatFn = collectionId ? "collection-chat" : "note-chat";
+        const { data } = await supabase.functions.invoke(chatFn, {
           body: { mode: "summarize", messages: transcript },
         });
         if (data?.summary) {
