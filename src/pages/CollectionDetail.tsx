@@ -3023,6 +3023,17 @@ export default function CollectionDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {chatOpen && collection && (
+        <div className="fixed inset-y-0 right-0 z-50 flex">
+          <CollectionChatPanel
+            collectionId={collection.id}
+            collectionName={collection.name}
+            itemId={selectedItem && selectedItem.id !== "new" ? selectedItem.id : null}
+            onClose={() => setChatOpen(false)}
+            onCollectionChanged={() => setReloadTick((t) => t + 1)}
+          />
+        </div>
+      )}
     </div>
   );
 }
