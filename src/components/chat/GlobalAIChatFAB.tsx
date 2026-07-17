@@ -226,13 +226,21 @@ export function GlobalAIChatFAB() {
 
     try {
       const apiMessages = buildApiMessages(nextState);
-      const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
-        body: {
-          note_id: noteId || undefined,
-          person_id: personId || undefined,
-          messages: apiMessages,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
+      const chatFn = collectionId ? "collection-chat" : "note-chat";
+      const invokeBody = collectionId
+        ? {
+            collection_id: collectionId,
+            messages: apiMessages,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }
+        : {
+            note_id: noteId || undefined,
+            person_id: personId || undefined,
+            messages: apiMessages,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          };
+      const { data, error: fnErr } = await supabase.functions.invoke(chatFn, {
+        body: invokeBody,
       });
 
       if (fnErr) {
