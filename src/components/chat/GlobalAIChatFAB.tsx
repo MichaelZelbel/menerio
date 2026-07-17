@@ -13,6 +13,7 @@ import {
   CHAT_WINDOW_SIZE,
   SUMMARY_THRESHOLD,
   NOTE_MODIFYING_TOOLS,
+  COLLECTION_MODIFYING_TOOLS,
   type PersistedChatMessage,
   type PersistedChatState,
 } from "@/lib/chat-history";
