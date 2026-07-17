@@ -2614,6 +2614,15 @@ export default function CollectionDetail() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => setChatOpen((v) => !v)}
+            aria-label="AI chat"
+            aria-pressed={chatOpen}
+          >
+            <Sparkles className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">AI Chat</span>
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => navigate(`/collections/${slug}/schema`)}
             aria-label="Customize fields"
           >
