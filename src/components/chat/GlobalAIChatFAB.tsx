@@ -281,6 +281,16 @@ export function GlobalAIChatFAB() {
         );
       }
 
+      // If a collection-modifying tool ran, dispatch a refresh event
+      if (
+        collectionId &&
+        data.tool_results?.some((tr: any) => COLLECTION_MODIFYING_TOOLS.includes(tr.tool))
+      ) {
+        window.dispatchEvent(
+          new CustomEvent("menerio:collection-updated", { detail: { collectionId } }),
+        );
+      }
+
       updated = await refreshSummaryIfNeeded(updated);
       setState(updated);
 
@@ -290,7 +300,7 @@ export function GlobalAIChatFAB() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, personId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, collectionId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends; Shift+Enter inserts a newline. This matches the in-note and
