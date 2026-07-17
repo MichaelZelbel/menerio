@@ -2183,6 +2183,8 @@ export default function CollectionDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
