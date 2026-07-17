@@ -86,7 +86,40 @@ export function GlobalAIChatFAB() {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  const contextKey = noteId ? `note:${noteId}` : personId ? `person:${personId}` : "general";
+  // Detect collection context from /collections/:slug (and optional item route)
+  const collectionSlug = useMemo(() => {
+    const match = location.pathname.match(/^\/collections\/([^/]+)/);
+    return match ? match[1] : null;
+  }, [location.pathname]);
+
+  const [collectionId, setCollectionId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!collectionSlug || !user) {
+      setCollectionId(null);
+      return;
+    }
+    supabase
+      .from("collections")
+      .select("id")
+      .eq("slug", collectionSlug)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setCollectionId(data?.id ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionSlug, user?.id]);
+
+  const contextKey = collectionId
+    ? `collection:${collectionId}`
+    : noteId
+      ? `note:${noteId}`
+      : personId
+        ? `person:${personId}`
+        : "general";
 
   // Persisted chat state for the current context
   const [state, setState] = useState<PersistedChatState>(() =>
