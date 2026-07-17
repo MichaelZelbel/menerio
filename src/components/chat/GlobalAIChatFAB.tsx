@@ -207,7 +207,7 @@ export function GlobalAIChatFAB() {
       }
       return current;
     },
-    [],
+    [collectionId],
   );
 
   const sendMessage = useCallback(async () => {
