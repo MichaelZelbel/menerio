@@ -24,6 +24,7 @@ import {
   Settings2,
   Trash2,
   User,
+  Sparkles,
   X,
 } from "lucide-react";
 import { z } from "zod";
