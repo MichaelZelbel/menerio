@@ -893,8 +893,24 @@ async function generateReviewItems(
 
     const suggestions: ReviewSuggestion[] = [];
 
+    // Fiction guard — when the note is primarily about a work of fiction (novel,
+    // anime, manga, game, film, TV, etc.), the "people" list from the metadata
+    // pass is almost certainly a cast of characters, not real contacts. Skip
+    // add_contact / add_alias suggestions in that case. Heuristic backup: even
+    // if the LLM missed `content_mode`, look for strong fiction cues in the text.
+    const contentMode = typeof metadata.content_mode === "string" ? metadata.content_mode : "personal";
+    const fictionCueRe = /\b(novel|light novel|visual novel|manga|manhwa|manhua|anime|light[- ]?novel|graphic novel|comic(?:s|book)?|video ?game|jrpg|otome|dating sim|movie|film|tv series|tv show|series|episode|season|character|protagonist|antagonist|author|writer|director|studio ghibli|main cast|voice actor|voice cast)\b/i;
+    const noteFictionText = `${noteTitle}\n${noteContent}`;
+    const looksLikeFiction = contentMode === "review_of_fiction" || (contentMode !== "personal" && fictionCueRe.test(noteFictionText));
+    const skipPersonSuggestions = contentMode === "review_of_fiction";
+    if (skipPersonSuggestions) {
+      console.log(`[process-note] Skipping add_contact/add_alias suggestions for note ${noteId} — content_mode=${contentMode}`);
+    } else if (looksLikeFiction) {
+      console.log(`[process-note] Fiction cues detected in note ${noteId} but content_mode=${contentMode}; proceeding with normal person suggestions.`);
+    }
+
     // Person detection: check if mentioned people exist as contacts (alias-aware)
-    if (people.length > 0) {
+    if (people.length > 0 && !skipPersonSuggestions) {
       const { data: existingContacts } = await supabase
         .from("contacts")
         .select("id, name, aliases")
