@@ -321,7 +321,9 @@ export function GlobalAIChatFAB() {
 
   if (!user) return null;
 
-  const emptyText = noteId
+  const emptyText = collectionId
+    ? "Ask me to add, update, or search items in this collection."
+    : noteId
     ? "Ask me about this note or your knowledge base."
     : personId
       ? "Ask me about this person or anything in your knowledge base."
