@@ -24,6 +24,7 @@ import {
   Settings2,
   Trash2,
   User,
+  Sparkles,
   X,
 } from "lucide-react";
 import { z } from "zod";
@@ -101,6 +102,7 @@ import {
 import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionItem = Database["public"]["Tables"]["collection_items"]["Row"];
@@ -2182,6 +2184,8 @@ export default function CollectionDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
@@ -2403,7 +2407,7 @@ export default function CollectionDetail() {
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters]);
+  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters, reloadTick]);
 
 
   useEffect(() => {
@@ -2607,6 +2611,15 @@ export default function CollectionDetail() {
           >
             <Plus className="mr-2 h-4 w-4" />
             New Item
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setChatOpen((v) => !v)}
+            aria-label="AI chat"
+            aria-pressed={chatOpen}
+          >
+            <Sparkles className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">AI Chat</span>
           </Button>
           <Button
             variant="outline"
@@ -3010,6 +3023,17 @@ export default function CollectionDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {chatOpen && collection && (
+        <div className="fixed inset-y-0 right-0 z-50 flex">
+          <CollectionChatPanel
+            collectionId={collection.id}
+            collectionName={collection.name}
+            itemId={selectedItem && selectedItem.id !== "new" ? selectedItem.id : null}
+            onClose={() => setChatOpen(false)}
+            onCollectionChanged={() => setReloadTick((t) => t + 1)}
+          />
+        </div>
+      )}
     </div>
   );
 }

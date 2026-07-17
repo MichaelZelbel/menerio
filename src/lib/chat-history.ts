@@ -128,3 +128,10 @@ export const NOTE_MODIFYING_TOOLS = [
   "update_note_tags",
   "add_wikilink",
 ];
+
+/** Collection-modifying tools (create/update/delete items) — used by CollectionChatPanel. */
+export const COLLECTION_MODIFYING_TOOLS = [
+  "create_collection_item",
+  "update_collection_item",
+  "delete_collection_item",
+];
