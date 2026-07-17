@@ -13,6 +13,7 @@ import {
   CHAT_WINDOW_SIZE,
   SUMMARY_THRESHOLD,
   NOTE_MODIFYING_TOOLS,
+  COLLECTION_MODIFYING_TOOLS,
   type PersistedChatMessage,
   type PersistedChatState,
 } from "@/lib/chat-history";
@@ -85,7 +86,40 @@ export function GlobalAIChatFAB() {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  const contextKey = noteId ? `note:${noteId}` : personId ? `person:${personId}` : "general";
+  // Detect collection context from /collections/:slug (and optional item route)
+  const collectionSlug = useMemo(() => {
+    const match = location.pathname.match(/^\/collections\/([^/]+)/);
+    return match ? match[1] : null;
+  }, [location.pathname]);
+
+  const [collectionId, setCollectionId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!collectionSlug || !user) {
+      setCollectionId(null);
+      return;
+    }
+    supabase
+      .from("collections")
+      .select("id")
+      .eq("slug", collectionSlug)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setCollectionId(data?.id ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionSlug, user?.id]);
+
+  const contextKey = collectionId
+    ? `collection:${collectionId}`
+    : noteId
+      ? `note:${noteId}`
+      : personId
+        ? `person:${personId}`
+        : "general";
 
   // Persisted chat state for the current context
   const [state, setState] = useState<PersistedChatState>(() =>
@@ -157,7 +191,8 @@ export function GlobalAIChatFAB() {
       try {
         const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
         const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
-        const { data } = await supabase.functions.invoke("note-chat", {
+        const chatFn = collectionId ? "collection-chat" : "note-chat";
+        const { data } = await supabase.functions.invoke(chatFn, {
           body: { mode: "summarize", messages: transcript },
         });
         if (data?.summary) {
@@ -172,7 +207,7 @@ export function GlobalAIChatFAB() {
       }
       return current;
     },
-    [],
+    [collectionId],
   );
 
   const sendMessage = useCallback(async () => {
@@ -191,13 +226,21 @@ export function GlobalAIChatFAB() {
 
     try {
       const apiMessages = buildApiMessages(nextState);
-      const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
-        body: {
-          note_id: noteId || undefined,
-          person_id: personId || undefined,
-          messages: apiMessages,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
+      const chatFn = collectionId ? "collection-chat" : "note-chat";
+      const invokeBody = collectionId
+        ? {
+            collection_id: collectionId,
+            messages: apiMessages,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }
+        : {
+            note_id: noteId || undefined,
+            person_id: personId || undefined,
+            messages: apiMessages,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          };
+      const { data, error: fnErr } = await supabase.functions.invoke(chatFn, {
+        body: invokeBody,
       });
 
       if (fnErr) {
@@ -238,6 +281,16 @@ export function GlobalAIChatFAB() {
         );
       }
 
+      // If a collection-modifying tool ran, dispatch a refresh event
+      if (
+        collectionId &&
+        data.tool_results?.some((tr: any) => COLLECTION_MODIFYING_TOOLS.includes(tr.tool))
+      ) {
+        window.dispatchEvent(
+          new CustomEvent("menerio:collection-updated", { detail: { collectionId } }),
+        );
+      }
+
       updated = await refreshSummaryIfNeeded(updated);
       setState(updated);
 
@@ -247,7 +300,7 @@ export function GlobalAIChatFAB() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, personId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, collectionId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends; Shift+Enter inserts a newline. This matches the in-note and
@@ -268,7 +321,9 @@ export function GlobalAIChatFAB() {
 
   if (!user) return null;
 
-  const emptyText = noteId
+  const emptyText = collectionId
+    ? "Ask me to add, update, or search items in this collection."
+    : noteId
     ? "Ask me about this note or your knowledge base."
     : personId
       ? "Ask me about this person or anything in your knowledge base."

@@ -2186,6 +2186,16 @@ export default function CollectionDetail() {
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { collectionId?: string } | undefined;
+      if (!detail?.collectionId || !collection || detail.collectionId === collection.id) {
+        setReloadTick((t) => t + 1);
+      }
+    };
+    window.addEventListener("menerio:collection-updated", handler);
+    return () => window.removeEventListener("menerio:collection-updated", handler);
+  }, [collection?.id]);
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
