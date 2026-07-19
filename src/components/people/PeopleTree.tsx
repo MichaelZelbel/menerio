@@ -850,54 +850,56 @@ export function PeopleTree({
               </ContextMenu>
               {allExpanded && (
                 <div>
-                  {tree.roots.length === 0 ? (
+                  {tree.roots.length === 0 && tree.ungrouped.length === 0 ? (
                     <div
                       className="text-[11px] italic text-muted-foreground"
                       style={{ paddingLeft: `${basePad + depthStep}px`, paddingTop: "2px", paddingBottom: "2px" }}
                     >
-                      No groups yet
+                      No people yet
                     </div>
                   ) : (
-                    tree.roots.map((node) => (
-                      <GroupRow
-                        key={node.group.id}
-                        node={node}
-                        depth={1}
-                        depthStep={depthStep}
-                        basePad={basePad}
-                        expanded={expanded}
-                        selectedPersonId={selectedPersonId}
-                        groupOptions={groupOptions}
-                        draggingKey={draggingKey}
-                        dragOverKey={dragOverKey}
-                        multiActive={multiActive}
-                        isChecked={bulk.isSelected}
-                        bulkClick={bulk.handleClick}
-                        handlers={handlers}
-                      />
-                    ))
+                    <>
+                      {tree.roots.map((node) => (
+                        <GroupRow
+                          key={node.group.id}
+                          node={node}
+                          depth={1}
+                          depthStep={depthStep}
+                          basePad={basePad}
+                          expanded={expanded}
+                          selectedPersonId={selectedPersonId}
+                          groupOptions={groupOptions}
+                          draggingKey={draggingKey}
+                          dragOverKey={dragOverKey}
+                          multiActive={multiActive}
+                          isChecked={bulk.isSelected}
+                          bulkClick={bulk.handleClick}
+                          handlers={handlers}
+                        />
+                      ))}
+                      {tree.ungrouped.map((person) => (
+                        <PersonRow
+                          key={`all:${person.id}`}
+                          person={person}
+                          parentKey={ALL_KEY}
+                          containingGroup={null}
+                          depth={1}
+                          depthStep={depthStep}
+                          basePad={basePad}
+                          selectedPersonId={selectedPersonId}
+                          groupOptions={groupOptions}
+                          isChecked={bulk.isSelected(person.id)}
+                          multiActive={multiActive}
+                          draggingKey={draggingKey}
+                          bulkClick={bulk.handleClick}
+                          handlers={handlers}
+                        />
+                      ))}
+                    </>
                   )}
                 </div>
               )}
             </div>
-
-            <SectionRow
-              sectionKey={UNGROUPED_KEY}
-              label="Ungrouped"
-              icon={UserX}
-              people={tree.ungrouped}
-              expanded={expanded}
-              depthStep={depthStep}
-              basePad={basePad}
-              selectedPersonId={selectedPersonId}
-              groupOptions={groupOptions}
-              draggingKey={draggingKey}
-              multiActive={multiActive}
-              isChecked={bulk.isSelected}
-              bulkClick={bulk.handleClick}
-              onToggle={toggle}
-              handlers={handlers}
-            />
           </>
         )}
       </div>
