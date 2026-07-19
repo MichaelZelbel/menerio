@@ -2809,15 +2809,6 @@ export default function CollectionDetail() {
   };
 
 
-  if (isLoading && !collection)
-    return (
-      <div className="w-full max-w-6xl space-y-4">
-        <Skeleton className="h-8 w-80" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-80 w-full" />
-      </div>
-    );
-
   // Load full item set (id/title/folder/favorite/recent-viewed) + folders for
   // the sidebar tree. This runs in parallel with the paged/filtered `items`
   // load and refreshes whenever an item/folder is mutated via the tree.
@@ -2985,6 +2976,15 @@ export default function CollectionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, routeItemId, closeItem, refreshTree],
   );
+
+  if (isLoading && !collection)
+    return (
+      <div className="w-full max-w-6xl space-y-4">
+        <Skeleton className="h-8 w-80" />
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-80 w-full" />
+      </div>
+    );
 
   return (
     <div className="flex h-[calc(100dvh-104px)] w-full flex-col overflow-hidden rounded-md border bg-background lg:flex-row">
