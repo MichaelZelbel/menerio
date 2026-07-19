@@ -140,7 +140,6 @@ const PersonRow = memo(function PersonRow({
   handlers,
 }: PersonRowProps) {
   const isSelected = person.id === selectedPersonId;
-  const initial = person.name.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <ContextMenu>
