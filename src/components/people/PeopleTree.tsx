@@ -67,7 +67,6 @@ function groupIcon(icon?: string | null) {
 
 const FAVORITES_KEY = "__favorites__";
 const RECENT_KEY = "__recent__";
-const UNGROUPED_KEY = "__ungrouped__";
 const ALL_KEY = "__all__";
 const SEARCH_KEY = "__search__";
 
