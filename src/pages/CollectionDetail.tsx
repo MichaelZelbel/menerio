@@ -2764,9 +2764,8 @@ export default function CollectionDetail() {
               will know how to capture it here.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3">
-              <Button
-                onClick={() => setSelectedItem({ id: "new" } as CollectionItem)}
-              >
+              <Button onClick={openNewItem}>
+
                 <Plus className="mr-2 h-4 w-4" />
                 New Item
               </Button>
