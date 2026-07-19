@@ -751,7 +751,7 @@ export function PeopleTree({
   );
 
   const allExpanded = expanded.has(ALL_KEY);
-  const allDragOver = dragOverKey === ALL_KEY && draggingKey?.startsWith("group:");
+  const allDragOver = dragOverKey === ALL_KEY && (draggingKey?.startsWith("group:") || draggingKey?.startsWith("person:"));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
