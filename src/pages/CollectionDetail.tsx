@@ -686,23 +686,39 @@ function itemDisplayTitle(item: CollectionItem, primaryField?: SchemaField) {
 function CollectionItemsTree({
   collection,
   items,
+  folders,
+  treeItems,
   selectedItemId,
   query,
   onQueryChange,
   onSelectItem,
   onNewItem,
   isLoading,
-  primaryField,
+  onToggleFavorite,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onReparentFolder,
+  onMoveItemToFolder,
+  onDeleteItem,
 }: {
   collection: Collection | null;
   items: CollectionItem[];
+  folders: FolderLite[];
+  treeItems: ItemLite[];
   selectedItemId?: string | null;
   query: string;
   onQueryChange: (value: string) => void;
-  onSelectItem: (item: CollectionItem) => void;
+  onSelectItem: (item: { id: string }) => void;
   onNewItem: () => void;
   isLoading: boolean;
-  primaryField?: SchemaField;
+  onToggleFavorite: (id: string, isFavorite: boolean) => void;
+  onCreateFolder: (parentFolderId: string | null) => void;
+  onRenameFolder: (folderId: string, currentName: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  onReparentFolder: (folderId: string, parentFolderId: string | null) => void;
+  onMoveItemToFolder: (itemId: string, folderId: string | null) => void;
+  onDeleteItem: (itemId: string) => void;
 }) {
   return (
     <aside className="flex w-full shrink-0 flex-col border-b bg-background lg:h-full lg:w-80 lg:border-b-0 lg:border-r">
@@ -731,59 +747,36 @@ function CollectionItemsTree({
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {selectedItemId === "new" && (
-          <button
-            type="button"
-            className="mb-1 flex w-full items-start gap-2 rounded-md bg-accent px-2 py-2 text-left text-sm"
-            onClick={onNewItem}
-          >
-            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate font-medium">New item</span>
-          </button>
-        )}
-        {isLoading ? (
-          <div className="space-y-2 p-1">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="h-11 w-full" />
-            ))}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-            {query.trim() ? "No matching items." : "No items yet."}
-          </div>
-        ) : (
-          <nav className="space-y-1" aria-label="Collection items">
-            {items.map((item) => {
-              const active = selectedItemId === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onSelectItem(item)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent",
-                    active && "bg-accent text-accent-foreground",
-                  )}
-                >
-                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {itemDisplayTitle(item, primaryField)}
-                    </span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
-                      {formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        )}
-      </div>
+      {isLoading ? (
+        <div className="space-y-2 p-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-7 w-full" />
+          ))}
+        </div>
+      ) : (
+        <CollectionItemsFolderTree
+          items={treeItems}
+          folders={folders}
+          selectedItemId={selectedItemId ?? null}
+          searchQuery={query}
+          onSelectItem={(id) => onSelectItem({ id })}
+          onToggleFavorite={onToggleFavorite}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
+          onReparentFolder={onReparentFolder}
+          onMoveItemToFolder={onMoveItemToFolder}
+          onCreateItem={(folderId) => {
+            void folderId;
+            onNewItem();
+          }}
+          onDeleteItem={onDeleteItem}
+        />
+      )}
     </aside>
   );
 }
+
 
 function initialFormValues(
   fields: SchemaField[],
