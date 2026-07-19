@@ -2655,7 +2655,7 @@ export default function CollectionDetail() {
     }
     const existing = items.find((item) => item.id === link.id);
     if (existing) {
-      setSelectedItem(existing);
+      openItem(existing);
       return;
     }
     const { data, error } = await supabase
@@ -2664,8 +2664,9 @@ export default function CollectionDetail() {
       .eq("id", link.id)
       .maybeSingle();
     if (error || !data) return toast.error("Linked item not found");
-    setSelectedItem(data);
+    openItem(data as CollectionItem);
   };
+
 
   if (isLoading && !collection)
     return (
