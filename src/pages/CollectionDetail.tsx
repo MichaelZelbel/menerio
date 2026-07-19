@@ -2808,8 +2808,9 @@ export default function CollectionDetail() {
         />
       )}
       {!selectedItem && (
-
+      <>
       {items.length === 0 && !query.trim() && !isLoading ? (
+
         <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
           <div className="max-w-lg">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary">
