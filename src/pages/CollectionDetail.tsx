@@ -2321,6 +2321,16 @@ export default function CollectionDetail() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
+  // Tree data (full item set + folders for the collection) is loaded separately
+  // from the paged/filtered `items` used by the table view — the tree needs the
+  // full picture, and refreshing it independently avoids resetting pagination.
+  const [treeItems, setTreeItems] = useState<ItemLite[]>([]);
+  const [folders, setFolders] = useState<FolderLite[]>([]);
+  const [treeReloadTick, setTreeReloadTick] = useState(0);
+  const refreshTree = useCallback(
+    () => setTreeReloadTick((t) => t + 1),
+    [],
+  );
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
   // Selection is URL-driven so /collections/:slug/:itemId deep-links work, the
   // browser back button behaves, and the AI FAB can prime item context from
