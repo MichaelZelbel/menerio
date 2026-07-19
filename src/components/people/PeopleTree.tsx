@@ -699,9 +699,20 @@ export function PeopleTree({
       event.preventDefault();
       setDragOverKey(null);
       const groupId = event.dataTransfer.getData("application/x-group-id");
-      if (groupId) onReparentGroup(groupId, null);
+      if (groupId) {
+        onReparentGroup(groupId, null);
+        return;
+      }
+      // Dropping a person onto "All people" removes them from every group they
+      // currently belong to — the loose bucket lives directly under this root.
+      const personId = event.dataTransfer.getData("application/x-person-id");
+      if (personId) {
+        memberships
+          .filter((m) => m.contact_id === personId)
+          .forEach((m) => onRemoveFromGroup(personId, m.group_id));
+      }
     },
-    [onReparentGroup],
+    [onReparentGroup, onRemoveFromGroup, memberships],
   );
 
   const handlers = useMemo<TreeHandlers>(
