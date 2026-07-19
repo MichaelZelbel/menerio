@@ -312,7 +312,7 @@ export function GlobalAIChatFAB() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, personId, collectionId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, collectionId, collectionItemId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends; Shift+Enter inserts a newline. This matches the in-note and
