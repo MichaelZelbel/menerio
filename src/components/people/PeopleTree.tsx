@@ -67,7 +67,6 @@ function groupIcon(icon?: string | null) {
 
 const FAVORITES_KEY = "__favorites__";
 const RECENT_KEY = "__recent__";
-const UNGROUPED_KEY = "__ungrouped__";
 const ALL_KEY = "__all__";
 const SEARCH_KEY = "__search__";
 
@@ -618,7 +617,6 @@ export function PeopleTree({
     if (!inGroup) {
       const person = people.find((p) => p.id === selectedPersonId);
       if (person?.is_favorite) keys.add(FAVORITES_KEY);
-      keys.add(UNGROUPED_KEY);
     }
     setExpanded((current) => {
       let changed = false;
@@ -667,8 +665,8 @@ export function PeopleTree({
         node.people.forEach((p) => push(p.id));
       };
       tree.roots.forEach(walk);
+      tree.ungrouped.forEach((p) => push(p.id));
     }
-    if (expanded.has(UNGROUPED_KEY)) tree.ungrouped.forEach((p) => push(p.id));
     return out;
   }, [searching, searchResults, expanded, favorites, recent, tree]);
 
@@ -701,9 +699,20 @@ export function PeopleTree({
       event.preventDefault();
       setDragOverKey(null);
       const groupId = event.dataTransfer.getData("application/x-group-id");
-      if (groupId) onReparentGroup(groupId, null);
+      if (groupId) {
+        onReparentGroup(groupId, null);
+        return;
+      }
+      // Dropping a person onto "All people" removes them from every group they
+      // currently belong to — the loose bucket lives directly under this root.
+      const personId = event.dataTransfer.getData("application/x-person-id");
+      if (personId) {
+        memberships
+          .filter((m) => m.contact_id === personId)
+          .forEach((m) => onRemoveFromGroup(personId, m.group_id));
+      }
     },
-    [onReparentGroup],
+    [onReparentGroup, onRemoveFromGroup, memberships],
   );
 
   const handlers = useMemo<TreeHandlers>(
@@ -742,7 +751,7 @@ export function PeopleTree({
   );
 
   const allExpanded = expanded.has(ALL_KEY);
-  const allDragOver = dragOverKey === ALL_KEY && draggingKey?.startsWith("group:");
+  const allDragOver = dragOverKey === ALL_KEY && (draggingKey?.startsWith("group:") || draggingKey?.startsWith("person:"));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -816,9 +825,9 @@ export function PeopleTree({
                     type="button"
                     onClick={() => toggle(ALL_KEY)}
                     onDragOver={(event) => {
-                      if (!draggingKey?.startsWith("group:")) return;
+                      if (!draggingKey?.startsWith("group:") && !draggingKey?.startsWith("person:")) return;
                       event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
+                      event.dataTransfer.dropEffect = draggingKey.startsWith("group:") ? "move" : "copy";
                       if (dragOverKey !== ALL_KEY) setDragOverKey(ALL_KEY);
                     }}
                     onDragLeave={(event) => {
@@ -852,54 +861,56 @@ export function PeopleTree({
               </ContextMenu>
               {allExpanded && (
                 <div>
-                  {tree.roots.length === 0 ? (
+                  {tree.roots.length === 0 && tree.ungrouped.length === 0 ? (
                     <div
                       className="text-[11px] italic text-muted-foreground"
                       style={{ paddingLeft: `${basePad + depthStep}px`, paddingTop: "2px", paddingBottom: "2px" }}
                     >
-                      No groups yet
+                      No people yet
                     </div>
                   ) : (
-                    tree.roots.map((node) => (
-                      <GroupRow
-                        key={node.group.id}
-                        node={node}
-                        depth={1}
-                        depthStep={depthStep}
-                        basePad={basePad}
-                        expanded={expanded}
-                        selectedPersonId={selectedPersonId}
-                        groupOptions={groupOptions}
-                        draggingKey={draggingKey}
-                        dragOverKey={dragOverKey}
-                        multiActive={multiActive}
-                        isChecked={bulk.isSelected}
-                        bulkClick={bulk.handleClick}
-                        handlers={handlers}
-                      />
-                    ))
+                    <>
+                      {tree.roots.map((node) => (
+                        <GroupRow
+                          key={node.group.id}
+                          node={node}
+                          depth={1}
+                          depthStep={depthStep}
+                          basePad={basePad}
+                          expanded={expanded}
+                          selectedPersonId={selectedPersonId}
+                          groupOptions={groupOptions}
+                          draggingKey={draggingKey}
+                          dragOverKey={dragOverKey}
+                          multiActive={multiActive}
+                          isChecked={bulk.isSelected}
+                          bulkClick={bulk.handleClick}
+                          handlers={handlers}
+                        />
+                      ))}
+                      {tree.ungrouped.map((person) => (
+                        <PersonRow
+                          key={`all:${person.id}`}
+                          person={person}
+                          parentKey={ALL_KEY}
+                          containingGroup={null}
+                          depth={1}
+                          depthStep={depthStep}
+                          basePad={basePad}
+                          selectedPersonId={selectedPersonId}
+                          groupOptions={groupOptions}
+                          isChecked={bulk.isSelected(person.id)}
+                          multiActive={multiActive}
+                          draggingKey={draggingKey}
+                          bulkClick={bulk.handleClick}
+                          handlers={handlers}
+                        />
+                      ))}
+                    </>
                   )}
                 </div>
               )}
             </div>
-
-            <SectionRow
-              sectionKey={UNGROUPED_KEY}
-              label="Ungrouped"
-              icon={UserX}
-              people={tree.ungrouped}
-              expanded={expanded}
-              depthStep={depthStep}
-              basePad={basePad}
-              selectedPersonId={selectedPersonId}
-              groupOptions={groupOptions}
-              draggingKey={draggingKey}
-              multiActive={multiActive}
-              isChecked={bulk.isSelected}
-              bulkClick={bulk.handleClick}
-              onToggle={toggle}
-              handlers={handlers}
-            />
           </>
         )}
       </div>

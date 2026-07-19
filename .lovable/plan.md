@@ -1,84 +1,35 @@
-# Unify Collections navigation with People/Notes
+## Goal
 
-Bring Collections into the same "tree + search on the left, detail on the right, AI panel docked" shell that Notes and People already use. Replace the slide-in item overlay with a real routed detail view so the Global AI FAB has stable context for every item.
+In the People sidebar, remove the separate "Ungrouped" section. Under "All people", show groups first, then people with no group membership — mirroring how the Notes tree lists folders first and then loose notes under its root.
 
-## Scope decisions (please confirm)
+## Current state (verified)
 
-- **Keep the collection-level grid view.** When you land on `/collections/:slug` with no item selected, you still see the grid — it's genuinely better for visual browsing. The shell change is about what happens when you *open* an item.
-- **Manual subfolders inside a collection** (item groups) — proposed as **Phase 2**, not v1. Phase 1 gives us the shell, tree, favorites, recents, and routed detail. Subfolders add a new schema + reparenting logic and are worth landing separately once the shell is stable.
-- **New-item destination:** force an explicit collection pick when there's no collection context, rather than silently defaulting. Inside a collection, "New item" targets that collection.
-- **Item detail is a form, not a rich-text editor.** Fields are dynamic from the collection schema. The "editor-style" framing is about the *shell* (tree left, content right, AI docks), not about Tiptap.
+- `buildPeopleTree` in `src/components/people/peopleTreeBuild.ts` returns `{ roots, ungrouped }`. `ungrouped` = active people with no membership to any active group.
+- `PeopleTree.tsx` renders three peer sections under Favorites/Recent:
+  1. An "All people" expandable that contains only `tree.roots` (groups).
+  2. A separate `SectionRow` labeled **"Ungrouped"** using `UNGROUPED_KEY` and the `UserX` icon (lines ~886–902).
+- Expansion state, keyboard navigation, and drag/drop all reference `UNGROUPED_KEY`.
 
-## Phase 1 — Shell, tree, routed detail
+## Change
 
-### 1. New route + shell
+1. **`peopleTreeBuild.ts`** — no shape change needed; keep returning `ungrouped`. (Renaming to something like `looseMembers` is optional; skipping to keep the diff small and tests green.)
 
-- Add `/collections/:slug/:itemId` alongside the existing `/collections/:slug`.
-- New `CollectionsLayout` component modeled on the People layout: `SidebarProvider` with a left `CollectionsTree` panel and `<Outlet />` on the right.
-- `/collections` (index) and `/collections/:slug` render inside this shell. Selecting an item navigates to `/collections/:slug/:itemId` and swaps the right pane to `CollectionItemDetail`. No modal, no slide-in.
+2. **`PeopleTree.tsx`**
+   - Remove the standalone "Ungrouped" `SectionRow` block.
+   - Inside the "All people" expanded body, after rendering `tree.roots.map(...)`, render `tree.ungrouped` as person rows at depth 1 (same indent level the root groups use), reusing the existing person-row rendering path used inside a group (drag source, context menu, bulk select, selection highlight).
+   - Empty-state copy: when both `tree.roots` and `tree.ungrouped` are empty, keep a single "No groups yet" line (or switch to "No people yet" if there are also no ungrouped — minor polish).
+   - Keep the "All people" count as `people.length` (unchanged — it already reflects the full set).
+   - Remove `UNGROUPED_KEY` from the expansion set defaults and from the keyboard-navigation flattener at line ~671 (loose people are now visible whenever "All people" is expanded — gated by `ALL_KEY` instead of `UNGROUPED_KEY`).
+   - Drop the `UserX` import if it becomes unused.
 
-### 2. `CollectionsTree` (left panel)
+3. **Drag & drop**
+   - Dropping a person onto empty space inside "All people" (or explicitly onto the loose-people area) should behave like the old "Ungrouped" drop: remove that person from all groups. Wire the existing "remove from all groups" handler to a drop target on the loose-people container (or on "All people" itself when the drag payload is a person, not a group — groups already reparent-to-root on that drop).
 
-Mirrors `PeopleTree`'s structure:
+4. **Tests**
+   - `peopleTreeBuild.test.ts` continues to pass (shape unchanged).
+   - `peopleTreeInteractions.test.tsx`: update any assertion that looked for the "Ungrouped" label; add a case asserting loose people render under "All people" when expanded.
 
-- **Search bar** at top: placeholder "Search collections and items". Searches across collection names, item titles, and item field values (reuse the existing collection search path).
-- **Favorites** pinned section — items the user has starred.
-- **Recents** pinned section — last N opened items (persisted per-user, same shape as People's `last_viewed_at`).
-- **Collections** as top-level nodes; expanding a collection lists its items (paged/virtualized if large). Active item highlighted.
-- Right-click / ⋯ menu: open, favorite, delete, move (Phase 2).
+## Out of scope
 
-### 3. `CollectionItemDetail` (right pane)
-
-- Renders the item title + dynamic fields from the collection schema (reuse whatever `CollectionDetail` currently uses for the slide-in).
-- Inline edit, save, delete.
-- Breadcrumb: Collections › {Collection name} › {Item title}.
-- The Global AI FAB automatically has collection + item context here (see §5).
-
-### 4. Favorites + recents
-
-- Add `is_favorite boolean default false` and `last_viewed_at timestamptz` to `collection_items` (migration + GRANTs).
-- `useTouchItemViewed` hook mirrors `useTouchPersonViewed` (5-minute throttle, cache-gated).
-- Star toggle in the tree row and in the detail header.
-
-### 5. AI FAB integration
-
-- Extend the route detection in `GlobalAIChatFAB.tsx`: when path matches `/collections/:slug/:itemId`, pass both `collection_id` and `item_id` to `collection-chat`.
-- Extend `collection-chat` to accept an optional `item_id` in context and prime the system prompt with the current item's fields (same pattern as note-chat priming the open note).
-- Modifying tools (`update_item`, `delete_item`) operate on the open item by default when `item_id` is present.
-- Listen for `menerio:collection-updated` on the detail page to refetch after AI edits (already wired at collection level; extend to item level).
-
-### 6. Global "New item" flow
-
-- From inside `/collections/:slug` or `/collections/:slug/:itemId`: creates in the current collection, opens the new item's detail route immediately so you can talk to the AI about it while filling it in.
-- From `/collections` (index) or from the global create button with no collection context: opens a small "Choose collection" step, then routes into the new item.
-- No silent default — an item created in the wrong collection is worse than one extra click.
-
-### 7. Remove the slide-in
-
-- Delete the item overlay from `CollectionDetail.tsx`. All "open item" call sites navigate to the new route instead.
-- Keep the collection-level grid on `/collections/:slug` — it's the landing view when no item is selected.
-
-## Phase 2 — Manual subfolders (item groups)
-
-Deferred, sketched here so we know it fits:
-
-- New table `collection_item_groups` (id, collection_id, parent_group_id, name, user_id) + `collection_item_group_memberships` join table. GRANTs + RLS scoped to owner. Cycle-prevention trigger on `parent_group_id` (reuse People's approach).
-- Drag-to-reparent in `CollectionsTree` with the same client-side `wouldCreateCycle` guard we use for People groups.
-- Subtree item counts deduped by item id, matching `buildPeopleTree`.
-- Item can belong to multiple groups (many-to-many), same as People.
-
-## Technical details
-
-- **Files touched (Phase 1):**
-  - New: `src/components/collections/CollectionsLayout.tsx`, `CollectionsTree.tsx`, `CollectionItemDetail.tsx`, `useCollectionsTree.ts`, `useTouchItemViewed.ts`.
-  - Modified: `src/App.tsx` (nested routes under `/collections`), `src/pages/CollectionDetail.tsx` (drop overlay, keep grid), `src/pages/Collections.tsx` (render inside shell), `src/components/chat/GlobalAIChatFAB.tsx` (item_id detection), `supabase/functions/collection-chat/index.ts` (accept item_id, prime prompt), `src/components/layout/GlobalCreateButton.tsx` (choose-collection step).
-  - Migration: `is_favorite`, `last_viewed_at` on `collection_items` + GRANTs.
-- **AI FAB:** the fix we just shipped that resolves collection_id from slug extends naturally — same effect, one more segment.
-- **Search:** tree search reuses existing collection/item search; no new indexes needed for Phase 1.
-- **Testing:** unit tests for a `buildCollectionsTree` helper (favorites/recents/collections buckets), plus a smoke test that opening an item routes rather than modals.
-
-## Open questions
-
-1. Confirm Phase 2 (subfolders) is deferred, not dropped.
-2. On mobile, the shell collapses to a single pane (tree → detail on select), same as People — confirm that's the right behavior.
-3. Should "Recents" be per-collection or global across all collections? I'd argue global, matching how you'd actually think ("what did I open last?").
+- The Collections tree alignment (next step, after this fix ships).
+- Renaming Notes' `VaultRoot` label to "All notes" (mentioned by user as a naming nit; not requested as part of this task).

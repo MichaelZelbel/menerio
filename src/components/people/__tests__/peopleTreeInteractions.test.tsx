@@ -97,8 +97,8 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
   it("checkbox click in the tree selects the person, prevents the row anchor's navigation, and shows the bulk bar", () => {
     const handlers = renderTree();
 
-    // Marco has no membership → lives under Ungrouped (collapsed by default).
-    fireEvent.click(screen.getByRole("button", { name: /Ungrouped/ }));
+    // Marco has no membership → renders directly under "All people" (expanded by default),
+    // alongside groups, just like loose notes appear under the notes root.
     const checkbox = screen.getByRole("checkbox", { name: "Select Marco Test" });
 
     // The row is an <a href>; if nothing preventDefaults the click, the browser
@@ -121,7 +121,6 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
 
   it("second checkbox click deselects and hides the bulk bar", () => {
     renderTree();
-    fireEvent.click(screen.getByRole("button", { name: /Ungrouped/ }));
     const checkbox = screen.getByRole("checkbox", { name: "Select Marco Test" });
 
     fireEvent.click(checkbox);
@@ -162,7 +161,6 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
 
   it("plain row click still navigates to the person (and never full-page navigates)", () => {
     const handlers = renderTree();
-    fireEvent.click(screen.getByRole("button", { name: /Ungrouped/ }));
 
     const row = screen.getByRole("link", { name: /Marco Test/ });
     const defaultNotPrevented = fireEvent.click(row);
