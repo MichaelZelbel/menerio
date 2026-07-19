@@ -2337,7 +2337,28 @@ export default function CollectionDetail() {
   // the current route. `selectedItem` mirrors the route param.
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
   const openItem = useCallback(
-    (item: CollectionItem) => navigate(`/collections/${slug}/${item.id}`),
+    (item: { id: string }) => {
+      navigate(`/collections/${slug}/${item.id}`);
+      // Fire-and-forget last_viewed_at stamp so the tree's Recent section is
+      // populated. Silent failures are fine — this is a UX signal, not data.
+      if (item.id && item.id !== "new") {
+        supabase
+          .from("collection_items")
+          .update({ last_viewed_at: new Date().toISOString() })
+          .eq("id", item.id)
+          .then(({ error }) => {
+            if (!error) {
+              setTreeItems((prev) =>
+                prev.map((row) =>
+                  row.id === item.id
+                    ? { ...row, last_viewed_at: new Date().toISOString() }
+                    : row,
+                ),
+              );
+            }
+          });
+      }
+    },
     [navigate, slug],
   );
   const closeItem = useCallback(
