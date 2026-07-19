@@ -2705,28 +2705,11 @@ export default function CollectionDetail() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() =>
-              setSelectedItem({
-                id: "new",
-                collection_id: collection?.id ?? "",
-                user_id: user?.id ?? "",
-                data: {},
-                title: null,
-                created_at: "",
-                updated_at: "",
-                indexable_date_1: null,
-                indexable_date_2: null,
-                indexable_number_1: null,
-                indexable_number_2: null,
-                indexable_text_1: null,
-                search_vector: null,
-              } as CollectionItem)
-            }
-          >
+          <Button onClick={openNewItem}>
             <Plus className="mr-2 h-4 w-4" />
             New Item
           </Button>
+
           <Button
             variant="outline"
             onClick={() => setChatOpen((v) => !v)}
