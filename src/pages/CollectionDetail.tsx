@@ -2244,6 +2244,62 @@ export default function CollectionDetail() {
     return () => window.removeEventListener("menerio:collection-updated", handler);
   }, [collection?.id]);
 
+  // Sync selectedItem with the URL param (/collections/:slug/:itemId).
+  //   - "new" → placeholder create item
+  //   - real id → existing row from `items`, or a targeted DB fetch when not
+  //     yet in the current page (deep-link / linked-item hop)
+  //   - absent → grid view
+  useEffect(() => {
+    if (!routeItemId) {
+      setSelectedItem(null);
+      return;
+    }
+    if (!user || !collection) return;
+    if (routeItemId === "new") {
+      setSelectedItem({
+        id: "new",
+        collection_id: collection.id,
+        user_id: user.id,
+        data: {},
+        title: null,
+        created_at: "",
+        updated_at: "",
+        indexable_date_1: null,
+        indexable_date_2: null,
+        indexable_number_1: null,
+        indexable_number_2: null,
+        indexable_text_1: null,
+        search_vector: null,
+      } as CollectionItem);
+      return;
+    }
+    const existing = items.find((row) => row.id === routeItemId);
+    if (existing) {
+      setSelectedItem(existing);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("collection_items")
+      .select("*")
+      .eq("id", routeItemId)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          toast.error("Item not found");
+          navigate(`/collections/${slug}`, { replace: true });
+          return;
+        }
+        setSelectedItem(data as CollectionItem);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeItemId, user, collection?.id, items, navigate, slug]);
+
+
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
