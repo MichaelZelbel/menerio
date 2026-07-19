@@ -669,6 +669,117 @@ function CollectionIcon({
   return <LayoutGrid className={className} />;
 }
 
+function itemDisplayTitle(item: CollectionItem, primaryField?: SchemaField) {
+  const data = asData(item.data);
+  return (
+    item.title ||
+    (primaryField ? truncate(data[primaryField.key]) : "Untitled") ||
+    "Untitled"
+  );
+}
+
+function CollectionItemsTree({
+  collection,
+  items,
+  selectedItemId,
+  query,
+  onQueryChange,
+  onSelectItem,
+  onNewItem,
+  isLoading,
+  primaryField,
+}: {
+  collection: Collection | null;
+  items: CollectionItem[];
+  selectedItemId?: string | null;
+  query: string;
+  onQueryChange: (value: string) => void;
+  onSelectItem: (item: CollectionItem) => void;
+  onNewItem: () => void;
+  isLoading: boolean;
+  primaryField?: SchemaField;
+}) {
+  return (
+    <aside className="flex w-full shrink-0 flex-col border-b bg-background lg:h-full lg:w-80 lg:border-b-0 lg:border-r">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <CollectionIcon icon={collection?.icon} className="h-4 w-4" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold font-display">
+            {collection?.name ?? "Collection"}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            {items.length} item{items.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewItem}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="border-b px-3 py-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Search items"
+            className="h-8 pl-8 text-sm"
+          />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {selectedItemId === "new" && (
+          <button
+            type="button"
+            className="mb-1 flex w-full items-start gap-2 rounded-md bg-accent px-2 py-2 text-left text-sm"
+            onClick={onNewItem}
+          >
+            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate font-medium">New item</span>
+          </button>
+        )}
+        {isLoading ? (
+          <div className="space-y-2 p-1">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-11 w-full" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+            {query.trim() ? "No matching items." : "No items yet."}
+          </div>
+        ) : (
+          <nav className="space-y-1" aria-label="Collection items">
+            {items.map((item) => {
+              const active = selectedItemId === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelectItem(item)}
+                  className={cn(
+                    "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent",
+                    active && "bg-accent text-accent-foreground",
+                  )}
+                >
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">
+                      {itemDisplayTitle(item, primaryField)}
+                    </span>
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      {formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function initialFormValues(
   fields: SchemaField[],
   item: CollectionItem | null,
@@ -1664,10 +1775,11 @@ function ItemSheet({
       );
     toast.success(isCreate ? "Item created" : "Item saved");
     onSaved(data);
-    onOpenChange(false);
+    if (!inline) onOpenChange(false);
   }, [
     collection,
     fields,
+    inline,
     isCreate,
     item?.id,
     onOpenChange,
@@ -1810,7 +1922,7 @@ function ItemSheet({
   if (inline) {
     if (!open) return null;
     return (
-      <div className="flex min-h-[calc(100dvh-8rem)] flex-col rounded-lg border bg-card">
+      <div className="flex h-full min-h-0 flex-col bg-background">
         <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold font-display">{title}</h2>
@@ -2678,11 +2790,23 @@ export default function CollectionDetail() {
     );
 
   return (
-    <div className="w-full max-w-7xl space-y-6">
+    <div className="flex h-[calc(100dvh-104px)] w-full flex-col overflow-hidden rounded-md border bg-background lg:flex-row">
       <SEOHead
         title={`${collection?.name ?? "Collection"} — Menerio`}
         noIndex
       />
+      <CollectionItemsTree
+        collection={collection}
+        items={items}
+        selectedItemId={routeItemId ?? null}
+        query={query}
+        onQueryChange={setQuery}
+        onSelectItem={openItem}
+        onNewItem={openNewItem}
+        isLoading={isLoading}
+        primaryField={primaryField}
+      />
+      <section className="min-w-0 flex-1 overflow-y-auto p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
@@ -2797,7 +2921,7 @@ export default function CollectionDetail() {
             if (selectedItem?.id === "new") {
               navigate(`/collections/${slug}/${savedItem.id}`, { replace: true });
             } else {
-              closeItem();
+              setSelectedItem(savedItem);
             }
           }}
           onDeleted={(id) => {
@@ -3135,6 +3259,8 @@ export default function CollectionDetail() {
       )}
       </>
       )}
+
+      </section>
 
       <EditCollectionDialog
         collection={collection}
