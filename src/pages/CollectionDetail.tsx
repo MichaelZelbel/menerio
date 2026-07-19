@@ -103,6 +103,11 @@ import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
+import { CollectionItemsTree as CollectionItemsFolderTree } from "@/components/collections/CollectionItemsTree";
+import type {
+  FolderLite,
+  ItemLite,
+} from "@/components/collections/collectionItemsTreeBuild";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionItem = Database["public"]["Tables"]["collection_items"]["Row"];
@@ -681,23 +686,39 @@ function itemDisplayTitle(item: CollectionItem, primaryField?: SchemaField) {
 function CollectionItemsTree({
   collection,
   items,
+  folders,
+  treeItems,
   selectedItemId,
   query,
   onQueryChange,
   onSelectItem,
   onNewItem,
   isLoading,
-  primaryField,
+  onToggleFavorite,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onReparentFolder,
+  onMoveItemToFolder,
+  onDeleteItem,
 }: {
   collection: Collection | null;
   items: CollectionItem[];
+  folders: FolderLite[];
+  treeItems: ItemLite[];
   selectedItemId?: string | null;
   query: string;
   onQueryChange: (value: string) => void;
-  onSelectItem: (item: CollectionItem) => void;
+  onSelectItem: (item: { id: string }) => void;
   onNewItem: () => void;
   isLoading: boolean;
-  primaryField?: SchemaField;
+  onToggleFavorite: (id: string, isFavorite: boolean) => void;
+  onCreateFolder: (parentFolderId: string | null) => void;
+  onRenameFolder: (folderId: string, currentName: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  onReparentFolder: (folderId: string, parentFolderId: string | null) => void;
+  onMoveItemToFolder: (itemId: string, folderId: string | null) => void;
+  onDeleteItem: (itemId: string) => void;
 }) {
   return (
     <aside className="flex w-full shrink-0 flex-col border-b bg-background lg:h-full lg:w-80 lg:border-b-0 lg:border-r">
@@ -726,59 +747,36 @@ function CollectionItemsTree({
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {selectedItemId === "new" && (
-          <button
-            type="button"
-            className="mb-1 flex w-full items-start gap-2 rounded-md bg-accent px-2 py-2 text-left text-sm"
-            onClick={onNewItem}
-          >
-            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate font-medium">New item</span>
-          </button>
-        )}
-        {isLoading ? (
-          <div className="space-y-2 p-1">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="h-11 w-full" />
-            ))}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-            {query.trim() ? "No matching items." : "No items yet."}
-          </div>
-        ) : (
-          <nav className="space-y-1" aria-label="Collection items">
-            {items.map((item) => {
-              const active = selectedItemId === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onSelectItem(item)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent",
-                    active && "bg-accent text-accent-foreground",
-                  )}
-                >
-                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {itemDisplayTitle(item, primaryField)}
-                    </span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
-                      {formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        )}
-      </div>
+      {isLoading ? (
+        <div className="space-y-2 p-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-7 w-full" />
+          ))}
+        </div>
+      ) : (
+        <CollectionItemsFolderTree
+          items={treeItems}
+          folders={folders}
+          selectedItemId={selectedItemId ?? null}
+          searchQuery={query}
+          onSelectItem={(id) => onSelectItem({ id })}
+          onToggleFavorite={onToggleFavorite}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
+          onReparentFolder={onReparentFolder}
+          onMoveItemToFolder={onMoveItemToFolder}
+          onCreateItem={(folderId) => {
+            void folderId;
+            onNewItem();
+          }}
+          onDeleteItem={onDeleteItem}
+        />
+      )}
     </aside>
   );
 }
+
 
 function initialFormValues(
   fields: SchemaField[],
@@ -2323,13 +2321,44 @@ export default function CollectionDetail() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
+  // Tree data (full item set + folders for the collection) is loaded separately
+  // from the paged/filtered `items` used by the table view — the tree needs the
+  // full picture, and refreshing it independently avoids resetting pagination.
+  const [treeItems, setTreeItems] = useState<ItemLite[]>([]);
+  const [folders, setFolders] = useState<FolderLite[]>([]);
+  const [treeReloadTick, setTreeReloadTick] = useState(0);
+  const refreshTree = useCallback(
+    () => setTreeReloadTick((t) => t + 1),
+    [],
+  );
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
   // Selection is URL-driven so /collections/:slug/:itemId deep-links work, the
   // browser back button behaves, and the AI FAB can prime item context from
   // the current route. `selectedItem` mirrors the route param.
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
   const openItem = useCallback(
-    (item: CollectionItem) => navigate(`/collections/${slug}/${item.id}`),
+    (item: { id: string }) => {
+      navigate(`/collections/${slug}/${item.id}`);
+      // Fire-and-forget last_viewed_at stamp so the tree's Recent section is
+      // populated. Silent failures are fine — this is a UX signal, not data.
+      if (item.id && item.id !== "new") {
+        supabase
+          .from("collection_items")
+          .update({ last_viewed_at: new Date().toISOString() })
+          .eq("id", item.id)
+          .then(({ error }) => {
+            if (!error) {
+              setTreeItems((prev) =>
+                prev.map((row) =>
+                  row.id === item.id
+                    ? { ...row, last_viewed_at: new Date().toISOString() }
+                    : row,
+                ),
+              );
+            }
+          });
+      }
+    },
     [navigate, slug],
   );
   const closeItem = useCallback(
@@ -2789,6 +2818,174 @@ export default function CollectionDetail() {
       </div>
     );
 
+  // Load full item set (id/title/folder/favorite/recent-viewed) + folders for
+  // the sidebar tree. This runs in parallel with the paged/filtered `items`
+  // load and refreshes whenever an item/folder is mutated via the tree.
+  useEffect(() => {
+    if (!user || !collection?.id) {
+      setTreeItems([]);
+      setFolders([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [itemsRes, foldersRes] = await Promise.all([
+        supabase
+          .from("collection_items")
+          .select("id, title, folder_id, is_favorite, last_viewed_at, updated_at")
+          .eq("user_id", user.id)
+          .eq("collection_id", collection.id),
+        supabase
+          .from("collection_item_folders")
+          .select("id, name, parent_folder_id")
+          .eq("user_id", user.id)
+          .eq("collection_id", collection.id)
+          .order("name"),
+      ]);
+      if (cancelled) return;
+      setTreeItems((itemsRes.data ?? []) as ItemLite[]);
+      setFolders((foldersRes.data ?? []) as FolderLite[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, collection?.id, treeReloadTick, reloadTick]);
+
+  const handleToggleFavorite = useCallback(
+    async (id: string, isFavorite: boolean) => {
+      // Optimistic — favorite is a fire-and-forget UX flag.
+      setTreeItems((prev) =>
+        prev.map((row) => (row.id === id ? { ...row, is_favorite: isFavorite } : row)),
+      );
+      const { error } = await supabase
+        .from("collection_items")
+        .update({ is_favorite: isFavorite })
+        .eq("id", id);
+      if (error) {
+        toast.error("Could not update favorite", { description: error.message });
+        refreshTree();
+      }
+    },
+    [refreshTree],
+  );
+
+  const handleCreateFolder = useCallback(
+    async (parentFolderId: string | null) => {
+      if (!user || !collection) return;
+      const name = window.prompt(parentFolderId ? "New subfolder name" : "New folder name");
+      if (!name || !name.trim()) return;
+      const { error } = await supabase.from("collection_item_folders").insert({
+        user_id: user.id,
+        collection_id: collection.id,
+        parent_folder_id: parentFolderId,
+        name: name.trim(),
+      });
+      if (error) {
+        toast.error("Could not create folder", { description: error.message });
+        return;
+      }
+      toast.success("Folder created");
+      refreshTree();
+    },
+    [user, collection, refreshTree],
+  );
+
+  const handleRenameFolder = useCallback(
+    async (folderId: string, currentName: string) => {
+      const name = window.prompt("Rename folder", currentName);
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === currentName) return;
+      const { error } = await supabase
+        .from("collection_item_folders")
+        .update({ name: trimmed })
+        .eq("id", folderId);
+      if (error) {
+        toast.error("Could not rename folder", { description: error.message });
+        return;
+      }
+      refreshTree();
+    },
+    [refreshTree],
+  );
+
+  const handleDeleteFolder = useCallback(
+    async (folderId: string) => {
+      // FK is ON DELETE SET NULL for items and child folders, so items and
+      // subfolders survive and reappear at the parent level. Confirm since
+      // the tree structure changes.
+      if (!window.confirm("Delete this folder? Its items and subfolders will move up one level.")) return;
+      const { error } = await supabase
+        .from("collection_item_folders")
+        .delete()
+        .eq("id", folderId);
+      if (error) {
+        toast.error("Could not delete folder", { description: error.message });
+        return;
+      }
+      toast.success("Folder deleted");
+      refreshTree();
+    },
+    [refreshTree],
+  );
+
+  const handleReparentFolder = useCallback(
+    async (folderId: string, parentFolderId: string | null) => {
+      const { error } = await supabase
+        .from("collection_item_folders")
+        .update({ parent_folder_id: parentFolderId })
+        .eq("id", folderId);
+      if (error) {
+        toast.error("Could not move folder", { description: error.message });
+        return;
+      }
+      refreshTree();
+    },
+    [refreshTree],
+  );
+
+  const handleMoveItemToFolder = useCallback(
+    async (itemId: string, folderId: string | null) => {
+      setTreeItems((prev) =>
+        prev.map((row) => (row.id === itemId ? { ...row, folder_id: folderId } : row)),
+      );
+      const { error } = await supabase
+        .from("collection_items")
+        .update({ folder_id: folderId })
+        .eq("id", itemId);
+      if (error) {
+        toast.error("Could not move item", { description: error.message });
+        refreshTree();
+      }
+    },
+    [refreshTree],
+  );
+
+  const handleDeleteItemFromTree = useCallback(
+    async (itemId: string) => {
+      if (!window.confirm("Delete this item? This cannot be undone.")) return;
+      const target = items.find((row) => row.id === itemId);
+      if (target) {
+        await deleteItem(target);
+      } else {
+        const { error } = await supabase
+          .from("collection_items")
+          .delete()
+          .eq("id", itemId);
+        if (error) {
+          toast.error("Could not delete item", { description: error.message });
+          return;
+        }
+        toast.success("Item deleted");
+      }
+      if (routeItemId === itemId) closeItem();
+      refreshTree();
+    },
+    // deleteItem is defined below in the same component; ESLint can't see it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, routeItemId, closeItem, refreshTree],
+  );
+
   return (
     <div className="flex h-[calc(100dvh-104px)] w-full flex-col overflow-hidden rounded-md border bg-background lg:flex-row">
       <SEOHead
@@ -2798,13 +2995,21 @@ export default function CollectionDetail() {
       <CollectionItemsTree
         collection={collection}
         items={items}
+        folders={folders}
+        treeItems={treeItems}
         selectedItemId={routeItemId ?? null}
         query={query}
         onQueryChange={setQuery}
         onSelectItem={openItem}
         onNewItem={openNewItem}
         isLoading={isLoading}
-        primaryField={primaryField}
+        onToggleFavorite={handleToggleFavorite}
+        onCreateFolder={handleCreateFolder}
+        onRenameFolder={handleRenameFolder}
+        onDeleteFolder={handleDeleteFolder}
+        onReparentFolder={handleReparentFolder}
+        onMoveItemToFolder={handleMoveItemToFolder}
+        onDeleteItem={handleDeleteItemFromTree}
       />
       <section className="min-w-0 flex-1 overflow-y-auto p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
