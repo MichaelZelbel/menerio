@@ -2790,7 +2790,7 @@ export default function CollectionDetail() {
     );
 
   return (
-    <div className="flex h-[calc(100dvh-104px)] w-full overflow-hidden rounded-md border bg-background">
+    <div className="flex h-[calc(100dvh-104px)] w-full flex-col overflow-hidden rounded-md border bg-background lg:flex-row">
       <SEOHead
         title={`${collection?.name ?? "Collection"} — Menerio`}
         noIndex
