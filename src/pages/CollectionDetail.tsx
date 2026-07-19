@@ -2982,7 +2982,8 @@ export default function CollectionDetail() {
                       <TableRow
                         key={item.id}
                         className="cursor-pointer"
-                        onClick={() => setSelectedItem(item)}
+                        onClick={() => openItem(item)}
+
                       >
                         <TableCell className="font-medium">
                           {item.title ||
