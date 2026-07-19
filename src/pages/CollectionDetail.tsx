@@ -103,6 +103,11 @@ import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
+import { CollectionItemsTree as CollectionItemsFolderTree } from "@/components/collections/CollectionItemsTree";
+import type {
+  FolderLite,
+  ItemLite,
+} from "@/components/collections/collectionItemsTreeBuild";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionItem = Database["public"]["Tables"]["collection_items"]["Row"];
