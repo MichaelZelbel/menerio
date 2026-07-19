@@ -277,18 +277,69 @@ export type Database = {
         }
         Relationships: []
       }
+      collection_item_folders: {
+        Row: {
+          collection_id: string
+          created_at: string
+          id: string
+          name: string
+          parent_folder_id: string | null
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          collection_id: string
+          created_at?: string
+          id?: string
+          name: string
+          parent_folder_id?: string | null
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          collection_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          parent_folder_id?: string | null
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_item_folders_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_item_folders_parent_folder_id_fkey"
+            columns: ["parent_folder_id"]
+            isOneToOne: false
+            referencedRelation: "collection_item_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collection_items: {
         Row: {
           ai_visibility: string
           collection_id: string
           created_at: string
           data: Json
+          folder_id: string | null
           id: string
           indexable_date_1: string | null
           indexable_date_2: string | null
           indexable_number_1: number | null
           indexable_number_2: number | null
           indexable_text_1: string | null
+          is_favorite: boolean
+          last_viewed_at: string | null
           search_vector: unknown
           title: string | null
           updated_at: string
@@ -299,12 +350,15 @@ export type Database = {
           collection_id: string
           created_at?: string
           data?: Json
+          folder_id?: string | null
           id?: string
           indexable_date_1?: string | null
           indexable_date_2?: string | null
           indexable_number_1?: number | null
           indexable_number_2?: number | null
           indexable_text_1?: string | null
+          is_favorite?: boolean
+          last_viewed_at?: string | null
           search_vector?: unknown
           title?: string | null
           updated_at?: string
@@ -315,12 +369,15 @@ export type Database = {
           collection_id?: string
           created_at?: string
           data?: Json
+          folder_id?: string | null
           id?: string
           indexable_date_1?: string | null
           indexable_date_2?: string | null
           indexable_number_1?: number | null
           indexable_number_2?: number | null
           indexable_text_1?: string | null
+          is_favorite?: boolean
+          last_viewed_at?: string | null
           search_vector?: unknown
           title?: string | null
           updated_at?: string
@@ -332,6 +389,13 @@ export type Database = {
             columns: ["collection_id"]
             isOneToOne: false
             referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "collection_item_folders"
             referencedColumns: ["id"]
           },
         ]
