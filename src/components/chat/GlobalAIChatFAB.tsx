@@ -86,11 +86,21 @@ export function GlobalAIChatFAB() {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  // Detect collection context from /collections/:slug (and optional item route)
+  // Detect collection context from /collections/:slug and optional /:itemId
   const collectionSlug = useMemo(() => {
     const match = location.pathname.match(/^\/collections\/([^/]+)/);
     return match ? match[1] : null;
   }, [location.pathname]);
+
+  const collectionItemId = useMemo(() => {
+    // /collections/:slug/:itemId — but skip reserved subroutes like /schema
+    const match = location.pathname.match(/^\/collections\/[^/]+\/([^/]+)$/);
+    if (!match) return null;
+    const seg = match[1];
+    if (seg === "schema" || seg === "new") return null;
+    return seg;
+  }, [location.pathname]);
+
 
   const [collectionId, setCollectionId] = useState<string | null>(null);
   useEffect(() => {
@@ -230,6 +240,7 @@ export function GlobalAIChatFAB() {
       const invokeBody = collectionId
         ? {
             collection_id: collectionId,
+            item_id: collectionItemId || undefined,
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }
@@ -239,6 +250,7 @@ export function GlobalAIChatFAB() {
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           };
+
       const { data, error: fnErr } = await supabase.functions.invoke(chatFn, {
         body: invokeBody,
       });
@@ -300,7 +312,7 @@ export function GlobalAIChatFAB() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, personId, collectionId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, collectionId, collectionItemId, queryClient, refreshSummaryIfNeeded]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends; Shift+Enter inserts a newline. This matches the in-note and

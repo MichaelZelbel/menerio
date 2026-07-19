@@ -1597,6 +1597,7 @@ function ItemSheet({
   onSaved,
   onDeleted,
   collections,
+  inline = false,
 }: {
   collection: Collection | null;
   fields: SchemaField[];
@@ -1606,6 +1607,8 @@ function ItemSheet({
   onSaved: (item: CollectionItem) => void;
   onDeleted: (id: string) => void;
   collections: Collection[];
+  /** Render as a routed inline detail view (full-width) instead of a right-side Sheet. */
+  inline?: boolean;
 }) {
   const { user } = useAuth();
   const [values, setValues] = useState<FormValues>({});
@@ -1696,14 +1699,128 @@ function ItemSheet({
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
         save();
-      } else if (event.key === "Escape") {
+      } else if (event.key === "Escape" && !inline) {
         event.preventDefault();
         close();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [close, open, save]);
+  }, [close, open, save, inline]);
+
+  const title = isCreate
+    ? `New item in ${collection?.name ?? "Collection"}`
+    : item?.title || "Edit item";
+  const subtitle = isDirty ? "Unsaved changes" : "Save changes when you are done.";
+
+  const body = (
+    <>
+      <div className={cn("flex-1 overflow-y-auto", inline ? "px-6 py-6" : "-mx-6 px-6 py-4")}>
+        <form
+          className={cn("space-y-5", inline && "mx-auto max-w-2xl")}
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          {fields.map((field) => (
+            <FieldInput
+              key={field.key}
+              field={field}
+              value={
+                values[field.key] ??
+                (field.type === "multiselect"
+                  ? []
+                  : field.type === "boolean"
+                    ? false
+                    : "")
+              }
+              error={errors[field.key]}
+              collections={collections}
+              currentCollection={collection}
+              onChange={(value) => {
+                setValues((current) => ({ ...current, [field.key]: value }));
+                setErrors((current) => ({ ...current, [field.key]: "" }));
+              }}
+            />
+          ))}
+        </form>
+        {!isCreate && item && collection && (
+          <div className={cn(inline && "mx-auto max-w-2xl")}>
+            <ItemNotesPanel
+              itemId={item.id}
+              itemTitle={item.title ?? "Untitled"}
+              collectionId={collection.id}
+              collectionName={collection.name}
+              onClose={inline ? undefined : () => onOpenChange(false)}
+            />
+          </div>
+        )}
+      </div>
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 border-t pt-4",
+          inline && "px-6 pb-6",
+        )}
+      >
+        <div>
+          {!isCreate && (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={close}>
+            {inline ? "Back" : "Cancel"}
+          </Button>
+          <Button type="button" onClick={save} disabled={isSaving}>
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes this collection item. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteItem}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+
+  if (inline) {
+    if (!open) return null;
+    return (
+      <div className="flex min-h-[calc(100dvh-8rem)] flex-col rounded-lg border bg-card">
+        <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-semibold font-display">{title}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+          </div>
+        </div>
+        {body}
+      </div>
+    );
+  }
 
   return (
     <Sheet
@@ -1712,101 +1829,16 @@ function ItemSheet({
     >
       <SheetContent className="flex flex-col sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle>
-            {isCreate
-              ? `New item in ${collection?.name ?? "Collection"}`
-              : item?.title || "Edit item"}
-          </SheetTitle>
-          <SheetDescription>
-            {isDirty ? "Unsaved changes" : "Save changes when you are done."}
-          </SheetDescription>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{subtitle}</SheetDescription>
         </SheetHeader>
-        <div className="-mx-6 flex-1 overflow-y-auto px-6 py-4">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              save();
-            }}
-          >
-            {fields.map((field) => (
-              <FieldInput
-                key={field.key}
-                field={field}
-                value={
-                  values[field.key] ??
-                  (field.type === "multiselect"
-                    ? []
-                    : field.type === "boolean"
-                      ? false
-                      : "")
-                }
-                error={errors[field.key]}
-                collections={collections}
-                currentCollection={collection}
-                onChange={(value) => {
-                  setValues((current) => ({ ...current, [field.key]: value }));
-                  setErrors((current) => ({ ...current, [field.key]: "" }));
-                }}
-              />
-            ))}
-          </form>
-          {!isCreate && item && collection && (
-            <ItemNotesPanel
-              itemId={item.id}
-              itemTitle={item.title ?? "Untitled"}
-              collectionId={collection.id}
-              collectionName={collection.name}
-              onClose={() => onOpenChange(false)}
-            />
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-2 border-t pt-4">
-          <div>
-            {!isCreate && (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={close}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={save} disabled={isSaving}>
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </div>
-        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete item?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This permanently deletes this collection item. This action
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={deleteItem}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {body}
       </SheetContent>
     </Sheet>
   );
 }
+
+
 
 function EditCollectionDialog({
   collection,
@@ -2165,7 +2197,7 @@ function SortableHeader({
 }
 
 export default function CollectionDetail() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, itemId: routeItemId } = useParams<{ slug: string; itemId?: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -2180,7 +2212,22 @@ export default function CollectionDetail() {
   const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
+  // Selection is URL-driven so /collections/:slug/:itemId deep-links work, the
+  // browser back button behaves, and the AI FAB can prime item context from
+  // the current route. `selectedItem` mirrors the route param.
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
+  const openItem = useCallback(
+    (item: CollectionItem) => navigate(`/collections/${slug}/${item.id}`),
+    [navigate, slug],
+  );
+  const closeItem = useCallback(
+    () => navigate(`/collections/${slug}`),
+    [navigate, slug],
+  );
+  const openNewItem = useCallback(
+    () => navigate(`/collections/${slug}/new`),
+    [navigate, slug],
+  );
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
@@ -2196,6 +2243,63 @@ export default function CollectionDetail() {
     window.addEventListener("menerio:collection-updated", handler);
     return () => window.removeEventListener("menerio:collection-updated", handler);
   }, [collection?.id]);
+
+  // Sync selectedItem with the URL param (/collections/:slug/:itemId).
+  //   - "new" → placeholder create item
+  //   - real id → existing row from `items`, or a targeted DB fetch when not
+  //     yet in the current page (deep-link / linked-item hop)
+  //   - absent → grid view
+  useEffect(() => {
+    if (!routeItemId) {
+      setSelectedItem(null);
+      return;
+    }
+    if (!user || !collection) return;
+    if (routeItemId === "new") {
+      setSelectedItem({
+        id: "new",
+        collection_id: collection.id,
+        user_id: user.id,
+        data: {},
+        title: null,
+        created_at: "",
+        updated_at: "",
+        indexable_date_1: null,
+        indexable_date_2: null,
+        indexable_number_1: null,
+        indexable_number_2: null,
+        indexable_text_1: null,
+        search_vector: null,
+      } as CollectionItem);
+      return;
+    }
+    const existing = items.find((row) => row.id === routeItemId);
+    if (existing) {
+      setSelectedItem(existing);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("collection_items")
+      .select("*")
+      .eq("id", routeItemId)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          toast.error("Item not found");
+          navigate(`/collections/${slug}`, { replace: true });
+          return;
+        }
+        setSelectedItem(data as CollectionItem);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeItemId, user, collection?.id, items, navigate, slug]);
+
+
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
@@ -2551,7 +2655,7 @@ export default function CollectionDetail() {
     }
     const existing = items.find((item) => item.id === link.id);
     if (existing) {
-      setSelectedItem(existing);
+      openItem(existing);
       return;
     }
     const { data, error } = await supabase
@@ -2560,8 +2664,9 @@ export default function CollectionDetail() {
       .eq("id", link.id)
       .maybeSingle();
     if (error || !data) return toast.error("Linked item not found");
-    setSelectedItem(data);
+    openItem(data as CollectionItem);
   };
+
 
   if (isLoading && !collection)
     return (
@@ -2579,92 +2684,133 @@ export default function CollectionDetail() {
         noIndex
       />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
             <Link to="/collections" className="hover:text-foreground">
               Collections
             </Link>{" "}
-            / {collection?.name}
+            /{" "}
+            {selectedItem ? (
+              <>
+                <Link to={`/collections/${slug}`} className="hover:text-foreground">
+                  {collection?.name}
+                </Link>{" "}
+                /{" "}
+                <span className="text-foreground">
+                  {selectedItem.id === "new"
+                    ? "New item"
+                    : selectedItem.title || "Untitled"}
+                </span>
+              </>
+            ) : (
+              collection?.name
+            )}
           </p>
-          <h1 className="mt-2 text-3xl font-bold font-display">
-            <CollectionIcon
-              icon={collection?.icon}
-              className="mr-2 inline-flex h-8 w-8 align-[-0.15em]"
-            />
-            {collection?.name}
-          </h1>
-          {collection?.description && (
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {collection.description}
-            </p>
+          {!selectedItem && (
+            <>
+              <h1 className="mt-2 text-3xl font-bold font-display">
+                <CollectionIcon
+                  icon={collection?.icon}
+                  className="mr-2 inline-flex h-8 w-8 align-[-0.15em]"
+                />
+                {collection?.name}
+              </h1>
+              {collection?.description && (
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {collection.description}
+                </p>
+              )}
+            </>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() =>
-              setSelectedItem({
-                id: "new",
-                collection_id: collection?.id ?? "",
-                user_id: user?.id ?? "",
-                data: {},
-                title: null,
-                created_at: "",
-                updated_at: "",
-                indexable_date_1: null,
-                indexable_date_2: null,
-                indexable_number_1: null,
-                indexable_number_2: null,
-                indexable_text_1: null,
-                search_vector: null,
-              } as CollectionItem)
-            }
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            New Item
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setChatOpen((v) => !v)}
-            aria-label="AI chat"
-            aria-pressed={chatOpen}
-          >
-            <Sparkles className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">AI Chat</span>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate(`/collections/${slug}/schema`)}
-            aria-label="Customize fields"
-          >
-            <Settings2 className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Customize</span>
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Collection actions"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                Edit Collection
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                Delete Collection
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        {!selectedItem && (
+          <div className="flex items-center gap-2">
+            <Button onClick={openNewItem}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Item
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => setChatOpen((v) => !v)}
+              aria-label="AI chat"
+              aria-pressed={chatOpen}
+            >
+              <Sparkles className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">AI Chat</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/collections/${slug}/schema`)}
+              aria-label="Customize fields"
+            >
+              <Settings2 className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Customize</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Collection actions"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                  Edit Collection
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  Delete Collection
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </div>
+      {selectedItem && (
+        <ItemSheet
+          inline
+          collection={collection}
+          fields={fields}
+          item={selectedItem}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) closeItem();
+          }}
+          onSaved={(savedItem) => {
+            setItems((current) => {
+              const exists = current.some((row) => row.id === savedItem.id);
+              return exists
+                ? current.map((row) =>
+                    row.id === savedItem.id ? savedItem : row,
+                  )
+                : [savedItem, ...current].slice(0, PAGE_SIZE);
+            });
+            // If this was a create, route to the newly created item so the AI
+            // FAB can prime item context and further edits happen in place.
+            if (selectedItem?.id === "new") {
+              navigate(`/collections/${slug}/${savedItem.id}`, { replace: true });
+            } else {
+              closeItem();
+            }
+          }}
+          onDeleted={(id) => {
+            setItems((current) => current.filter((row) => row.id !== id));
+            closeItem();
+          }}
+          collections={allCollections}
+        />
+      )}
+      {!selectedItem && (
+      <>
       {items.length === 0 && !query.trim() && !isLoading ? (
+
         <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
           <div className="max-w-lg">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -2676,9 +2822,8 @@ export default function CollectionDetail() {
               will know how to capture it here.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3">
-              <Button
-                onClick={() => setSelectedItem({ id: "new" } as CollectionItem)}
-              >
+              <Button onClick={openNewItem}>
+
                 <Plus className="mr-2 h-4 w-4" />
                 New Item
               </Button>
@@ -2895,7 +3040,8 @@ export default function CollectionDetail() {
                       <TableRow
                         key={item.id}
                         className="cursor-pointer"
-                        onClick={() => setSelectedItem(item)}
+                        onClick={() => openItem(item)}
+
                       >
                         <TableCell className="font-medium">
                           {item.title ||
@@ -2935,8 +3081,9 @@ export default function CollectionDetail() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={() => setSelectedItem(item)}
+                                onClick={() => openItem(item)}
                               >
+
                                 Edit
                               </DropdownMenuItem>
                               <DropdownMenuItem
@@ -2986,27 +3133,9 @@ export default function CollectionDetail() {
           </div>
         </div>
       )}
-      <ItemSheet
-        collection={collection}
-        fields={fields}
-        item={selectedItem}
-        open={!!selectedItem}
-        onOpenChange={(open) => !open && setSelectedItem(null)}
-        onSaved={(savedItem) => {
-          setItems((current) => {
-            const exists = current.some((row) => row.id === savedItem.id);
-            return exists
-              ? current.map((row) =>
-                  row.id === savedItem.id ? savedItem : row,
-                )
-              : [savedItem, ...current].slice(0, PAGE_SIZE);
-          });
-        }}
-        onDeleted={(id) =>
-          setItems((current) => current.filter((row) => row.id !== id))
-        }
-        collections={allCollections}
-      />
+      </>
+      )}
+
       <EditCollectionDialog
         collection={collection}
         open={editOpen}

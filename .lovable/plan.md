@@ -1,79 +1,84 @@
-# Collection AI Chat
+# Unify Collections navigation with People/Notes
 
-Add the same chat surface we already ship for notes and people to collections. Two contexts:
+Bring Collections into the same "tree + search on the left, detail on the right, AI panel docked" shell that Notes and People already use. Replace the slide-in item overlay with a real routed detail view so the Global AI FAB has stable context for every item.
 
-- **Collection context** — chat scoped to a whole collection (all items + schema + agent instructions).
-- **Item context** — chat scoped to a single collection item.
+## Scope decisions (please confirm)
 
-The core challenge you called out — every collection has a different shape — is solvable because each collection already carries **`field_schema`** (typed fields, `link_person`, `link_note`, selects, dates, etc.) and **`agent_instructions`** (produced by `generate_collection_schema`). The chatbot reads those at runtime and treats them as the tool contract, so it works for any user-defined collection without per-collection code.
+- **Keep the collection-level grid view.** When you land on `/collections/:slug` with no item selected, you still see the grid — it's genuinely better for visual browsing. The shell change is about what happens when you *open* an item.
+- **Manual subfolders inside a collection** (item groups) — proposed as **Phase 2**, not v1. Phase 1 gives us the shell, tree, favorites, recents, and routed detail. Subfolders add a new schema + reparenting logic and are worth landing separately once the shell is stable.
+- **New-item destination:** force an explicit collection pick when there's no collection context, rather than silently defaulting. Inside a collection, "New item" targets that collection.
+- **Item detail is a form, not a rich-text editor.** Fields are dynamic from the collection schema. The "editor-style" framing is about the *shell* (tree left, content right, AI docks), not about Tiptap.
 
-## What the user sees
+## Phase 1 — Shell, tree, routed detail
 
-- On `CollectionDetail` (whole-collection view): the same right-side chat panel as notes/people. Suggestions like "Add an item from this URL", "Summarize entries added this month", "Find duplicates", "Which items are missing a due date?".
-- On a collection item drawer/detail: item-scoped chat. Suggestions like "Fill missing fields from this link", "Update status to done", "Link this to the person Xihui".
-- Global FAB already exists — no change needed there; it can pick up collection context from route if we want (optional later).
+### 1. New route + shell
 
-## Backend — new edge function `collection-chat`
+- Add `/collections/:slug/:itemId` alongside the existing `/collections/:slug`.
+- New `CollectionsLayout` component modeled on the People layout: `SidebarProvider` with a left `CollectionsTree` panel and `<Outlet />` on the right.
+- `/collections` (index) and `/collections/:slug` render inside this shell. Selecting an item navigates to `/collections/:slug/:itemId` and swaps the right pane to `CollectionItemDetail`. No modal, no slide-in.
 
-Modeled after `note-chat` (shared read tools, agent loop, credits, MCP). One function handling both scopes via a `mode` field.
+### 2. `CollectionsTree` (left panel)
 
-Request body:
-```
-{ collection_id, item_id?: string, messages, timezone }
-```
+Mirrors `PeopleTree`'s structure:
 
-System prompt is assembled at request time from:
-- Collection name, icon, description, visibility.
-- `agent_instructions` (verbatim — this is exactly what they're for).
-- **Rendered schema description**: for each field emit `key (type[, options]) — label` so the model sees the exact contract. Mark the `primary` field and `indexable` fields.
-- If `item_id` present: the current item's `data` JSON plus resolved links (person names for `link_person`, note titles for `link_note`).
-- User profile digest + awareness context (same helpers used by note-chat).
+- **Search bar** at top: placeholder "Search collections and items". Searches across collection names, item titles, and item field values (reuse the existing collection search path).
+- **Favorites** pinned section — items the user has starred.
+- **Recents** pinned section — last N opened items (persisted per-user, same shape as People's `last_viewed_at`).
+- **Collections** as top-level nodes; expanding a collection lists its items (paged/virtualized if large). Active item highlighted.
+- Right-click / ⋯ menu: open, favorite, delete, move (Phase 2).
 
-Read tools (reuse `_shared/read-tools.ts`): semantic search, person lookup, media search, list recent notes. Add two new read tools:
-- `list_collection_items(collection_id, limit, filter?)` — returns rows with primary field + a compact projection.
-- `get_collection_item(item_id)` — full row + resolved links.
+### 3. `CollectionItemDetail` (right pane)
 
-Write tools (new, generic over `field_schema`):
-- `create_collection_item(collection_id, data)` — validates `data` against `field_schema` server-side (types, required, select options, link_person UUID existence). Returns created row.
-- `update_collection_item(item_id, data)` — partial merge, same validation.
-- `delete_collection_item(item_id)` — soft-delete if the table supports it, else hard delete.
-- `link_item_to_person(item_id, field_key, person_id)` and `link_item_to_note(item_id, field_key, note_id)` — convenience wrappers when the model already knows target ids.
-- `extract_item_from_url(url, collection_id)` — fetches the URL server-side (existing web fetcher / MCP), runs a small structured-output pass that receives the same rendered `field_schema` and returns a `data` object; then feeds it into `create_collection_item`. This directly addresses the "fill from link" use case: the LLM doesn't guess field names, it fills the schema we hand it.
+- Renders the item title + dynamic fields from the collection schema (reuse whatever `CollectionDetail` currently uses for the slide-in).
+- Inline edit, save, delete.
+- Breadcrumb: Collections › {Collection name} › {Item title}.
+- The Global AI FAB automatically has collection + item context here (see §5).
 
-Validation is the linchpin. `_shared/collection-schema.ts` (new) provides:
-- `renderSchemaForPrompt(field_schema)` — deterministic string for system prompt.
-- `validateItemData(field_schema, data)` — throws structured errors the model can read back and retry.
-- `resolveItemLinks(row, field_schema)` — expands `link_person`/`link_note` ids to labels.
+### 4. Favorites + recents
 
-All writes go through the atomic credits path (`checkBalance` + `openRouterWithCredits`) and RLS-scoped Supabase client, same pattern as note-chat.
+- Add `is_favorite boolean default false` and `last_viewed_at timestamptz` to `collection_items` (migration + GRANTs).
+- `useTouchItemViewed` hook mirrors `useTouchPersonViewed` (5-minute throttle, cache-gated).
+- Star toggle in the tree row and in the detail header.
 
-## Frontend
+### 5. AI FAB integration
 
-- `src/components/collections/CollectionChatPanel.tsx` — mirrors `NoteChatPanel`, reuses `chat-history` (`contextKey = collection:{id}` or `collection-item:{id}`), `chatMarkdownComponents`, credits refresh events.
-- Toggle button on `CollectionDetail` header (Bot icon) and inside the item detail dialog.
-- After any `*_collection_item` tool result: refetch the collection items list / current item (dispatch a `menerio:collection-updated` event like notes do).
+- Extend the route detection in `GlobalAIChatFAB.tsx`: when path matches `/collections/:slug/:itemId`, pass both `collection_id` and `item_id` to `collection-chat`.
+- Extend `collection-chat` to accept an optional `item_id` in context and prime the system prompt with the current item's fields (same pattern as note-chat priming the open note).
+- Modifying tools (`update_item`, `delete_item`) operate on the open item by default when `item_id` is present.
+- Listen for `menerio:collection-updated` on the detail page to refetch after AI edits (already wired at collection level; extend to item level).
 
-## Why per-collection differences are OK
+### 6. Global "New item" flow
 
-The model never sees a hardcoded schema. On every turn we hand it:
-1. The declarative `field_schema` (with types, options, primary/indexable flags).
-2. The user-authored `agent_instructions` describing capture behavior.
-3. Validated tool signatures where the `data` argument is free-form JSON, but the server rejects anything that doesn't match the schema.
+- From inside `/collections/:slug` or `/collections/:slug/:itemId`: creates in the current collection, opens the new item's detail route immediately so you can talk to the AI about it while filling it in.
+- From `/collections` (index) or from the global create button with no collection context: opens a small "Choose collection" step, then routes into the new item.
+- No silent default — an item created in the wrong collection is worse than one extra click.
 
-That's the same contract `generate_collection_schema` and `process-note` already rely on, so a new collection created tomorrow works with zero code changes.
+### 7. Remove the slide-in
 
-## Out of scope (can follow later)
+- Delete the item overlay from `CollectionDetail.tsx`. All "open item" call sites navigate to the new route instead.
+- Keep the collection-level grid on `/collections/:slug` — it's the landing view when no item is selected.
 
-- Bulk operations across many items in one call (safer to add after single-item flows settle).
-- Chat memory that spans different collections in the same conversation.
-- Suggestions engine that surfaces "AI ideas for this collection" without the user asking.
+## Phase 2 — Manual subfolders (item groups)
 
-## Files to add/change
+Deferred, sketched here so we know it fits:
 
-- Add: `supabase/functions/collection-chat/index.ts`
-- Add: `supabase/functions/_shared/collection-schema.ts`
-- Extend: `supabase/functions/_shared/read-tools.ts` (two new read tools)
-- Add: `src/components/collections/CollectionChatPanel.tsx`
-- Edit: `src/pages/CollectionDetail.tsx` (chat toggle + panel mount)
-- Edit: the item detail component under `src/components/collections/` (add chat toggle in item view)
-- Edit: `src/lib/chat-history.ts` — extend `NOTE_MODIFYING_TOOLS` equivalent or add `COLLECTION_MODIFYING_TOOLS`
+- New table `collection_item_groups` (id, collection_id, parent_group_id, name, user_id) + `collection_item_group_memberships` join table. GRANTs + RLS scoped to owner. Cycle-prevention trigger on `parent_group_id` (reuse People's approach).
+- Drag-to-reparent in `CollectionsTree` with the same client-side `wouldCreateCycle` guard we use for People groups.
+- Subtree item counts deduped by item id, matching `buildPeopleTree`.
+- Item can belong to multiple groups (many-to-many), same as People.
+
+## Technical details
+
+- **Files touched (Phase 1):**
+  - New: `src/components/collections/CollectionsLayout.tsx`, `CollectionsTree.tsx`, `CollectionItemDetail.tsx`, `useCollectionsTree.ts`, `useTouchItemViewed.ts`.
+  - Modified: `src/App.tsx` (nested routes under `/collections`), `src/pages/CollectionDetail.tsx` (drop overlay, keep grid), `src/pages/Collections.tsx` (render inside shell), `src/components/chat/GlobalAIChatFAB.tsx` (item_id detection), `supabase/functions/collection-chat/index.ts` (accept item_id, prime prompt), `src/components/layout/GlobalCreateButton.tsx` (choose-collection step).
+  - Migration: `is_favorite`, `last_viewed_at` on `collection_items` + GRANTs.
+- **AI FAB:** the fix we just shipped that resolves collection_id from slug extends naturally — same effect, one more segment.
+- **Search:** tree search reuses existing collection/item search; no new indexes needed for Phase 1.
+- **Testing:** unit tests for a `buildCollectionsTree` helper (favorites/recents/collections buckets), plus a smoke test that opening an item routes rather than modals.
+
+## Open questions
+
+1. Confirm Phase 2 (subfolders) is deferred, not dropped.
+2. On mobile, the shell collapses to a single pane (tree → detail on select), same as People — confirm that's the right behavior.
+3. Should "Recents" be per-collection or global across all collections? I'd argue global, matching how you'd actually think ("what did I open last?").
