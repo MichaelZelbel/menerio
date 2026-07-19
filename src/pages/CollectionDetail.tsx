@@ -1775,10 +1775,11 @@ function ItemSheet({
       );
     toast.success(isCreate ? "Item created" : "Item saved");
     onSaved(data);
-    onOpenChange(false);
+    if (!inline) onOpenChange(false);
   }, [
     collection,
     fields,
+    inline,
     isCreate,
     item?.id,
     onOpenChange,
@@ -1921,7 +1922,7 @@ function ItemSheet({
   if (inline) {
     if (!open) return null;
     return (
-      <div className="flex min-h-[calc(100dvh-8rem)] flex-col rounded-lg border bg-card">
+      <div className="flex h-full min-h-0 flex-col bg-background">
         <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold font-display">{title}</h2>
