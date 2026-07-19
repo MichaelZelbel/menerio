@@ -1597,6 +1597,7 @@ function ItemSheet({
   onSaved,
   onDeleted,
   collections,
+  inline = false,
 }: {
   collection: Collection | null;
   fields: SchemaField[];
@@ -1606,6 +1607,8 @@ function ItemSheet({
   onSaved: (item: CollectionItem) => void;
   onDeleted: (id: string) => void;
   collections: Collection[];
+  /** Render as a routed inline detail view (full-width) instead of a right-side Sheet. */
+  inline?: boolean;
 }) {
   const { user } = useAuth();
   const [values, setValues] = useState<FormValues>({});
@@ -1696,14 +1699,128 @@ function ItemSheet({
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
         save();
-      } else if (event.key === "Escape") {
+      } else if (event.key === "Escape" && !inline) {
         event.preventDefault();
         close();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [close, open, save]);
+  }, [close, open, save, inline]);
+
+  const title = isCreate
+    ? `New item in ${collection?.name ?? "Collection"}`
+    : item?.title || "Edit item";
+  const subtitle = isDirty ? "Unsaved changes" : "Save changes when you are done.";
+
+  const body = (
+    <>
+      <div className={cn("flex-1 overflow-y-auto", inline ? "px-6 py-6" : "-mx-6 px-6 py-4")}>
+        <form
+          className={cn("space-y-5", inline && "mx-auto max-w-2xl")}
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          {fields.map((field) => (
+            <FieldInput
+              key={field.key}
+              field={field}
+              value={
+                values[field.key] ??
+                (field.type === "multiselect"
+                  ? []
+                  : field.type === "boolean"
+                    ? false
+                    : "")
+              }
+              error={errors[field.key]}
+              collections={collections}
+              currentCollection={collection}
+              onChange={(value) => {
+                setValues((current) => ({ ...current, [field.key]: value }));
+                setErrors((current) => ({ ...current, [field.key]: "" }));
+              }}
+            />
+          ))}
+        </form>
+        {!isCreate && item && collection && (
+          <div className={cn(inline && "mx-auto max-w-2xl")}>
+            <ItemNotesPanel
+              itemId={item.id}
+              itemTitle={item.title ?? "Untitled"}
+              collectionId={collection.id}
+              collectionName={collection.name}
+              onClose={inline ? undefined : () => onOpenChange(false)}
+            />
+          </div>
+        )}
+      </div>
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 border-t pt-4",
+          inline && "px-6 pb-6",
+        )}
+      >
+        <div>
+          {!isCreate && (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={close}>
+            {inline ? "Back" : "Cancel"}
+          </Button>
+          <Button type="button" onClick={save} disabled={isSaving}>
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes this collection item. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteItem}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+
+  if (inline) {
+    if (!open) return null;
+    return (
+      <div className="flex min-h-[calc(100dvh-8rem)] flex-col rounded-lg border bg-card">
+        <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-semibold font-display">{title}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+          </div>
+        </div>
+        {body}
+      </div>
+    );
+  }
 
   return (
     <Sheet
@@ -1712,101 +1829,16 @@ function ItemSheet({
     >
       <SheetContent className="flex flex-col sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle>
-            {isCreate
-              ? `New item in ${collection?.name ?? "Collection"}`
-              : item?.title || "Edit item"}
-          </SheetTitle>
-          <SheetDescription>
-            {isDirty ? "Unsaved changes" : "Save changes when you are done."}
-          </SheetDescription>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{subtitle}</SheetDescription>
         </SheetHeader>
-        <div className="-mx-6 flex-1 overflow-y-auto px-6 py-4">
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              save();
-            }}
-          >
-            {fields.map((field) => (
-              <FieldInput
-                key={field.key}
-                field={field}
-                value={
-                  values[field.key] ??
-                  (field.type === "multiselect"
-                    ? []
-                    : field.type === "boolean"
-                      ? false
-                      : "")
-                }
-                error={errors[field.key]}
-                collections={collections}
-                currentCollection={collection}
-                onChange={(value) => {
-                  setValues((current) => ({ ...current, [field.key]: value }));
-                  setErrors((current) => ({ ...current, [field.key]: "" }));
-                }}
-              />
-            ))}
-          </form>
-          {!isCreate && item && collection && (
-            <ItemNotesPanel
-              itemId={item.id}
-              itemTitle={item.title ?? "Untitled"}
-              collectionId={collection.id}
-              collectionName={collection.name}
-              onClose={() => onOpenChange(false)}
-            />
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-2 border-t pt-4">
-          <div>
-            {!isCreate && (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={close}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={save} disabled={isSaving}>
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </div>
-        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete item?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This permanently deletes this collection item. This action
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={deleteItem}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {body}
       </SheetContent>
     </Sheet>
   );
 }
+
+
 
 function EditCollectionDialog({
   collection,
