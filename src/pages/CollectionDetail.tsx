@@ -2684,74 +2684,131 @@ export default function CollectionDetail() {
         noIndex
       />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
             <Link to="/collections" className="hover:text-foreground">
               Collections
             </Link>{" "}
-            / {collection?.name}
+            /{" "}
+            {selectedItem ? (
+              <>
+                <Link to={`/collections/${slug}`} className="hover:text-foreground">
+                  {collection?.name}
+                </Link>{" "}
+                /{" "}
+                <span className="text-foreground">
+                  {selectedItem.id === "new"
+                    ? "New item"
+                    : selectedItem.title || "Untitled"}
+                </span>
+              </>
+            ) : (
+              collection?.name
+            )}
           </p>
-          <h1 className="mt-2 text-3xl font-bold font-display">
-            <CollectionIcon
-              icon={collection?.icon}
-              className="mr-2 inline-flex h-8 w-8 align-[-0.15em]"
-            />
-            {collection?.name}
-          </h1>
-          {collection?.description && (
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {collection.description}
-            </p>
+          {!selectedItem && (
+            <>
+              <h1 className="mt-2 text-3xl font-bold font-display">
+                <CollectionIcon
+                  icon={collection?.icon}
+                  className="mr-2 inline-flex h-8 w-8 align-[-0.15em]"
+                />
+                {collection?.name}
+              </h1>
+              {collection?.description && (
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {collection.description}
+                </p>
+              )}
+            </>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={openNewItem}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Item
-          </Button>
+        {!selectedItem && (
+          <div className="flex items-center gap-2">
+            <Button onClick={openNewItem}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Item
+            </Button>
 
-          <Button
-            variant="outline"
-            onClick={() => setChatOpen((v) => !v)}
-            aria-label="AI chat"
-            aria-pressed={chatOpen}
-          >
-            <Sparkles className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">AI Chat</span>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate(`/collections/${slug}/schema`)}
-            aria-label="Customize fields"
-          >
-            <Settings2 className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Customize</span>
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Collection actions"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                Edit Collection
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                Delete Collection
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            <Button
+              variant="outline"
+              onClick={() => setChatOpen((v) => !v)}
+              aria-label="AI chat"
+              aria-pressed={chatOpen}
+            >
+              <Sparkles className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">AI Chat</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/collections/${slug}/schema`)}
+              aria-label="Customize fields"
+            >
+              <Settings2 className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Customize</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Collection actions"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                  Edit Collection
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  Delete Collection
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </div>
+      {selectedItem && (
+        <ItemSheet
+          inline
+          collection={collection}
+          fields={fields}
+          item={selectedItem}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) closeItem();
+          }}
+          onSaved={(savedItem) => {
+            setItems((current) => {
+              const exists = current.some((row) => row.id === savedItem.id);
+              return exists
+                ? current.map((row) =>
+                    row.id === savedItem.id ? savedItem : row,
+                  )
+                : [savedItem, ...current].slice(0, PAGE_SIZE);
+            });
+            // If this was a create, route to the newly created item so the AI
+            // FAB can prime item context and further edits happen in place.
+            if (selectedItem?.id === "new") {
+              navigate(`/collections/${slug}/${savedItem.id}`, { replace: true });
+            } else {
+              closeItem();
+            }
+          }}
+          onDeleted={(id) => {
+            setItems((current) => current.filter((row) => row.id !== id));
+            closeItem();
+          }}
+          collections={allCollections}
+        />
+      )}
+      {!selectedItem && (
+
       {items.length === 0 && !query.trim() && !isLoading ? (
         <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
           <div className="max-w-lg">
