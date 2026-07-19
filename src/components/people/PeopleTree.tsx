@@ -203,10 +203,6 @@ const PersonRow = memo(function PersonRow({
               aria-label={`Select ${person.name}`}
               className={cn("h-3.5 w-3.5", multiActive ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
             />
-          </span>
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
-            {initial}
-          </span>
           <span className="min-w-0 flex-1 truncate">{person.name}</span>
           <button
             type="button"
