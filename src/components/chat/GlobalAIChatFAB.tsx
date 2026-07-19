@@ -240,6 +240,7 @@ export function GlobalAIChatFAB() {
       const invokeBody = collectionId
         ? {
             collection_id: collectionId,
+            item_id: collectionItemId || undefined,
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }
@@ -249,6 +250,7 @@ export function GlobalAIChatFAB() {
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           };
+
       const { data, error: fnErr } = await supabase.functions.invoke(chatFn, {
         body: invokeBody,
       });
