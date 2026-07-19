@@ -665,8 +665,8 @@ export function PeopleTree({
         node.people.forEach((p) => push(p.id));
       };
       tree.roots.forEach(walk);
+      tree.ungrouped.forEach((p) => push(p.id));
     }
-    if (expanded.has(UNGROUPED_KEY)) tree.ungrouped.forEach((p) => push(p.id));
     return out;
   }, [searching, searchResults, expanded, favorites, recent, tree]);
 
