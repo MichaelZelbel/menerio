@@ -2921,7 +2921,7 @@ export default function CollectionDetail() {
             if (selectedItem?.id === "new") {
               navigate(`/collections/${slug}/${savedItem.id}`, { replace: true });
             } else {
-              closeItem();
+              setSelectedItem(savedItem);
             }
           }}
           onDeleted={(id) => {
