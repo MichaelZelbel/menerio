@@ -617,7 +617,6 @@ export function PeopleTree({
     if (!inGroup) {
       const person = people.find((p) => p.id === selectedPersonId);
       if (person?.is_favorite) keys.add(FAVORITES_KEY);
-      keys.add(UNGROUPED_KEY);
     }
     setExpanded((current) => {
       let changed = false;
