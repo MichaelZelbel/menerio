@@ -189,6 +189,8 @@ const App = () => (
                     <Route index element={<Collections />} />
                     <Route path="templates" element={<CollectionTemplates />} />
                     <Route path=":slug" element={<CollectionDetail />} />
+                    <Route path=":slug/:itemId" element={<CollectionDetail />} />
+
                     <Route path=":slug/schema" element={<CollectionSchema />} />
                   </Route>
 
