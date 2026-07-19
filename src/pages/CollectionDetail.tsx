@@ -3132,27 +3132,9 @@ export default function CollectionDetail() {
           </div>
         </div>
       )}
-      <ItemSheet
-        collection={collection}
-        fields={fields}
-        item={selectedItem}
-        open={!!selectedItem}
-        onOpenChange={(open) => !open && setSelectedItem(null)}
-        onSaved={(savedItem) => {
-          setItems((current) => {
-            const exists = current.some((row) => row.id === savedItem.id);
-            return exists
-              ? current.map((row) =>
-                  row.id === savedItem.id ? savedItem : row,
-                )
-              : [savedItem, ...current].slice(0, PAGE_SIZE);
-          });
-        }}
-        onDeleted={(id) =>
-          setItems((current) => current.filter((row) => row.id !== id))
-        }
-        collections={allCollections}
-      />
+      </>
+      )}
+
       <EditCollectionDialog
         collection={collection}
         open={editOpen}
