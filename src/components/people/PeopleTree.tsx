@@ -825,9 +825,9 @@ export function PeopleTree({
                     type="button"
                     onClick={() => toggle(ALL_KEY)}
                     onDragOver={(event) => {
-                      if (!draggingKey?.startsWith("group:")) return;
+                      if (!draggingKey?.startsWith("group:") && !draggingKey?.startsWith("person:")) return;
                       event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
+                      event.dataTransfer.dropEffect = draggingKey.startsWith("group:") ? "move" : "copy";
                       if (dragOverKey !== ALL_KEY) setDragOverKey(ALL_KEY);
                     }}
                     onDragLeave={(event) => {
