@@ -2197,7 +2197,7 @@ function SortableHeader({
 }
 
 export default function CollectionDetail() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, itemId: routeItemId } = useParams<{ slug: string; itemId?: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -2212,7 +2212,22 @@ export default function CollectionDetail() {
   const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
+  // Selection is URL-driven so /collections/:slug/:itemId deep-links work, the
+  // browser back button behaves, and the AI FAB can prime item context from
+  // the current route. `selectedItem` mirrors the route param.
   const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
+  const openItem = useCallback(
+    (item: CollectionItem) => navigate(`/collections/${slug}/${item.id}`),
+    [navigate, slug],
+  );
+  const closeItem = useCallback(
+    () => navigate(`/collections/${slug}`),
+    [navigate, slug],
+  );
+  const openNewItem = useCallback(
+    () => navigate(`/collections/${slug}/new`),
+    [navigate, slug],
+  );
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
@@ -2228,6 +2243,7 @@ export default function CollectionDetail() {
     window.addEventListener("menerio:collection-updated", handler);
     return () => window.removeEventListener("menerio:collection-updated", handler);
   }, [collection?.id]);
+
   const [linkValidity, setLinkValidity] =
     useState<LinkValidity>(emptyLinkValidity);
   const fields = useMemo(
