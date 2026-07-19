@@ -86,11 +86,21 @@ export function GlobalAIChatFAB() {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  // Detect collection context from /collections/:slug (and optional item route)
+  // Detect collection context from /collections/:slug and optional /:itemId
   const collectionSlug = useMemo(() => {
     const match = location.pathname.match(/^\/collections\/([^/]+)/);
     return match ? match[1] : null;
   }, [location.pathname]);
+
+  const collectionItemId = useMemo(() => {
+    // /collections/:slug/:itemId — but skip reserved subroutes like /schema
+    const match = location.pathname.match(/^\/collections\/[^/]+\/([^/]+)$/);
+    if (!match) return null;
+    const seg = match[1];
+    if (seg === "schema" || seg === "new") return null;
+    return seg;
+  }, [location.pathname]);
+
 
   const [collectionId, setCollectionId] = useState<string | null>(null);
   useEffect(() => {
