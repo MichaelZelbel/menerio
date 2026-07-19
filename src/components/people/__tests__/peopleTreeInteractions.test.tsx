@@ -161,7 +161,6 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
 
   it("plain row click still navigates to the person (and never full-page navigates)", () => {
     const handlers = renderTree();
-    fireEvent.click(screen.getByRole("button", { name: /Ungrouped/ }));
 
     const row = screen.getByRole("link", { name: /Marco Test/ });
     const defaultNotPrevented = fireEvent.click(row);
