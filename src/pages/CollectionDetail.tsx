@@ -2790,11 +2790,23 @@ export default function CollectionDetail() {
     );
 
   return (
-    <div className="w-full max-w-7xl space-y-6">
+    <div className="flex h-[calc(100dvh-104px)] w-full overflow-hidden rounded-md border bg-background">
       <SEOHead
         title={`${collection?.name ?? "Collection"} — Menerio`}
         noIndex
       />
+      <CollectionItemsTree
+        collection={collection}
+        items={items}
+        selectedItemId={routeItemId ?? null}
+        query={query}
+        onQueryChange={setQuery}
+        onSelectItem={openItem}
+        onNewItem={openNewItem}
+        isLoading={isLoading}
+        primaryField={primaryField}
+      />
+      <section className="min-w-0 flex-1 overflow-y-auto p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
@@ -3247,6 +3259,8 @@ export default function CollectionDetail() {
       )}
       </>
       )}
+
+      </section>
 
       <EditCollectionDialog
         collection={collection}
