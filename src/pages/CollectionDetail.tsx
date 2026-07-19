@@ -3023,8 +3023,9 @@ export default function CollectionDetail() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={() => setSelectedItem(item)}
+                                onClick={() => openItem(item)}
                               >
+
                                 Edit
                               </DropdownMenuItem>
                               <DropdownMenuItem
