@@ -18,7 +18,7 @@ interface OutgoingLink {
 
 export function OutgoingLinksPanel({ noteId, onNavigate }: OutgoingLinksPanelProps) {
   const { user } = useAuth();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   const { data: links = [], isLoading } = useQuery<OutgoingLink[]>({
     queryKey: ["outgoing-links", noteId, user?.id],
