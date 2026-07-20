@@ -1405,10 +1405,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {/* Web clip snapshot now rendered at top of editor (see above title bar) */}
 
 
-      {/* Note Metadata editor — keyed by note.id so expand state resets per note */}
+      {/* Note Metadata editor */}
       {!note.is_trashed && (
         <NoteMetadataEditor
-          key={note.id}
           metadata={metadata}
           onUpdate={(updated) => {
             updateNote.mutate({ id: note.id, metadata: updated } as any);
@@ -1426,13 +1425,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
 
       {/* Outgoing links panel */}
-      <OutgoingLinksPanel key={note.id} noteId={note.id} onNavigate={handleNavigateToNote} />
+      <OutgoingLinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
       {/* Backlinks panel */}
-      <BacklinksPanel key={note.id} noteId={note.id} onNavigate={handleNavigateToNote} />
+      <BacklinksPanel noteId={note.id} onNavigate={handleNavigateToNote} />
 
       {/* Suggested Links panel */}
       <SuggestedLinksPanel
-        key={note.id}
         noteId={note.id}
         onInsertWikilink={(targetId, targetTitle) => {
           if (editor) {
@@ -1440,6 +1438,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           }
         }}
       />
+
 
 
       {/* Status bar */}
