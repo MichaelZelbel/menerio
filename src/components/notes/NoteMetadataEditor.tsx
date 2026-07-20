@@ -45,22 +45,13 @@ interface NoteMetadataEditorProps {
   showTagInput?: boolean;
 }
 
-const NOTE_METADATA_STORAGE_KEY = "menerio-note-metadata-expanded";
-
-function getStoredExpanded(): boolean {
-  try {
-    const v = localStorage.getItem(NOTE_METADATA_STORAGE_KEY);
-    if (v === "true") return true;
-    return false; // default collapsed
-  } catch { /* ignored */
-    return false;
-  }
-}
-
 export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
-  const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
+  // Always default to collapsed on note open — an expanded metadata panel
+  // pushes the note content off-screen. Users can expand per-note as needed.
+  const [isOpen, setIsOpen] = useState(false);
+
   const navigate = useNavigate();
   const topicInputRef = useCallback((node: HTMLInputElement | null) => {
     if (node && showTagInput) node.focus();
