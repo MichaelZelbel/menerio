@@ -131,10 +131,8 @@ export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, on
   if (!hasMetadata) return null;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={(open) => {
-      setIsOpen(open);
-      try { localStorage.setItem(NOTE_METADATA_STORAGE_KEY, String(open)); } catch { /* ignored */ }
-    }}>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+
       <CollapsibleTrigger asChild>
         <button className="flex items-center gap-1.5 px-4 py-1.5 w-full text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border-b border-border">
           <ChevronRight
