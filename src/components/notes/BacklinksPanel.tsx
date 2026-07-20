@@ -19,7 +19,7 @@ interface Backlink {
 
 export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
   const { user } = useAuth();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   const { data: backlinks = [], isLoading } = useQuery<Backlink[]>({
     queryKey: ["backlinks", noteId, user?.id],

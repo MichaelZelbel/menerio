@@ -45,22 +45,13 @@ interface NoteMetadataEditorProps {
   showTagInput?: boolean;
 }
 
-const NOTE_METADATA_STORAGE_KEY = "menerio-note-metadata-expanded";
-
-function getStoredExpanded(): boolean {
-  try {
-    const v = localStorage.getItem(NOTE_METADATA_STORAGE_KEY);
-    if (v === "true") return true;
-    return false; // default collapsed
-  } catch { /* ignored */
-    return false;
-  }
-}
-
 export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
-  const [isOpen, setIsOpen] = useState(() => getStoredExpanded());
+  // Always default to collapsed on note open — an expanded metadata panel
+  // pushes the note content off-screen. Users can expand per-note as needed.
+  const [isOpen, setIsOpen] = useState(false);
+
   const navigate = useNavigate();
   const topicInputRef = useCallback((node: HTMLInputElement | null) => {
     if (node && showTagInput) node.focus();
@@ -140,10 +131,8 @@ export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, on
   if (!hasMetadata) return null;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={(open) => {
-      setIsOpen(open);
-      try { localStorage.setItem(NOTE_METADATA_STORAGE_KEY, String(open)); } catch { /* ignored */ }
-    }}>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+
       <CollapsibleTrigger asChild>
         <button className="flex items-center gap-1.5 px-4 py-1.5 w-full text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border-b border-border">
           <ChevronRight
