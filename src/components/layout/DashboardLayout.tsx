@@ -7,7 +7,7 @@ import { GlobalAIChatFAB } from "@/components/chat/GlobalAIChatFAB";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { LowBalanceBanner } from "./LowBalanceBanner";
+
 
 export function DashboardLayout() {
   return (
