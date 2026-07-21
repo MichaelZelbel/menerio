@@ -7,7 +7,7 @@ import { GlobalAIChatFAB } from "@/components/chat/GlobalAIChatFAB";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { LowBalanceBanner } from "./LowBalanceBanner";
+
 
 export function DashboardLayout() {
   return (
@@ -24,7 +24,7 @@ export function DashboardLayout() {
               <ThemeToggle />
             </div>
           </header>
-          <LowBalanceBanner />
+          
           <main className="flex-1 overflow-auto p-6">
             <Outlet />
           </main>
