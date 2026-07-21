@@ -4,6 +4,8 @@
  */
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const LOVABLE_GATEWAY_BASE = "https://ai.gateway.lovable.dev/v1";
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
 
 const FALLBACK_TOKENS: Record<string, number> = {
   "deepseek/deepseek-v4-flash": 500,
