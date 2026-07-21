@@ -1,14 +1,16 @@
-Goal: Stop showing the duplicate "Out of AI credits" toast, because the dashboard already displays the persistent `LowBalanceBanner` credit warning.
+Goal: Stop showing the red "AI credits running low" / "Out of AI credits" banner at the top of the dashboard. Credit status remains visible in Settings → Credits and via the existing `CreditsDisplay`, but nothing intrusive appears during normal use.
 
 Changes:
-1. Edit `src/hooks/useAICreditsGate.ts`:
-   - Remove the `useToast` import.
-   - Remove the `const { toast } = useToast()` call.
-   - Remove the two `toast({ variant: "destructive", ... })` calls inside `checkCredits`.
-   - Keep all boolean return logic so AI features are still blocked when credits are exhausted or the plan has zero credits.
+1. `src/components/layout/DashboardLayout.tsx`
+   - Remove the `import { LowBalanceBanner }` line.
+   - Remove the `<LowBalanceBanner />` render inside the layout.
+2. `src/components/layout/LowBalanceBanner.tsx`
+   - Delete the file (no other consumers — verified with a codebase search).
+
+Behavior preserved:
+- `useAICreditsGate` still blocks AI actions when credits are exhausted (silently, no toast).
+- Users can still see and manage credits under `/dashboard/settings?tab=credits` and via `CreditsDisplay` in Settings.
 
 Verification:
-- Run `bunx tsgo --noEmit` to confirm no TypeScript errors after removing the toast dependency.
-- Run `npm run lint` to confirm no new lint issues.
-
-No other files need to change. The `LowBalanceBanner` remains as the single persistent credit warning, and callers of `checkCredits` will still receive `false` and block the action when appropriate.
+- `bunx tsgo --noEmit` — confirm no dangling imports.
+- `npm run lint` — confirm clean.
