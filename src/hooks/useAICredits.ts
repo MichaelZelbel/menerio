@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
 import { onCreditsChange } from "@/lib/credits-events";
 
 export interface AICredits {
@@ -20,11 +19,9 @@ export interface AICredits {
 
 export function useAICredits() {
   const { session, user } = useAuth();
-  const { toast } = useToast();
   const [credits, setCredits] = useState<AICredits | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const warnedRef = useRef(false);
 
   const fetchCredits = useCallback(async () => {
     if (!session || !user) {
@@ -73,20 +70,6 @@ export function useAICredits() {
           tokensPerCredit: Number(meta.tokens_per_credit) || 200,
         };
         setCredits(c);
-
-        // Low credit warning (once per session, < 15%)
-        if (
-          !warnedRef.current &&
-          c.creditsGranted > 0 &&
-          c.remainingCredits / c.creditsGranted < 0.15
-        ) {
-          warnedRef.current = true;
-          toast({
-            title: "AI credits running low",
-            description: `You have ${c.remainingCredits} credits remaining this period.`,
-            variant: "destructive",
-          });
-        }
       } else {
         setCredits(null);
       }
@@ -95,7 +78,7 @@ export function useAICredits() {
     } finally {
       setIsLoading(false);
     }
-  }, [session, user, toast]);
+  }, [session, user]);
 
   useEffect(() => {
     fetchCredits();

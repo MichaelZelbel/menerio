@@ -1,16 +1,21 @@
-Goal: Stop showing the red "AI credits running low" / "Out of AI credits" banner at the top of the dashboard. Credit status remains visible in Settings → Credits and via the existing `CreditsDisplay`, but nothing intrusive appears during normal use.
+## Plan: stop disturbing users with AI credit warning toasts
 
-Changes:
-1. `src/components/layout/DashboardLayout.tsx`
-   - Remove the `import { LowBalanceBanner }` line.
-   - Remove the `<LowBalanceBanner />` render inside the layout.
-2. `src/components/layout/LowBalanceBanner.tsx`
-   - Delete the file (no other consumers — verified with a codebase search).
+1. **Remove the remaining credit-warning toast at the source**
+   - Edit `src/hooks/useAICredits.ts`.
+   - Remove the `useToast` import, `toast` setup, `warnedRef`, and the low-credit warning block that currently creates the red toast: `AI credits running low`.
 
-Behavior preserved:
-- `useAICreditsGate` still blocks AI actions when credits are exhausted (silently, no toast).
-- Users can still see and manage credits under `/dashboard/settings?tab=credits` and via `CreditsDisplay` in Settings.
+2. **Keep credit data and blocking behavior intact**
+   - Keep `useAICredits()` fetching and returning credit balances for dashboard/settings displays.
+   - Keep `useAICreditsGate()` blocking AI actions when credits are exhausted.
+   - Do not add any replacement toast, banner, snackbar, popup, or bottom notification for low/exhausted credits.
 
-Verification:
-- `bunx tsgo --noEmit` — confirm no dangling imports.
-- `npm run lint` — confirm clean.
+3. **Clean up dependencies**
+   - Update the `fetchCredits` callback dependency list so it no longer depends on `toast`.
+
+4. **Verify**
+   - Search the codebase again for AI-credit toast strings to confirm there are no remaining user-facing credit warning toasts.
+   - Run the existing type/lint check used for this project.
+
+## Expected result
+
+AI credit warnings will no longer appear as toasts anywhere from the credit hook. Existing non-intrusive credit displays can still show balances where the UI explicitly renders them.

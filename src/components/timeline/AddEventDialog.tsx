@@ -170,7 +170,6 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
           }
         } catch { /* ignore */ }
         if (body?.code === "INSUFFICIENT_CREDITS" || error.message?.includes("402")) {
-          toast({ title: "Out of AI credits", variant: "destructive" });
           return;
         }
         const f = friendlyAiError(body?.code, body?.error || error.message);
@@ -178,7 +177,6 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         return;
       }
       if ((data as any)?.code === "INSUFFICIENT_CREDITS") {
-        toast({ title: "Out of AI credits", variant: "destructive" });
         return;
       }
       if ((data as any)?.code) {
