@@ -1,22 +1,14 @@
-## Fix: below-note panels default collapsed on every note open
+Goal: Stop showing the duplicate "Out of AI credits" toast, because the dashboard already displays the persistent `LowBalanceBanner` credit warning.
 
-The screenshot shows a note where **Note Metadata**, **Links**, and **Backlinks** are all expanded on open, pushing the actual note content off-screen. Regression source (verified in code):
+Changes:
+1. Edit `src/hooks/useAICreditsGate.ts`:
+   - Remove the `useToast` import.
+   - Remove the `const { toast } = useToast()` call.
+   - Remove the two `toast({ variant: "destructive", ... })` calls inside `checkCredits`.
+   - Keep all boolean return logic so AI features are still blocked when credits are exhausted or the plan has zero credits.
 
-- `src/components/notes/BacklinksPanel.tsx` — `useState(true)` (default expanded).
-- `src/components/notes/OutgoingLinksPanel.tsx` — `useState(true)` (default expanded).
-- `src/components/notes/NoteMetadataEditor.tsx` — persists last-open state in `localStorage` (`menerio-note-metadata-expanded`), so once a user expanded it, every note reopens expanded.
+Verification:
+- Run `bunx tsgo --noEmit` to confirm no TypeScript errors after removing the toast dependency.
+- Run `npm run lint` to confirm no new lint issues.
 
-`NoteAttachmentsPanel` and `SuggestedLinksPanel` already default to collapsed. `SmartTagsPanel` is Lexicon-only and unaffected.
-
-### Changes
-
-1. **`BacklinksPanel.tsx`** — change `useState(true)` → `useState(false)`.
-2. **`OutgoingLinksPanel.tsx`** — change `useState(true)` → `useState(false)`.
-3. **`NoteMetadataEditor.tsx`** — remove the `localStorage`-backed default. Initialize `isOpen` to `false` on every mount and delete the `getStoredExpanded` helper + the `localStorage.setItem` write. Rationale: cross-note persistence is exactly what caused this regression to keep coming back — each note should start with a clean, readable view; the user can expand per-note as needed.
-
-No changes to layout, styling, data, or the panels' expand/collapse interaction — only their initial state on note open.
-
-### Out of scope
-
-- Attachments and Suggested Links panels (already collapsed by default).
-- Any redesign of the below-note section or resizable layout.
+No other files need to change. The `LowBalanceBanner` remains as the single persistent credit warning, and callers of `checkCredits` will still receive `false` and block the action when appropriate.
