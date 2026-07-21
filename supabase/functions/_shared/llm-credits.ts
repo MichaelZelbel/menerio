@@ -173,7 +173,7 @@ export async function openRouterWithCredits(
     tokens: totalTokens,
     feature,
     model,
-    provider: "openrouter",
+    provider: useGateway ? "lovable" : "openrouter",
     promptTokens,
     completionTokens,
     usageSource,
