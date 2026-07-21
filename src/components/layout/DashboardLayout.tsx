@@ -24,7 +24,7 @@ export function DashboardLayout() {
               <ThemeToggle />
             </div>
           </header>
-          <LowBalanceBanner />
+          
           <main className="flex-1 overflow-auto p-6">
             <Outlet />
           </main>
