@@ -9,6 +9,7 @@ import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
+  isListValuedLabel,
   isSingleValueLabel,
   normalizeProfileValueForDedup,
   stripTrailingQualifier,
