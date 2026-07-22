@@ -146,13 +146,21 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
       const { error } = await supabase.functions.invoke("normalize-profile", {
         body: {
           action: "backfill",
-          subject_type: "contact",
-          subject_id: person.id,
+          scope: "contact",
+          contact_id: person.id,
           includeNotesContext: true,
         },
       });
       if (error) throw error;
-      showToast.success("Profile normalization started");
+      showToast.success("Cleaning up profile… duplicates will collapse in a moment. Any judgement calls appear in Review Queue.");
+      // Backfill is fire-and-forget on the edge; refresh profile data after
+      // it's had time to run so the UI reflects the merges automatically.
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["profile-entries", person.id] });
+        queryClient.invalidateQueries({ queryKey: ["profile-categories", person.id] });
+        queryClient.invalidateQueries({ queryKey: ["profile-suggestions", person.id] });
+        queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      }, 6000);
     } catch (err: any) {
       showToast.error(err.message ?? "Normalization failed");
     } finally {
