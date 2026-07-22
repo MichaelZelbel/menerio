@@ -194,6 +194,11 @@ for (const [slug, schema] of Object.entries(PROFILE_CANONICAL_SCHEMA)) {
   PER_CATEGORY_ALIAS_MAP[slug] = m;
 }
 
+for (const [alias, canonical] of Object.entries(OPEN_CATEGORY_LABEL_ALIASES)) {
+  GLOBAL_ALIAS_MAP.set(alias.toLowerCase(), canonical);
+  GLOBAL_ALIAS_MAP.set(canonical.toLowerCase(), canonical);
+}
+
 function normalizeKey(label: string): string {
   return String(label || "")
     .trim()
