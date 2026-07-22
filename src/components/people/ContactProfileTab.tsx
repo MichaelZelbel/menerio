@@ -49,6 +49,7 @@ export function ContactProfileTab({
   } = useContactProfile(contactId);
 
   const [enriching, setEnriching] = useState(false);
+  const [normalizing, setNormalizing] = useState(false);
 
   // Count pending profile suggestions for this contact (from notes OR moments).
   const { data: pendingCount = 0 } = useQuery({
