@@ -199,7 +199,11 @@ export function ContactProfileTab({
             </Link>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
+        <Button variant="outline" size="sm" onClick={runNormalize} disabled={normalizing || enriching}>
+          {normalizing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Wand2 className="mr-2 h-3.5 w-3.5" />}
+          Normalize profile
+        </Button>
+        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching || normalizing}>
           {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
           Enrich from notes & timeline
         </Button>
