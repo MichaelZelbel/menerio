@@ -248,6 +248,14 @@ async function prepareForInsert(
 ): Promise<Suggestion> {
   const threshold = thresholdFor(s.suggestion_type, prefs.sensitivity);
   const confidence = s.confidence_score ?? 0;
+  // Extra guard: Date of birth is a permanent single-value fact and one wrong
+  // auto-applied value stains a profile until manually fixed. Require ≥0.9
+  // confidence regardless of user's sensitivity setting; otherwise route to
+  // review.
+  const isDob =
+    s.suggestion_type === "add_profile_entry" &&
+    String((s.payload as any)?.label || "").trim().toLowerCase() === "date of birth";
+  if (isDob && confidence < 0.9) return { ...s, status: "pending_review" };
   const canAuto = prefs.mode === "auto" && confidence >= threshold && (!s.is_sensitive || prefs.autoAddSensitive);
   if (!canAuto) return { ...s, status: "pending_review" };
 
