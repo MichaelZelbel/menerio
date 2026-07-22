@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, X } from "lucide-react";
+import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, Wand2, X } from "lucide-react";
 
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
@@ -58,6 +58,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
   const [conversationContext, setConversationContext] = useState("");
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePrefillId, setMergePrefillId] = useState<string | null>(null);
+  const [normalizingProfile, setNormalizingProfile] = useState(false);
 
   // Record a view whenever a person is opened (throttled inside the hook —
   // skips if already touched within 5 minutes). This component only mounts for
@@ -137,6 +138,26 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
         },
       },
     );
+  };
+
+  const normalizeProfile = async () => {
+    setNormalizingProfile(true);
+    try {
+      const { error } = await supabase.functions.invoke("normalize-profile", {
+        body: {
+          action: "backfill",
+          subject_type: "contact",
+          subject_id: person.id,
+          includeNotesContext: true,
+        },
+      });
+      if (error) throw error;
+      showToast.success("Profile normalization started");
+    } catch (err: any) {
+      showToast.error(err.message ?? "Normalization failed");
+    } finally {
+      setNormalizingProfile(false);
+    }
   };
 
   const isEditing = editingAliases !== null;
@@ -241,6 +262,19 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
                           <Merge className="h-3.5 w-3.5 mr-1" /> Merge
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={normalizeProfile}
+                          disabled={normalizingProfile}
+                        >
+                          {normalizingProfile ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <Wand2 className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          Normalize
                         </Button>
                       </>
                     ) : (
