@@ -328,7 +328,7 @@ export async function planSubjectNormalization(args: {
   // This guarantees zero overlap: the LLM cannot see, and therefore cannot
   // touch, any row claimed by the exact-duplicate or soft-single passes.
   const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
-  if (llmRows.length < 2) return deterministicGroups.concat(softSingleGroups);
+  if (llmRows.length < 2) return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
 
   const llmEntries = llmRows.map((r) => ({
     id: r.id,
@@ -430,7 +430,7 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups.concat(softSingleGroups);
+    return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
@@ -506,7 +506,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return deterministicGroups.concat(softSingleGroups).concat(llmGroups);
+  return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups).concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
