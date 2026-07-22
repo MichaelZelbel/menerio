@@ -148,6 +148,31 @@ export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
   // Identity-ish extras (routed via GLOBAL map, not tied to a structured cat)
   "ethnicity": "Ethnicity",
   "ethnic background": "Ethnicity",
+  // Health — collapse the many synonyms real notes produce into one
+  // list-valued canonical so the deterministic list merger folds them.
+  "allergy": "Allergies",
+  "allergies": "Allergies",
+  "allergen": "Allergies",
+  "allergens": "Allergies",
+  "food allergy": "Allergies",
+  "food allergies": "Allergies",
+  "health condition": "Health conditions",
+  "health conditions": "Health conditions",
+  "medical condition": "Health conditions",
+  "medical conditions": "Health conditions",
+  "mental health condition": "Health conditions",
+  "mental health conditions": "Health conditions",
+  "chronic condition": "Health conditions",
+  "chronic conditions": "Health conditions",
+  "diagnosis": "Health conditions",
+  "diagnoses": "Health conditions",
+  "condition": "Health conditions",
+  "health issue": "Health conditions",
+  "health issues": "Health conditions",
+  "medication": "Medications",
+  "medications": "Medications",
+  "current medication": "Medications",
+  "current medications": "Medications",
 };
 
 /**
@@ -166,6 +191,9 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Skill",
     "Hobby",
     "Interest",
+    "Allergies",
+    "Health conditions",
+    "Medications",
   ].map((s) => s.toLowerCase()),
 );
 
