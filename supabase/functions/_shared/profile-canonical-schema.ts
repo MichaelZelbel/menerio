@@ -118,6 +118,61 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
   preferences: { shape: "open", labels: [] },
 };
 
+/**
+ * Additional label aliasing for OPEN categories. The schema above intentionally
+ * keeps open categories free-form, but a handful of near-synonymous labels
+ * (Favorite foods / Favorite food/drink / Favorite cuisine …) cause massive
+ * duplicate rows in practice. Mapping them to one canonical label makes the
+ * deterministic exact-duplicate collapser in `profile-normalization.ts` fold
+ * them together without pulling the category out of "open" shape.
+ */
+export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
+  // Food
+  "favorite food": "Favorite food",
+  "favorite foods": "Favorite food",
+  "favorite food/drink": "Favorite food",
+  "favorite dish": "Favorite food",
+  "favorite dishes": "Favorite food",
+  "favorite cuisine": "Favorite food",
+  "favorite cuisines": "Favorite food",
+  "favorite drink": "Favorite drink",
+  "favorite drinks": "Favorite drink",
+  "favorite beverage": "Favorite drink",
+  "favorite beverages": "Favorite drink",
+  "favorite dessert": "Favorite dessert",
+  "favorite desserts": "Favorite dessert",
+  // Personality / relational
+  "love language": "Love language",
+  "love languages": "Love language",
+  "love language(s)": "Love language",
+  // Identity-ish extras (routed via GLOBAL map, not tied to a structured cat)
+  "ethnicity": "Ethnicity",
+  "ethnic background": "Ethnicity",
+};
+
+/**
+ * Canonical labels whose semantic is "a set of tokens" (nicknames, favorite
+ * foods, …). The normalizer merges same-label rows for one subject into a
+ * single row whose value is the deduplicated union of comma-split tokens.
+ */
+export const LIST_VALUED_LABELS: Set<string> = new Set(
+  [
+    "Nickname",
+    "Aliases",
+    "Favorite food",
+    "Favorite drink",
+    "Favorite dessert",
+    "Love language",
+    "Skill",
+    "Hobby",
+    "Interest",
+  ].map((s) => s.toLowerCase()),
+);
+
+export function isListValuedLabel(canonicalLabel: string): boolean {
+  return LIST_VALUED_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
+}
+
 // Build per-category alias→canonical lookup.
 const PER_CATEGORY_ALIAS_MAP: Record<string, Map<string, string>> = {};
 // Global alias map for re-homing across categories.
