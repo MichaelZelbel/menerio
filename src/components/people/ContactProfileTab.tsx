@@ -87,6 +87,28 @@ export function ContactProfileTab({
     }
   };
 
+  const runNormalize = async () => {
+    setNormalizing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: {
+          action: "backfill",
+          subject_type: "contact",
+          subject_id: contactId,
+          includeNotesContext: true,
+        },
+      });
+      if (error) throw error;
+      const created = (data as { created?: number })?.created ?? 0;
+      const autoApplied = (data as { autoApplied?: number })?.autoApplied ?? 0;
+      showToast.success(`Normalizer finished: ${created} suggestion(s), ${autoApplied} auto-applied.`);
+    } catch (err: any) {
+      showToast.error(err.message ?? "Normalization failed");
+    } finally {
+      setNormalizing(false);
+    }
+  };
+
   if (isLoading) {
     return <PageLoader />;
   }
