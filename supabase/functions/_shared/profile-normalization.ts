@@ -125,6 +125,25 @@ export async function planSubjectNormalization(args: {
   const slugById = new Map<string, string>();
   for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
 
+  // --- Boolean-value condition transform (in-plan only) ---
+  // A "checkbox" extraction like {label: "BPD", value: "true"} filed under
+  // `health` is really "Health conditions: BPD". Rewriting the row's label/
+  // value here (before clustering) folds it into the list-valued merger with
+  // every other Health-conditions row. Safe: the `before` snapshot used for
+  // rollback is re-queried from the DB in createNormalizationSuggestions, so
+  // this in-memory rewrite never lands in the snapshot.
+  const BOOLEAN_VALUES = new Set(["true", "yes", "y", "x", "✓", "✔"]);
+  for (const row of rows) {
+    const slug = slugById.get(row.category_id) || "";
+    if (slug !== "health") continue;
+    const v = String(row.value || "").trim().toLowerCase();
+    if (!BOOLEAN_VALUES.has(v)) continue;
+    const orig = String(row.label || "").trim();
+    if (!orig || orig.length > 60 || /[:{}]/.test(orig)) continue;
+    row.label = "Health conditions";
+    row.value = orig;
+  }
+
   // --- Deterministic exact-duplicate collapser (runs BEFORE the LLM) ---
   // Cluster rows by (correctedCategorySlug, canonicalLabel, dedup-normalized
   // value). Value normalization strips trailing parenthetical qualifiers, so
