@@ -1425,6 +1425,30 @@ server.registerTool(
       const redacted = redactContactList(data || []);
       if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
+      // Pull a small allow-list of high-value profile facts per hit so the caller
+      // sees birthdays / nicknames without needing a second tool call.
+      const HIGHLIGHT_LABELS = new Set([
+        "date of birth", "birthday", "nickname", "aliases", "ethnicity",
+        "current city", "job title", "employer",
+      ]);
+      const visibleIds = redacted.filter((c: any) => !c._redacted).map((c: any) => c.id);
+      const factsById = new Map<string, string[]>();
+      if (visibleIds.length > 0) {
+        const { data: pe } = await supabase
+          .from("profile_entries")
+          .select("contact_id, label, value")
+          .eq("user_id", getCurrentUserId())
+          .in("contact_id", visibleIds)
+          .limit(400);
+        for (const e of (pe || []) as any[]) {
+          if (!HIGHLIGHT_LABELS.has(String(e.label || "").trim().toLowerCase())) continue;
+          const arr = factsById.get(e.contact_id) || [];
+          if (arr.length >= 4) continue;
+          arr.push(`${e.label}: ${e.value}`);
+          factsById.set(e.contact_id, arr);
+        }
+      }
+
       const lines = redacted.map((c: any, i: number) => {
         if (c._redacted) {
           return `${i + 1}. ${c.name}${c.relationship ? ` (${c.relationship})` : ""} — 🔒 marked sensitive, PII hidden from AI.`;
@@ -1437,6 +1461,8 @@ server.registerTool(
           const days = Math.floor((Date.now() - new Date(c.last_contact_date).getTime()) / 86400000);
           parts.push(`| Last contact: ${days}d ago`);
         }
+        const facts = factsById.get(c.id);
+        if (facts?.length) parts.push(`\n   Profile: ${facts.join(" • ")}`);
         if (c.notes) parts.push(`\n   Notes: ${c.notes.substring(0, 200)}`);
         return parts.join(" ");
       });
