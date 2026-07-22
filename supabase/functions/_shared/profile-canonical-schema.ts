@@ -22,7 +22,7 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
     labels: [
       { canonical: "Full name", single: true, aliases: ["legal name", "name", "full legal name"] },
       { canonical: "Preferred name", single: true, aliases: ["first name", "goes by", "preferred name"] },
-      { canonical: "Nickname", single: false, aliases: ["nickname", "alias", "handle", "pet name", "aka", "also known as", "known as"] },
+      { canonical: "Nickname", single: false, aliases: ["nickname", "nicknames", "alias", "aliases", "name aliases", "handle", "pet name", "aka", "also known as", "known as"] },
       { canonical: "Date of birth", single: true, aliases: ["birthday", "dob", "born on", "geburtsdatum", "geburtstag", "date of birth", "birth date"] },
       { canonical: "Place of birth", single: true, aliases: ["birthplace", "born in", "place of birth"] },
       { canonical: "Nationality", single: false, aliases: ["citizenship", "nationality"] },
