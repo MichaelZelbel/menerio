@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -44,6 +44,7 @@ interface PersonDetailProps {
  */
 export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const toggleFavorite = useToggleFavoritePerson();
   const touchPersonViewed = useTouchPersonViewed();
