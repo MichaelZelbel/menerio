@@ -22,7 +22,7 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
     labels: [
       { canonical: "Full name", single: true, aliases: ["legal name", "name", "full legal name"] },
       { canonical: "Preferred name", single: true, aliases: ["first name", "goes by", "preferred name"] },
-      { canonical: "Nickname", single: false, aliases: ["nickname", "alias", "handle", "pet name", "aka", "also known as", "known as"] },
+      { canonical: "Nickname", single: false, aliases: ["nickname", "nicknames", "alias", "aliases", "name aliases", "handle", "pet name", "aka", "also known as", "known as"] },
       { canonical: "Date of birth", single: true, aliases: ["birthday", "dob", "born on", "geburtsdatum", "geburtstag", "date of birth", "birth date"] },
       { canonical: "Place of birth", single: true, aliases: ["birthplace", "born in", "place of birth"] },
       { canonical: "Nationality", single: false, aliases: ["citizenship", "nationality"] },
@@ -118,6 +118,61 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
   preferences: { shape: "open", labels: [] },
 };
 
+/**
+ * Additional label aliasing for OPEN categories. The schema above intentionally
+ * keeps open categories free-form, but a handful of near-synonymous labels
+ * (Favorite foods / Favorite food/drink / Favorite cuisine …) cause massive
+ * duplicate rows in practice. Mapping them to one canonical label makes the
+ * deterministic exact-duplicate collapser in `profile-normalization.ts` fold
+ * them together without pulling the category out of "open" shape.
+ */
+export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
+  // Food
+  "favorite food": "Favorite food",
+  "favorite foods": "Favorite food",
+  "favorite food/drink": "Favorite food",
+  "favorite dish": "Favorite food",
+  "favorite dishes": "Favorite food",
+  "favorite cuisine": "Favorite food",
+  "favorite cuisines": "Favorite food",
+  "favorite drink": "Favorite drink",
+  "favorite drinks": "Favorite drink",
+  "favorite beverage": "Favorite drink",
+  "favorite beverages": "Favorite drink",
+  "favorite dessert": "Favorite dessert",
+  "favorite desserts": "Favorite dessert",
+  // Personality / relational
+  "love language": "Love language",
+  "love languages": "Love language",
+  "love language(s)": "Love language",
+  // Identity-ish extras (routed via GLOBAL map, not tied to a structured cat)
+  "ethnicity": "Ethnicity",
+  "ethnic background": "Ethnicity",
+};
+
+/**
+ * Canonical labels whose semantic is "a set of tokens" (nicknames, favorite
+ * foods, …). The normalizer merges same-label rows for one subject into a
+ * single row whose value is the deduplicated union of comma-split tokens.
+ */
+export const LIST_VALUED_LABELS: Set<string> = new Set(
+  [
+    "Nickname",
+    "Aliases",
+    "Favorite food",
+    "Favorite drink",
+    "Favorite dessert",
+    "Love language",
+    "Skill",
+    "Hobby",
+    "Interest",
+  ].map((s) => s.toLowerCase()),
+);
+
+export function isListValuedLabel(canonicalLabel: string): boolean {
+  return LIST_VALUED_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
+}
+
 // Build per-category alias→canonical lookup.
 const PER_CATEGORY_ALIAS_MAP: Record<string, Map<string, string>> = {};
 // Global alias map for re-homing across categories.
@@ -137,6 +192,11 @@ for (const [slug, schema] of Object.entries(PROFILE_CANONICAL_SCHEMA)) {
     }
   }
   PER_CATEGORY_ALIAS_MAP[slug] = m;
+}
+
+for (const [alias, canonical] of Object.entries(OPEN_CATEGORY_LABEL_ALIASES)) {
+  GLOBAL_ALIAS_MAP.set(alias.toLowerCase(), canonical);
+  GLOBAL_ALIAS_MAP.set(canonical.toLowerCase(), canonical);
 }
 
 function normalizeKey(label: string): string {

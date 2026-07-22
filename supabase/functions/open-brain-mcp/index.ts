@@ -1425,6 +1425,30 @@ server.registerTool(
       const redacted = redactContactList(data || []);
       if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
+      // Pull a small allow-list of high-value profile facts per hit so the caller
+      // sees birthdays / nicknames without needing a second tool call.
+      const HIGHLIGHT_LABELS = new Set([
+        "date of birth", "birthday", "nickname", "aliases", "ethnicity",
+        "current city", "job title", "employer",
+      ]);
+      const visibleIds = redacted.filter((c: any) => !c._redacted).map((c: any) => c.id);
+      const factsById = new Map<string, string[]>();
+      if (visibleIds.length > 0) {
+        const { data: pe } = await supabase
+          .from("profile_entries")
+          .select("contact_id, label, value")
+          .eq("user_id", getCurrentUserId())
+          .in("contact_id", visibleIds)
+          .limit(400);
+        for (const e of (pe || []) as any[]) {
+          if (!HIGHLIGHT_LABELS.has(String(e.label || "").trim().toLowerCase())) continue;
+          const arr = factsById.get(e.contact_id) || [];
+          if (arr.length >= 4) continue;
+          arr.push(`${e.label}: ${e.value}`);
+          factsById.set(e.contact_id, arr);
+        }
+      }
+
       const lines = redacted.map((c: any, i: number) => {
         if (c._redacted) {
           return `${i + 1}. ${c.name}${c.relationship ? ` (${c.relationship})` : ""} — 🔒 marked sensitive, PII hidden from AI.`;
@@ -1437,6 +1461,8 @@ server.registerTool(
           const days = Math.floor((Date.now() - new Date(c.last_contact_date).getTime()) / 86400000);
           parts.push(`| Last contact: ${days}d ago`);
         }
+        const facts = factsById.get(c.id);
+        if (facts?.length) parts.push(`\n   Profile: ${facts.join(" • ")}`);
         if (c.notes) parts.push(`\n   Notes: ${c.notes.substring(0, 200)}`);
         return parts.join(" ");
       });
@@ -1529,7 +1555,124 @@ server.registerTool(
         }
       }
 
+      // Structured profile facts — the whole reason external LLMs ask about a
+      // person. Without this section a bot literally cannot see the birthday,
+      // nicknames, favorites, etc. stored in Menerio. Cap ~40 entries; skip
+      // private categories.
+      const { data: catRows } = await supabase
+        .from("profile_categories")
+        .select("id, name, slug, sort_order")
+        .eq("user_id", getCurrentUserId())
+        .eq("contact_id", contact.id)
+        .neq("visibility_scope", "private")
+        .order("sort_order");
+      const profCatIds = (catRows || []).map((c: any) => c.id);
+      if (profCatIds.length > 0) {
+        const { data: profEntries } = await supabase
+          .from("profile_entries")
+          .select("category_id, label, value, sort_order")
+          .eq("user_id", getCurrentUserId())
+          .eq("contact_id", contact.id)
+          .in("category_id", profCatIds)
+          .order("sort_order")
+          .limit(60);
+        if (profEntries?.length) {
+          lines.push("", "## Profile");
+          const byCat = new Map<string, any[]>();
+          for (const e of profEntries as any[]) {
+            const arr = byCat.get(e.category_id) || [];
+            arr.push(e);
+            byCat.set(e.category_id, arr);
+          }
+          let printed = 0;
+          for (const cat of (catRows || []) as any[]) {
+            const es = byCat.get(cat.id);
+            if (!es?.length) continue;
+            lines.push(`### ${cat.name}`);
+            for (const e of es) {
+              if (printed >= 40) break;
+              lines.push(`- ${e.label}: ${e.value}`);
+              printed++;
+            }
+            if (printed >= 40) { lines.push(`(profile truncated at 40 entries)`); break; }
+          }
+        }
+      }
+
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err: unknown) {
+      return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+
+// Tool: Get Contact Profile — return a contact's structured profile_entries.
+// Mirror of get_user_profile but for a named contact. This is the direct
+// "look up X's birthday / nickname / favorite food" tool.
+server.registerTool(
+  "get_contact_profile",
+  {
+    title: "Get Contact Profile",
+    description:
+      "Return a specific contact's structured profile facts (birthday, nicknames, favorite foods, aliases, ethnicity, location, job, …). Use this when the user asks about a specific person's attributes and `get_contact_context` doesn't include enough profile detail. Provide either `name` (fuzzy) or `contact_id`.",
+    inputSchema: {
+      name: z.string().optional().describe("Contact name (fuzzy, case-insensitive)"),
+      contact_id: z.string().uuid().optional().describe("Exact contact UUID"),
+    },
+  },
+  async ({ name, contact_id }) => {
+    try {
+      if (!name && !contact_id) {
+        return { content: [{ type: "text" as const, text: "Provide either `name` or `contact_id`." }], isError: true };
+      }
+      let cq = supabase
+        .from("contacts")
+        .select("id, name, is_sensitive, ai_visibility")
+        .eq("user_id", getCurrentUserId())
+        .is("merged_into", null)
+        .eq("ai_visibility", "visible")
+        .limit(1);
+      cq = contact_id ? cq.eq("id", contact_id) : cq.ilike("name", `%${name}%`);
+      const { data: cs } = await cq;
+      if (!cs?.length) return { content: [{ type: "text" as const, text: `No contact found.` }] };
+      const c = cs[0] as any;
+      if (c.is_sensitive) {
+        return { content: [{ type: "text" as const, text: `# ${c.name}\n🔒 Marked sensitive — profile facts hidden from AI.` }] };
+      }
+      const { data: cats } = await supabase
+        .from("profile_categories")
+        .select("id, name, slug, sort_order")
+        .eq("user_id", getCurrentUserId())
+        .eq("contact_id", c.id)
+        .neq("visibility_scope", "private")
+        .order("sort_order");
+      const ids = (cats || []).map((x: any) => x.id);
+      if (ids.length === 0) {
+        return { content: [{ type: "text" as const, text: `# ${c.name}\nNo structured profile facts recorded yet.` }] };
+      }
+      const { data: entries } = await supabase
+        .from("profile_entries")
+        .select("category_id, label, value, sort_order")
+        .eq("user_id", getCurrentUserId())
+        .eq("contact_id", c.id)
+        .in("category_id", ids)
+        .order("sort_order");
+      const byCat = new Map<string, any[]>();
+      for (const e of (entries || []) as any[]) {
+        const arr = byCat.get(e.category_id) || [];
+        arr.push(e);
+        byCat.set(e.category_id, arr);
+      }
+      const out: string[] = [`# ${c.name} — Profile`];
+      for (const cat of (cats || []) as any[]) {
+        const es = byCat.get(cat.id);
+        if (!es?.length) continue;
+        out.push(`\n## ${cat.name}`);
+        for (const e of es) out.push(`- ${e.label}: ${e.value}`);
+      }
+      if (out.length === 1) out.push("No entries.");
+      return { content: [{ type: "text" as const, text: out.join("\n") }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }

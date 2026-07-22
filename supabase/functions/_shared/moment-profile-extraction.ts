@@ -104,9 +104,26 @@ function valueAppearsInSource(value: string, label: string, source: string): boo
   const v = value.toLowerCase().trim();
   const s = source.toLowerCase();
   if (!v) return false;
-  // Birthday computed from "Nth birthday" — accept ISO date if source mentions birthday/born.
-  if (label.toLowerCase() === "date of birth" && /\d{4}-\d{2}-\d{2}/.test(v) && /birthday|born/.test(s)) {
-    return true;
+  // Date of birth: require the ISO date components to appear VERBATIM in the
+  // source (as ISO or as a natural date with the same year+month+day).
+  // No more "any ISO if source mentions birthday/born" — that let a stray
+  // "born" plus a nearby year produce fabricated birthdays.
+  if (label.toLowerCase() === "date of birth" && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [y, m, d] = v.split("-");
+    if (s.includes(v)) return true; // ISO substring
+    const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december","jan","feb","mar","apr","jun","jul","aug","sep","sept","oct","nov","dec"];
+    const dayNum = String(Number(d));
+    const monthIdx = Number(m) - 1;
+    if (monthIdx >= 0 && monthIdx < 12) {
+      // Require year + month name + day-of-month all present.
+      const monthHits = monthNames.filter((mn) => s.includes(mn));
+      if (
+        s.includes(y) &&
+        monthHits.some((mn) => (mn.startsWith(["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"][monthIdx]))) &&
+        new RegExp(`\\b${dayNum}(st|nd|rd|th)?\\b`).test(s)
+      ) return true;
+    }
+    return false;
   }
   if (s.includes(v)) return true;
   // Fuzzy: ≥80% of value tokens (len ≥ 3) appear in source.
@@ -231,6 +248,14 @@ async function prepareForInsert(
 ): Promise<Suggestion> {
   const threshold = thresholdFor(s.suggestion_type, prefs.sensitivity);
   const confidence = s.confidence_score ?? 0;
+  // Extra guard: Date of birth is a permanent single-value fact and one wrong
+  // auto-applied value stains a profile until manually fixed. Require ≥0.9
+  // confidence regardless of user's sensitivity setting; otherwise route to
+  // review.
+  const isDob =
+    s.suggestion_type === "add_profile_entry" &&
+    String((s.payload as any)?.label || "").trim().toLowerCase() === "date of birth";
+  if (isDob && confidence < 0.9) return { ...s, status: "pending_review" };
   const canAuto = prefs.mode === "auto" && confidence >= threshold && (!s.is_sensitive || prefs.autoAddSensitive);
   if (!canAuto) return { ...s, status: "pending_review" };
 

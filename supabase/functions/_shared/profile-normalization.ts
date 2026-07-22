@@ -9,6 +9,7 @@ import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
+  isListValuedLabel,
   isSingleValueLabel,
   normalizeProfileValueForDedup,
   stripTrailingQualifier,
@@ -197,6 +198,80 @@ export async function planSubjectNormalization(args: {
     });
   }
 
+  // --- List-valued label merger (deterministic) ---
+  // Nickname, Favorite food, Favorite drink, Love language, … are semantically
+  // "a set of tokens". When two+ rows for the SAME (subject, canonical label)
+  // survive the exact-duplicate pass with DIFFERENT values, we merge them into
+  // one row whose value is the deduplicated, comma-joined union of the tokens
+  // in every member. Auto-appliable (confidence 0.95) because the merge is
+  // token-preserving and reversible.
+  type ListMember = { row: ProfileEntryRow; correctedSlug: string; canonLabel: string };
+  const listBuckets = new Map<string, ListMember[]>();
+  for (const row of rows) {
+    if (deterministicIds.has(row.id)) continue;
+    const currentSlug = slugById.get(row.category_id) || "preferences";
+    const correctedSlug = correctProfileCategory(row.label, currentSlug);
+    const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
+    if (!isListValuedLabel(canonLabel)) continue;
+    const key = `${correctedSlug}||${canonLabel.toLowerCase()}`;
+    const m: ListMember = { row, correctedSlug, canonLabel };
+    const bucket = listBuckets.get(key);
+    if (bucket) bucket.push(m); else listBuckets.set(key, [m]);
+  }
+  const listValuedGroups: NormalizationGroup[] = [];
+  const splitTokens = (v: string): string[] =>
+    String(v || "")
+      .split(/[,;]|\band\b|\bund\b|\balso\b/i)
+      .map((t) => stripTrailingQualifier(t).trim())
+      .filter((t) => t.length > 0);
+  for (const members of listBuckets.values()) {
+    if (members.length < 2) continue;
+    // Union tokens case-insensitively, keeping first-seen casing/order.
+    const seen = new Set<string>();
+    const union: string[] = [];
+    for (const m of members) {
+      for (const tok of splitTokens(m.row.value)) {
+        const key = tok.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        union.push(tok);
+      }
+    }
+    if (union.length === 0) continue;
+    // Survivor: already in the corrected category + canonical label; else the
+    // row with the richest token set; else first.
+    const tokenCount = (r: ProfileEntryRow) => splitTokens(r.value).length;
+    const inCanonicalPos = (m: ListMember) =>
+      slugById.get(m.row.category_id) === m.correctedSlug && m.row.label === m.canonLabel;
+    let survivor = members.find(inCanonicalPos) || members[0];
+    for (const cand of members) {
+      if (tokenCount(cand.row) > tokenCount(survivor.row)) survivor = cand;
+    }
+    const memberIds = members.map((m) => m.row.id);
+    const newValue = union.join(", ");
+    // No-op if survivor already carries the full canonical value AND every other
+    // member is exactly equal to it (extremely rare — exact-dup pass would have
+    // caught it; guard anyway).
+    const survivorValue = survivor.row.value?.trim() ?? "";
+    if (
+      survivorValue === newValue &&
+      members.every((m) => (m.row.value || "").trim().toLowerCase() === newValue.toLowerCase())
+    ) continue;
+    for (const id of memberIds) deterministicIds.add(id);
+    listValuedGroups.push({
+      user_id: userId,
+      contact_id: contactId,
+      member_entry_ids: memberIds,
+      survivor_entry_id: survivor.row.id,
+      canonical_category_slug: survivor.correctedSlug,
+      canonical_label: survivor.canonLabel,
+      canonical_value: newValue,
+      operation: "merge",
+      confidence: 0.95,
+      rationale: `Merged ${members.length} '${survivor.canonLabel}' entries into one comma-list of ${union.length} value(s).`,
+    });
+  }
+
   // --- Soft single-label multiplicity detector (deterministic) ---
   // For canonical [single] labels with 2+ rows AND 2+ distinct values: emit a
   // low-confidence (0.55) merge group so it routes to REVIEW (never auto-applies).
@@ -253,7 +328,7 @@ export async function planSubjectNormalization(args: {
   // This guarantees zero overlap: the LLM cannot see, and therefore cannot
   // touch, any row claimed by the exact-duplicate or soft-single passes.
   const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
-  if (llmRows.length < 2) return deterministicGroups.concat(softSingleGroups);
+  if (llmRows.length < 2) return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
 
   const llmEntries = llmRows.map((r) => ({
     id: r.id,
@@ -355,7 +430,7 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups.concat(softSingleGroups);
+    return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
@@ -431,7 +506,7 @@ export async function planSubjectNormalization(args: {
       rationale: String(g.rationale || "").slice(0, 500),
     });
   }
-  return deterministicGroups.concat(softSingleGroups).concat(llmGroups);
+  return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups).concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
