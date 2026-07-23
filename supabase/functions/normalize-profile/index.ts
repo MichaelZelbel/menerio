@@ -75,7 +75,16 @@ function makePrepareSuggestion(db: any) {
   return async (suggestion: any, preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean }) => {
     const threshold = thresholdFor(suggestion.suggestion_type, preferences.sensitivity);
     const confidence = suggestion.confidence_score ?? 0;
-    const canAutoApply = preferences.mode === "auto" && confidence >= threshold && (!suggestion.is_sensitive || preferences.autoAddSensitive);
+    // Normalization does not introduce new sensitive facts; it merges/relabels
+    // facts the user already has. High-confidence cleanup should therefore run
+    // silently even for health/relationship fields, instead of leaving janitor
+    // work in Review Queue. Low-confidence conflict groups still require review.
+    const isHighConfidenceNormalization = suggestion.suggestion_type === "normalize_profile_entry" && confidence >= 0.95;
+    const canAutoApply = isHighConfidenceNormalization || (
+      preferences.mode === "auto" &&
+      confidence >= threshold &&
+      (!suggestion.is_sensitive || preferences.autoAddSensitive)
+    );
     if (!canAutoApply) return { ...suggestion, status: "pending_review" };
 
     if (suggestion.suggestion_type === "normalize_profile_entry") {
