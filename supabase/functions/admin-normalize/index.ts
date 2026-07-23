@@ -240,7 +240,7 @@ serve(async (req) => {
     } catch {
       runAll();
     }
-    return json({ ok: true, started: true, subjectCount: subjects.length }, 202);
+    return json({ ok: true, started: true, subjectCount: subjects.length, skippedUnchanged }, 202);
   } catch (err) {
     console.error("[admin-normalize] error:", err);
     return json({ error: String(err) }, 500);
