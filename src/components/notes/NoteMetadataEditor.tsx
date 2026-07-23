@@ -37,6 +37,7 @@ const SENTIMENT_EMOJI: Record<string, string> = {
 };
 
 interface NoteMetadataEditorProps {
+  noteId: string;
   metadata: Record<string, unknown> | null;
   onUpdate: (metadata: Record<string, unknown>) => void;
   tags?: string[];
@@ -45,12 +46,16 @@ interface NoteMetadataEditorProps {
   showTagInput?: boolean;
 }
 
-export function NoteMetadataEditor({ metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
+export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
   // Always default to collapsed on note open — an expanded metadata panel
   // pushes the note content off-screen. Users can expand per-note as needed.
   const [isOpen, setIsOpen] = useState(false);
+  // Reset collapse state when switching notes. NoteEditor reuses this
+  // component instance across notes (no `key` prop, to avoid a duplication
+  // glitch), so state does NOT reset on its own. Do not remove.
+  useEffect(() => { setIsOpen(false); }, [noteId]);
 
   const navigate = useNavigate();
   const topicInputRef = useCallback((node: HTMLInputElement | null) => {
