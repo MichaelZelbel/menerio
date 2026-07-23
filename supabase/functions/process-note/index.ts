@@ -23,6 +23,10 @@ import {
   applyNormalization,
   createNormalizationSuggestions,
 } from "../_shared/profile-normalization.ts";
+import {
+  buildProfileTokenIndex,
+  dedupIncomingProfileValue,
+} from "../_shared/profile-dedup.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -1500,21 +1504,8 @@ async function generateProfileSuggestions(
       existingCategories.push(...(c2 || []));
     }
 
-    // Value is dedup-normalized (trailing parenthetical qualifiers stripped)
-    // so "5'4\"" and "5'4\" (fun sized)" register as the same fact.
-    const entryKey = (cid: string | null, label: string, value: string) =>
-      `${cid || OWNER_KEY}|${label.toLowerCase()}|${normalizeProfileValueForDedup(value)}`;
-    const singletonEntryKey = (cid: string | null, label: string) =>
-      `${cid || OWNER_KEY}|${label.toLowerCase()}`;
-
-    const entrySet = new Set(existingEntries.map((e: any) => entryKey(e.contact_id, e.label, e.value)));
-    const singletonEntrySet = new Set(
-      existingEntries
-        .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
-        .map((e: any) => singletonEntryKey(e.contact_id, e.label)),
-    );
-
-    // Existing review_queue items
+    // Existing review_queue items — count toward dedup so we don't
+    // regenerate a suggestion already waiting in the queue.
     const { data: existingQueueItems } = await supabase
       .from("review_queue")
       .select("payload, status")
@@ -1522,18 +1513,19 @@ async function generateProfileSuggestions(
       .eq("suggestion_type", "add_profile_entry")
       .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
 
-    const queueSet = new Set(
-      (existingQueueItems || []).map((q: any) =>
-        entryKey(q.payload?.contact_id || null, q.payload?.label || "", q.payload?.value || "")
-      ),
-    );
-    const singletonQueueSet = new Set(
-      (existingQueueItems || [])
-        .filter((q: any) =>
-          SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
-          ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
-        )
-        .map((q: any) => singletonEntryKey(q.payload?.contact_id || null, q.payload?.label || "")),
+    // Token-aware dedup index. For list-valued canonical labels
+    // (Health conditions, Favorite food, Allergies, Nickname, …) it stores
+    // per-token keys per (contact, canonical-label-group), so reshuffled
+    // list values ("MDD, BPD" vs "MDD, BPD, panic attacks") no longer look
+    // like brand-new facts. Non-list labels fall back to the original
+    // exact-normalized-value + singleton behavior.
+    const dedupIndex = buildProfileTokenIndex(
+      existingEntries as any[],
+      (existingQueueItems || []).map((q: any) => ({
+        contact_id: q.payload?.contact_id ?? null,
+        label: String(q.payload?.label || ""),
+        value: String(q.payload?.value || ""),
+      })),
     );
 
     const suggestions: ReviewSuggestion[] = [];
@@ -1542,17 +1534,20 @@ async function generateProfileSuggestions(
     for (const fact of validFacts) {
       const target = fact._target;
       const tKey = keyFor(target);
-      const labelLower = fact.label.toLowerCase();
-      const dedupKey = entryKey(target.contact_id, fact.label, fact.value);
-      const sKey = singletonEntryKey(target.contact_id, fact.label);
-
-      if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
-      if (SINGLETON_PROFILE_LABELS.has(labelLower)) {
-        if (singletonEntrySet.has(sKey) || singletonQueueSet.has(sKey)) {
-          console.log(`[profile-extract] skipping singleton "${fact.label}" already known for ${target.canonical_name}`);
-          continue;
-        }
+      const dd = dedupIncomingProfileValue({
+        contactId: target.contact_id,
+        label: fact.label,
+        value: fact.value,
+        index: dedupIndex,
+      });
+      if (dd.action === "skip") {
+        console.log(`[profile-extract] dedup skip (${dd.reason}) "${fact.label}: ${fact.value}" for ${target.canonical_name}`);
+        continue;
       }
+      // Use the (possibly narrowed) value returned by the guard — for a
+      // list label with partial overlap this drops the tokens already known.
+      const effectiveValue = dd.value;
+
       const count = perTargetCount.get(tKey) || 0;
       if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) continue;
       perTargetCount.set(tKey, count + 1);
@@ -1568,7 +1563,7 @@ async function generateProfileSuggestions(
         source_note_id: noteId,
         suggestion_type: "add_profile_entry",
         title: `Add to ${ownerLabelName} profile: ${fact.label}`,
-        description: `"${fact.value}" — extracted from "${noteTitle}"`,
+        description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
         payload: {
           contact_id: target.contact_id,
           contact_name: target.canonical_name,
@@ -1576,22 +1571,20 @@ async function generateProfileSuggestions(
           category_slug: fact.category_slug,
           category_id: catRow?.id || null,
           label: fact.label,
-          value: fact.value,
+          value: effectiveValue,
         },
         status: "pending_review",
         target_entity_type: "profile_entry",
         source_title: noteTitle,
-        extracted_value: `${fact.label}: ${fact.value}`,
+        extracted_value: `${fact.label}: ${effectiveValue}`,
         confidence_score: isSoftSignal
           ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
           : DEFAULT_CONFIDENCE.add_profile_entry,
-        is_sensitive: isSensitiveSuggestion("add_profile_entry", fact as unknown as Record<string, unknown>, noteContent),
-        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${fact.value}`),
+        is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
+        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
       });
-
-      queueSet.add(dedupKey);
-      if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(sKey);
     }
+
 
     if (suggestions.length > 0) {
       const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);

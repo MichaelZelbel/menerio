@@ -17,7 +17,8 @@ import {
   isSelfName,
   type EntityRef,
 } from "./relationship-canonical.ts";
-import { normalizeProfileValueForDedup } from "./profile-canonical-schema.ts";
+
+import { buildProfileTokenIndex, dedupIncomingProfileValue } from "./profile-dedup.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
@@ -139,14 +140,10 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-const SINGLETON_PROFILE_LABELS = new Set([
-  "job title", "current job title", "role", "title",
-  "company", "current company", "employer",
-  "current city", "city", "location",
-  "birthday", "date of birth", "dob", "geburtstag", "geburtsdatum",
-  "pronouns", "nationality",
-  "partner", "spouse",
-]);
+// SINGLETON_PROFILE_LABELS removed — the shared token-aware dedup guard
+// in `profile-dedup.ts` now enforces singleton behavior via the canonical
+// schema's `single: true` flag.
+
 
 const MOMENT_PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal life-timeline "moment" (an event or milestone the user recorded).
 
@@ -451,34 +448,25 @@ export async function extractProfileFromMoment(
     .select("contact_id, label, value")
     .eq("user_id", userId)
     .in("contact_id", contactIds);
-  const entrySet = new Set(
-    (existingEntries || []).map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}|${normalizeProfileValueForDedup(e.value || "")}`),
-  );
-  const singletonEntrySet = new Set(
-    (existingEntries || [])
-      .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
-      .map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}`),
-  );
-
   const { data: existingQueue } = await supabase
     .from("review_queue")
     .select("payload, status")
     .eq("user_id", userId)
     .eq("suggestion_type", "add_profile_entry")
     .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
-  const queueSet = new Set(
-    (existingQueue || []).map((q: any) =>
-      `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}|${normalizeProfileValueForDedup(q.payload?.value || "")}`
-    ),
+
+  // Token-aware dedup: canonicalizes list-valued labels so reshuffled
+  // multi-item values (e.g. "MDD, BPD" vs "MDD, BPD, ASD") stop looking
+  // like distinct facts. See _shared/profile-dedup.ts for the details.
+  const dedupIndex = buildProfileTokenIndex(
+    (existingEntries || []) as any[],
+    (existingQueue || []).map((q: any) => ({
+      contact_id: q.payload?.contact_id ?? null,
+      label: String(q.payload?.label || ""),
+      value: String(q.payload?.value || ""),
+    })),
   );
-  const singletonQueueSet = new Set(
-    (existingQueue || [])
-      .filter((q: any) =>
-        SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
-        ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
-      )
-      .map((q: any) => `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}`),
-  );
+
 
   // 7. Load profile_categories so we can map slug → id for auto-apply.
   const { data: categories } = await supabase
@@ -520,12 +508,17 @@ export async function extractProfileFromMoment(
       continue;
     }
 
-    const dedupKey = `${contact.contact_id}|${labelLower}|${normalizeProfileValueForDedup(value)}`;
-    if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
-    const singletonKey = `${contact.contact_id}|${labelLower}`;
-    if (SINGLETON_PROFILE_LABELS.has(labelLower) && (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey))) {
+    const dd = dedupIncomingProfileValue({
+      contactId: contact.contact_id,
+      label,
+      value,
+      index: dedupIndex,
+    });
+    if (dd.action === "skip") {
+      console.log(`[moment-extract] dedup skip (${dd.reason}) "${label}: ${value}" for ${contact.canonical_name}`);
       continue;
     }
+    const effectiveValue = dd.value;
 
     const catRow = (categories || []).find((c: any) => c.slug === categorySlug && c.contact_id === contact.contact_id);
 
@@ -535,7 +528,7 @@ export async function extractProfileFromMoment(
       category_slug: categorySlug,
       category_id: catRow?.id || null,
       label,
-      value,
+      value: effectiveValue,
       source: `moment:${momentId}`,
       moment_id: momentId,
       moment_title: (moment as any).title,
@@ -546,20 +539,18 @@ export async function extractProfileFromMoment(
       source_note_id: null,
       suggestion_type: "add_profile_entry",
       title: `Add to ${contact.canonical_name}'s profile: ${label}`,
-      description: `"${value}" — extracted from timeline moment "${(moment as any).title}"`,
+      description: `"${effectiveValue}" — extracted from timeline moment "${(moment as any).title}"`,
       payload,
       status: "pending_review",
       target_entity_type: "profile_entry",
       source_title: noteTitleLike,
-      extracted_value: `${label}: ${value}`,
+      extracted_value: `${label}: ${effectiveValue}`,
       confidence_score: baseConfidence,
       is_sensitive: isSensitive("add_profile_entry", payload, `${(moment as any).title} ${(moment as any).description || ""}`),
-      suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${label}:${value}`),
+      suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${label}:${effectiveValue}`),
     });
-
-    queueSet.add(dedupKey);
-    if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
   }
+
 
   // Relationships — now supports self ↔ contact (e.g. "my wife Xihui").
   const [{ data: existingRels }, { data: existingRelQueue }] = await Promise.all([

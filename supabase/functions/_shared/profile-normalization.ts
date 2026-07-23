@@ -61,7 +61,7 @@ export type NormalizationPayload = {
   rationale: string;
 };
 
-function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
+export function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
   let cleaned = stripTrailingQualifier(token)
     .replace(/^(?:allerg(?:ic|y)|allergen)\s+(?:to\s+)?/i, "")
     .replace(/^(?:diagnosed\s+with|diagnosis\s*:?|condition\s*:?|has\s+)/i, "")
@@ -92,7 +92,7 @@ function normalizeTokenForList(label: string, token: string): { key: string; dis
   return { key: lower, display: cleaned };
 }
 
-function splitListTokens(label: string, value: string): Array<{ key: string; display: string }> {
+export function splitListTokens(label: string, value: string): Array<{ key: string; display: string }> {
   return String(value || "")
     .replace(/^allergic\s+to\s+/i, "")
     .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
