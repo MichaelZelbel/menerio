@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,6 +16,9 @@ import type { ProfileCategory, ProfileEntry } from "./useProfile";
 export interface ContactProfileEntry extends ProfileEntry {
   is_pinned: boolean;
 }
+
+const autoNormalizationInFlight = new Set<string>();
+const autoNormalizationSeen = new Set<string>();
 
 export function useContactProfile(contactId: string | null) {
   const { user } = useAuth();
@@ -57,6 +61,53 @@ export function useContactProfile(contactId: string | null) {
     },
     enabled: !!userId && !!contactId,
   });
+
+  useEffect(() => {
+    if (!userId || !contactId) return;
+    if (categoriesQuery.isLoading || entriesQuery.isLoading) return;
+    if (!entriesQuery.data) return;
+
+    const signature = JSON.stringify(
+      entriesQuery.data.map((entry) => ({
+        id: entry.id,
+        category_id: entry.category_id,
+        label: entry.label,
+        value: entry.value,
+      })),
+    );
+    const key = `${userId}:${contactId}:${signature}`;
+    if (autoNormalizationSeen.has(key) || autoNormalizationInFlight.has(key)) return;
+
+    autoNormalizationInFlight.add(key);
+    void supabase.functions
+      .invoke("normalize-profile", {
+        body: {
+          action: "backfill",
+          scope: "contact",
+          contact_id: contactId,
+          includeNotesContext: true,
+        },
+      })
+      .then(({ data, error }) => {
+        if (error) throw error;
+        autoNormalizationSeen.add(key);
+        const totals = (data as any)?.totals;
+        const changed = Number(totals?.applied || 0) + Number(totals?.review || 0) + Number(totals?.created || 0);
+        if (changed > 0) {
+          qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+          qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
+          qc.invalidateQueries({ queryKey: ["pending-profile-suggestions", userId, contactId] });
+          qc.invalidateQueries({ queryKey: ["review-queue"] });
+          triggerPeopleSync({ people: [contactId] });
+        }
+      })
+      .catch((err) => {
+        console.error("[normalize-profile] automatic contact cleanup failed", err);
+      })
+      .finally(() => {
+        autoNormalizationInFlight.delete(key);
+      });
+  }, [categoriesQuery.isLoading, contactId, entriesQuery.data, entriesQuery.isLoading, qc, triggerPeopleSync, userId]);
 
   const upsertCategory = useMutation({
     mutationFn: async (cat: Partial<ProfileCategory> & { id?: string }) => {

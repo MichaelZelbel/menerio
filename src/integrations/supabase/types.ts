@@ -2303,6 +2303,60 @@ export type Database = {
           },
         ]
       }
+      profile_normalization_runs: {
+        Row: {
+          applied_count: number
+          completed_at: string | null
+          contact_id: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          input_hash: string
+          planned_count: number
+          review_count: number
+          skipped_count: number
+          started_at: string
+          status: string
+          subject_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          applied_count?: number
+          completed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input_hash: string
+          planned_count?: number
+          review_count?: number
+          skipped_count?: number
+          started_at?: string
+          status?: string
+          subject_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          applied_count?: number
+          completed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input_hash?: string
+          planned_count?: number
+          review_count?: number
+          skipped_count?: number
+          started_at?: string
+          status?: string
+          subject_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profile_views: {
         Row: {
           created_at: string | null

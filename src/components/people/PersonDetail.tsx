@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -35,10 +35,6 @@ interface PersonDetailProps {
   onClose: () => void;
 }
 
-const AUTO_NORMALIZE_VERSION = "contact-profile-auto-normalize-health-v1";
-const AUTO_NORMALIZE_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const autoNormalizeInFlight = new Set<string>();
-
 /**
  * Master-detail right pane for a selected person. Extracted from the old
  * single-column People page essentially verbatim: header card (name/aliases
@@ -48,7 +44,6 @@ const autoNormalizeInFlight = new Set<string>();
  */
 export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const toggleFavorite = useToggleFavoritePerson();
   const touchPersonViewed = useTouchPersonViewed();
@@ -63,44 +58,6 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
   const [conversationContext, setConversationContext] = useState("");
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePrefillId, setMergePrefillId] = useState<string | null>(null);
-  const invalidateContactProfile = useCallback(() => {
-    if (!user?.id) return;
-    queryClient.invalidateQueries({ queryKey: ["contact-profile-entries", user.id, person.id] });
-    queryClient.invalidateQueries({ queryKey: ["contact-profile-categories", user.id, person.id] });
-    queryClient.invalidateQueries({ queryKey: ["profile-entries", person.id] });
-    queryClient.invalidateQueries({ queryKey: ["profile-categories", person.id] });
-    queryClient.invalidateQueries({ queryKey: ["profile-suggestions", person.id] });
-    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
-  }, [person.id, queryClient, user?.id]);
-
-  const runProfileNormalization = useCallback(
-    async ({ notify = false }: { notify?: boolean } = {}) => {
-      try {
-        const { error } = await supabase.functions.invoke("normalize-profile", {
-          body: {
-            action: "backfill",
-            scope: "contact",
-            contact_id: person.id,
-            includeNotesContext: true,
-          },
-        });
-        if (error) throw error;
-        if (notify) {
-          showToast.success("Profile cleanup started. Changes appear automatically when it finishes.");
-        }
-        // Backfill is fire-and-forget on the edge; refresh the exact query keys
-        // used by ContactProfileTab after it has had time to apply safe merges.
-        window.setTimeout(invalidateContactProfile, 2500);
-        window.setTimeout(invalidateContactProfile, 7000);
-        window.setTimeout(invalidateContactProfile, 15000);
-        return true;
-      } catch (err: any) {
-        if (notify) showToast.error(err.message ?? "Normalization failed");
-        return false;
-      }
-    },
-    [invalidateContactProfile, person.id],
-  );
 
   // Record a view whenever a person is opened (throttled inside the hook —
   // skips if already touched within 5 minutes). This component only mounts for
@@ -109,36 +66,6 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
     if (person.id) touchPersonViewed.mutate(person.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [person.id]);
-
-  // Normalize contact profile facts automatically when a person opens. This is
-  // deliberately silent: users should not have to find or click a janitor button
-  // just to collapse obvious duplicates like Allergy/Allergies or BPD: true.
-  useEffect(() => {
-    if (!person.id || !user?.id) return;
-
-    const storageKey = `${AUTO_NORMALIZE_VERSION}:${user.id}:${person.id}`;
-    let lastRun = 0;
-    try {
-      lastRun = Number(window.localStorage.getItem(storageKey) || "0");
-    } catch {
-      lastRun = 0;
-    }
-
-    if (Date.now() - lastRun < AUTO_NORMALIZE_MIN_INTERVAL_MS) return;
-    if (autoNormalizeInFlight.has(storageKey)) return;
-
-    autoNormalizeInFlight.add(storageKey);
-    void runProfileNormalization().then((ok) => {
-      autoNormalizeInFlight.delete(storageKey);
-      if (!ok) return;
-      try {
-        window.localStorage.setItem(storageKey, String(Date.now()));
-      } catch {
-        // localStorage can be unavailable in private contexts; normalization
-        // still succeeded, so there is nothing else to do.
-      }
-    });
-  }, [person.id, runProfileNormalization, user?.id]);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({

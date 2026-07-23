@@ -43,6 +43,8 @@ export type NormalizationGroup = {
   operation: "merge" | "relabel" | "recategorize" | "reformat";
   confidence: number;
   rationale: string;
+  source?: "exact" | "list" | "soft_single" | "llm";
+  auto_apply_direct?: boolean;
 };
 
 export type NormalizationPayload = {
@@ -58,6 +60,45 @@ export type NormalizationPayload = {
   operation: string;
   rationale: string;
 };
+
+function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
+  let cleaned = stripTrailingQualifier(token)
+    .replace(/^(?:allerg(?:ic|y)|allergen)\s+(?:to\s+)?/i, "")
+    .replace(/^(?:diagnosed\s+with|diagnosis\s*:?|condition\s*:?|has\s+)/i, "")
+    .trim()
+    .replace(/[.。]+$/u, "")
+    .trim();
+  if (!cleaned) cleaned = String(token || "").trim();
+
+  const lower = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const healthSynonyms: Record<string, string> = {
+    "major depressive disorder": "MDD",
+    "major depression": "MDD",
+    "mdd": "MDD",
+    "borderline personality disorder": "BPD",
+    "bpd": "BPD",
+    "autism spectrum disorder": "ASD",
+    "autistic spectrum disorder": "ASD",
+    "asd": "ASD",
+    "avoidant personality disorder": "AVPD",
+    "avpd": "AVPD",
+  };
+
+  if (String(label || "").trim().toLowerCase() === "health conditions") {
+    const canonical = healthSynonyms[lower];
+    if (canonical) return { key: canonical.toLowerCase(), display: canonical };
+  }
+
+  return { key: lower, display: cleaned };
+}
+
+function splitListTokens(label: string, value: string): Array<{ key: string; display: string }> {
+  return String(value || "")
+    .replace(/^allergic\s+to\s+/i, "")
+    .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
+    .map((t) => normalizeTokenForList(label, t))
+    .filter((t) => t.display.length > 0 && t.key.length > 0);
+}
 
 function buildSchemaDescription(): string {
   const lines: string[] = [];
@@ -220,6 +261,8 @@ export async function planSubjectNormalization(args: {
       operation: "merge",
       confidence: 1.0,
       rationale: "Duplicate entries (same fact) collapsed to the canonical label/category.",
+      source: "exact",
+      auto_apply_direct: true,
     });
   }
 
@@ -244,34 +287,28 @@ export async function planSubjectNormalization(args: {
     if (bucket) bucket.push(m); else listBuckets.set(key, [m]);
   }
   const listValuedGroups: NormalizationGroup[] = [];
-  const splitTokens = (v: string): string[] =>
-    String(v || "")
-      .replace(/^allergic\s+to\s+/i, "")
-      .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
-      .map((t) => stripTrailingQualifier(t).trim())
-      .filter((t) => t.length > 0);
   for (const members of listBuckets.values()) {
     if (members.length < 2) continue;
     // Union tokens case-insensitively, keeping first-seen casing/order.
     const seen = new Set<string>();
     const union: string[] = [];
     for (const m of members) {
-      for (const tok of splitTokens(m.row.value)) {
-        const key = tok.toLowerCase();
+      for (const tok of splitListTokens(m.canonLabel, m.row.value)) {
+        const key = tok.key;
         if (seen.has(key)) continue;
         seen.add(key);
-        union.push(tok);
+        union.push(tok.display);
       }
     }
     if (union.length === 0) continue;
     // Survivor: already in the corrected category + canonical label; else the
     // row with the richest token set; else first.
-    const tokenCount = (r: ProfileEntryRow) => splitTokens(r.value).length;
+    const tokenCount = (m: ListMember) => splitListTokens(m.canonLabel, m.row.value).length;
     const inCanonicalPos = (m: ListMember) =>
       slugById.get(m.row.category_id) === m.correctedSlug && m.row.label === m.canonLabel;
     let survivor = members.find(inCanonicalPos) || members[0];
     for (const cand of members) {
-      if (tokenCount(cand.row) > tokenCount(survivor.row)) survivor = cand;
+      if (tokenCount(cand) > tokenCount(survivor)) survivor = cand;
     }
     const memberIds = members.map((m) => m.row.id);
     const newValue = union.join(", ");
@@ -295,6 +332,8 @@ export async function planSubjectNormalization(args: {
       operation: "merge",
       confidence: 0.95,
       rationale: `Merged ${members.length} '${survivor.canonLabel}' entries into one comma-list of ${union.length} value(s).`,
+      source: "list",
+      auto_apply_direct: true,
     });
   }
 
@@ -347,6 +386,8 @@ export async function planSubjectNormalization(args: {
       operation: "merge",
       confidence: 0.55,
       rationale: `Multiple entries share the single-value field '${survivor.canonLabel}'; choose one.`,
+      source: "soft_single",
+      auto_apply_direct: false,
     });
   }
 
@@ -530,6 +571,8 @@ export async function planSubjectNormalization(args: {
       operation: op,
       confidence: conf,
       rationale: String(g.rationale || "").slice(0, 500),
+      source: "llm",
+      auto_apply_direct: false,
     });
   }
   return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups).concat(llmGroups);
@@ -590,11 +633,11 @@ export async function createNormalizationSuggestions(args: {
     isSensitiveSuggestion: (t: string, payload: Record<string, unknown>, text?: string) => boolean;
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
-}): Promise<{ created: number; autoApplied: number }> {
-  const { supabase, userId, contactId, preferences, sourceNoteId, helpers, includeNotesContext = false } = args;
+}): Promise<{ created: number; autoApplied: number; planned: number; applied: number; review: number; skipped: number }> {
+  const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false } = args;
 
   const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext });
-  if (groups.length === 0) return { created: 0, autoApplied: 0 };
+  if (groups.length === 0) return { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.
   let entryQuery = supabase
@@ -625,20 +668,15 @@ export async function createNormalizationSuggestions(args: {
     ((existingQueue || []) as any[]).map((q) => q.suppression_key).filter(Boolean),
   );
 
-  const suggestions: ReviewSuggestion[] = [];
-  for (const g of groups) {
-    const payload = buildPayload(g, rows);
-    if (payload.before.length === 0) continue;
-
+  const makeSuggestion = (g: NormalizationGroup, payload: NormalizationPayload): ReviewSuggestion => {
     const suppression = helpers.buildSuppressionKey(
       "normalize_profile_entry",
       contactId ? "contact" : "owner",
       contactId,
       `${g.canonical_label}:${g.canonical_value}`,
     );
-    if (existingKeys.has(suppression)) continue;
 
-    suggestions.push({
+    return {
       user_id: userId,
       source_note_id: sourceNoteId ?? null,
       suggestion_type: "normalize_profile_entry",
@@ -656,23 +694,78 @@ export async function createNormalizationSuggestions(args: {
         "",
       ),
       suppression_key: suppression,
-    });
+    };
+  };
+
+  const reviewSuggestions: ReviewSuggestion[] = [];
+  const auditRows: ReviewSuggestion[] = [];
+  let applied = 0;
+  let skipped = 0;
+
+  for (const g of groups) {
+    const payload = buildPayload(g, rows);
+    if (payload.before.length === 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const suggestion = makeSuggestion(g, payload);
+    if (g.auto_apply_direct) {
+      const result = await applyNormalization(supabase, payload);
+      if (result.ok && result.entryId) {
+        applied += 1;
+        auditRows.push({
+          ...suggestion,
+          status: "auto_applied_unreviewed",
+          target_entity_id: result.entryId,
+          applied_at: new Date().toISOString(),
+        });
+      } else {
+        skipped += 1;
+        console.warn(`[normalize-profile] direct apply skipped: ${result.reason || "unknown"}`);
+      }
+      continue;
+    }
+
+    if (suggestion.suppression_key && existingKeys.has(suggestion.suppression_key)) {
+      skipped += 1;
+      continue;
+    }
+    reviewSuggestions.push(suggestion);
   }
 
-  if (suggestions.length === 0) return { created: 0, autoApplied: 0 };
-
-  const unsuppressed = await helpers.filterSuppressedSuggestions(userId, suggestions);
-  const prepared = await Promise.all(
-    unsuppressed.map((s) => helpers.prepareSuggestionForInsert(s, preferences)),
-  );
-  const autoApplied = prepared.filter((p) => p.status === "auto_applied_unreviewed").length;
-
-  const { error } = await supabase.from("review_queue").insert(prepared);
-  if (error) {
-    console.error("[normalize-profile] insert failed:", error);
-    return { created: 0, autoApplied: 0 };
+  let created = 0;
+  if (auditRows.length > 0) {
+    const { error } = await supabase.from("review_queue").insert(auditRows);
+    if (error) console.error("[normalize-profile] audit insert failed:", error);
+    else created += auditRows.length;
   }
-  return { created: prepared.length, autoApplied };
+
+  if (reviewSuggestions.length === 0) {
+    return { created, autoApplied: applied, planned: groups.length, applied, review: 0, skipped };
+  }
+
+  const unsuppressed = await helpers.filterSuppressedSuggestions(userId, reviewSuggestions);
+  const prepared = unsuppressed.map((s) => ({ ...s, status: "pending_review" }));
+
+  if (prepared.length > 0) {
+    const { error } = await supabase.from("review_queue").insert(prepared);
+    if (error) {
+      console.error("[normalize-profile] insert failed:", error);
+      skipped += prepared.length;
+    } else {
+      created += prepared.length;
+    }
+  }
+
+  return {
+    created,
+    autoApplied: applied,
+    planned: groups.length,
+    applied,
+    review: prepared.length,
+    skipped: skipped + (reviewSuggestions.length - prepared.length),
+  };
 }
 
 // Resolve (or create) a profile_categories row for (user, slug, contact_id).
