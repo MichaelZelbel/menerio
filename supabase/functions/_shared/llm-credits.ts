@@ -4,8 +4,6 @@
  */
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const LOVABLE_GATEWAY_BASE = "https://ai.gateway.lovable.dev/v1";
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
 
 const FALLBACK_TOKENS: Record<string, number> = {
   "deepseek/deepseek-v4-flash": 500,
@@ -123,17 +121,11 @@ export async function openRouterWithCredits(
     throw err;
   }
 
-  // Prefer Lovable AI Gateway when LOVABLE_API_KEY is available; fall back to OpenRouter.
-  const useGateway = !!LOVABLE_API_KEY;
-  const url = useGateway
-    ? `${LOVABLE_GATEWAY_BASE}/${endpoint}`
-    : `${OPENROUTER_BASE}/${endpoint}`;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (useGateway) {
-    headers["Lovable-API-Key"] = LOVABLE_API_KEY;
-  } else {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-  }
+  const url = `${OPENROUTER_BASE}/${endpoint}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
 
   const r = await fetch(url, {
     method: "POST",
@@ -143,7 +135,7 @@ export async function openRouterWithCredits(
 
   if (!r.ok) {
     const msg = await r.text().catch(() => "");
-    throw new Error(`${useGateway ? "Lovable AI Gateway" : "OpenRouter"} ${endpoint} failed: ${r.status} ${msg}`);
+    throw new Error(`OpenRouter ${endpoint} failed: ${r.status} ${msg}`);
   }
 
   const result = await r.json();
@@ -173,7 +165,7 @@ export async function openRouterWithCredits(
     tokens: totalTokens,
     feature,
     model,
-    provider: useGateway ? "lovable" : "openrouter",
+    provider: "openrouter",
     promptTokens,
     completionTokens,
     usageSource,
