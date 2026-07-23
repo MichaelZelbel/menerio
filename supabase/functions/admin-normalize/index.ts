@@ -121,6 +121,9 @@ serve(async (req) => {
     if (!userId) return json({ error: "user_id required" }, 400);
     const scope = String(body?.scope || "all");
     const includeNotesContext = body?.includeNotesContext !== false;
+    // Default: only touch subjects whose profile changed since last successful run.
+    // Pass changed_only:false to force a full sweep.
+    const changedOnly = body?.changed_only !== false;
 
     const subjects: Array<string | null> = [];
     if (scope === "owner") subjects.push(null);
@@ -139,6 +142,41 @@ serve(async (req) => {
         .limit(1000);
       for (const c of (contacts || []) as any[]) subjects.push(c.id);
     }
+
+    // Filter subjects to only those with profile_entries updated after their last completed run.
+    // Subjects never run before are always included.
+    let skippedUnchanged = 0;
+    if (changedOnly && scope !== "contact") {
+      const { data: runs } = await db
+        .from("profile_normalization_runs")
+        .select("contact_id, subject_type, completed_at, status")
+        .eq("user_id", userId);
+      const runByKey = new Map<string, string | null>();
+      for (const r of (runs || []) as any[]) {
+        if (r.status !== "completed" || !r.completed_at) continue;
+        const key = r.subject_type === "owner" ? "owner" : String(r.contact_id);
+        runByKey.set(key, r.completed_at);
+      }
+      const filtered: Array<string | null> = [];
+      for (const subj of subjects) {
+        const key = subj === null ? "owner" : subj;
+        const lastCompleted = runByKey.get(key);
+        if (!lastCompleted) { filtered.push(subj); continue; }
+        let q = db
+          .from("profile_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .gt("updated_at", lastCompleted);
+        q = subj === null ? q.is("contact_id", null) : q.eq("contact_id", subj);
+        const { count } = await q;
+        if ((count ?? 0) > 0) filtered.push(subj);
+        else skippedUnchanged += 1;
+      }
+      subjects.length = 0;
+      subjects.push(...filtered);
+    }
+
+
 
     const preferences = await getPrefs(db, userId);
     const helpers = makeHelpers(db);
