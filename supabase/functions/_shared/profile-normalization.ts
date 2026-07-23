@@ -628,8 +628,8 @@ export async function createNormalizationSuggestions(args: {
   includeNotesContext?: boolean;
   // injected helpers from process-note (avoids circular import)
   helpers: {
-    filterSuppressedSuggestions: (userId: string, s: ReviewSuggestion[]) => Promise<ReviewSuggestion[]>;
-    prepareSuggestionForInsert: (s: ReviewSuggestion, prefs: any) => Promise<ReviewSuggestion>;
+    filterSuppressedSuggestions: (userId: string, s: any[]) => Promise<any[]>;
+    prepareSuggestionForInsert: (s: any, prefs: any) => Promise<any>;
     isSensitiveSuggestion: (t: string, payload: Record<string, unknown>, text?: string) => boolean;
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
