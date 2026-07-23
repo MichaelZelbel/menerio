@@ -1,54 +1,34 @@
 
-## Problem
+## Fix
 
-Your dedup for profile-entry suggestions compares `(contact_id, label_lower, normalized_value)` exactly. That works when the same phrase reappears verbatim, but it doesn't catch the pattern that's actually filling your queue — list-valued facts written as **different combinations of the same tokens**. Live data from Yumei right now:
+Remove the Lovable-Gateway override from `openRouterWithCredits` in `supabase/functions/_shared/llm-credits.ts`. That helper should do what its name says — call OpenRouter with the API key it was handed — and nothing else. Per-call-site provider/model selection already lives in `llm_call_configs` and is honored by `runChat()` in `_shared/llm-router.ts`; that path stays exactly as it is.
 
-- **Health conditions** — 6 competing rows: `"MDD"`, `"BPD"`, `"ASD"`, `"AVPD"`, `"MDD, BPD, ASD, AVPD"`, `"MDD, BPD, ASD, AVPD, panic attacks"`, `"MDD, BPD, ASD, AVPD, panic attacks, endometriosis"`. Every new note reshuffles the list and produces a "new" value string.
-- **Favorite food** — `"Sushi, KFC, McDonald's"` vs `"Sushi, KFC, McDonald's, Starbucks strawberry frappuccino, Hello Kitty strawberry milkshake, pão recheado"`. Superset regenerated as a fresh suggestion.
-- **Allergies / Health conditions overlap** — `Allergies: "Allergic to Buscopan/Postan"` and `Health conditions: "Endometriosis, allergic to Buscopan/Postan"` — same fact leaked into two labels.
+### The single edit
 
-The normalizer cleans this up after the fact, then the extractor regenerates it on the next note. We need to stop it at the write.
+In `supabase/functions/_shared/llm-credits.ts`, inside `openRouterWithCredits` (lines 126-136 today), delete the `useGateway` branch and always call OpenRouter:
 
-## Fix — token-level containment guard before insert
+- `url` = `${OPENROUTER_BASE}/${endpoint}`
+- `headers.Authorization` = `Bearer ${apiKey}`
+- Error message: `OpenRouter ${endpoint} failed: …`
+- `deductTokens({ …, provider: "openrouter" })`
 
-Two extractors write these rows: `supabase/functions/process-note/index.ts` (note → facts) and `supabase/functions/_shared/moment-profile-extraction.ts` (timeline moment → facts). Both build the same `entrySet` / `queueSet` of exact keys. Replace that check with a token-aware one, sharing the logic from `_shared/profile-normalization.ts` (`splitListTokens`, `normalizeTokenForList` already exist there).
+Remove the now-unused `LOVABLE_GATEWAY_BASE` and `LOVABLE_API_KEY` constants at the top of the same file. Leave `deductExternalLLMTokens` alone — that's the correct helper for callers that legitimately hit Lovable Gateway through `runChat`.
 
-### 1. New shared helper: `_shared/profile-dedup.ts`
+Nothing else changes: no call site edits, no config edits, no model changes, no embedding changes.
 
-- `isListValuedLabel(canonicalLabel)` — returns true for labels the schema marks `single: false` **and** the small set of known list fields (`Health conditions`, `Allergies`, `Favorite food`, `Favorite drink`, `Favorite movies`, `Favorite TV shows`, `Hobbies`, `Skill`, `Nickname`, `Nationality`, `Child`, `Parent`, `Sibling`, `Previous employer`, `Previous city`, `Previous address`, `Social handle`, `Email`, `Phone`, `Website`, `Certification`, `Degree`, `Field of study`, `School`). Drives whether we split-and-compare instead of exact-compare.
-- `buildExistingTokenIndex(existingEntries, existingQueueRows)` — returns a `Map<contactKey|labelGroup, Set<normalizedToken>>` where `labelGroup` collapses semantically-identical labels into one bucket (e.g. `favorite food`, `favorite restaurant`, `favorite fast food`, `favorite drink` all map to bucket `food:favorite`; `allergies` and `health conditions` both contribute their allergy tokens to a shared `health:allergy` bucket via a phrase test on tokens containing `allerg`). Uses the canonical schema aliases already in `profile-canonical-schema.ts` for the primary grouping; the small extra rules above cover the specific overlaps we see today.
-- `dedupIncomingValue({ contactId, label, value, index })` — returns `{ action: "skip" } | { action: "write", value } | { action: "write", value: newTokensJoined }`:
-  - Non-list label → exact behavior (same normalized-value compare as today).
-  - List label → split incoming value into tokens; drop any token whose normalized form is already in the index bucket; if all are known → **skip**; if some remain → rewrite the suggestion's `value` to just the residual tokens joined with `", "` so the queue item represents only the genuinely new facts. Update the index in memory so later facts in the same batch dedup against it.
+### Why this is the whole fix
 
-### 2. Wire it into both extractors
+- `runChat` (used by `note-chat`, `conversation-chat`, `collection-chat`, `process-note.metadata`, `admin-llm-config.test`, and all the group-AI / wiki / weekly-review / draft-event / extract-event / suggest-* call sites via `callJson`) already reads `llm_call_configs.provider` and dispatches per-provider — OpenRouter when the row says OpenRouter, Lovable when the row says Lovable, etc. That has been working; nothing routed through it is affected by this bug.
+- The only callers still going through `openRouterWithCredits` are the ones that intentionally use OpenRouter directly: `getEmbeddingWithCredits` (embeddings — `openai/text-embedding-3-small` on OpenRouter, must stay OpenRouter to keep vector-space compatibility with existing `note_chunks`) and `chatWithCredits` (legacy). Both should hit OpenRouter. Today they don't because of the override.
+- Removing the override restores the previous behavior you remember: provider = whatever is configured.
 
-In `process-note/index.ts` around lines 1503–1594 and in `moment-profile-extraction.ts` around lines 447–562:
+### Verification
 
-- Replace the manual `entrySet` / `queueSet` / `singletonEntrySet` construction with a single call to `buildExistingTokenIndex` (it still enforces the singleton rule internally by treating `single: true` labels as an atomic bucket).
-- Replace the `if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;` gate with `dedupIncomingValue(...)` and act on its return value.
-- Keep the existing suppression/preferences path untouched.
+1. Open AI Assistant on a person page → `note-chat.general` (Claude via OpenRouter, per `llm_call_configs`) responds normally.
+2. Open AI Assistant on a note and on a collection → both respond.
+3. Capture a new note → `process-note.metadata` (DeepSeek via OpenRouter) completes; embeddings insert into `note_chunks`.
+4. Tail `note-chat` and `process-note` logs → no more `Lovable AI Gateway … 400 invalid model` lines.
 
-### 3. Small post-hoc safety net in the normalizer
+### Out of scope
 
-In `_shared/profile-normalization.ts`, extend the deterministic collapser that already runs before the LLM: for list-valued labels within one contact + label bucket, if entry A's token set is a strict subset of entry B's, mark A for removal (merge into B). Today the collapser only handles exact-normalized duplicates; this adds subset collapse so any residual duplicates that slip past the write guard still get cleaned in the next scheduled `admin-normalize` cron pass without generating a `normalize_profile_entry` review item.
-
-### 4. Verification (post-implement)
-
-1. Re-trigger `process-note` on the last note that produced the current 65 items and confirm zero new duplicates for `Health conditions` / `Favorite food`.
-2. Run `admin-normalize` for Yumei; confirm the collapse pass folds `"MDD"`, `"BPD"`, `"ASD"`, `"AVPD"` into the existing combined list without creating review items.
-3. Unit tests in `src/lib/__tests__/` covering: subset skip, partial-overlap rewrite, allergy cross-label bucket, single-token new fact, non-list label unchanged.
-
-## Out of scope
-
-- Merging genuinely-different label variants owned by different categories (e.g. `Favorite fast food` under `hobbies` vs `Favorite restaurant` under `food`) — the bucket rule handles the dedup, but I won't re-home the label; that stays a normalizer decision.
-- Changing confidence thresholds or the auto-apply gate.
-- Frontend changes.
-
-## Files touched
-
-- `supabase/functions/_shared/profile-dedup.ts` — new
-- `supabase/functions/process-note/index.ts` — dedup block only
-- `supabase/functions/_shared/moment-profile-extraction.ts` — dedup block only
-- `supabase/functions/_shared/profile-normalization.ts` — extend deterministic collapser with subset rule
-- `src/lib/__tests__/profile-dedup.test.ts` — new (tests import the shared module directly)
+- No changes to `llm-router.ts`, `llm_call_configs`, any call site, the frontend, or any migration.
