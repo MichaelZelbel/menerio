@@ -716,7 +716,7 @@ export async function createNormalizationSuggestions(args: {
         applied += 1;
         auditRows.push({
           ...suggestion,
-          status: "auto_applied_unreviewed",
+          status: "kept",
           target_entity_id: result.entryId,
           applied_at: new Date().toISOString(),
         });
