@@ -644,7 +644,11 @@ const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JS
 - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
 - "people": array of names of REAL human beings the note author actually knows of or interacts with (real individuals — first name, full name, or known alias). Do NOT include:
     * companies, products, apps, projects, tools, libraries, websites, brands, domains, or open-source repos, even if the name sounds personal.
-    * fictional characters from novels, light novels, manga, anime, visual novels, video games, films, TV series, comics, plays, or any other work of fiction — even if the note lists them by name.
+    * fictional characters from novels, light novels, manga, anime, visual novels, video games, films, TV series, comics, plays, or any other work of fiction — even if the note lists them by name. This applies EVEN when the surrounding note is a personal profile or journal that only references media in passing. Examples that must be EXCLUDED:
+        - "favorite actor Lee Junyoung as Geum Sung-je" → exclude "Geum Sung-je" (that's the fictional role, not a person the author knows).
+        - "the character I remind you of? Spiderman?" → exclude "Spiderman" (fictional superhero).
+        - "currently watching Weak Hero, love the protagonist" / "cast: A, B, C" / "playing Chocola in NEKOPARA" → exclude character names.
+      Real actors, directors, authors, streamers, or creators the author actually follows or knows MAY be included — but the fictional role they play must not.
     * mythological, religious, or folkloric figures presented as characters.
   When in doubt (a single capitalized word with no clearly human context, or a name that only appears as part of describing a story/game/show), leave it out.
 - "mentioned_works": array of titles of creative works discussed in the note (novels, manga, anime, games, films, shows, albums, etc.). Empty if none.
