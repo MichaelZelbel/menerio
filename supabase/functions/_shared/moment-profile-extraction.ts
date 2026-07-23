@@ -512,12 +512,17 @@ export async function extractProfileFromMoment(
       continue;
     }
 
-    const dedupKey = `${contact.contact_id}|${labelLower}|${normalizeProfileValueForDedup(value)}`;
-    if (entrySet.has(dedupKey) || queueSet.has(dedupKey)) continue;
-    const singletonKey = `${contact.contact_id}|${labelLower}`;
-    if (SINGLETON_PROFILE_LABELS.has(labelLower) && (singletonEntrySet.has(singletonKey) || singletonQueueSet.has(singletonKey))) {
+    const dd = dedupIncomingProfileValue({
+      contactId: contact.contact_id,
+      label,
+      value,
+      index: dedupIndex,
+    });
+    if (dd.action === "skip") {
+      console.log(`[moment-extract] dedup skip (${dd.reason}) "${label}: ${value}" for ${contact.canonical_name}`);
       continue;
     }
+    const effectiveValue = dd.value;
 
     const catRow = (categories || []).find((c: any) => c.slug === categorySlug && c.contact_id === contact.contact_id);
 
@@ -527,7 +532,7 @@ export async function extractProfileFromMoment(
       category_slug: categorySlug,
       category_id: catRow?.id || null,
       label,
-      value,
+      value: effectiveValue,
       source: `moment:${momentId}`,
       moment_id: momentId,
       moment_title: (moment as any).title,
@@ -538,20 +543,18 @@ export async function extractProfileFromMoment(
       source_note_id: null,
       suggestion_type: "add_profile_entry",
       title: `Add to ${contact.canonical_name}'s profile: ${label}`,
-      description: `"${value}" — extracted from timeline moment "${(moment as any).title}"`,
+      description: `"${effectiveValue}" — extracted from timeline moment "${(moment as any).title}"`,
       payload,
       status: "pending_review",
       target_entity_type: "profile_entry",
       source_title: noteTitleLike,
-      extracted_value: `${label}: ${value}`,
+      extracted_value: `${label}: ${effectiveValue}`,
       confidence_score: baseConfidence,
       is_sensitive: isSensitive("add_profile_entry", payload, `${(moment as any).title} ${(moment as any).description || ""}`),
-      suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${label}:${value}`),
+      suppression_key: buildSuppressionKey("add_profile_entry", "contact", contact.contact_id, `${label}:${effectiveValue}`),
     });
-
-    queueSet.add(dedupKey);
-    if (SINGLETON_PROFILE_LABELS.has(labelLower)) singletonQueueSet.add(singletonKey);
   }
+
 
   // Relationships — now supports self ↔ contact (e.g. "my wife Xihui").
   const [{ data: existingRels }, { data: existingRelQueue }] = await Promise.all([
