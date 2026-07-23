@@ -878,6 +878,123 @@ const SOFT_SIGNAL_SOURCES = new Set([
 ]);
 const SOFT_SIGNAL_CONFIDENCE_CAP = 0.7;
 
+/* ── Fictional-character guard (per-name) ─────────────────────────────────────
+ * The metadata pass sometimes leaks fictional characters into `people` even
+ * when the note isn't a "review_of_fiction". These helpers reject a name
+ * either by hard match against iconic characters or by inspecting the
+ * surrounding text for role/casting/media cues.
+ */
+const FICTIONAL_CHARACTER_BLOCKLIST = new Set([
+  // Superheroes / comics
+  "spiderman", "spider-man", "spider man", "peter parker",
+  "batman", "bruce wayne", "superman", "clark kent", "wonder woman",
+  "iron man", "tony stark", "captain america", "steve rogers", "thor",
+  "hulk", "black widow", "hawkeye", "deadpool", "wolverine", "storm",
+  "aquaman", "flash", "green lantern", "catwoman", "joker", "harley quinn",
+  // Anime / manga / games
+  "naruto", "sasuke", "sakura", "kakashi", "goku", "vegeta", "luffy",
+  "zoro", "sanji", "ichigo", "eren", "mikasa", "levi", "light yagami",
+  "l lawliet", "kirito", "asuna", "saber", "rem", "emilia", "zero two",
+  "sailor moon", "usagi", "pikachu", "ash ketchum", "mario", "luigi",
+  "peach", "bowser", "yoshi", "link", "zelda", "ganon", "samus",
+  "kratos", "master chief", "geralt", "cloud strife", "sephiroth",
+  "chocola", "vanilla", "nekopara",
+  // Star Wars / fantasy
+  "luke skywalker", "darth vader", "yoda", "obi-wan", "han solo",
+  "leia", "rey", "kylo ren", "gandalf", "frodo", "aragorn", "legolas",
+  "harry potter", "hermione", "voldemort", "dumbledore",
+  // Common cartoon
+  "mickey mouse", "donald duck", "bugs bunny", "snoopy",
+]);
+
+const FICTION_CONTEXT_RE = /\b(as|playing|plays|voiced by|voice(?:d)?|role of|the character|character|protagonist|antagonist|villain|main lead|main cast|cast:|starring|hero|heroine|OC|fictkin|kin|waifu|husbando|from the (?:show|series|anime|manga|game|movie|film|book|novel))\b/i;
+const FICTION_LIST_CUES_RE = /\b(favorite (?:show|movie|film|anime|manga|series|game|character|actor|band)|currently (?:watching|reading|playing)|watch(?:ing|list)|read(?:ing|list)|play(?:ing|list)|episode|season|chapter|manhwa|manhua|light novel|visual novel|otome|jrpg|VN)\b/i;
+
+/** Find the sentence/window around a name mention (case-insensitive). */
+function contextAround(name: string, text: string, radius = 140): string | null {
+  if (!name || !text) return null;
+  const hay = text.toLowerCase();
+  const needle = name.toLowerCase();
+  const idx = hay.indexOf(needle);
+  if (idx < 0) return null;
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(text.length, idx + needle.length + radius);
+  return text.slice(start, end);
+}
+
+/** Deterministic per-name fiction check. Returns a reason string when the name
+ * looks fictional, or null when it looks fine to keep. */
+function detectFictionalMention(name: string, text: string): string | null {
+  const norm = name.toLowerCase().trim();
+  if (!norm) return null;
+  if (FICTIONAL_CHARACTER_BLOCKLIST.has(norm)) return "iconic fictional character";
+  const compact = norm.replace(/[-\s]+/g, "");
+  if (FICTIONAL_CHARACTER_BLOCKLIST.has(compact)) return "iconic fictional character";
+
+  const ctx = contextAround(name, text);
+  if (!ctx) return null;
+
+  // Strong cue: "actor X as Name" / "playing Name" / "as Name (role)" / "voiced by X"
+  const nameEsc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const asRoleRe = new RegExp(`\\b(?:as|playing|plays|role of|voiced by|voice actor)\\s+${nameEsc}\\b`, "i");
+  if (asRoleRe.test(ctx)) return "appears as a role/character in surrounding text";
+  const nameAsRe = new RegExp(`\\b${nameEsc}\\s*[,(]?\\s*(?:the )?(?:protagonist|antagonist|villain|main character|character|hero|heroine|main lead)\\b`, "i");
+  if (nameAsRe.test(ctx)) return "described as a character in surrounding text";
+
+  // Combined: fiction context cue + list/media cue in the same window
+  if (FICTION_CONTEXT_RE.test(ctx) && FICTION_LIST_CUES_RE.test(ctx)) {
+    return "mentioned inside a media/fiction list";
+  }
+  return null;
+}
+
+/** LLM verification: classify a batch of candidate new-people names as
+ * real vs fictional given short context snippets from the note. Returns a
+ * Set of names the LLM verdicted as `real_person`. On any failure, returns
+ * a permissive Set (all names allowed) so we don't break the pipeline. */
+async function verifyRealPeopleWithLLM(
+  userId: string,
+  noteTitle: string,
+  noteText: string,
+  candidates: string[],
+): Promise<Set<string>> {
+  const allowAll = new Set(candidates.map((n) => n.toLowerCase()));
+  if (candidates.length === 0) return allowAll;
+  try {
+    const snippets = candidates.map((n) => {
+      const ctx = contextAround(n, noteText, 200) || "(no context found)";
+      return `- ${n}: "${ctx.replace(/\s+/g, " ").trim()}"`;
+    }).join("\n");
+    const userPrompt = `Note title: ${noteTitle}\n\nCandidate names extracted from this note (each with surrounding text):\n${snippets}\n\nFor EACH candidate, decide whether it is a REAL person the note's author knows or interacts with, or a FICTIONAL character (from a novel, anime, manga, game, film, TV show, comic, etc.), or UNCLEAR. Actors/creators/streamers count as real; the roles they play do not. Return strict JSON: {"verdicts":[{"name":"...","verdict":"real_person"|"fictional_character"|"unclear"}]}`;
+    const result = await runChat({
+      db: supabase,
+      userId,
+      callSite: "process-note.fiction_guard",
+      messages: [{ role: "user", content: userPrompt }],
+      defaults: {
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4-flash",
+        systemPrompt: "You classify whether extracted names refer to real people the note's author knows, or to fictional characters. Be strict: when the surrounding text frames the name as a character, role, or media reference, mark it fictional. When context is thin, mark it unclear. Output valid JSON only.",
+      },
+      callOptions: { response_format: { type: "json_object" } },
+    });
+    const parsed = JSON.parse(result.content || "{}");
+    const verdicts = Array.isArray(parsed?.verdicts) ? parsed.verdicts : [];
+    const real = new Set<string>();
+    for (const v of verdicts) {
+      if (v && typeof v.name === "string" && v.verdict === "real_person") {
+        real.add(String(v.name).toLowerCase());
+      }
+    }
+    // If the LLM returned nothing usable, fall back to permissive to avoid regressions.
+    if (real.size === 0 && verdicts.length === 0) return allowAll;
+    return real;
+  } catch (err) {
+    console.error("[fiction_guard] LLM verification failed, allowing all candidates:", err);
+    return allowAll;
+  }
+}
+
 /* ── Review Queue suggestion generator ── */
 async function generateReviewItems(
   userId: string,
