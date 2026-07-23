@@ -18,6 +18,7 @@ import {
   type EntityRef,
 } from "./relationship-canonical.ts";
 import { normalizeProfileValueForDedup } from "./profile-canonical-schema.ts";
+import { buildProfileTokenIndex, dedupIncomingProfileValue } from "./profile-dedup.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
