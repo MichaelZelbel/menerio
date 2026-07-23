@@ -17,8 +17,50 @@ import {
   isListValuedLabel,
   isSingleValueLabel,
   normalizeProfileValueForDedup,
+  stripTrailingQualifier,
 } from "./profile-canonical-schema.ts";
-import { splitListTokens } from "./profile-normalization.ts";
+
+// Inlined copies of `splitListTokens` / `normalizeTokenForList` from
+// `profile-normalization.ts`. That module transitively imports Deno-only
+// code (llm-router → llm-credits), which breaks Vitest when the frontend
+// imports helpers from here. Keep these two in sync manually if the source
+// implementations change.
+function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
+  let cleaned = stripTrailingQualifier(token)
+    .replace(/^(?:allerg(?:ic|y)|allergen)\s+(?:to\s+)?/i, "")
+    .replace(/^(?:diagnosed\s+with|diagnosis\s*:?|condition\s*:?|has\s+)/i, "")
+    .trim()
+    .replace(/[.。]+$/u, "")
+    .trim();
+  if (!cleaned) cleaned = String(token || "").trim();
+
+  const lower = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const healthSynonyms: Record<string, string> = {
+    "major depressive disorder": "MDD",
+    "major depression": "MDD",
+    "mdd": "MDD",
+    "borderline personality disorder": "BPD",
+    "bpd": "BPD",
+    "autism spectrum disorder": "ASD",
+    "autistic spectrum disorder": "ASD",
+    "asd": "ASD",
+    "avoidant personality disorder": "AVPD",
+    "avpd": "AVPD",
+  };
+  if (String(label || "").trim().toLowerCase() === "health conditions") {
+    const canonical = healthSynonyms[lower];
+    if (canonical) return { key: canonical.toLowerCase(), display: canonical };
+  }
+  return { key: lower, display: cleaned };
+}
+
+function splitListTokens(label: string, value: string): Array<{ key: string; display: string }> {
+  return String(value || "")
+    .replace(/^allergic\s+to\s+/i, "")
+    .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
+    .map((t) => normalizeTokenForList(label, t))
+    .filter((t) => t.display.length > 0 && t.key.length > 0);
+}
 
 const OWNER = "__owner__";
 
