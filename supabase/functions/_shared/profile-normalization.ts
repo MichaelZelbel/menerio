@@ -605,13 +605,15 @@ export async function createNormalizationSuggestions(args: {
     if (c?.name) subjectLabel = `${c.name}'s`;
   }
 
-  // Existing normalize suggestions (for dedup by suppression_key).
+  // Existing normalize suggestions (for dedup by suppression_key). Only active
+  // queue rows should block a fresh plan. Historical kept/accepted rows may be
+  // stale after new facts arrive, and blocking on them leaves duplicates stuck.
   const { data: existingQueue } = await supabase
     .from("review_queue")
     .select("suppression_key, status")
     .eq("user_id", userId)
     .eq("suggestion_type", "normalize_profile_entry")
-    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]);
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
   const existingKeys = new Set(
     ((existingQueue || []) as any[]).map((q) => q.suppression_key).filter(Boolean),
   );
