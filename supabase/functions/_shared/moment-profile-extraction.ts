@@ -452,34 +452,25 @@ export async function extractProfileFromMoment(
     .select("contact_id, label, value")
     .eq("user_id", userId)
     .in("contact_id", contactIds);
-  const entrySet = new Set(
-    (existingEntries || []).map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}|${normalizeProfileValueForDedup(e.value || "")}`),
-  );
-  const singletonEntrySet = new Set(
-    (existingEntries || [])
-      .filter((e: any) => SINGLETON_PROFILE_LABELS.has((e.label || "").toLowerCase()))
-      .map((e: any) => `${e.contact_id}|${(e.label || "").toLowerCase()}`),
-  );
-
   const { data: existingQueue } = await supabase
     .from("review_queue")
     .select("payload, status")
     .eq("user_id", userId)
     .eq("suggestion_type", "add_profile_entry")
     .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
-  const queueSet = new Set(
-    (existingQueue || []).map((q: any) =>
-      `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}|${normalizeProfileValueForDedup(q.payload?.value || "")}`
-    ),
+
+  // Token-aware dedup: canonicalizes list-valued labels so reshuffled
+  // multi-item values (e.g. "MDD, BPD" vs "MDD, BPD, ASD") stop looking
+  // like distinct facts. See _shared/profile-dedup.ts for the details.
+  const dedupIndex = buildProfileTokenIndex(
+    (existingEntries || []) as any[],
+    (existingQueue || []).map((q: any) => ({
+      contact_id: q.payload?.contact_id ?? null,
+      label: String(q.payload?.label || ""),
+      value: String(q.payload?.value || ""),
+    })),
   );
-  const singletonQueueSet = new Set(
-    (existingQueue || [])
-      .filter((q: any) =>
-        SINGLETON_PROFILE_LABELS.has((q.payload?.label || "").toLowerCase()) &&
-        ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"].includes(q.status)
-      )
-      .map((q: any) => `${q.payload?.contact_id}|${(q.payload?.label || "").toLowerCase()}`),
-  );
+
 
   // 7. Load profile_categories so we can map slug → id for auto-apply.
   const { data: categories } = await supabase
