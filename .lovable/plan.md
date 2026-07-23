@@ -1,34 +1,27 @@
+## Problem
 
-## Fix
+When switching between notes, the **Note Metadata**, **Outgoing Links**, and **Backlinks** panels appear expanded even though each one's local state defaults to `useState(false)`. The `NoteEditor` re-renders with a new `noteId` prop but React reuses the same panel component instances, so whatever `expanded` state the user (or a previous note) left them in persists.
 
-Remove the Lovable-Gateway override from `openRouterWithCredits` in `supabase/functions/_shared/llm-credits.ts`. That helper should do what its name says — call OpenRouter with the API key it was handed — and nothing else. Per-call-site provider/model selection already lives in `llm_call_configs` and is honored by `runChat()` in `_shared/llm-router.ts`; that path stays exactly as it is.
+Yesterday's attempted fix used `key={noteId}` to force remounts, but that turned out to cause the "panels rendered multiple times stacked" glitch and was reverted — leaving no reset mechanism at all. Hence the regression.
 
-### The single edit
+## Fix (survives because it doesn't rely on remounting)
 
-In `supabase/functions/_shared/llm-credits.ts`, inside `openRouterWithCredits` (lines 126-136 today), delete the `useGateway` branch and always call OpenRouter:
+Reset the local `expanded` / `isOpen` state to `false` inside each panel whenever the `noteId` prop changes, using a `useEffect`. No key props, no remounts, no duplication risk.
 
-- `url` = `${OPENROUTER_BASE}/${endpoint}`
-- `headers.Authorization` = `Bearer ${apiKey}`
-- Error message: `OpenRouter ${endpoint} failed: …`
-- `deductTokens({ …, provider: "openrouter" })`
+Files to change (one small hook added to each):
 
-Remove the now-unused `LOVABLE_GATEWAY_BASE` and `LOVABLE_API_KEY` constants at the top of the same file. Leave `deductExternalLLMTokens` alone — that's the correct helper for callers that legitimately hit Lovable Gateway through `runChat`.
+1. `src/components/notes/BacklinksPanel.tsx` — add
+   ```ts
+   useEffect(() => { setExpanded(false); }, [noteId]);
+   ```
+2. `src/components/notes/OutgoingLinksPanel.tsx` — same reset on `noteId`.
+3. `src/components/notes/NoteMetadataEditor.tsx` — same reset on the note identity it receives (needs to accept/derive a `noteId` — pass it from `NoteEditor` as a new prop so the effect has a stable dependency; the metadata object reference alone is unreliable).
 
-Nothing else changes: no call site edits, no config edits, no model changes, no embedding changes.
+## Regression guards
 
-### Why this is the whole fix
+- Add a small test (or extend an existing one) in `src/components/notes/__tests__/` that renders a panel with `noteId="a"`, sets `expanded=true`, rerenders with `noteId="b"`, and asserts the panel is collapsed again.
+- Leave a short comment in each panel explaining *why* the effect exists so a future refactor doesn't silently drop it.
 
-- `runChat` (used by `note-chat`, `conversation-chat`, `collection-chat`, `process-note.metadata`, `admin-llm-config.test`, and all the group-AI / wiki / weekly-review / draft-event / extract-event / suggest-* call sites via `callJson`) already reads `llm_call_configs.provider` and dispatches per-provider — OpenRouter when the row says OpenRouter, Lovable when the row says Lovable, etc. That has been working; nothing routed through it is affected by this bug.
-- The only callers still going through `openRouterWithCredits` are the ones that intentionally use OpenRouter directly: `getEmbeddingWithCredits` (embeddings — `openai/text-embedding-3-small` on OpenRouter, must stay OpenRouter to keep vector-space compatibility with existing `note_chunks`) and `chatWithCredits` (legacy). Both should hit OpenRouter. Today they don't because of the override.
-- Removing the override restores the previous behavior you remember: provider = whatever is configured.
+## Out of scope
 
-### Verification
-
-1. Open AI Assistant on a person page → `note-chat.general` (Claude via OpenRouter, per `llm_call_configs`) responds normally.
-2. Open AI Assistant on a note and on a collection → both respond.
-3. Capture a new note → `process-note.metadata` (DeepSeek via OpenRouter) completes; embeddings insert into `note_chunks`.
-4. Tail `note-chat` and `process-note` logs → no more `Lovable AI Gateway … 400 invalid model` lines.
-
-### Out of scope
-
-- No changes to `llm-router.ts`, `llm_call_configs`, any call site, the frontend, or any migration.
+No changes to `NoteEditor.tsx` layout, no `key` props reintroduced, no changes to the reverted duplication fix.
