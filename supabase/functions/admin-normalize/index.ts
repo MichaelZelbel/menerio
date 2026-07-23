@@ -104,13 +104,16 @@ function makeHelpers(db: any) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const adminKey = Deno.env.get("MCP_ACCESS_KEY");
-    if (!adminKey) return json({ error: "MCP_ACCESS_KEY not configured" }, 500);
-    const provided = req.headers.get("x-admin-key") || "";
-    if (provided !== adminKey) return json({ error: "forbidden" }, 403);
-
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const adminKey = Deno.env.get("MCP_ACCESS_KEY") || "";
+    const provided = req.headers.get("x-admin-key") || "";
+    const authHeader = (req.headers.get("Authorization") || "").replace("Bearer ", "");
+    // Accept either the MCP shared secret (dev/curl) or the service-role key
+    // (pg_cron / server-side callers). Never accept anon or user JWTs here.
+    if (!(provided && provided === adminKey) && !(authHeader && authHeader === SERVICE_ROLE)) {
+      return json({ error: "forbidden" }, 403);
+    }
     const db = createClient(SUPABASE_URL, SERVICE_ROLE);
 
     const body = await req.json().catch(() => ({}));
