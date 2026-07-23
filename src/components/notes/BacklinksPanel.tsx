@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link2, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatDistanceToNow } from "date-fns";
 
 interface BacklinksPanelProps {
@@ -20,6 +20,9 @@ interface Backlink {
 export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(false);
+  // Reset on note switch — NoteEditor reuses this instance (no `key`
+  // remount, which caused a duplication glitch). Do not remove.
+  useEffect(() => { setExpanded(false); }, [noteId]);
 
   const { data: backlinks = [], isLoading } = useQuery<Backlink[]>({
     queryKey: ["backlinks", noteId, user?.id],
