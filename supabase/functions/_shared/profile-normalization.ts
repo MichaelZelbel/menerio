@@ -61,7 +61,7 @@ export type NormalizationPayload = {
   rationale: string;
 };
 
-function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
+export function normalizeTokenForList(label: string, token: string): { key: string; display: string } {
   let cleaned = stripTrailingQualifier(token)
     .replace(/^(?:allerg(?:ic|y)|allergen)\s+(?:to\s+)?/i, "")
     .replace(/^(?:diagnosed\s+with|diagnosis\s*:?|condition\s*:?|has\s+)/i, "")
