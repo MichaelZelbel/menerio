@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Sparkles, Loader2, Wand2 } from "lucide-react";
+import { FileText, Sparkles, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -49,8 +49,6 @@ export function ContactProfileTab({
   } = useContactProfile(contactId);
 
   const [enriching, setEnriching] = useState(false);
-  const [normalizing, setNormalizing] = useState(false);
-
   // Count pending profile suggestions for this contact (from notes OR moments).
   const { data: pendingCount = 0 } = useQuery({
     queryKey: ["pending-profile-suggestions", user?.id, contactId],
@@ -60,7 +58,7 @@ export function ContactProfileTab({
         .from("review_queue")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user!.id)
-        .in("suggestion_type", ["add_profile_entry", "add_relationship"])
+        .in("suggestion_type", ["add_profile_entry", "add_relationship", "normalize_profile_entry"])
         .in("status", ["pending_review", "pending", "auto_applied_unreviewed"])
         .contains("payload", { contact_id: contactId });
       return count ?? 0;
@@ -84,28 +82,6 @@ export function ContactProfileTab({
       showToast.error(err.message ?? "Enrichment failed");
     } finally {
       setEnriching(false);
-    }
-  };
-
-  const runNormalize = async () => {
-    setNormalizing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("normalize-profile", {
-        body: {
-          action: "backfill",
-          subject_type: "contact",
-          subject_id: contactId,
-          includeNotesContext: true,
-        },
-      });
-      if (error) throw error;
-      const created = (data as { created?: number })?.created ?? 0;
-      const autoApplied = (data as { autoApplied?: number })?.autoApplied ?? 0;
-      showToast.success(`Normalizer finished: ${created} suggestion(s), ${autoApplied} auto-applied.`);
-    } catch (err: any) {
-      showToast.error(err.message ?? "Normalization failed");
-    } finally {
-      setNormalizing(false);
     }
   };
 
@@ -199,11 +175,7 @@ export function ContactProfileTab({
             </Link>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={runNormalize} disabled={normalizing || enriching}>
-          {normalizing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Wand2 className="mr-2 h-3.5 w-3.5" />}
-          Normalize profile
-        </Button>
-        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching || normalizing}>
+        <Button variant="outline" size="sm" onClick={runEnrich} disabled={enriching}>
           {enriching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
           Enrich from notes & timeline
         </Button>

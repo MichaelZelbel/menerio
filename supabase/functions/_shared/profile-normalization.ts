@@ -137,8 +137,14 @@ export async function planSubjectNormalization(args: {
     const slug = slugById.get(row.category_id) || "";
     if (slug !== "health") continue;
     const v = String(row.value || "").trim().toLowerCase();
-    if (!BOOLEAN_VALUES.has(v)) continue;
     const orig = String(row.label || "").trim();
+    const diagnosisMatch = orig.match(/^diagnosis\s*:\s*(.+)$/i);
+    if (diagnosisMatch && diagnosisMatch[1]?.trim()) {
+      row.label = "Health conditions";
+      row.value = [diagnosisMatch[1].trim(), row.value].filter(Boolean).join(" ").trim();
+      continue;
+    }
+    if (!BOOLEAN_VALUES.has(v)) continue;
     if (!orig || orig.length > 60 || /[:{}]/.test(orig)) continue;
     row.label = "Health conditions";
     row.value = orig;
@@ -240,7 +246,8 @@ export async function planSubjectNormalization(args: {
   const listValuedGroups: NormalizationGroup[] = [];
   const splitTokens = (v: string): string[] =>
     String(v || "")
-      .split(/[,;]|\band\b|\bund\b|\balso\b/i)
+      .replace(/^allergic\s+to\s+/i, "")
+      .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
       .map((t) => stripTrailingQualifier(t).trim())
       .filter((t) => t.length > 0);
   for (const members of listBuckets.values()) {
@@ -605,13 +612,15 @@ export async function createNormalizationSuggestions(args: {
     if (c?.name) subjectLabel = `${c.name}'s`;
   }
 
-  // Existing normalize suggestions (for dedup by suppression_key).
+  // Existing normalize suggestions (for dedup by suppression_key). Only active
+  // queue rows should block a fresh plan. Historical kept/accepted rows may be
+  // stale after new facts arrive, and blocking on them leaves duplicates stuck.
   const { data: existingQueue } = await supabase
     .from("review_queue")
     .select("suppression_key, status")
     .eq("user_id", userId)
     .eq("suggestion_type", "normalize_profile_entry")
-    .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]);
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
   const existingKeys = new Set(
     ((existingQueue || []) as any[]).map((q) => q.suppression_key).filter(Boolean),
   );
