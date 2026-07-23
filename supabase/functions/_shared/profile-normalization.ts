@@ -137,8 +137,14 @@ export async function planSubjectNormalization(args: {
     const slug = slugById.get(row.category_id) || "";
     if (slug !== "health") continue;
     const v = String(row.value || "").trim().toLowerCase();
-    if (!BOOLEAN_VALUES.has(v)) continue;
     const orig = String(row.label || "").trim();
+    const diagnosisMatch = orig.match(/^diagnosis\s*:\s*(.+)$/i);
+    if (diagnosisMatch && diagnosisMatch[1]?.trim()) {
+      row.label = "Health conditions";
+      row.value = [diagnosisMatch[1].trim(), row.value].filter(Boolean).join(" ").trim();
+      continue;
+    }
+    if (!BOOLEAN_VALUES.has(v)) continue;
     if (!orig || orig.length > 60 || /[:{}]/.test(orig)) continue;
     row.label = "Health conditions";
     row.value = orig;
@@ -240,7 +246,8 @@ export async function planSubjectNormalization(args: {
   const listValuedGroups: NormalizationGroup[] = [];
   const splitTokens = (v: string): string[] =>
     String(v || "")
-      .split(/[,;]|\band\b|\bund\b|\balso\b/i)
+      .replace(/^allergic\s+to\s+/i, "")
+      .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
       .map((t) => stripTrailingQualifier(t).trim())
       .filter((t) => t.length > 0);
   for (const members of listBuckets.values()) {
