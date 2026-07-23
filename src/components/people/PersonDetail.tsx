@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, Wand2, X } from "lucide-react";
+import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, X } from "lucide-react";
 
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
@@ -34,6 +34,10 @@ interface PersonDetailProps {
   people: Person[];
   onClose: () => void;
 }
+
+const AUTO_NORMALIZE_VERSION = "contact-profile-auto-normalize-health-v1";
+const AUTO_NORMALIZE_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const autoNormalizeInFlight = new Set<string>();
 
 /**
  * Master-detail right pane for a selected person. Extracted from the old
@@ -59,7 +63,44 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
   const [conversationContext, setConversationContext] = useState("");
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePrefillId, setMergePrefillId] = useState<string | null>(null);
-  const [normalizingProfile, setNormalizingProfile] = useState(false);
+  const invalidateContactProfile = useCallback(() => {
+    if (!user?.id) return;
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-entries", user.id, person.id] });
+    queryClient.invalidateQueries({ queryKey: ["contact-profile-categories", user.id, person.id] });
+    queryClient.invalidateQueries({ queryKey: ["profile-entries", person.id] });
+    queryClient.invalidateQueries({ queryKey: ["profile-categories", person.id] });
+    queryClient.invalidateQueries({ queryKey: ["profile-suggestions", person.id] });
+    queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+  }, [person.id, queryClient, user?.id]);
+
+  const runProfileNormalization = useCallback(
+    async ({ notify = false }: { notify?: boolean } = {}) => {
+      try {
+        const { error } = await supabase.functions.invoke("normalize-profile", {
+          body: {
+            action: "backfill",
+            scope: "contact",
+            contact_id: person.id,
+            includeNotesContext: true,
+          },
+        });
+        if (error) throw error;
+        if (notify) {
+          showToast.success("Profile cleanup started. Changes appear automatically when it finishes.");
+        }
+        // Backfill is fire-and-forget on the edge; refresh the exact query keys
+        // used by ContactProfileTab after it has had time to apply safe merges.
+        window.setTimeout(invalidateContactProfile, 2500);
+        window.setTimeout(invalidateContactProfile, 7000);
+        window.setTimeout(invalidateContactProfile, 15000);
+        return true;
+      } catch (err: any) {
+        if (notify) showToast.error(err.message ?? "Normalization failed");
+        return false;
+      }
+    },
+    [invalidateContactProfile, person.id],
+  );
 
   // Record a view whenever a person is opened (throttled inside the hook —
   // skips if already touched within 5 minutes). This component only mounts for
@@ -68,6 +109,36 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
     if (person.id) touchPersonViewed.mutate(person.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [person.id]);
+
+  // Normalize contact profile facts automatically when a person opens. This is
+  // deliberately silent: users should not have to find or click a janitor button
+  // just to collapse obvious duplicates like Allergy/Allergies or BPD: true.
+  useEffect(() => {
+    if (!person.id || !user?.id) return;
+
+    const storageKey = `${AUTO_NORMALIZE_VERSION}:${user.id}:${person.id}`;
+    let lastRun = 0;
+    try {
+      lastRun = Number(window.localStorage.getItem(storageKey) || "0");
+    } catch {
+      lastRun = 0;
+    }
+
+    if (Date.now() - lastRun < AUTO_NORMALIZE_MIN_INTERVAL_MS) return;
+    if (autoNormalizeInFlight.has(storageKey)) return;
+
+    autoNormalizeInFlight.add(storageKey);
+    void runProfileNormalization().then((ok) => {
+      autoNormalizeInFlight.delete(storageKey);
+      if (!ok) return;
+      try {
+        window.localStorage.setItem(storageKey, String(Date.now()));
+      } catch {
+        // localStorage can be unavailable in private contexts; normalization
+        // still succeeded, so there is nothing else to do.
+      }
+    });
+  }, [person.id, runProfileNormalization, user?.id]);
 
   // Related notes (notes mentioning this person by name or alias)
   const { data: relatedNotes = [] } = useQuery({
@@ -139,34 +210,6 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
         },
       },
     );
-  };
-
-  const normalizeProfile = async () => {
-    setNormalizingProfile(true);
-    try {
-      const { error } = await supabase.functions.invoke("normalize-profile", {
-        body: {
-          action: "backfill",
-          scope: "contact",
-          contact_id: person.id,
-          includeNotesContext: true,
-        },
-      });
-      if (error) throw error;
-      showToast.success("Cleaning up profile… duplicates will collapse in a moment. Any judgement calls appear in Review Queue.");
-      // Backfill is fire-and-forget on the edge; refresh profile data after
-      // it's had time to run so the UI reflects the merges automatically.
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["profile-entries", person.id] });
-        queryClient.invalidateQueries({ queryKey: ["profile-categories", person.id] });
-        queryClient.invalidateQueries({ queryKey: ["profile-suggestions", person.id] });
-        queryClient.invalidateQueries({ queryKey: ["review-queue"] });
-      }, 6000);
-    } catch (err: any) {
-      showToast.error(err.message ?? "Normalization failed");
-    } finally {
-      setNormalizingProfile(false);
-    }
   };
 
   const isEditing = editingAliases !== null;
@@ -271,19 +314,6 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
                           <Merge className="h-3.5 w-3.5 mr-1" /> Merge
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={normalizeProfile}
-                          disabled={normalizingProfile}
-                        >
-                          {normalizingProfile ? (
-                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                          ) : (
-                            <Wand2 className="h-3.5 w-3.5 mr-1" />
-                          )}
-                          Normalize
                         </Button>
                       </>
                     ) : (
