@@ -160,6 +160,8 @@ export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
   "health conditions": "Health conditions",
   "medical condition": "Health conditions",
   "medical conditions": "Health conditions",
+  "physical health condition": "Health conditions",
+  "physical health conditions": "Health conditions",
   "mental health condition": "Health conditions",
   "mental health conditions": "Health conditions",
   "chronic condition": "Health conditions",
@@ -169,6 +171,7 @@ export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
   "condition": "Health conditions",
   "health issue": "Health conditions",
   "health issues": "Health conditions",
+  "allergic to": "Allergies",
   "medication": "Medications",
   "medications": "Medications",
   "current medication": "Medications",
@@ -267,9 +270,15 @@ export function correctProfileCategory(label: string, currentSlug: string): stri
     "parent",
     "sibling",
   ]);
+  const HEALTH_LABELS = new Set([
+    "allergies",
+    "health conditions",
+    "medications",
+  ]);
 
   if (IDENTITY_LABELS.has(canonLower)) return "identity";
   if (RELATIONSHIP_LABELS.has(canonLower)) return "relationships";
+  if (HEALTH_LABELS.has(canonLower)) return "health";
   return currentSlug;
 }
 

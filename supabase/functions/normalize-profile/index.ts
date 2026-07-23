@@ -13,6 +13,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type SubjectRunResult = {
+  subject: string;
+  input_hash: string;
+  completed_hash?: string;
+  status: "completed" | "failed" | "skipped";
+  created: number;
+  autoApplied: number;
+  planned: number;
+  applied: number;
+  review: number;
+  skipped: number;
+  error?: string;
+};
+
 const SENSITIVE_TERMS = [
   "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
   "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
@@ -108,6 +122,58 @@ function json(body: unknown, status = 200) {
   });
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function getProfileInputHash(db: any, userId: string, contactId: string | null): Promise<string> {
+  let query = db
+    .from("profile_entries")
+    .select("id, category_id, label, value, sort_order, linked_note_id, updated_at, created_at")
+    .eq("user_id", userId)
+    .order("id", { ascending: true });
+  query = contactId ? query.eq("contact_id", contactId) : query.is("contact_id", null);
+  const { data, error } = await query;
+  if (error) throw error;
+  return sha256Hex(JSON.stringify(data || []));
+}
+
+async function readRunState(db: any, userId: string, contactId: string | null) {
+  const subjectType = contactId ? "contact" : "owner";
+  const base = db
+    .from("profile_normalization_runs")
+    .select("id, input_hash, status, completed_at")
+    .eq("user_id", userId)
+    .eq("subject_type", subjectType)
+    .limit(1);
+  const { data, error } = contactId
+    ? await base.eq("contact_id", contactId).maybeSingle()
+    : await base.is("contact_id", null).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function writeRunState(db: any, userId: string, contactId: string | null, values: Record<string, unknown>) {
+  const subjectType = contactId ? "contact" : "owner";
+  const existing = await readRunState(db, userId, contactId);
+  const payload = {
+    user_id: userId,
+    contact_id: contactId,
+    subject_type: subjectType,
+    ...values,
+  };
+  if (existing?.id) {
+    const { error } = await db.from("profile_normalization_runs").update(payload).eq("id", existing.id);
+    if (error) throw error;
+    return existing.id;
+  }
+  const { data, error } = await db.from("profile_normalization_runs").insert(payload).select("id").single();
+  if (error) throw error;
+  return data?.id;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -148,6 +214,8 @@ serve(async (req) => {
     if (action === "backfill") {
       const scope = String(body?.scope || "owner");
       const preferences = await getSuggestionPreferences(db, userId);
+      const force = body?.force === true;
+      const includeNotesContext = body?.includeNotesContext === false ? false : true;
 
       const subjects: Array<string | null> = [];
       if (scope === "owner") {
@@ -171,38 +239,123 @@ serve(async (req) => {
         return json({ error: "invalid scope" }, 400);
       }
 
-      let totalCreated = 0;
-      let totalAuto = 0;
-      const perSubject: any[] = [];
-      const runAll = async () => {
-        for (const subj of subjects) {
-          try {
+      const runOne = async (subj: string | null): Promise<SubjectRunResult> => {
+        const subjectLabel = subj ?? "owner";
+        const inputHash = await getProfileInputHash(db, userId, subj);
+        const state = await readRunState(db, userId, subj);
+        if (!force && state?.status === "completed" && state.input_hash === inputHash) {
+          return {
+            subject: subjectLabel,
+            input_hash: inputHash,
+            completed_hash: inputHash,
+            status: "skipped",
+            created: 0,
+            autoApplied: 0,
+            planned: 0,
+            applied: 0,
+            review: 0,
+            skipped: 1,
+          };
+        }
+
+        await writeRunState(db, userId, subj, {
+          input_hash: inputHash,
+          status: "running",
+          planned_count: 0,
+          applied_count: 0,
+          review_count: 0,
+          skipped_count: 0,
+          error_message: null,
+          started_at: new Date().toISOString(),
+          completed_at: null,
+        });
+
+        try {
+          const aggregate = { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 };
+          for (let pass = 0; pass < 3; pass += 1) {
             const r = await createNormalizationSuggestions({
               supabase: db,
               userId,
               contactId: subj,
               preferences,
               sourceNoteId: null,
-              includeNotesContext: true,
+              includeNotesContext,
               helpers,
             });
-            totalCreated += r.created;
-            totalAuto += r.autoApplied;
-            perSubject.push({ subject: subj ?? "owner", ...r });
-          } catch (e) {
-            console.error(`[normalize-profile] backfill subject=${subj}`, e);
-            perSubject.push({ subject: subj ?? "owner", error: String(e) });
+            aggregate.created += r.created;
+            aggregate.autoApplied += r.autoApplied;
+            aggregate.planned += r.planned;
+            aggregate.applied += r.applied;
+            aggregate.review += r.review;
+            aggregate.skipped += r.skipped;
+            // Direct deterministic passes mutate rows. Re-plan immediately so
+            // groups that were intentionally non-overlapping in pass N can be
+            // folded in pass N+1 before we record this input as complete.
+            if (r.applied === 0 || r.planned === 0) break;
           }
+          const completedHash = await getProfileInputHash(db, userId, subj);
+          await writeRunState(db, userId, subj, {
+            input_hash: completedHash,
+            status: "completed",
+            planned_count: aggregate.planned,
+            applied_count: aggregate.applied,
+            review_count: aggregate.review,
+            skipped_count: aggregate.skipped,
+            error_message: null,
+            completed_at: new Date().toISOString(),
+          });
+          return { subject: subjectLabel, input_hash: inputHash, completed_hash: completedHash, status: "completed", ...aggregate };
+        } catch (e) {
+          const message = String(e);
+          await writeRunState(db, userId, subj, {
+            input_hash: inputHash,
+            status: "failed",
+            error_message: message,
+            completed_at: new Date().toISOString(),
+          });
+          console.error(`[normalize-profile] backfill subject=${subj}`, e);
+          return {
+            subject: subjectLabel,
+            input_hash: inputHash,
+            status: "failed",
+            created: 0,
+            autoApplied: 0,
+            planned: 0,
+            applied: 0,
+            review: 0,
+            skipped: 0,
+            error: message,
+          };
         }
-        console.log(`[normalize-profile] background backfill done: created=${totalCreated} auto=${totalAuto} subjects=${subjects.length}`);
       };
-      // Fire-and-forget on the edge runtime; respond immediately so the
-      // HTTP client doesn't time out on long all_contacts sweeps.
+
+      const runAll = async () => {
+        const perSubject: SubjectRunResult[] = [];
+        for (const subj of subjects) perSubject.push(await runOne(subj));
+        const totals = perSubject.reduce(
+          (acc, r) => ({
+            created: acc.created + r.created,
+            autoApplied: acc.autoApplied + r.autoApplied,
+            planned: acc.planned + r.planned,
+            applied: acc.applied + r.applied,
+            review: acc.review + r.review,
+            skipped: acc.skipped + r.skipped,
+          }),
+          { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 },
+        );
+        console.log(`[normalize-profile] backfill done: ${JSON.stringify({ scope, subjectCount: subjects.length, ...totals })}`);
+        return { perSubject, totals };
+      };
+
+      if (scope === "contact" || scope === "owner") {
+        const result = await runAll();
+        return json({ ok: true, completed: true, scope, subjectCount: subjects.length, ...result }, 200);
+      }
+
       try {
         // @ts-expect-error - EdgeRuntime is a Supabase Edge global
         EdgeRuntime.waitUntil(runAll());
       } catch {
-        // Fallback: still kick off, just unawaited.
         runAll();
       }
       return json({ ok: true, started: true, scope, subjectCount: subjects.length }, 202);
