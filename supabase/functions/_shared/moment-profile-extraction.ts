@@ -140,14 +140,10 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-const SINGLETON_PROFILE_LABELS = new Set([
-  "job title", "current job title", "role", "title",
-  "company", "current company", "employer",
-  "current city", "city", "location",
-  "birthday", "date of birth", "dob", "geburtstag", "geburtsdatum",
-  "pronouns", "nationality",
-  "partner", "spouse",
-]);
+// SINGLETON_PROFILE_LABELS removed — the shared token-aware dedup guard
+// in `profile-dedup.ts` now enforces singleton behavior via the canonical
+// schema's `single: true` flag.
+
 
 const MOMENT_PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal life-timeline "moment" (an event or milestone the user recorded).
 
