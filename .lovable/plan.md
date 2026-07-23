@@ -1,145 +1,54 @@
-## What I verified
 
-- The current frontend source does have an automatic normalization call in `PersonDetail.tsx`, but it is guarded by a 6-hour `localStorage` cooldown.
-- That call sends `action: "backfill"`, and `normalize-profile` immediately returns `202 started` while the actual work runs later via `EdgeRuntime.waitUntil`.
-- The frontend then records the cooldown after the `202`, not after actual cleanup. So a started-but-failed/no-op run can suppress future attempts.
-- The preview/network snapshot shows no `normalize-profile` request for the current open of Yumei.
-- Recent edge/function logs show no `normalize-profile` invocation.
-- Live data still has the problem: Yumei has 207 profile entries, 11 BPD mentions, 15 health-related rows, and 17 historical `normalize_profile_entry` rows marked `kept`.
+## Why the current guard missed "Spiderman" and "Geum Sung-je"
 
-## Root problem to fix
+The note "Yumei" is a personal contact profile — it's not primarily *about* a work of fiction, so `content_mode` came back as `personal` and the whole-note fiction guard didn't trigger. But inside that note the following sentences appear:
 
-The automatic cleanup is not reliable because it is browser-local, fire-and-forget, and not verified against actual database changes. It also has no server-side run state, so the app cannot know whether Yumei was actually cleaned or merely that a request once returned “started”.
+- `"Where did I see the character I remind you of? Spiderman?"` — Spiderman is a fictional superhero.
+- `"favorite actor Lee Junyoung as Geum Sung-je"` — Geum Sung-je is the *role* Lee Junyoung plays in the K-drama *Weak Hero*, i.e. a fictional character.
 
-## Plan
+Both were included by the LLM in `metadata.people` despite the prompt saying not to, and there is no *per-name* filter after that — the guard is all-or-nothing at the note level.
 
-### 1. Make contact normalization synchronous and observable
+**Yes, this is fixable.** The fix is to stop trusting a single note-level flag and instead evaluate each new proposed name individually before it becomes a review-queue item.
 
-Change `supabase/functions/normalize-profile/index.ts` so:
+## Plan — three complementary layers, all in `supabase/functions/process-note/index.ts`
 
-- `scope: "contact"` runs immediately and awaits completion before returning.
-- It returns real counts: planned groups, applied groups, created review items, skipped/stale groups, and any errors.
-- `scope: "all_contacts"` can still use background execution, because that is the only potentially long-running path.
-- The frontend must not record any cooldown unless the response says the contact run actually completed.
+Only the person-suggestion path is affected. No frontend changes, no schema changes.
 
-This removes the current “request started, maybe nothing happened” failure mode.
+### 1. Deterministic per-name context filter (fast, free)
 
-### 2. Move cooldown/state from `localStorage` to the server
+Before creating an `add_contact` suggestion for a name that isn't in Contacts, look at the sentence(s) around each mention in the note text and drop the name when it clearly reads as fictional. Concretely, skip the name if any of these apply:
 
-Add a small `profile_normalization_runs` table:
+- The name matches a small hard blocklist of iconic fictional characters (Spiderman/Spider-Man, Batman, Superman, Naruto, Goku, Pikachu, Mario, Luigi, Zelda, Link, Kirito, Sailor Moon, …). This list ships in code and is easy to extend.
+- Within ~120 chars of the mention we see fiction-role cues: `\b(as|playing|voiced by|plays|role of|character|protagonist|antagonist|villain|hero(?:ine)?|main lead|OC|fictkin|kin)\b`, or the mention is inside a `[[wikilink]]` that resolves to a Lexicon page tagged as work/character.
+- The mention appears in a bulleted "favorite/watching/reading/playing" list (`favorite (show|movie|anime|manga|game|character|actor)`, `currently (watching|reading|playing)`, `cast:`, `starring`) — indicative of media, not a real contact.
+- The `add_alias` path already gates on `scorePersonMention`; extend that gate to also fail on the fiction cues above for both `add_contact` and `add_alias`.
 
-- subject owner/contact
-- last input hash
-- last run time
-- status: `running`, `completed`, `failed`
-- counts and error message
+This alone would have caught both examples: "as Geum Sung-je" is preceded by "actor Lee Junyoung as", and "Spiderman?" appears right after "the character I remind you of".
 
-Access rules:
+### 2. LLM verification pass for the residual (cheap, tiny model)
 
-- Users can read their own run state.
-- Edge functions can update run state with the service role.
+For any candidate name that survives layer 1 *and* would create a new `add_contact` suggestion (not a fuzzy alias match), run one small batched classification call per note:
 
-The normalizer will compute a hash of the current profile entries. If the profile content changed since the last completed run, it runs again automatically. If not, it skips safely. This replaces brittle browser-local cooldowns.
+- Input: the list of candidate names + the note title + a short excerpt (±200 chars around each mention).
+- Output: `{ name, verdict: "real_person" | "fictional_character" | "unclear" }[]`.
+- Only names verdicted `real_person` continue to the review queue. `unclear` is dropped by default (safer than adding a fictional character).
+- Model: same tiny model used elsewhere in `process-note` (routed through the existing `runChat` / Lovable AI Gateway path). Uses existing credit accounting; one call per note, only when there are new-person candidates.
 
-### 3. Trigger normalization from the profile data hook, not the page shell
+### 3. Strengthen the metadata prompt (belt & suspenders)
 
-Move the automatic call out of `PersonDetail.tsx` and into the profile data path (`useContactProfile` or `ContactProfileTab`) after entries/categories load.
+In `METADATA_SYSTEM_PROMPT` (the section describing `"people"` around line 645), add a short explicit example: *"Exclude character names even when the note is a personal profile that references media — e.g. `favorite actor X as Y` → `Y` is a fictional role, do not include."* And add a matching negative example. This nudges the extraction pass itself so layers 1 & 2 have less to clean up.
 
-Why:
+## Cleanup of the two stuck items
 
-- It guarantees the trigger is tied to the actual profile data the user is seeing.
-- It can compare the profile-entry hash/run state.
-- It avoids hidden page-mount timing issues.
+After the fix ships, the two existing `pending_review` rows for "Spiderman" and "Geum Sung-je" will still be there. Either you dismiss them manually, or I can delete just those two `review_queue` rows for your user in a one-off data change. I'll ask before doing that.
 
-After a completed run, invalidate exactly:
+## Files touched
 
-- `contact-profile-entries`
-- `contact-profile-categories`
-- pending profile suggestions
-- review queue
+- `supabase/functions/process-note/index.ts` — extend the person-suggestion loop with layer-1 filter + layer-2 verification, update metadata prompt.
 
-No button, no user maintenance step.
+That's it. No new tables, no new edge functions, no UI changes.
 
-### 4. Make safe deterministic cleanup apply directly
+## Honest caveats
 
-In `_shared/profile-normalization.ts`, split output into two classes:
-
-- **Safe deterministic cleanup**: exact duplicates, checkbox-style `BPD: true`, alias relabels, list-valued union merges.
-- **Human review cleanup**: conflicting single-value facts, lossy/mixed-field groups, low-confidence LLM suggestions.
-
-For safe deterministic cleanup:
-
-- Apply directly to `profile_entries`.
-- Log a `review_queue` audit row after applying if useful, but do not depend on the review queue insert for the data cleanup to happen.
-
-For human review cleanup:
-
-- Create `pending_review` rows only.
-
-This prevents old/historical queue rows from blocking obvious database cleanup.
-
-### 5. Harden the health/BPD canonicalization specifically
-
-Extend the deterministic normalizer so Yumei’s current rows collapse reliably:
-
-- Convert `BPD: true` into `Health conditions: BPD`.
-- Canonicalize `Diagnosis`, `Diagnoses`, `Medical condition`, `Mental health condition(s)`, and `Health conditions` into one list-valued health field unless the row is specifically an allergy/medication.
-- Deduplicate abbreviation/full-name pairs:
-  - `BPD` = `borderline personality disorder`
-  - `MDD` = `major depressive disorder`
-  - `ASD` = `autism spectrum disorder`
-  - `AVPD` = `avoidant personality disorder`
-- Split health/allergy lists on commas, slashes, `and`, `or`, and German equivalents, while preserving distinct conditions.
-- Keep allergies separate as `Allergies` when the row is clearly allergy-only.
-
-Expected result: BPD should appear once in the canonical health row, not scattered across many rows.
-
-### 6. Add tests for the exact failure case
-
-Add focused edge/shared-module tests using a Yumei-like fixture:
-
-- `BPD: true`
-- `Mental health condition: BPD`
-- `Medical condition: MDD, BPD, ASD, AVPD`
-- `Mental health conditions: Major depressive disorder, borderline personality disorder, autism spectrum disorder, avoidant personality disorder`
-- allergy rows such as `allergic to Buscopan or Postan`
-
-Assertions:
-
-- One canonical health-condition row is produced.
-- BPD appears once after synonym normalization.
-- Allergy rows are either separated or deduped correctly.
-- Conflicting singleton fields still go to review, not auto-apply.
-
-### 7. Redeploy and run the repair automatically for Yumei
-
-After implementation:
-
-- Deploy `normalize-profile` and any shared files it imports.
-- Invoke the deployed `normalize-profile` function for Yumei from here, not by asking you to click anything.
-- Query the live database after the run and report raw counts:
-  - total profile entries
-  - BPD mentions
-  - health-related rows
-  - any pending normalization rows
-
-### 8. Verification before saying it is fixed
-
-I will only call this fixed after verifying all of these:
-
-- The deployed edge function logs show a real `normalize-profile` contact run.
-- The function response reports completed counts, not just `started: true`.
-- Live DB rows for Yumei changed.
-- BPD duplicate mentions are collapsed.
-- Re-opening Yumei’s profile triggers no redundant run if the server-side input hash is unchanged.
-- Adding a new duplicate fact triggers a new run automatically without any user click.
-
-## Files likely touched
-
-- `supabase/functions/normalize-profile/index.ts`
-- `supabase/functions/_shared/profile-normalization.ts`
-- `supabase/functions/_shared/profile-canonical-schema.ts`
-- `src/hooks/useContactProfile.ts` or `src/components/people/ContactProfileTab.tsx`
-- remove the current auto-normalization effect from `src/components/people/PersonDetail.tsx`
-- new migration for `profile_normalization_runs`
-- focused tests for the normalizer fixture
+- Layer 2 is an LLM call, so it can still occasionally misjudge (e.g. a real person who happens to share a name with a fictional character). Because we default `unclear` to dropped, false negatives (a real contact not suggested) are possible — you can still add them manually from the person's page. This is the right tradeoff versus the current failure mode of adding Spiderman to your People.
+- Very obscure fictional characters with no context around the mention may still slip through layer 1; layer 2 catches most of these.
