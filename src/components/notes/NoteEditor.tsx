@@ -1408,6 +1408,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       {/* Note Metadata editor */}
       {!note.is_trashed && (
         <NoteMetadataEditor
+          noteId={note.id}
           metadata={metadata}
           onUpdate={(updated) => {
             updateNote.mutate({ id: note.id, metadata: updated } as any);
