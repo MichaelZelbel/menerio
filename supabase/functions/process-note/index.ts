@@ -1083,6 +1083,8 @@ async function generateReviewItems(
       const { factor: sourceFactor, sourceTag } = getSourceConfidenceFactor(metadata);
       const blocklist = new Set(preferences.personBlocklist || []);
 
+      const newContactCandidates: ReviewSuggestion[] = [];
+
       for (const person of people) {
         // 1. Exact match
         if (nameToContact.has(person.toLowerCase())) continue;
@@ -1096,6 +1098,15 @@ async function generateReviewItems(
         // 2. User-defined / generic blocklist — drop completely.
         if (blocklist.has(person.toLowerCase())) {
           console.log(`Skipping blocklisted name "${person}"`);
+          continue;
+        }
+
+        // 2b. Per-name fiction guard (layer 1 — deterministic). Blocks iconic
+        // characters and names framed as roles/characters in nearby text, even
+        // when the note as a whole isn't tagged as fiction.
+        const fictionReason = detectFictionalMention(person, fullText);
+        if (fictionReason) {
+          console.log(`Skipping fictional-looking name "${person}" — ${fictionReason}`);
           continue;
         }
 
@@ -1151,7 +1162,7 @@ async function generateReviewItems(
 
         const adjustedConfidence = Math.max(0.1, Math.min(1, DEFAULT_CONFIDENCE.add_contact * sourceFactor * mention.score));
 
-        suggestions.push({
+        newContactCandidates.push({
           user_id: userId,
           source_note_id: noteId,
           suggestion_type: "add_contact",
@@ -1166,6 +1177,22 @@ async function generateReviewItems(
           is_sensitive: isSensitiveSuggestion("add_contact", { name: person }, noteContent),
           suppression_key: buildSuppressionKey("add_contact", "contact", null, person),
         });
+      }
+
+      // Layer 2 — LLM verification for new-person candidates. Drops any name
+      // the classifier flags as fictional/unclear. Runs at most one small
+      // batched call per note, only when there is at least one candidate.
+      if (newContactCandidates.length > 0) {
+        const names = newContactCandidates.map((s) => String(s.extracted_value || ""));
+        const verifiedReal = await verifyRealPeopleWithLLM(userId, noteTitle, fullText, names);
+        for (const cand of newContactCandidates) {
+          const key = String(cand.extracted_value || "").toLowerCase();
+          if (verifiedReal.has(key)) {
+            suggestions.push(cand);
+          } else {
+            console.log(`Fiction guard (LLM) dropped candidate contact "${cand.extracted_value}" from note ${noteId}`);
+          }
+        }
       }
     }
 
