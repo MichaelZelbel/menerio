@@ -158,12 +158,20 @@ export default function ReviewQueue() {
       const { data, error } = await supabase.functions.invoke("normalize-profile", {
         body: { action: "rollback", review_id: item.id },
       });
+      // A 409 "stale" means the underlying profile already changed — treat
+      // as a no-op so bulk Keep/Reject flows don't crash into a blank screen.
+      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
+      if (stale) {
+        invalidateProfileQueries();
+        return;
+      }
       if (error || !data?.ok) {
         throw new Error(error?.message || data?.reason || "Rollback failed");
       }
       invalidateProfileQueries();
       return;
     }
+
 
     if (item.suggestion_type === "add_contact" && item.target_entity_id) {
       await supabase.from("contacts").delete().eq("id", item.target_entity_id);
