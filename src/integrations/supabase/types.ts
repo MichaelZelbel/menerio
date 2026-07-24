@@ -3235,6 +3235,7 @@ export type Database = {
         Args: { _label: string; _value: string }
         Returns: string
       }
+      profile_duplicate_scope_key: { Args: { _label: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
       profile_existing_token_keys: {
         Args: {
