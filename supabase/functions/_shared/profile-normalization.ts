@@ -110,6 +110,35 @@ export function splitListTokens(label: string, value: string): Array<{ key: stri
     .filter((t) => t.display.length > 0 && t.key.length > 0);
 }
 
+function comparableProfileValue(value: string): string {
+  return normalizeProfileValueForDedup(value)
+    .replace(/[()\[\]{}]/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function meaningfulTokenSet(value: string): Set<string> {
+  const stop = new Set(["a", "an", "and", "as", "at", "for", "from", "has", "in", "is", "of", "on", "or", "the", "to", "with"]);
+  return new Set(
+    comparableProfileValue(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !stop.has(token)),
+  );
+}
+
+function isSubsumedValue(shorterValue: string, longerValue: string): boolean {
+  const shorter = comparableProfileValue(shorterValue);
+  const longer = comparableProfileValue(longerValue);
+  if (!shorter || !longer || shorter === longer) return false;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  const shortTokens = meaningfulTokenSet(shorterValue);
+  if (shortTokens.size < 3) return false;
+  const longTokens = meaningfulTokenSet(longerValue);
+  return [...shortTokens].every((token) => longTokens.has(token));
+}
+
 function buildSchemaDescription(): string {
   const lines: string[] = [];
   for (const [slug, schema] of Object.entries(PROFILE_CANONICAL_SCHEMA)) {
@@ -344,6 +373,47 @@ export async function planSubjectNormalization(args: {
       confidence: 0.95,
       rationale: `Merged ${members.length} '${survivor.canonLabel}' entries into one comma-list of ${union.length} value(s).`,
       source: "list",
+      auto_apply_direct: true,
+    });
+  }
+
+  // --- Same-field subsumption merger (deterministic) ---
+  // If one value for the SAME canonical field clearly contains another, keep
+  // the richest value and delete the shorter duplicate. This covers extractor
+  // repeats like "Weak Hero" / "Weak Hero Season 2" without asking the LLM.
+  type SubsumedMember = { row: ProfileEntryRow; correctedSlug: string; canonLabel: string };
+  const subsumptionBuckets = new Map<string, SubsumedMember[]>();
+  for (const row of rows) {
+    if (deterministicIds.has(row.id)) continue;
+    const currentSlug = slugById.get(row.category_id) || "preferences";
+    const correctedSlug = correctProfileCategory(row.label, currentSlug);
+    const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
+    const key = `${correctedSlug}||${canonLabel.toLowerCase()}`;
+    const member: SubsumedMember = { row, correctedSlug, canonLabel };
+    const bucket = subsumptionBuckets.get(key);
+    if (bucket) bucket.push(member); else subsumptionBuckets.set(key, [member]);
+  }
+  const subsumptionGroups: NormalizationGroup[] = [];
+  for (const members of subsumptionBuckets.values()) {
+    if (members.length < 2) continue;
+    const sorted = [...members].sort((a, b) => comparableProfileValue(b.row.value).length - comparableProfileValue(a.row.value).length);
+    const survivor = sorted[0];
+    const subsumed = sorted.filter((m) => m.row.id !== survivor.row.id && isSubsumedValue(m.row.value, survivor.row.value));
+    if (subsumed.length === 0) continue;
+    const memberIds = [survivor, ...subsumed].map((m) => m.row.id);
+    for (const id of memberIds) deterministicIds.add(id);
+    subsumptionGroups.push({
+      user_id: userId,
+      contact_id: contactId,
+      member_entry_ids: memberIds,
+      survivor_entry_id: survivor.row.id,
+      canonical_category_slug: survivor.correctedSlug,
+      canonical_label: survivor.canonLabel,
+      canonical_value: survivor.row.value,
+      operation: "merge",
+      confidence: 0.95,
+      rationale: `Removed ${subsumed.length} shorter duplicate '${survivor.canonLabel}' value(s) already covered by the richest entry.`,
+      source: "exact",
       auto_apply_direct: true,
     });
   }
