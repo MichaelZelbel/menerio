@@ -38,26 +38,6 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const DEFAULT_PROFILE_CATEGORIES = [
-  { name: "Identity & Basics", slug: "identity", icon: "user", description: "Full name, pronouns, languages, nationality", sort_order: 0, visibility_scope: "all" },
-  { name: "Location & Living", slug: "location", icon: "map-pin", description: "Current city, timezone, living situation", sort_order: 1, visibility_scope: "personal" },
-  { name: "Professional Life", slug: "professional", icon: "briefcase", description: "Job, company, industry, skills", sort_order: 2, visibility_scope: "professional" },
-  { name: "Education", slug: "education", icon: "graduation-cap", description: "Degrees, certifications, learning style", sort_order: 3, visibility_scope: "professional" },
-  { name: "Relationships & Family", slug: "relationships", icon: "heart", description: "Partner, children, close family", sort_order: 4, visibility_scope: "personal" },
-  { name: "Communication Style", slug: "communication", icon: "message-circle", description: "Tone, pet peeves, humor style", sort_order: 5, visibility_scope: "all" },
-  { name: "Personality & Values", slug: "personality", icon: "compass", description: "Type indicators, core values, philosophy", sort_order: 6, visibility_scope: "all" },
-  { name: "Principles & Operating System", slug: "principles", icon: "book-open", description: "Personal rules, codex vitae, frameworks", sort_order: 7, visibility_scope: "all" },
-  { name: "Health & Wellness", slug: "health", icon: "activity", description: "Medical, allergies, fitness, sleep", sort_order: 8, visibility_scope: "health" },
-  { name: "Hobbies & Interests", slug: "hobbies", icon: "palette", description: "Active hobbies, creative pursuits", sort_order: 9, visibility_scope: "personal" },
-  { name: "Food & Drink", slug: "food", icon: "utensils", description: "Cuisines, dietary style, cooking", sort_order: 10, visibility_scope: "personal" },
-  { name: "Music & Entertainment", slug: "entertainment", icon: "music", description: "Genres, movies, books, gaming", sort_order: 11, visibility_scope: "personal" },
-  { name: "Travel & Experiences", slug: "travel", icon: "plane", description: "Countries, bucket list, travel style", sort_order: 12, visibility_scope: "personal" },
-  { name: "Digital Life", slug: "digital", icon: "monitor", description: "Social profiles, tools, tech stack", sort_order: 13, visibility_scope: "all" },
-  { name: "Financial", slug: "financial", icon: "wallet", description: "Goals, investment style, budget", sort_order: 14, visibility_scope: "private" },
-  { name: "Goals & Aspirations", slug: "goals", icon: "target", description: "Short-term, long-term, anti-goals", sort_order: 15, visibility_scope: "all" },
-  { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Morning/night, introvert/extrovert, pet peeves", sort_order: 16, visibility_scope: "all" },
-];
-
 const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
   add_alias: { icon: User, label: "Add Alias", color: "text-cyan-500" },
@@ -219,128 +199,20 @@ export default function ReviewQueue() {
   };
 
   const handleAcceptProfileEntry = async (item: ReviewItem) => {
-    const { contact_id, contact_name, category_slug, label, value } = item.payload as any;
-    if (!category_slug || !label || !value) {
-      showToast.error("Incomplete profile suggestion");
-      return;
-    }
-    const isOwner = !contact_id;
-    const ownerName = isOwner ? "your" : `${contact_name}'s`;
-
-    // Helper: find existing category honoring contact_id IS NULL for owner.
-    const findCategory = async () => {
-      const q = supabase
-        .from("profile_categories")
-        .select("id")
-        .eq("user_id", user!.id)
-        .eq("slug", category_slug);
-      const { data } = isOwner
-        ? await q.is("contact_id", null).maybeSingle()
-        : await q.eq("contact_id", contact_id).maybeSingle();
-      return data?.id || null;
-    };
-
     try {
-      // Check if categories are seeded for this scope (owner or contact).
-      const seedQuery = supabase
-        .from("profile_categories")
-        .select("id, slug")
-        .eq("user_id", user!.id);
-      const { data: existingCats, error: existingErr } = isOwner
-        ? await seedQuery.is("contact_id", null)
-        : await seedQuery.eq("contact_id", contact_id);
-
-      if (existingErr) {
-        showToast.error("Failed to load profile: " + existingErr.message);
-        return;
-      }
-
-      let categoryId: string | null = null;
-      const matchExisting = (existingCats || []).find((c: any) => c.slug === category_slug);
-      if (matchExisting) categoryId = matchExisting.id;
-
-      // Seed defaults if no categories exist in this scope.
-      if (!existingCats || existingCats.length === 0) {
-        const rows = DEFAULT_PROFILE_CATEGORIES.map((c) => ({
-          ...c,
-          user_id: user!.id,
-          contact_id: isOwner ? null : contact_id,
-          is_default: true,
-        } as any));
-        const { error: seedErr } = await supabase.from("profile_categories").insert(rows);
-        if (seedErr && (seedErr as any).code !== "23505") {
-          showToast.error("Failed to initialize profile: " + seedErr.message);
-          return;
-        }
-        categoryId = await findCategory();
-      }
-
-      if (!categoryId) {
-        const existingId = await findCategory();
-        if (existingId) {
-          categoryId = existingId;
-        } else {
-          const catDef = DEFAULT_PROFILE_CATEGORIES.find((c) => c.slug === category_slug);
-          const { data: newCat, error: catErr } = await supabase
-            .from("profile_categories")
-            .insert({
-              name: catDef?.name || category_slug,
-              slug: category_slug,
-              icon: catDef?.icon || "folder",
-              user_id: user!.id,
-              contact_id: isOwner ? null : contact_id,
-              is_default: false,
-              sort_order: 99,
-              visibility_scope: "all",
-            } as any)
-            .select("id")
-            .maybeSingle();
-          if (catErr) {
-            if ((catErr as any).code === "23505") {
-              categoryId = await findCategory();
-            } else {
-              showToast.error("Failed to create category: " + catErr.message);
-              return;
-            }
-          } else {
-            categoryId = newCat?.id || null;
-          }
-        }
-      }
-
-      if (!categoryId) {
-        showToast.error("Could not resolve profile category");
-        return;
-      }
-
-      const { data: inserted, error: entryErr } = await supabase.from("profile_entries").insert({
-        category_id: categoryId,
-        contact_id: isOwner ? null : contact_id,
-        label,
-        value,
-        sort_order: 0,
-        user_id: item.user_id,
-      }).select("id").maybeSingle();
-
-      if (entryErr) {
-        showToast.error("Failed to add profile entry: " + entryErr.message);
-        return;
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
-      queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
-      queryClient.invalidateQueries({ queryKey: ["profile-categories"] });
-      updateStatus.mutate({
-        id: item.id,
-        status: "kept",
-        extra: {
-          target_entity_type: "profile_entry",
-          target_entity_id: inserted?.id ?? null,
-          applied_at: new Date().toISOString(),
-        },
+      const { data, error } = await supabase.functions.invoke("normalize-profile", {
+        body: { action: "accept_profile_entry", review_id: item.id },
       });
-      showToast.success(`Added "${label}: ${value}" to ${ownerName} profile`);
+      if (error || !data?.ok) {
+        showToast.error("Failed to add profile entry: " + (error?.message || data?.reason || "Unknown error"));
+        refreshReviewQueues();
+        return;
+      }
+
+      invalidateProfileQueries();
+      refreshReviewQueues();
+      const outcome = data.outcome === "already_exists" ? "Already in profile" : data.outcome === "merged_list" ? "Merged into profile" : "Added to profile";
+      showToast.success(outcome);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }
@@ -722,6 +594,12 @@ export default function ReviewQueue() {
       if (item.target_entity_id && item.applied_at) alreadyAppliedIds.push(item.id);
       else pending.push(item);
     }
+    const profileReviewIds = opts.kind === "keep"
+      ? pending.filter((item) => item.suggestion_type === "add_profile_entry").map((item) => item.id)
+      : [];
+    const pendingIndividual = profileReviewIds.length > 0
+      ? pending.filter((item) => item.suggestion_type !== "add_profile_entry")
+      : pending;
     const total = alreadyAppliedIds.length + pending.length + wikiRevisions.length;
     if (total === 0) return;
 
@@ -744,8 +622,28 @@ export default function ReviewQueue() {
         showToast.error(`Bulk update failed: ${err?.message || "Unknown error"}`);
       }
 
-      // 2) Pending items — small concurrent batches.
-      await runInBatches(pending, BULK_BATCH, async (item) => {
+      // 2) Profile-entry approvals run server-side in chunks so thousands of
+      // dedup checks/inserts do not execute in the browser.
+      for (let i = 0; i < profileReviewIds.length; i += 500) {
+        const chunk = profileReviewIds.slice(i, i + 500);
+        try {
+          const { data, error } = await supabase.functions.invoke("normalize-profile", {
+            body: { action: "bulk_profile_reviews", decision: "keep", review_ids: chunk },
+          });
+          if (error || !data?.ok) throw new Error(error?.message || data?.reason || "Bulk profile review failed");
+          const failedCount = Number(data.summary?.failed || 0);
+          ok += Math.max(0, chunk.length - failedCount);
+          fail += failedCount;
+          setBulkProgress((p) => (p ? { ...p, done: p.done + chunk.length } : p));
+        } catch (err: any) {
+          fail += chunk.length;
+          setBulkProgress((p) => (p ? { ...p, done: p.done + chunk.length } : p));
+          showToast.error(`Bulk profile cleanup failed: ${err?.message || "Unknown error"}`);
+        }
+      }
+
+      // 3) Other pending items — small concurrent batches.
+      await runInBatches(pendingIndividual, BULK_BATCH, async (item) => {
         try {
           await opts.handlePending(item);
           ok++;
@@ -757,7 +655,7 @@ export default function ReviewQueue() {
         setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
       });
 
-      // 3) Wiki revisions.
+      // 4) Wiki revisions.
       await runInBatches(wikiRevisions, BULK_BATCH, async (rev) => {
         try {
           await opts.handleWiki(rev);

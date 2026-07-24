@@ -180,8 +180,10 @@ export function useProfile() {
         const { error } = await supabase.from("profile_entries").update(entry).eq("id", entry.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("profile_entries").insert({ ...entry, user_id: userId! } as any);
-        if (error) throw error;
+        const { data, error } = await supabase.functions.invoke("normalize-profile", {
+          body: { action: "write_profile_entry", entry: { ...entry, contact_id: null } },
+        });
+        if (error || !data?.ok) throw error || new Error(data?.reason || "Profile entry was not saved");
       }
     },
     onSuccess: () => {

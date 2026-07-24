@@ -1,40 +1,107 @@
-## Why it freezes today
+## Goal
+Make duplicate prevention a backend invariant instead of another browser-triggered cleanup pass.
 
-Two problems compound on the Review Queue at 2,300 items:
+The fix should guarantee that obvious duplicates cannot be inserted again, clean existing duplicates in the background, and keep the browser out of heavy normalization work.
 
-1. **All rows render at once.** `src/pages/ReviewQueue.tsx` loads every pending item into a single `combinedReviewItems.map(...)` list — no pagination, no virtualization. That's ~2,300 Cards mounted simultaneously.
-2. **Bulk "Keep / Roll Back / Never Again" fires ~2,300 individual mutations.** Each `updateStatus.mutate(...)` triggers a React Query invalidation, which refetches all 2,300 rows and re‑renders the giant list. It also broadcasts a cross-window cache-sync message per call (recent `query-sync` addition). Result: O(N²) DOM work + thousands of network round-trips → the tab pins a CPU core and the OS starves.
+## Confirmed current gaps
+- Profile entries can still be created directly from the browser in Review Queue (`src/pages/ReviewQueue.tsx`) and profile hooks (`src/hooks/useProfile.ts`, `src/hooks/useContactProfile.ts`). That bypasses the token-aware backend guard at the final write step.
+- The extraction pipeline deduplicates before creating suggestions, but an accepted suggestion can become stale by the time it is approved and still insert a duplicate.
+- The database has no uniqueness guard for profile entries beyond the primary key; exact/case-normalized duplicates can exist.
+- The normalizer is currently cleanup-after-the-fact. It helps, but it is not a write barrier.
 
-## Fix (frontend only, no schema changes)
+## Plan
 
-### 1. Paginate the on-screen list
-- Add client-side pagination in `ReviewQueue.tsx`: show 50 items per page with Prev / Next / "Page X of Y" controls above the list.
-- Keep `useReviewQueue` fetching the full lightweight list (id, title, small payload) so counts and bulk actions still work, but only render the current page's slice. This alone cuts steady-state DOM from ~2,300 Cards to 50.
+### 1. Add a database-level exact duplicate guard
+Create a migration that:
+- Adds a deterministic profile-entry fingerprint function for obvious duplicates:
+  - trims whitespace
+  - collapses repeated spaces
+  - compares case-insensitively
+  - handles `contact_id IS NULL` consistently for owner profiles
+- Cleans current exact duplicates once so the index can be added safely.
+- Adds a unique index preventing future exact duplicates per:
+  - user
+  - owner/contact subject
+  - category
+  - normalized label
+  - normalized value
 
-### 2. Batch the bulk actions and suppress intermediate refetches
-Rewrite `handleKeepAll`, `handleRemoveAll`, `handleNeverAgainAll` so they:
+This stops the simplest duplicate class permanently even if a missed code path tries to write one.
 
-- **Split items into two buckets:**
-  - *Already-applied* items (`target_entity_id && applied_at`): flip status in a single Supabase bulk update — `supabase.from("review_queue").update({ status, reviewed_at }).in("id", ids)` — instead of N mutations.
-  - *Not-yet-applied* items: process through the existing per-item accept/revert path (they need side effects) but in **small concurrent batches** (e.g. 10 at a time via a simple worker pool) with a progress toast ("Keeping 450 / 2,300…").
-- **Pause query invalidations during the loop:** don't call `updateStatus.mutate` per item (which auto-invalidates). Do the DB writes directly, then invalidate the review-queue queries **once** at the end, and broadcast a single cross-window sync message.
-- Disable the bulk buttons while running and show a progress indicator.
+### 2. Centralize profile entry writes in one server-side path
+Add a small authenticated Edge Function action, likely inside `normalize-profile` or a new focused `profile-entry-write` function, used for creating profile entries.
 
-### 3. Cheaper re-renders
-- Extract each row into a memoized `ReviewItemCard` / `WikiRevisionCard` component wrapped in `React.memo` so incremental updates don't re-render every card.
-- Compute `combinedReviewItems` inside a `useMemo` keyed on the source arrays.
+It will:
+- Validate input with Zod.
+- Resolve/create the profile category server-side.
+- Canonicalize category/label using the existing profile schema.
+- Re-check saved profile entries at the moment of write.
+- Use the existing token-aware dedup logic for list-valued fields.
+- Return one of these outcomes instead of blindly inserting:
+  - `inserted` — genuinely new fact
+  - `already_exists` — exact or singleton duplicate, no write
+  - `merged_list` — merged new tokens into an existing list row
+  - `rejected_duplicate` — duplicate blocked by the DB guard
+- Enqueue normalization for that subject after the write.
 
-### 4. Safety
-- Add a confirm dialog before bulk Keep/Roll Back/Never Again when the queue exceeds a threshold (e.g. 100 items), showing the count.
-- Keep the existing per-item error isolation and failure toasts, but coalesce them into a single summary toast ("Kept 2,287; 13 failed") to avoid flooding the toast stack.
+Then update browser code so it no longer inserts profile entries directly for:
+- accepting `add_profile_entry` review items
+- owner profile quick/manual entry creation
+- contact profile quick/manual entry creation
 
-## Out of scope (call out, don't change now)
-- No changes to `normalize-profile`, `useReviewQueue`, RLS, or DB schema.
-- No virtualization library added yet — pagination + memoization should be enough. If a user routinely exceeds ~500 items per page we can revisit with `@tanstack/react-virtual`.
+Existing edit/delete paths can remain direct, but they will trigger background normalization.
 
-## Files touched
-- `src/pages/ReviewQueue.tsx` — pagination, batched bulk handlers, memoized row components, confirm dialog for large bulk ops.
-- (Optional) small helper in the same file or a new `src/pages/reviewQueueBulk.ts` for the worker-pool utility, if it keeps the page readable.
+### 3. Add a lightweight background normalization job queue
+Create a server-side job table for normalization work, coalesced by user + subject.
 
-## Expected outcome
-Opening the queue with 2,300 items renders ~50 cards. Clicking "Keep" processes them in the background with a progress toast, issues at most a handful of DB round-trips for already-applied items plus batched work for the rest, and refreshes the UI once at the end — no more frozen tab.
+A database trigger on `profile_entries` will enqueue a job whenever an entry is inserted, updated, or deleted. This means normalization is automatic even if the write came from an old client path, MCP, review queue, or a future integration.
+
+The job runner will:
+- process only changed subjects, not every contact every six hours
+- claim jobs in small batches
+- use `EdgeRuntime.waitUntil` so requests return quickly
+- skip unchanged profiles using the existing input hash logic
+- run deterministic cleanup first, LLM cleanup only when needed
+- write audit rows to Review Queue only for real changes
+
+### 4. Make the normalizer stricter and idempotent
+Extend the deterministic normalizer so “obvious duplicate” includes:
+- same canonical label + same normalized value
+- case-only differences, e.g. `Partner` vs `partner`
+- health checkbox artifacts, e.g. `BPD: true` → `Health conditions: BPD`
+- list-valued overlaps, e.g. repeated `BPD`, repeated foods, repeated allergies
+- known alias families already represented in `profile-dedup.ts`
+
+The normalizer should be safe to run repeatedly: after it finishes once, running it again should produce zero changes for the same input.
+
+### 5. Move heavy Review Queue profile actions off the browser
+For bulk approval/removal of profile-related review items:
+- Add a server-side batch action for profile suggestions.
+- The browser sends one request with item IDs.
+- The Edge Function processes in chunks and returns progress/summary.
+- The browser only polls/refetches; it does not loop through thousands of mutations.
+
+This avoids the Windows-machine-freeze scenario when the queue is huge.
+
+### 6. Run one server-side cleanup sweep after deployment
+After the migration and server write path are in place:
+- Trigger the background normalizer for all existing subjects once.
+- Let it clean exact/list duplicates automatically.
+- Leave only genuinely ambiguous conflicts in Review Queue.
+- Verify Yumei’s profile specifically after the sweep.
+
+### 7. Add regression tests
+Add tests for:
+- exact duplicate fingerprinting
+- case/spacing duplicate blocking
+- list-token deduplication
+- boolean health transforms
+- accepting the same profile suggestion twice
+- concurrent duplicate writes
+- bulk review action not issuing N browser mutations
+
+## Expected result
+- Obvious duplicates are blocked at write time, not merely cleaned later.
+- Existing duplicates are cleaned by the backend without user clicks.
+- Future profile changes automatically enqueue background cleanup.
+- The browser stays responsive because it only triggers/polls server work, not thousands of per-item operations.

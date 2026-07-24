@@ -570,6 +570,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
         .select("id")
         .single();
+      if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
       if (error || !data) return { ...suggestion, status: "pending_review" };
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
     }

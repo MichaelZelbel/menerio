@@ -2303,6 +2303,54 @@ export type Database = {
           },
         ]
       }
+      profile_normalization_jobs: {
+        Row: {
+          attempts: number
+          claimed_at: string | null
+          contact_id: string | null
+          created_at: string
+          id: string
+          last_error: string | null
+          processed_at: string | null
+          reason: string | null
+          requested_at: string
+          status: string
+          subject_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          claimed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          reason?: string | null
+          requested_at?: string
+          status?: string
+          subject_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          claimed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          reason?: string | null
+          requested_at?: string
+          status?: string
+          subject_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profile_normalization_runs: {
         Row: {
           applied_count: number
@@ -3049,6 +3097,10 @@ export type Database = {
             }
             Returns: Json
           }
+      enqueue_profile_normalization_job: {
+        Args: { p_contact_id: string; p_reason?: string; p_user_id: string }
+        Returns: undefined
+      }
       get_shared_note_by_token: { Args: { p_token: string }; Returns: Json }
       get_user_role: {
         Args: { _user_id: string }
@@ -3168,6 +3220,7 @@ export type Database = {
         Args: { _user_id: string }
         Returns: string[]
       }
+      profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
       replace_group_members_section: {
         Args: { p_content: string; p_members_section: string }
         Returns: string
