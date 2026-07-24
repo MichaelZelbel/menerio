@@ -2545,6 +2545,54 @@ export type Database = {
           },
         ]
       }
+      review_queue_bulk_jobs: {
+        Row: {
+          action: string
+          created_at: string
+          done: number
+          failed: number
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          scope: string
+          started_at: string
+          status: string
+          total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          done?: number
+          failed?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          scope?: string
+          started_at?: string
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          done?: number
+          failed?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          scope?: string
+          started_at?: string
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       shared_notes: {
         Row: {
           created_at: string

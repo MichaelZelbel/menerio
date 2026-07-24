@@ -1,70 +1,74 @@
-## What's actually broken
 
-Confirmed against the live DB — the current entries under Yumei include labels like:
+# Make Review Queue bulk actions server-side
 
-- `Favorite restaurant` (still singular)
-- `Favorite snack` (still singular)
-- `Favorite TV show` (still singular)
-- `Favorite Pokémon`, `Favorite hobbies`, `Favorite animals`, `Favorite mythical animals`, `Favorite avatar creators`, `Favorite colors`
-- `Favorite McDonald's order` (has commas but is a single meal)
+## Why this is still slow
 
-My previous change used a static `LIST_VALUED_LABELS` set to decide when to render bullets and when to pluralize. That set:
+You're right — the design is wrong. Even after yesterday's batching, "Keep all" / "Roll Back all" / "Never Again all" still does the vast majority of the work **in your browser**:
 
-1. Doesn't contain the singular forms sitting in existing rows (so `Favorite restaurant`, `Favorite snack`, `Favorite TV show` render as blobs).
-2. Doesn't contain novel labels the LLM invents (`Favorite Pokémon`, `Favorite mythical animals`, `Favorite avatar creators`, `Favorite colors`, `Favorite hobbies`, `Favorite animals`) — those render as blobs too.
-3. Would falsely bullet-list `Favorite McDonald's order` if we naively lowered the bar to "any Favorite label".
+1. `useReviewQueue` loads up to ~1,000 items into memory and re-fetches every 60 s. With 2,000 pending items the query alone re-serializes a huge JSON payload on a timer.
+2. Each bulk button walks the in-memory `items` array and, for every single row, runs multiple Supabase round-trips from the browser (insert profile entry, create moment, insert relationship, update alias, upsert suppression, delete moment participants, etc.). Only `add_profile_entry` is currently batched server-side; everything else is per-item.
+3. Each processed item calls `setBulkProgress(...)`, forcing a React re-render of the whole page (including the 50 rendered cards). Thousands of re-renders + thousands of fetches on the main thread = the freeze you saw.
+4. After the run, every relevant query is invalidated → another full re-fetch + re-render.
 
-A static allowlist cannot cover both existing data and future LLM-invented labels. The fix has to be presentation-layer and shape-based.
+The browser has no reason to touch any of this. The only per-item work the client needs is the render for the ~50 rows currently on screen.
 
-## Fix — presentation-only
+## What to change (frontend only, plus one edge function)
 
-All changes in the frontend. No DB migration, no edge-function change, no data mutation.
+### 1. New edge function `review-queue-bulk`
 
-### 1. Render bullets based on VALUE SHAPE, not label allowlist
+One endpoint that handles every bulk action for the current user, entirely server-side.
 
-In `src/lib/profile-list-labels.ts`, replace `isListValuedLabel(label)` with `shouldRenderAsList(label, value)`:
+Input:
+```
+{ action: "keep" | "rollback" | "never_again",
+  scope: "all" | { ids: string[] },      // "all" = every pending row for this user
+  types?: string[]                        // optional filter (unused for now, future-proof)
+}
+```
 
-- Return `false` for a hard denylist of "single fact with commas" labels: `Favorite McDonald's order`, `Go-to recipe`, `Current address`, `Previous address`, `Wedding location`, `Place of birth`, `Full name`, `Preferred name`, `Date of birth`, `Dietary style`, `Cooking skill level`, `Timezone`, `Job title`, `Employer`, `Height`, `Eye color`, `Hair color`, `Blood type`. (These are labels a natural-language value might contain commas in without meaning "multiple items".)
-- Otherwise return `true` when `splitListValue(value).length >= 2`.
-- Keep the known-list overrides (Nickname, Aliases, Skills, Hobbies, Allergies, …) as an allowlist that returns `true` even for single-item values, so a one-item list still renders as a bullet for consistency inside that label family. Optional; if it clutters single-item cases we skip it.
+Behavior (executed with per-request Supabase client using the caller's JWT so RLS still applies):
 
-Update `CompactCategorySection.tsx` to call `shouldRenderAsList(entry.label, entry.value)` instead of `isListValuedLabel(entry.label)`.
+- Load the target `review_queue` rows in server-side pages of 500.
+- For each row, run the same side-effects the current client code runs (`revertAppliedChange`, `createSuppression`, alias handling, moment/participant delete, relationship delete, contact delete, `add_profile_entry` batching, wiki revision rollback via `wiki_rollback_revision` RPC, etc.). All of this happens inside the edge function using the service-role client — one DB region, no browser round-trips.
+- Flip `status` / `blocked_at` in bulk with a single `UPDATE ... WHERE id = ANY($1)` per 500-row page.
+- Wrap the whole thing in `EdgeRuntime.waitUntil(...)` and return `202 { job_id }` immediately so the HTTP call never times out.
+- Write progress to a tiny row in a new lightweight table `review_queue_bulk_jobs` (`id, user_id, action, total, done, failed, status, started_at, finished_at, last_error`). RLS: owner-only.
 
-### 2. Pluralize labels at display time
+### 2. Frontend: replace the current bulk machinery in `src/pages/ReviewQueue.tsx`
 
-Existing rows have singular labels; the alias map only folds new writes. Fix presentation:
+- Delete `runBulk`, `runInBatches`, `bulkFlipStatus`, and all per-item bulk paths.
+- `handleKeepAll` / `handleRemoveAll` / `handleNeverAgainAll` become one-liners that POST to `review-queue-bulk` with `scope: "all"` and receive a `job_id`.
+- Add a small `useBulkJob(jobId)` hook that polls `review_queue_bulk_jobs` every 2 s (not 60 ms) via `useQuery` and drives the existing "Processing X / Y…" indicator. Stop polling on `status in ('done','error')`.
+- On job completion, invalidate the review-queue queries **once**.
 
-- Add `displayLabel(label)` in `src/lib/profile-list-labels.ts` — a small table mapping the singulars seen in DB to their plural display form:
-  - `Favorite restaurant` → `Favorite restaurants`
-  - `Favorite snack` → `Favorite snacks`
-  - `Favorite TV show` → `Favorite TV shows`
-  - `Favorite movie` → `Favorite movies`
-  - `Favorite song` → `Favorite songs`
-  - `Favorite music artist` → `Favorite music artists`
-  - `Favorite character` → `Favorite characters`
-  - `Favorite YouTuber` → `Favorite YouTubers`
-  - `Favorite fruit` → `Favorite fruits`
-  - `Favorite dessert` → `Favorite desserts`
-  - `Favorite drink` → `Favorite drinks`
-  - `Favorite food` → `Favorite foods`
-  - `Favorite place` → `Favorite places`
-  - `Favorite game` → `Favorite games`
-  - `Favorite color` → `Favorite colors`
-  - `Favorite animal` → `Favorite animals`
-- Additionally: when a label is not in that map, if `shouldRenderAsList(label, value)` returns true AND the label ends in a singular common noun with a trivial plural (regex-based, guarded), still leave it alone — don't auto-mangle unknown labels. Keep this table explicit and small.
-- `CompactCategorySection.tsx` renders `displayLabel(entry.label)` (and passes it to `Highlighted`); editing/saving still uses the raw stored label so nothing gets renamed at the DB.
+### 3. Frontend: stop the hidden cost of just *loading* the page
 
-### 3. Character title-casing (unchanged)
+Independent of bulk actions, `useReviewQueue` today pulls the full row shape for every pending item and refetches on a timer.
 
-Keep `titleCaseCharacterName`, applied only when `entry.label` normalized === `favorite characters` (matches whether stored as "Favorite character" or "Favorite characters").
+- Change the list query to `select` only what a card renders (`id, suggestion_type, title, description, source_note_id, target_entity_id, applied_at, is_sensitive, payload, created_at, status, source_note:notes(title)`), and cap it with `.range(0, 499)` — the cards on screen never need more than the first page.
+- Keep the separate `count` query (already `head: true`) for the "2,000 pending changes" label.
+- Drop `refetchInterval: 60_000` on the list query (keep it on the count query only, or move to 5 min). The queue does not need to auto-refresh while the user is staring at it; the count badge is enough.
+- Add pagination cursors so "Next page" fetches the next 500 from the server instead of relying on an in-memory slice of everything.
 
-## Files touched
+### 4. Frontend: cheap render hygiene
 
-- `src/lib/profile-list-labels.ts` — replace `isListValuedLabel` with `shouldRenderAsList(label, value)`; add `displayLabel(label)`; keep `splitListValue`, `titleCaseCharacterName`, `isCharacterLabel`.
-- `src/components/people/profile/CompactCategorySection.tsx` — use `shouldRenderAsList` for the render branch; render `displayLabel(entry.label)` in the label span (both in the header and inside the `Highlighted` component input).
+- Throttle any remaining progress `setState` to at most one update per 250 ms (`requestAnimationFrame` or a simple `Date.now()` gate) so a large job can't flood React.
+- Wrap the card component in `React.memo` keyed by `item.id` so unrelated progress updates don't re-render 50 cards.
 
-## Out of scope
+## Files to touch
 
-- No DB rename of existing rows. Storage stays as-is; the normalizer will still fold future writes toward the plural canonical.
-- No LLM prompt change.
-- Editing UX (EntryForm) is unchanged.
+- `supabase/functions/review-queue-bulk/index.ts` — new.
+- `supabase/migrations/*` — new table `review_queue_bulk_jobs` with RLS + grants.
+- `src/hooks/useReviewQueue.ts` — trim `select`, add server pagination, drop list refetch interval.
+- `src/pages/ReviewQueue.tsx` — remove per-item bulk logic, wire to new edge function + job polling, memoize card, throttle progress.
+- (No changes to the individual per-row Keep / Roll Back / Never Again buttons — those already do one item at a time and are fine.)
+
+## Expected result
+
+Clicking "Keep 2,000 changes" fires a single HTTP request, returns in ~50 ms with a job id, and the UI shows a progress bar driven by a 2 s poll. The browser does zero per-item work, no thousands of round-trips, no thousands of re-renders. Even with 20,000 items the page should stay fully interactive.
+
+## Out of scope (not changing)
+
+- Server-side dedup / normalizer logic itself.
+- Per-row buttons on individual cards.
+- The wiki-revision review UI, other than being handled by the same new endpoint when `scope: "all"`.
