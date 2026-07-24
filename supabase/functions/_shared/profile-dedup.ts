@@ -35,6 +35,16 @@ function normalizeTokenForList(label: string, token: string): { key: string; dis
   if (!cleaned) cleaned = String(token || "").trim();
 
   const lower = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const labelLower = String(label || "").trim().toLowerCase();
+  if (labelLower === "pets" || labelLower === "pet") {
+    const petDisplay = cleaned
+      .replace(/\(([^)]+)\)/g, "$1")
+      .replace(/\bnamed\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const petKey = petDisplay.toLowerCase().replace(/\s+/g, " ");
+    return { key: petKey, display: petDisplay };
+  }
   const healthSynonyms: Record<string, string> = {
     "major depressive disorder": "MDD",
     "major depression": "MDD",
