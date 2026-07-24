@@ -197,6 +197,10 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Allergies",
     "Health conditions",
     "Medications",
+    "Pets",
+    "Personality traits",
+    "VRChat setup",
+    "VRChat equipment",
   ].map((s) => s.toLowerCase()),
 );
 

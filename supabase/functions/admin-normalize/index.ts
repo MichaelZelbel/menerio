@@ -189,6 +189,7 @@ serve(async (req) => {
     if (!userId) return json({ error: "user_id required" }, 400);
     const scope = String(isScheduledQueueRun ? "jobs" : body?.scope || "all");
     const includeNotesContext = body?.includeNotesContext !== false;
+    const deterministicOnly = isScheduledQueueRun || body?.deterministic_only === true;
     // Default: only touch subjects whose profile changed since last successful run.
     // Pass changed_only:false to force a full sweep.
     const changedOnly = isScheduledQueueRun ? true : body?.changed_only !== false;
@@ -290,6 +291,7 @@ serve(async (req) => {
               preferences,
               sourceNoteId: null,
               includeNotesContext,
+              deterministicOnly,
               helpers,
             });
             agg.created += r.created;

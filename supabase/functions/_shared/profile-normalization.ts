@@ -71,6 +71,16 @@ export function normalizeTokenForList(label: string, token: string): { key: stri
   if (!cleaned) cleaned = String(token || "").trim();
 
   const lower = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const labelLower = String(label || "").trim().toLowerCase();
+  if (labelLower === "pets" || labelLower === "pet") {
+    const petDisplay = cleaned
+      .replace(/\(([^)]+)\)/g, "$1")
+      .replace(/\bnamed\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const petKey = petDisplay.toLowerCase().replace(/\s+/g, " ");
+    return { key: petKey, display: petDisplay };
+  }
   const healthSynonyms: Record<string, string> = {
     "major depressive disorder": "MDD",
     "major depression": "MDD",
@@ -145,8 +155,9 @@ export async function planSubjectNormalization(args: {
   userId: string;
   contactId: string | null;
   includeNotesContext?: boolean;
+  deterministicOnly?: boolean;
 }): Promise<NormalizationGroup[]> {
-  const { supabase, userId, contactId, includeNotesContext = false } = args;
+  const { supabase, userId, contactId, includeNotesContext = false, deterministicOnly = false } = args;
 
   // Load all entries for this subject + their categories.
   let entryQuery = supabase
@@ -395,6 +406,7 @@ export async function planSubjectNormalization(args: {
   // This guarantees zero overlap: the LLM cannot see, and therefore cannot
   // touch, any row claimed by the exact-duplicate or soft-single passes.
   const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
+  if (deterministicOnly) return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
   if (llmRows.length < 2) return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
 
   const llmEntries = llmRows.map((r) => ({
@@ -626,6 +638,7 @@ export async function createNormalizationSuggestions(args: {
   preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean };
   sourceNoteId?: string | null;
   includeNotesContext?: boolean;
+  deterministicOnly?: boolean;
   // injected helpers from process-note (avoids circular import)
   helpers: {
     filterSuppressedSuggestions: (userId: string, s: any[]) => Promise<any[]>;
@@ -634,9 +647,9 @@ export async function createNormalizationSuggestions(args: {
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
 }): Promise<{ created: number; autoApplied: number; planned: number; applied: number; review: number; skipped: number }> {
-  const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false } = args;
+  const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false, deterministicOnly = false } = args;
 
-  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext });
+  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext, deterministicOnly });
   if (groups.length === 0) return { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.
