@@ -218,10 +218,12 @@ export function useCreateNote() {
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      broadcastInvalidation([["notes"]]);
       if ((note.title || note.content || "").trim().length >= 20) {
         invokeWikiIngest(note.id, "INSERT");
       }
     },
+
     onError: () => {
       showToast.error("Failed to create note");
     },
