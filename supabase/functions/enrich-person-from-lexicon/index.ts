@@ -645,6 +645,7 @@ async function run(userId: string, contactId: string) {
           .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: s.payload.label, value: s.payload.value, sort_order: 0 })
           .select("id")
           .single();
+        if (error && (error as any).code === "23505") { prepared.push({ ...s, status: "removed" }); continue; }
         if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }
         prepared.push({ ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() });
         autoApplied++;
