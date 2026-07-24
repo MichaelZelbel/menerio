@@ -151,12 +151,13 @@ export function useContactProfile(contactId: string | null) {
         const { error } = await (supabase as any).from("profile_entries").update(entry).eq("id", entry.id);
         if (error) throw error;
       } else {
-        const { error } = await (supabase as any).from("profile_entries").insert({
-          ...entry,
-          user_id: userId!,
-          contact_id: contactId!,
+        const { data, error } = await supabase.functions.invoke("normalize-profile", {
+          body: {
+            action: "write_profile_entry",
+            entry: { ...entry, contact_id: contactId! },
+          },
         });
-        if (error) throw error;
+        if (error || !data?.ok) throw error || new Error(data?.reason || "Profile entry was not saved");
       }
     },
     onSuccess: () => {

@@ -8,6 +8,61 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function norm(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function moveProfileEntriesSafely(args: {
+  supabase: any;
+  userId: string;
+  sourceContactId: string;
+  sourceCategoryId: string;
+  destinationContactId: string | null;
+  destinationCategoryId: string;
+}) {
+  const { supabase, userId, sourceContactId, sourceCategoryId, destinationContactId, destinationCategoryId } = args;
+  const { data: sourceEntries, error: sourceError } = await supabase
+    .from("profile_entries")
+    .select("id, label, value")
+    .eq("user_id", userId)
+    .eq("contact_id", sourceContactId)
+    .eq("category_id", sourceCategoryId);
+  if (sourceError) throw sourceError;
+
+  let targetQuery = supabase
+    .from("profile_entries")
+    .select("id, label, value")
+    .eq("user_id", userId)
+    .eq("category_id", destinationCategoryId);
+  targetQuery = destinationContactId ? targetQuery.eq("contact_id", destinationContactId) : targetQuery.is("contact_id", null);
+  const { data: targetEntries, error: targetError } = await targetQuery;
+  if (targetError) throw targetError;
+
+  const targetKeys = new Set((targetEntries || []).map((entry: any) => `${norm(entry.label)}|${norm(entry.value)}`));
+  for (const entry of (sourceEntries || []) as any[]) {
+    const key = `${norm(entry.label)}|${norm(entry.value)}`;
+    if (targetKeys.has(key)) {
+      await supabase.from("profile_entries").delete().eq("id", entry.id).eq("user_id", userId);
+      continue;
+    }
+
+    const { error } = await supabase
+      .from("profile_entries")
+      .update({ category_id: destinationCategoryId, contact_id: destinationContactId })
+      .eq("id", entry.id)
+      .eq("user_id", userId);
+    if (error) {
+      if ((error as any).code === "23505") {
+        await supabase.from("profile_entries").delete().eq("id", entry.id).eq("user_id", userId);
+      } else {
+        throw error;
+      }
+    } else {
+      targetKeys.add(key);
+    }
+  }
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -163,11 +218,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
           const existingCatId = userCatBySlug.get(srcCat.slug);
           if (existingCatId) {
             // Move entries to user's existing category
-            await supabase
-              .from("profile_entries")
-              .update({ category_id: existingCatId, contact_id: null })
-              .eq("category_id", srcCat.id)
-              .eq("contact_id", source_contact_id);
+            await moveProfileEntriesSafely({
+              supabase,
+              userId,
+              sourceContactId: source_contact_id,
+              sourceCategoryId: srcCat.id,
+              destinationContactId: null,
+              destinationCategoryId: existingCatId,
+            });
           } else {
             // Move the whole category to user profile
             await supabase
@@ -215,7 +273,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             .maybeSingle();
 
           if (!existing) {
-            await supabase.from("profile_entries").insert({
+            const { error: aliasInsertError } = await supabase.from("profile_entries").insert({
               user_id: userId,
               contact_id: null,
               category_id: userIdentityCat.id,
@@ -223,6 +281,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
               value: alias,
               sort_order: 99,
             });
+            if (aliasInsertError && (aliasInsertError as any).code !== "23505") throw aliasInsertError;
           }
         }
       }
@@ -247,11 +306,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
           const existingCatId = tgtCatBySlug.get(srcCat.slug);
           if (existingCatId) {
             // Move entries to target's existing category
-            await supabase
-              .from("profile_entries")
-              .update({ category_id: existingCatId, contact_id: targetContactId })
-              .eq("category_id", srcCat.id)
-              .eq("contact_id", source_contact_id);
+            await moveProfileEntriesSafely({
+              supabase,
+              userId,
+              sourceContactId: source_contact_id,
+              sourceCategoryId: srcCat.id,
+              destinationContactId: targetContactId,
+              destinationCategoryId: existingCatId,
+            });
           } else {
             // Move the whole category to target
             await supabase

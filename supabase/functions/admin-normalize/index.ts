@@ -56,6 +56,40 @@ async function writeRunState(db: any, userId: string, contactId: string | null, 
   }
 }
 
+async function markJob(db: any, id: string, values: Record<string, unknown>) {
+  await db.from("profile_normalization_jobs").update(values).eq("id", id);
+}
+
+async function claimQueuedJobs(db: any, userId: string, limit: number) {
+  const { data: queued, error } = await db
+    .from("profile_normalization_jobs")
+    .select("id, user_id, contact_id, subject_type, attempts")
+    .eq("user_id", userId)
+    .in("status", ["queued", "failed"])
+    .lt("attempts", 5)
+    .order("requested_at", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  const claimed: Array<{ id: string; user_id: string; contact_id: string | null }> = [];
+  for (const job of (queued || []) as any[]) {
+    const { data } = await db
+      .from("profile_normalization_jobs")
+      .update({
+        status: "running",
+        attempts: Number(job.attempts || 0) + 1,
+        claimed_at: new Date().toISOString(),
+        last_error: null,
+      })
+      .eq("id", job.id)
+      .in("status", ["queued", "failed"])
+      .select("id, user_id, contact_id")
+      .maybeSingle();
+    if (data?.id) claimed.push(data);
+  }
+  return claimed;
+}
+
 async function getPrefs(db: any, userId: string) {
   const { data } = await db
     .from("ai_suggestion_preferences")
@@ -124,9 +158,30 @@ serve(async (req) => {
     // Default: only touch subjects whose profile changed since last successful run.
     // Pass changed_only:false to force a full sweep.
     const changedOnly = body?.changed_only !== false;
+    const processJobs = body?.process_jobs !== false;
+    const jobLimit = Math.min(Math.max(Number(body?.job_limit || 100), 1), 500);
 
     const subjects: Array<string | null> = [];
-    if (scope === "owner") subjects.push(null);
+    const jobBySubject = new Map<string, string[]>();
+    if (processJobs) {
+      const jobs = await claimQueuedJobs(db, userId, jobLimit);
+      for (const job of jobs) {
+        const subject = job.contact_id ?? null;
+        const key = subject ?? "owner";
+        if (!jobBySubject.has(key)) {
+          jobBySubject.set(key, []);
+          subjects.push(subject);
+        }
+        jobBySubject.get(key)?.push(job.id);
+      }
+    }
+
+    if (subjects.length > 0) {
+      // Queue mode: only process subjects explicitly dirtied by profile writes.
+    } else if (processJobs && scope !== "owner" && scope !== "contact") {
+      // Scheduled/default mode is queue-only: no dirty subjects means no work.
+      // Force a full sweep by calling with { process_jobs: false, scope: "all" }.
+    } else if (scope === "owner") subjects.push(null);
     else if (scope === "contact") {
       const cid = String(body?.contact_id || "");
       if (!cid) return json({ error: "contact_id required" }, 400);
@@ -222,6 +277,9 @@ serve(async (req) => {
             completed_at: new Date().toISOString(),
           });
           console.log(`[admin-normalize] subject=${subj ?? "owner"} done`, agg);
+          for (const jobId of jobBySubject.get(subj ?? "owner") || []) {
+            await markJob(db, jobId, { status: "completed", processed_at: new Date().toISOString(), last_error: null });
+          }
         } catch (e) {
           const msg = String(e);
           await writeRunState(db, userId, subj, {
@@ -229,6 +287,9 @@ serve(async (req) => {
             error_message: msg,
             completed_at: new Date().toISOString(),
           });
+          for (const jobId of jobBySubject.get(subj ?? "owner") || []) {
+            await markJob(db, jobId, { status: "failed", last_error: msg, processed_at: new Date().toISOString() });
+          }
           console.error(`[admin-normalize] subject=${subj ?? "owner"} failed`, msg);
         }
       }

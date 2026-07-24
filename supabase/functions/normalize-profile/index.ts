@@ -1,12 +1,23 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { z } from "npm:zod@3.23.8";
 import {
   applyNormalization,
   createNormalizationSuggestions,
   planSubjectNormalization,
   rollbackNormalization,
+  splitListTokens,
   type NormalizationPayload,
 } from "../_shared/profile-normalization.ts";
+import {
+  canonicalProfileLabel,
+  correctProfileCategory,
+  isListValuedLabel,
+} from "../_shared/profile-canonical-schema.ts";
+import {
+  buildProfileTokenIndex,
+  dedupIncomingProfileValue,
+} from "../_shared/profile-dedup.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,6 +64,282 @@ const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
   normalize_profile_entry: { conservative: 0.92, balanced: 0.85, exploratory: 0.75 },
 };
+
+const ProfileEntryInputSchema = z.object({
+  contact_id: z.string().uuid().nullable().optional(),
+  category_id: z.string().uuid().nullable().optional(),
+  category_slug: z.string().trim().min(1).max(80).optional(),
+  label: z.string().trim().min(1).max(160),
+  value: z.string().trim().min(1).max(2000),
+  sort_order: z.coerce.number().int().min(0).max(10_000).optional(),
+  linked_note_id: z.string().uuid().nullable().optional(),
+  is_pinned: z.boolean().optional(),
+});
+
+const BulkProfileReviewSchema = z.object({
+  decision: z.enum(["keep"]),
+  review_ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+function normalizeComparable(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function subjectFilter(query: any, contactId: string | null) {
+  return contactId ? query.eq("contact_id", contactId) : query.is("contact_id", null);
+}
+
+async function resolveCategoryForWrite(
+  db: any,
+  userId: string,
+  contactId: string | null,
+  input: { category_id?: string | null; category_slug?: string },
+  correctedSlug: string,
+): Promise<{ id: string; slug: string } | null> {
+  if (input.category_id) {
+    const { data } = await db
+      .from("profile_categories")
+      .select("id, slug")
+      .eq("id", input.category_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (data?.id && data.slug === correctedSlug) return { id: data.id, slug: data.slug };
+  }
+
+  const base = db
+    .from("profile_categories")
+    .select("id, slug")
+    .eq("user_id", userId)
+    .eq("slug", correctedSlug);
+  const { data: existing } = contactId
+    ? await base.eq("contact_id", contactId).maybeSingle()
+    : await base.is("contact_id", null).maybeSingle();
+  if (existing?.id) return { id: existing.id, slug: existing.slug };
+
+  const { data: created, error } = await db
+    .from("profile_categories")
+    .insert({
+      user_id: userId,
+      contact_id: contactId,
+      slug: correctedSlug,
+      name: correctedSlug.charAt(0).toUpperCase() + correctedSlug.slice(1),
+      icon: "folder",
+      is_default: false,
+      sort_order: 99,
+      visibility_scope: "all",
+    } as any)
+    .select("id, slug")
+    .maybeSingle();
+
+  if (created?.id) return { id: created.id, slug: created.slug };
+  if (error && (error as any).code !== "23505") throw error;
+
+  const retryBase = db
+    .from("profile_categories")
+    .select("id, slug")
+    .eq("user_id", userId)
+    .eq("slug", correctedSlug);
+  const { data: raced } = contactId
+    ? await retryBase.eq("contact_id", contactId).maybeSingle()
+    : await retryBase.is("contact_id", null).maybeSingle();
+  return raced?.id ? { id: raced.id, slug: raced.slug } : null;
+}
+
+async function enqueueSubjectNormalization(db: any, userId: string, contactId: string | null, reason: string) {
+  const { error } = await db.rpc("enqueue_profile_normalization_job", {
+    p_user_id: userId,
+    p_contact_id: contactId,
+    p_reason: reason,
+  });
+  if (error) console.error("[normalize-profile] enqueue failed:", error);
+}
+
+function normalizeIncomingFact(categorySlug: string, label: string, value: string) {
+  let nextSlug = categorySlug;
+  let nextLabel = label.trim();
+  let nextValue = value.trim();
+  const booleanValues = new Set(["true", "yes", "y", "x", "✓", "✔"]);
+  const lowerValue = nextValue.toLowerCase();
+  const diagnosisMatch = nextLabel.match(/^diagnosis\s*:\s*(.+)$/i);
+
+  if (nextSlug === "health" && diagnosisMatch?.[1]?.trim()) {
+    nextLabel = "Health conditions";
+    nextValue = diagnosisMatch[1].trim();
+  } else if (nextSlug === "health" && booleanValues.has(lowerValue) && nextLabel.length <= 60 && !/[:{}]/.test(nextLabel)) {
+    nextValue = nextLabel;
+    nextLabel = "Health conditions";
+  }
+
+  nextSlug = correctProfileCategory(nextLabel, nextSlug);
+  nextLabel = canonicalProfileLabel(nextSlug, nextLabel);
+  nextSlug = correctProfileCategory(nextLabel, nextSlug);
+  return { categorySlug: nextSlug, label: nextLabel, value: nextValue };
+}
+
+async function writeProfileEntrySafely(args: {
+  db: any;
+  userId: string;
+  input: z.infer<typeof ProfileEntryInputSchema>;
+  reviewId?: string | null;
+}): Promise<{ ok: boolean; outcome: "inserted" | "already_exists" | "merged_list" | "rejected_duplicate"; entryId?: string | null; reason?: string }> {
+  const { db, userId, input, reviewId = null } = args;
+  const contactId = input.contact_id ?? null;
+
+  if (contactId) {
+    const { data: contact } = await db.from("contacts").select("id").eq("id", contactId).eq("user_id", userId).maybeSingle();
+    if (!contact?.id) return { ok: false, outcome: "rejected_duplicate", reason: "contact_not_found" };
+  }
+
+  let categorySlug = input.category_slug || "preferences";
+  if (!input.category_slug && input.category_id) {
+    const { data: cat } = await db
+      .from("profile_categories")
+      .select("slug")
+      .eq("id", input.category_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (cat?.slug) categorySlug = cat.slug;
+  }
+
+  const fact = normalizeIncomingFact(categorySlug, input.label, input.value);
+  const category = await resolveCategoryForWrite(db, userId, contactId, input, fact.categorySlug);
+  if (!category?.id) return { ok: false, outcome: "rejected_duplicate", reason: "category_unresolved" };
+
+  const { data: entries } = await subjectFilter(
+    db.from("profile_entries").select("id, category_id, contact_id, label, value, sort_order, linked_note_id").eq("user_id", userId),
+    contactId,
+  );
+  const { data: categories } = await subjectFilter(
+    db.from("profile_categories").select("id, slug").eq("user_id", userId),
+    contactId,
+  );
+  const slugById = new Map(((categories || []) as any[]).map((c) => [c.id, c.slug]));
+
+  const exact = ((entries || []) as any[]).find((entry) =>
+    entry.category_id === category.id &&
+    normalizeComparable(entry.label) === normalizeComparable(fact.label) &&
+    normalizeComparable(entry.value) === normalizeComparable(fact.value)
+  );
+  if (exact?.id) return { ok: true, outcome: "already_exists", entryId: exact.id };
+
+  const queueQuery = db
+    .from("review_queue")
+    .select("id, payload, status")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "add_profile_entry")
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+  const { data: queueRows } = reviewId ? await queueQuery.neq("id", reviewId) : await queueQuery;
+
+  const dedupIndex = buildProfileTokenIndex(
+    (entries || []) as any[],
+    (queueRows || []).map((q: any) => ({
+      contact_id: q.payload?.contact_id ?? null,
+      label: String(q.payload?.label || ""),
+      value: String(q.payload?.value || ""),
+    })),
+  );
+  const dedup = dedupIncomingProfileValue({ contactId, label: fact.label, value: fact.value, index: dedupIndex });
+  if (dedup.action === "skip") {
+    const sameLabel = ((entries || []) as any[]).find((entry) => {
+      const currentSlug = slugById.get(entry.category_id) || categorySlug;
+      const corrected = correctProfileCategory(entry.label, currentSlug);
+      const currentLabel = canonicalProfileLabel(corrected, entry.label);
+      return normalizeComparable(currentLabel) === normalizeComparable(fact.label);
+    });
+    return { ok: true, outcome: "already_exists", entryId: sameLabel?.id ?? exact?.id ?? null, reason: dedup.reason };
+  }
+
+  if (isListValuedLabel(fact.label)) {
+    const existingList = ((entries || []) as any[]).find((entry) => {
+      const currentSlug = slugById.get(entry.category_id) || categorySlug;
+      const corrected = correctProfileCategory(entry.label, currentSlug);
+      const currentLabel = canonicalProfileLabel(corrected, entry.label);
+      return normalizeComparable(currentLabel) === normalizeComparable(fact.label);
+    });
+    if (existingList?.id) {
+      const seen = new Set<string>();
+      const union: string[] = [];
+      for (const tok of [...splitListTokens(fact.label, existingList.value), ...splitListTokens(fact.label, dedup.value)]) {
+        if (seen.has(tok.key)) continue;
+        seen.add(tok.key);
+        union.push(tok.display);
+      }
+      const nextValue = union.join(", ");
+      if (normalizeComparable(existingList.value) === normalizeComparable(nextValue) && existingList.category_id === category.id && existingList.label === fact.label) {
+        return { ok: true, outcome: "already_exists", entryId: existingList.id };
+      }
+      const { data, error } = await db
+        .from("profile_entries")
+        .update({ category_id: category.id, label: fact.label, value: nextValue })
+        .eq("id", existingList.id)
+        .eq("user_id", userId)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      await enqueueSubjectNormalization(db, userId, contactId, "profile_entry_merged_list");
+      return { ok: true, outcome: "merged_list", entryId: data?.id ?? existingList.id };
+    }
+  }
+
+  const { data: inserted, error } = await db
+    .from("profile_entries")
+    .insert({
+      user_id: userId,
+      contact_id: contactId,
+      category_id: category.id,
+      label: fact.label,
+      value: dedup.value,
+      sort_order: input.sort_order ?? 0,
+      linked_note_id: input.linked_note_id ?? null,
+      is_pinned: input.is_pinned ?? false,
+    } as any)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    if ((error as any).code === "23505") return { ok: true, outcome: "already_exists", entryId: null, reason: "unique_guard" };
+    throw error;
+  }
+
+  await enqueueSubjectNormalization(db, userId, contactId, "profile_entry_inserted");
+  return { ok: true, outcome: "inserted", entryId: inserted?.id ?? null };
+}
+
+async function acceptProfileEntryReview(db: any, userId: string, reviewId: string) {
+  const { data: row, error } = await db
+    .from("review_queue")
+    .select("id, user_id, suggestion_type, payload, source_note_id, status")
+    .eq("id", reviewId)
+    .maybeSingle();
+  if (error || !row) return { ok: false, outcome: "rejected_duplicate", reason: "not_found" };
+  if (row.user_id !== userId) return { ok: false, outcome: "rejected_duplicate", reason: "forbidden" };
+  if (row.suggestion_type !== "add_profile_entry") return { ok: false, outcome: "rejected_duplicate", reason: "wrong_suggestion_type" };
+  const payload = row.payload || {};
+  const parsed = ProfileEntryInputSchema.safeParse({
+    contact_id: payload.contact_id ?? null,
+    category_id: payload.category_id ?? null,
+    category_slug: payload.category_slug,
+    label: payload.label,
+    value: payload.value,
+    linked_note_id: row.source_note_id ?? null,
+  });
+  if (!parsed.success) return { ok: false, outcome: "rejected_duplicate", reason: "invalid_payload" };
+
+  const result = await writeProfileEntrySafely({ db, userId, input: parsed.data, reviewId });
+  if (result.ok) {
+    await db
+      .from("review_queue")
+      .update({
+        status: "kept",
+        target_entity_type: "profile_entry",
+        target_entity_id: result.entryId ?? null,
+        applied_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", reviewId);
+  }
+  return result;
+}
 function thresholdFor(suggestionType: string, sensitivity: string): number {
   const perType = AUTO_APPLY_THRESHOLDS[suggestionType];
   if (perType && perType[sensitivity] !== undefined) return perType[sensitivity];
@@ -359,6 +646,43 @@ serve(async (req) => {
         runAll();
       }
       return json({ ok: true, started: true, scope, subjectCount: subjects.length }, 202);
+    }
+
+    if (action === "write_profile_entry") {
+      const parsed = ProfileEntryInputSchema.safeParse(body?.entry || body);
+      if (!parsed.success) return json({ error: parsed.error.flatten().fieldErrors }, 400);
+      const result = await writeProfileEntrySafely({ db, userId, input: parsed.data });
+      if (!result.ok) return json({ ok: false, reason: result.reason || result.outcome }, 409);
+      return json({ ok: true, ...result });
+    }
+
+    if (action === "accept_profile_entry") {
+      const reviewId = String(body?.review_id || "");
+      if (!reviewId) return json({ error: "review_id required" }, 400);
+      const result = await acceptProfileEntryReview(db, userId, reviewId);
+      if (!result.ok) return json({ ok: false, reason: result.reason || result.outcome }, 409);
+      return json({ ok: true, ...result });
+    }
+
+    if (action === "bulk_profile_reviews") {
+      const parsed = BulkProfileReviewSchema.safeParse(body);
+      if (!parsed.success) return json({ error: parsed.error.flatten().fieldErrors }, 400);
+      const summary = { processed: 0, inserted: 0, already_exists: 0, merged_list: 0, rejected_duplicate: 0, failed: 0 };
+      for (const reviewId of parsed.data.review_ids) {
+        try {
+          const result = await acceptProfileEntryReview(db, userId, reviewId);
+          summary.processed += 1;
+          if (result.ok && result.outcome === "inserted") summary.inserted += 1;
+          else if (result.ok && result.outcome === "already_exists") summary.already_exists += 1;
+          else if (result.ok && result.outcome === "merged_list") summary.merged_list += 1;
+          else summary.rejected_duplicate += 1;
+        } catch (e) {
+          summary.processed += 1;
+          summary.failed += 1;
+          console.error("[normalize-profile] bulk profile review failed", reviewId, e);
+        }
+      }
+      return json({ ok: true, summary });
     }
 
     if (action === "apply") {
