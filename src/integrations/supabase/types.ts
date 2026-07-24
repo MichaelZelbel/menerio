@@ -3069,6 +3069,7 @@ export type Database = {
           notes_hidden: number
         }[]
       }
+      backfill_accumulator_profile_entries: { Args: never; Returns: Json }
       cleanup_profile_duplicates: {
         Args: { _contact_id: string; _user_id: string }
         Returns: Json
@@ -3226,6 +3227,10 @@ export type Database = {
       }
       profile_canonical_label: { Args: { t: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
+      profile_is_accumulator_label: {
+        Args: { p_canonical: string }
+        Returns: boolean
+      }
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
       profile_tokenize_value: { Args: { t: string }; Returns: string[] }
