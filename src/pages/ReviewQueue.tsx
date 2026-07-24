@@ -875,10 +875,26 @@ export default function ReviewQueue() {
 
 
   const hasReviewItems = items.length + wikiRevisions.length > 0;
-  const combinedReviewItems = [
-    ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
-    ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
-  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const combinedReviewItems = useMemo(
+    () =>
+      [
+        ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
+        ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [items, wikiRevisions],
+  );
+
+  // Paginate to keep the DOM small even with thousands of pending items.
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(combinedReviewItems.length / PAGE_SIZE));
+  useEffect(() => {
+    if (page > pageCount - 1) setPage(0);
+  }, [page, pageCount]);
+  const pageItems = useMemo(
+    () => combinedReviewItems.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [combinedReviewItems, page],
+  );
 
   if (isLoading) {
     return (
@@ -891,6 +907,8 @@ export default function ReviewQueue() {
     );
   }
 
+  const bulkDisabled = updateStatus.isPending || isBulkRunning || !hasReviewItems;
+
   return (
     <div className="p-6 space-y-6 max-w-3xl">
       <div>
@@ -898,24 +916,37 @@ export default function ReviewQueue() {
         <p className="text-muted-foreground text-sm mt-1">
           Menerio automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
         </p>
+        {hasReviewItems && (
+          <p className="text-xs text-muted-foreground mt-2">
+            {combinedReviewItems.length.toLocaleString()} pending {combinedReviewItems.length === 1 ? "change" : "changes"}
+            {pageCount > 1 && <> · showing {page * PAGE_SIZE + 1}–{Math.min(combinedReviewItems.length, (page + 1) * PAGE_SIZE)}</>}
+          </p>
+        )}
       </div>
 
       {hasReviewItems && (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={updateStatus.isPending || !hasReviewItems}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={bulkDisabled}>
             <X className="h-4 w-4 mr-1" />
             Never Again
           </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || !hasReviewItems}>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={bulkDisabled}>
             <RotateCcw className="h-4 w-4 mr-1" />
             Roll Back
           </Button>
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || !hasReviewItems}>
+          <Button size="sm" onClick={handleKeepAll} disabled={bulkDisabled}>
             <Check className="h-4 w-4 mr-1" />
             Keep
           </Button>
+          {isBulkRunning && bulkProgress && (
+            <span className="text-xs text-muted-foreground ml-2">
+              Processing {bulkProgress.done.toLocaleString()} / {bulkProgress.total.toLocaleString()}…
+            </span>
+          )}
         </div>
       )}
+
+
 
       {!hasReviewItems ? (
         <Card>
