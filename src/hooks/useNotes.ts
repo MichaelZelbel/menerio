@@ -8,6 +8,8 @@ import { ilikeContains } from "@/lib/postgrest";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
+import { broadcastInvalidation } from "@/lib/query-sync";
+
 
 export interface RelatedItem {
   type: string;
@@ -126,7 +128,12 @@ function useNotesRemote(filter: "all" | "favorites" | "trash") {
   return useQuery<Note[]>({
     queryKey: ["notes", filter, user?.id],
     enabled: !!user,
+    // Always revalidate against Supabase when a component (in particular a
+    // popped-out note window) first mounts, so a fresh window never renders
+    // a persisted-but-stale copy of the notes list.
+    refetchOnMount: "always",
     queryFn: async () => {
+
       let query = supabase
         .from("notes" as any)
         .select(NOTE_COLUMNS)
@@ -211,10 +218,12 @@ export function useCreateNote() {
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      broadcastInvalidation([["notes"]]);
       if ((note.title || note.content || "").trim().length >= 20) {
         invokeWikiIngest(note.id, "INSERT");
       }
     },
+
     onError: () => {
       showToast.error("Failed to create note");
     },
@@ -273,6 +282,8 @@ export function useUpdateNote() {
         qc.setQueryData<Note[]>(key, next);
       }
       qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
+      broadcastInvalidation([["notes"]]);
+
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
       }
@@ -297,6 +308,8 @@ export function useDeleteNote() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      broadcastInvalidation([["notes"]]);
+
       showToast.batched.success("note:delete-permanent", (n) =>
         n === 1 ? "Note permanently deleted" : `${n} notes permanently deleted`,
       );
@@ -411,6 +424,8 @@ export function useDuplicateNote() {
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      broadcastInvalidation([["notes"]]);
+
       showToast.success("Duplicated note");
       if ((note.title || note.content || "").trim().length >= 20) {
         invokeWikiIngest(note.id, "INSERT");

@@ -1,48 +1,57 @@
-## Goal
+# Fix: popped-out note window shows stale content for minutes
 
-Each of the three panels (Note Metadata, Links, Backlinks) remembers **the user's own choice** as a global preference:
+## Root cause (confirmed by reading the code)
 
-- Never touched → collapsed on every note (today's expected default).
-- User expands it once → stays expanded on every note they open, across reloads.
-- User collapses it again → stays collapsed everywhere until they change their mind.
+Each browser window runs its own React Query cache in memory, but they share the on-disk cache in IndexedDB via `queryPersister` (`src/lib/query-persister.ts`, wired in `src/App.tsx:73-88`). The defaults are:
 
-No per-note memory — the preference is per panel, not per note.
+- `staleTime: 5 * 60 * 1000` (5 minutes)
+- `refetchOnWindowFocus: false`
+- `networkMode: "offlineFirst"`
+- `persister: queryPersister.persisterFn`
 
-## Why the current behavior is wrong
+When you pop a note out with `window.open('/dashboard/notes/:id', '_blank')` (`src/components/notes/NoteEditor.tsx:1116`), the new window:
 
-Right now each panel uses local `useState(false)` plus a `useEffect` that force-resets to `false` on every `noteId` change. That both (a) makes the "sticky expand" you want impossible and (b) is fragile enough that a stale render can leave them open — which is what you saw today.
+1. Hydrates the notes list / note detail query from IndexedDB (the version written by the *previous* save, or an even older one).
+2. Sees the query as "fresh" (< 5 min old) and does not refetch.
+3. Because `refetchOnWindowFocus` is off and there is no cross-window invalidation, edits made in window A never reach window B until the 5-minute stale timer expires.
+
+Meanwhile window A shows the new version after a manual reload because its own in-memory cache was just updated by the save mutation, and reload repopulates from that same recent write.
+
+The "few minutes" delay the user describes matches the 5-minute `staleTime` exactly.
 
 ## Fix
 
-### 1. New hook: `src/hooks/useStickyPanelPreference.ts`
+Add cross-window cache synchronization so a save in one window immediately invalidates the affected queries in every other window of the same app.
 
-- Signature: `useStickyPanelPreference(key: "note-metadata" | "note-links" | "note-backlinks"): [boolean, (v: boolean) => void]`
-- Reads/writes `localStorage` under `menerio.panelPrefs.<key>` (safe JSON parse, defaults to `false`).
-- SSR-safe (guards `typeof window`).
-- Emits a `storage`-like event so multiple mounted instances stay in sync within the same tab.
+### 1. New module: `src/lib/query-sync.ts`
 
-### 2. Wire it into the three panels
+- Create a `BroadcastChannel("menerio-query-sync")` (fallback: `storage` event on `localStorage` for Safari private mode).
+- Export `broadcastInvalidation(keys: unknown[][])` — posts `{type: "invalidate", keys, ts}`.
+- Export `installQuerySyncListener(queryClient)` — on message, calls `queryClient.invalidateQueries({queryKey})` for each key and also removes the matching entries from the IndexedDB persister so a follow-up reload can't resurrect the stale copy.
 
-- `src/components/notes/NoteMetadataEditor.tsx` — replace `useState(false)` + `useEffect([noteId])` reset with `useStickyPanelPreference("note-metadata")`.
-- `src/components/notes/OutgoingLinksPanel.tsx` — same, key `"note-links"`.
-- `src/components/notes/BacklinksPanel.tsx` — same, key `"note-backlinks"`.
+### 2. Wire the listener once at app boot
 
-Remove the `useEffect(() => setX(false), [noteId])` blocks and the outdated "NoteEditor reuses this instance" comments (NoteEditor actually does remount via `key={selectedNote.id}`).
+In `src/App.tsx` near the `QueryClient` creation, call `installQuerySyncListener(queryClient)` inside a `useEffect` in a small `<QuerySyncBridge/>` component mounted under `QueryClientProvider`.
 
-### 3. Regression test
+### 3. Broadcast on note writes
 
-`src/components/notes/__tests__/panelStickyPreference.test.tsx` (vitest + Testing Library):
+In `src/hooks/useNotes.ts`, wherever we currently call `qc.invalidateQueries({ queryKey: ["notes"] })` after a successful save / update / delete (lines ~213, 275, 299, 413), also call `broadcastInvalidation([["notes"], ["note", id]])`. Same treatment for the single-note detail hook if it uses a different key.
 
-- Fresh localStorage → Metadata panel renders collapsed for note A and note B.
-- User clicks to expand on note A → localStorage updated → navigating to note B renders expanded.
-- User collapses on note B → note A renders collapsed on next open.
+### 4. Belt-and-suspenders for the note detail route
 
-## Files touched
+In the note detail query (the one that powers `/dashboard/notes/:id`), set `refetchOnMount: "always"` so a freshly opened window always revalidates against Supabase on top of the broadcast mechanism. This is scoped to that one query, not global, so we don't churn other screens.
 
-- add `src/hooks/useStickyPanelPreference.ts`
-- edit `src/components/notes/NoteMetadataEditor.tsx`
-- edit `src/components/notes/OutgoingLinksPanel.tsx`
-- edit `src/components/notes/BacklinksPanel.tsx`
-- add `src/components/notes/__tests__/panelStickyPreference.test.tsx`
+### 5. Don't leave stale data in IndexedDB
 
-No backend, schema, or edge-function changes.
+When we broadcast an invalidation, also remove the persisted entry for the affected keys via `queryPersister.persisterFn`'s storage layer (already exposed in `src/lib/query-persister.ts`). This prevents the next cold reload of the popped-out window from painting the old note before the refetch finishes.
+
+## Out of scope
+
+- No change to `staleTime` globally — reducing it would cause extra refetches everywhere.
+- No change to the pop-out mechanism itself (`window.open`).
+- No Supabase realtime subscriptions (heavier; the broadcast + refetch-on-mount is enough for the same-user, same-browser case the user described).
+
+## Verification
+
+- Manual: edit a note, pop it out, confirm the new window renders the current version immediately (and after hard reload).
+- Automated: add a small vitest around `query-sync.ts` (message round-trip triggers `invalidateQueries` with the expected keys).
