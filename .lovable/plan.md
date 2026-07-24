@@ -1,57 +1,40 @@
-# Fix: popped-out note window shows stale content for minutes
+## Why it freezes today
 
-## Root cause (confirmed by reading the code)
+Two problems compound on the Review Queue at 2,300 items:
 
-Each browser window runs its own React Query cache in memory, but they share the on-disk cache in IndexedDB via `queryPersister` (`src/lib/query-persister.ts`, wired in `src/App.tsx:73-88`). The defaults are:
+1. **All rows render at once.** `src/pages/ReviewQueue.tsx` loads every pending item into a single `combinedReviewItems.map(...)` list — no pagination, no virtualization. That's ~2,300 Cards mounted simultaneously.
+2. **Bulk "Keep / Roll Back / Never Again" fires ~2,300 individual mutations.** Each `updateStatus.mutate(...)` triggers a React Query invalidation, which refetches all 2,300 rows and re‑renders the giant list. It also broadcasts a cross-window cache-sync message per call (recent `query-sync` addition). Result: O(N²) DOM work + thousands of network round-trips → the tab pins a CPU core and the OS starves.
 
-- `staleTime: 5 * 60 * 1000` (5 minutes)
-- `refetchOnWindowFocus: false`
-- `networkMode: "offlineFirst"`
-- `persister: queryPersister.persisterFn`
+## Fix (frontend only, no schema changes)
 
-When you pop a note out with `window.open('/dashboard/notes/:id', '_blank')` (`src/components/notes/NoteEditor.tsx:1116`), the new window:
+### 1. Paginate the on-screen list
+- Add client-side pagination in `ReviewQueue.tsx`: show 50 items per page with Prev / Next / "Page X of Y" controls above the list.
+- Keep `useReviewQueue` fetching the full lightweight list (id, title, small payload) so counts and bulk actions still work, but only render the current page's slice. This alone cuts steady-state DOM from ~2,300 Cards to 50.
 
-1. Hydrates the notes list / note detail query from IndexedDB (the version written by the *previous* save, or an even older one).
-2. Sees the query as "fresh" (< 5 min old) and does not refetch.
-3. Because `refetchOnWindowFocus` is off and there is no cross-window invalidation, edits made in window A never reach window B until the 5-minute stale timer expires.
+### 2. Batch the bulk actions and suppress intermediate refetches
+Rewrite `handleKeepAll`, `handleRemoveAll`, `handleNeverAgainAll` so they:
 
-Meanwhile window A shows the new version after a manual reload because its own in-memory cache was just updated by the save mutation, and reload repopulates from that same recent write.
+- **Split items into two buckets:**
+  - *Already-applied* items (`target_entity_id && applied_at`): flip status in a single Supabase bulk update — `supabase.from("review_queue").update({ status, reviewed_at }).in("id", ids)` — instead of N mutations.
+  - *Not-yet-applied* items: process through the existing per-item accept/revert path (they need side effects) but in **small concurrent batches** (e.g. 10 at a time via a simple worker pool) with a progress toast ("Keeping 450 / 2,300…").
+- **Pause query invalidations during the loop:** don't call `updateStatus.mutate` per item (which auto-invalidates). Do the DB writes directly, then invalidate the review-queue queries **once** at the end, and broadcast a single cross-window sync message.
+- Disable the bulk buttons while running and show a progress indicator.
 
-The "few minutes" delay the user describes matches the 5-minute `staleTime` exactly.
+### 3. Cheaper re-renders
+- Extract each row into a memoized `ReviewItemCard` / `WikiRevisionCard` component wrapped in `React.memo` so incremental updates don't re-render every card.
+- Compute `combinedReviewItems` inside a `useMemo` keyed on the source arrays.
 
-## Fix
+### 4. Safety
+- Add a confirm dialog before bulk Keep/Roll Back/Never Again when the queue exceeds a threshold (e.g. 100 items), showing the count.
+- Keep the existing per-item error isolation and failure toasts, but coalesce them into a single summary toast ("Kept 2,287; 13 failed") to avoid flooding the toast stack.
 
-Add cross-window cache synchronization so a save in one window immediately invalidates the affected queries in every other window of the same app.
+## Out of scope (call out, don't change now)
+- No changes to `normalize-profile`, `useReviewQueue`, RLS, or DB schema.
+- No virtualization library added yet — pagination + memoization should be enough. If a user routinely exceeds ~500 items per page we can revisit with `@tanstack/react-virtual`.
 
-### 1. New module: `src/lib/query-sync.ts`
+## Files touched
+- `src/pages/ReviewQueue.tsx` — pagination, batched bulk handlers, memoized row components, confirm dialog for large bulk ops.
+- (Optional) small helper in the same file or a new `src/pages/reviewQueueBulk.ts` for the worker-pool utility, if it keeps the page readable.
 
-- Create a `BroadcastChannel("menerio-query-sync")` (fallback: `storage` event on `localStorage` for Safari private mode).
-- Export `broadcastInvalidation(keys: unknown[][])` — posts `{type: "invalidate", keys, ts}`.
-- Export `installQuerySyncListener(queryClient)` — on message, calls `queryClient.invalidateQueries({queryKey})` for each key and also removes the matching entries from the IndexedDB persister so a follow-up reload can't resurrect the stale copy.
-
-### 2. Wire the listener once at app boot
-
-In `src/App.tsx` near the `QueryClient` creation, call `installQuerySyncListener(queryClient)` inside a `useEffect` in a small `<QuerySyncBridge/>` component mounted under `QueryClientProvider`.
-
-### 3. Broadcast on note writes
-
-In `src/hooks/useNotes.ts`, wherever we currently call `qc.invalidateQueries({ queryKey: ["notes"] })` after a successful save / update / delete (lines ~213, 275, 299, 413), also call `broadcastInvalidation([["notes"], ["note", id]])`. Same treatment for the single-note detail hook if it uses a different key.
-
-### 4. Belt-and-suspenders for the note detail route
-
-In the note detail query (the one that powers `/dashboard/notes/:id`), set `refetchOnMount: "always"` so a freshly opened window always revalidates against Supabase on top of the broadcast mechanism. This is scoped to that one query, not global, so we don't churn other screens.
-
-### 5. Don't leave stale data in IndexedDB
-
-When we broadcast an invalidation, also remove the persisted entry for the affected keys via `queryPersister.persisterFn`'s storage layer (already exposed in `src/lib/query-persister.ts`). This prevents the next cold reload of the popped-out window from painting the old note before the refetch finishes.
-
-## Out of scope
-
-- No change to `staleTime` globally — reducing it would cause extra refetches everywhere.
-- No change to the pop-out mechanism itself (`window.open`).
-- No Supabase realtime subscriptions (heavier; the broadcast + refetch-on-mount is enough for the same-user, same-browser case the user described).
-
-## Verification
-
-- Manual: edit a note, pop it out, confirm the new window renders the current version immediately (and after hard reload).
-- Automated: add a small vitest around `query-sync.ts` (message round-trip triggers `invalidateQueries` with the expected keys).
+## Expected outcome
+Opening the queue with 2,300 items renders ~50 cards. Clicking "Keep" processes them in the background with a progress toast, issues at most a handful of DB round-trips for already-applied items plus batched work for the rest, and refreshes the UI once at the end — no more frozen tab.
