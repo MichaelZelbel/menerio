@@ -1213,6 +1213,30 @@ export default function ReviewQueue() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={!!bulkConfirm} onOpenChange={(open) => !open && setBulkConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{bulkConfirm?.label} {bulkConfirm?.total.toLocaleString()} changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will process every visible item in the review queue. Large queues can take a while — you'll see a progress indicator while it runs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const c = bulkConfirm;
+                setBulkConfirm(null);
+                if (c) void c.run();
+              }}
+            >
+              {bulkConfirm?.label} all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
