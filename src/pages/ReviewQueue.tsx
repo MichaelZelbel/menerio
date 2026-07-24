@@ -1152,6 +1152,31 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0 || isBulkRunning}
+          >
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {page + 1} of {pageCount}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            disabled={page >= pageCount - 1 || isBulkRunning}
+          >
+            Next
+          </Button>
+        </div>
+      )}
+
+
       <Dialog open={!!selectedWikiRevision} onOpenChange={(open) => !open && setSelectedWikiRevision(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
