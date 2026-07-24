@@ -1,102 +1,65 @@
-# Profile duplicate prevention — proof-driven fix
+## Goal
 
-## 1. Live diagnostic (already run, contact_id=cf9b5d76 "Yumei", 134 entries)
+Fix three UI/data issues visible on Yumei's profile (and every other profile) in the Food & Drink and Music & Entertainment sections:
 
-Concrete duplicate clusters found in the live database:
+1. Inconsistent label pluralization ("Favorite restaurant" vs "Favorite characters").
+2. Comma-separated blobs are unreadable — should be one item per line.
+3. "Favorite characters" values are all-lowercase — names should be capitalized.
 
-**Exact same (label, value):**
-- `Moved out at age` / `Age moved out` = "16"
-- `Japanese name` / `Full name (Japanese)` = "Yumei"
-- `Brazilian name` / `Full name (Brazilian)` = "Yasmin"
-- `VRChat identity` / `VRChat persona` = "Puppy/kitty/princess aesthetic, internet angel, semi/non-verbal, very sensitive"
-- `VRChat avatar creators` / `Favorite avatar creators` = "angelcore.club, Awo's Bakery, Yura"
+## 1. Consistent plural labels for list-valued fields
 
-**Same label, list value where one row's tokens ⊆ another:**
-- `Favorite artists` ⊇ `Favorite musician / band` ⊇ `Favorite music artists` ⊇ `Favorite music`
-- `Favorite food` ⊇ `Favorite foods and drinks` ⊇ `Favorite fast food` ⊇ `Favorite restaurant` (KFC/McDonald's)
-- `Favorite games` ⊇ `Comfort game`
-- `Favorite movies` ⊇ `Favorite movie` ⊇ `Comfort movie` (all → Grease)
-- `Health conditions` ⊇ `Mental health diagnoses` ⊇ `Physical condition` ⊇ `Suspected condition`
-- `VRChat equipment` ≈ `VRChat setup` ≈ `VRChat activities` ≈ `VR equipment` ≈ `VRChat hobbies` ≈ `Full body tracking:Yes`
-- `Hobbies` ⊇ `VRChat hobbies`
+Any label that is `LIST_VALUED` semantically holds multiple items and should read in plural. Update `supabase/functions/_shared/profile-canonical-schema.ts`:
 
-**Same value on a paraphrased label:**
-- `Hospitalization history` ≈ `Medical history` ≈ `Health conditions` (all "hospitalized as a child for mental health")
+- Rename canonical forms and add aliases so old singular labels fold into the new plural canonical:
+  - `Favorite restaurant` → `Favorite restaurants`
+  - `Favorite snack` → `Favorite snacks`
+  - `Favorite dessert` → `Favorite desserts` (already list-valued)
+  - `Favorite drink` → `Favorite drinks`
+  - `Favorite food` → `Favorite foods`
+  - `Favorite fruit` → `Favorite fruits`
+  - `Favorite song` → `Favorite songs`
+  - `Favorite movie` → `Favorite movies`
+  - `Favorite show` / `Favorite TV show` → `Favorite TV shows`
+  - `Favorite series` → `Favorite series` (unchanged, invariant plural)
+  - `Favorite music artist` → `Favorite music artists`
+  - `Favorite character` → `Favorite characters`
+  - `Favorite YouTuber` → `Favorite YouTubers`
+  - `Favorite game` → `Favorite games` (already handled)
+  - `Favorite place` → `Favorite places`
+  - `Favorite McDonald's order` → keep singular (single-order concept, not a list)
+  - `Go-to recipe` → keep singular
+- Add each new plural to `LIST_VALUED_LABELS`.
+- Add old-singular → new-plural entries to `OPEN_CATEGORY_LABEL_ALIASES` so the normalizer folds existing rows on the next pass.
 
-**Same-label, semantically conflicting (must NOT auto-merge → Review Queue):**
-- `Favorite restaurant` = "KFC" vs `Favorite restaurant` = "McDonald's"
-- `Favorite characters` (Alice-in-Borderland set) vs `Favorite characters` (Nekopara set)
-- `Routine` = "Cleans house in morning" vs `Routine` = "Wakes up around 5 AM" (complementary, keep both)
+## 2. One-item-per-line rendering for list-valued values
 
-## 2. Duplicate invariant (code definition)
+Change how comma-separated values render in the contact profile, without changing storage (values stay stored as `"a, b, c"` — the DB dedup/normalizer logic already depends on that shape).
 
-Two rows `A`, `B` on the same `(user_id, contact_id)` are **safe to collapse** into the row with the more complete value when ALL hold:
+In `src/components/people/profile/CompactCategorySection.tsx`, split rendering by label type:
 
-1. `canonical(A.label) == canonical(B.label)` (via `canonicalLabelMap` + slug-normalize: lowercase, strip punctuation, collapse whitespace, singular).
-2. Either:
-   - `norm(A.value) == norm(B.value)` (exact after normalize), OR
-   - `tokens(A.value) ⊆ tokens(B.value)` OR vice versa, where `tokens(v) = split(v, /[,;/·•]|\s(?:and|&|\+)\s/)` → lowercase → strip stopwords/punctuation.
-3. Neither row is `is_pinned`.
+- Import a small helper `isListValuedLabel` (mirror the server-side set client-side in `src/lib/profile-taxonomy.ts` or a new `src/lib/profile-list-labels.ts` so we don't import from `supabase/functions/`).
+- For entries whose canonical label is list-valued, render the value as a `<ul>` with one `<li>` per comma-split token (trimmed, empties dropped), each on its own line, with a subtle bullet or dash. Preserve the search highlight per item.
+- For non-list entries, keep the current inline single-line rendering.
+- Editing (`EntryForm`) still shows the raw comma-joined text — no change to input UX in this pass.
 
-Rows are **conflicting** (→ Review Queue, never auto-delete) when:
-- Same canonical label but token sets have non-empty symmetric difference AND neither is a subset (e.g. KFC vs McDonald's for `Favorite restaurant`).
-- Different labels but overlapping value tokens ≥ 50% (e.g. `Personality traits` vs `Semi-verbal:true`) — merge suggestion goes to review.
+## 3. Capitalize items in "Favorite characters"
 
-## 3. Deterministic write-time prevention
+Capitalization is a presentation concern here — the raw text from notes is lowercased by the LLM pipeline. Two-part fix:
 
-- **DB unique index** (partial, case-insensitive): `UNIQUE (user_id, contact_id, lower(btrim(label)), lower(btrim(value)))` on `profile_entries`. Prevents the trivial "insert exact clone" path that produced 5 of the clusters above.
-- Change every insert site to `upsert(..., { onConflict: 'user_id,contact_id,label_norm,value_norm' })` via a generated columns `label_norm`, `value_norm` (`lower(btrim(...))`) so we don't fight PostgREST on expression indexes.
-- Add pre-insert `resolveProfileWrite()` helper in `_shared/profile-dedup.ts` that:
-  1. Canonicalizes label.
-  2. Fetches existing rows for `(contact_id, canonical_label)`.
-  3. If new value is a subset of any existing → skip write (log).
-  4. If new value is a superset → UPDATE existing row's value in place.
-  5. If exact match → skip.
-  6. If conflicting → insert AND enqueue `review_queue` item of type `merge_profile_entries`.
-- Wire this helper into all 5 write sites: `process-note`, `moment-profile-extraction`, `user-profile`, `generate-profile-suggestions`, `enrich-person-from-lexicon`.
+- **Display-side (immediate):** in the new list renderer, when the entry's canonical label is `Favorite characters`, apply a Title-Case transform per list item at render time (capitalize the first letter of each word; leave tokens that already contain an uppercase letter untouched so brand-style names like `d3r` or `6arelyhuman` in other fields aren't affected — but this rule only fires for `Favorite characters`, so those aren't at risk anyway).
+- **No mutation of stored values** in this pass. This keeps the change safe and reversible; if we later want persisted capitalization, we can add a one-shot backfill.
 
-## 4. Deterministic cleanup (DB-side, no LLM, no timeout)
+Do NOT apply title-casing globally to all list values — it would wrongly capitalize song titles, band names, and stylized handles elsewhere.
 
-New SQL function `public.cleanup_profile_duplicates(_user_id, _contact_id)` that, for each `(canonical_label)` group:
-1. Deletes exact-value duplicates keeping oldest `created_at`.
-2. Deletes rows whose token-set is a strict subset of another row in the group; retained row's `updated_at` bumped.
-3. For different-label groups that share canonical label, folds into the canonical label.
-4. For token-conflicting pairs (rule 2 fails), inserts a `review_queue` row with both ids and returns without deleting.
-5. Returns `jsonb` summary: `{merged, deleted, review_created, remaining}`.
+## Files touched
 
-Called from:
-- `admin-normalize` scheduled cron (already exists, currently runs LLM path).
-- New action `POST /normalize-profile { action: 'deterministic_cleanup', contact_id }`.
-- Automatically after every `resolveProfileWrite()` on that `(contact_id, canonical_label)`.
+- `supabase/functions/_shared/profile-canonical-schema.ts` — canonical renames, alias additions, LIST_VALUED_LABELS additions.
+- `src/lib/profile-list-labels.ts` (new, small) — client-side mirror of the list-valued label set + `isListValuedLabel` + `titleCaseCharacterName` helper.
+- `src/components/people/profile/CompactCategorySection.tsx` — split value renderer: list vs inline; apply character-name title-casing only for `Favorite characters`.
+- `src/lib/__tests__/profile-list-labels.test.ts` (new) — unit tests for `isListValuedLabel` and the title-case helper (leaves mixed-case tokens alone, capitalizes plain lowercase names, handles multi-word names like `geum seong je` → `Geum Seong Je`).
 
-## 5. Tests (Vitest)
+## Out of scope
 
-`supabase/functions/_shared/__tests__/profile-dedup.test.ts` extended with Yumei-style fixtures:
-- `VRChat setup` vs `VRChat equipment` (same value, diff label) → merge into canonical `VRChat setup`.
-- `Favorite food` (superset) vs `Favorite fast food` (subset) → keep superset.
-- `Favorite restaurant: KFC` vs `Favorite restaurant: McDonald's` → NO merge, review queue item created.
-- `Health conditions` (long list) vs `Mental health diagnoses` (subset) → merged.
-- `Semi-verbal:true` vs `Personality traits:"...semi-verbal..."` → review suggestion, not auto-merge.
-
-## 6. Proof
-
-Sequence I will run and paste back verbatim:
-1. `SELECT count(*), label, value ... WHERE contact_id=cf9b5d76 ...` (before, already have 134).
-2. Deploy migration + edge functions.
-3. `SELECT public.cleanup_profile_duplicates('4332607c-...', 'cf9b5d76-...');` — paste jsonb output.
-4. Re-run the count query — paste after.
-5. `SELECT ... FROM review_queue WHERE target_entity_id='cf9b5d76-...' AND suggestion_type='merge_profile_entries'` — paste the ambiguous items that were preserved for review.
-
-If step 3 does not visibly shrink the duplicate clusters listed in §1, I stop and report what's blocking rather than declaring victory.
-
-## Technical details
-
-- Migration adds two generated columns + unique index + `cleanup_profile_duplicates` SQL function + `merge_profile_entries` allowed value in review_queue.
-- `_shared/profile-dedup.ts` gets `resolveProfileWrite`, `canonicalLabelKey`, `tokenizeListValue`, `subsumes`, `conflicts`.
-- The LLM path in `admin-normalize` stays as an opt-in `mode: 'llm'` but is no longer the default; deterministic cleanup is the default and runs synchronously.
-
----
-
-Acceptance = §6 outputs prove clusters in §1 collapsed and conflicts sent to review.
-
-Approve and I execute; the plan is intentionally scoped to what SELECT-provable behaviour requires.
+- No DB migration / no rewrite of existing stored values. Old singular-labeled rows fold to the new plural canonical the next time the normalizer runs on that profile (existing mechanism).
+- No changes to the LLM extraction prompts.
+- No global title-casing across other fields.

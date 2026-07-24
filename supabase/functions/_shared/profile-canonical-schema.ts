@@ -127,20 +127,49 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
  * them together without pulling the category out of "open" shape.
  */
 export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
-  // Food
-  "favorite food": "Favorite food",
-  "favorite foods": "Favorite food",
-  "favorite food/drink": "Favorite food",
-  "favorite dish": "Favorite food",
-  "favorite dishes": "Favorite food",
-  "favorite cuisine": "Favorite food",
-  "favorite cuisines": "Favorite food",
-  "favorite drink": "Favorite drink",
-  "favorite drinks": "Favorite drink",
-  "favorite beverage": "Favorite drink",
-  "favorite beverages": "Favorite drink",
-  "favorite dessert": "Favorite dessert",
-  "favorite desserts": "Favorite dessert",
+  // Food — collapse singular/plural/synonym variants into plural canonical.
+  "favorite food": "Favorite foods",
+  "favorite foods": "Favorite foods",
+  "favorite food/drink": "Favorite foods",
+  "favorite dish": "Favorite foods",
+  "favorite dishes": "Favorite foods",
+  "favorite cuisine": "Favorite foods",
+  "favorite cuisines": "Favorite foods",
+  "favorite drink": "Favorite drinks",
+  "favorite drinks": "Favorite drinks",
+  "favorite beverage": "Favorite drinks",
+  "favorite beverages": "Favorite drinks",
+  "favorite dessert": "Favorite desserts",
+  "favorite desserts": "Favorite desserts",
+  "favorite snack": "Favorite snacks",
+  "favorite snacks": "Favorite snacks",
+  "favorite fruit": "Favorite fruits",
+  "favorite fruits": "Favorite fruits",
+  "favorite restaurant": "Favorite restaurants",
+  "favorite restaurants": "Favorite restaurants",
+  // Entertainment — same pattern.
+  "favorite song": "Favorite songs",
+  "favorite songs": "Favorite songs",
+  "favorite movie": "Favorite movies",
+  "favorite movies": "Favorite movies",
+  "favorite film": "Favorite movies",
+  "favorite films": "Favorite movies",
+  "favorite show": "Favorite TV shows",
+  "favorite shows": "Favorite TV shows",
+  "favorite tv show": "Favorite TV shows",
+  "favorite tv shows": "Favorite TV shows",
+  "favorite music artist": "Favorite music artists",
+  "favorite music artists": "Favorite music artists",
+  "favorite artist": "Favorite music artists",
+  "favorite artists": "Favorite music artists",
+  "favorite band": "Favorite music artists",
+  "favorite bands": "Favorite music artists",
+  "favorite character": "Favorite characters",
+  "favorite characters": "Favorite characters",
+  "favorite youtuber": "Favorite YouTubers",
+  "favorite youtubers": "Favorite YouTubers",
+  "favorite place": "Favorite places",
+  "favorite places": "Favorite places",
   // Personality / relational
   "love language": "Love language",
   "love languages": "Love language",
@@ -190,11 +219,8 @@ export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
   "routine": "Routine",
   "daily routine": "Daily routine",
   "work arrangement": "Work arrangement",
-  "favorite tv show": "Favorite TV show",
-  "favorite tv shows": "Favorite TV show",
-  "favorite place": "Favorite place",
-  "favorite places": "Favorite place",
 };
+
 
 /**
  * Canonical labels whose semantic is "a set of tokens" (nicknames, favorite
@@ -205,9 +231,19 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
   [
     "Nickname",
     "Aliases",
-    "Favorite food",
-    "Favorite drink",
-    "Favorite dessert",
+    "Favorite foods",
+    "Favorite drinks",
+    "Favorite desserts",
+    "Favorite snacks",
+    "Favorite fruits",
+    "Favorite restaurants",
+    "Favorite songs",
+    "Favorite movies",
+    "Favorite TV shows",
+    "Favorite music artists",
+    "Favorite characters",
+    "Favorite YouTubers",
+    "Favorite places",
     "Love language",
     "Skill",
     "Hobby",
@@ -225,6 +261,7 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Likes",
   ].map((s) => s.toLowerCase()),
 );
+
 
 export function isListValuedLabel(canonicalLabel: string): boolean {
   return LIST_VALUED_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
