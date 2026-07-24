@@ -3227,6 +3227,8 @@ export type Database = {
       }
       profile_canonical_label: { Args: { t: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
+      profile_fact_label_key: { Args: { t: string }; Returns: string }
+      profile_fact_text_key: { Args: { t: string }; Returns: string }
       profile_is_accumulator_label: {
         Args: { p_canonical: string }
         Returns: boolean
@@ -3234,6 +3236,10 @@ export type Database = {
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
       profile_tokenize_value: { Args: { t: string }; Returns: string[] }
+      profile_value_contains_fact: {
+        Args: { subset: string; superset: string }
+        Returns: boolean
+      }
       replace_group_members_section: {
         Args: { p_content: string; p_members_section: string }
         Returns: string
