@@ -960,7 +960,7 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {combinedReviewItems.map((entry) => {
+          {pageItems.map((entry) => {
             if (entry.kind === "wiki") {
               const { revision } = entry;
               const diff = buildLineDiff(revision.previous_content, revision.new_content);
