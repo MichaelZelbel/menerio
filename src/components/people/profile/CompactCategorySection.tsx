@@ -38,8 +38,9 @@ import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
 import {
+  displayLabel,
   isCharacterLabel,
-  isListValuedLabel,
+  shouldRenderAsList,
   splitListValue,
   titleCaseCharacterName,
 } from "@/lib/profile-list-labels";
@@ -270,9 +271,9 @@ export function CompactCategorySection({
               >
                 <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <span className="text-xs text-muted-foreground shrink-0">
-                    <Highlighted text={entry.label} query={filterQuery} />
+                    <Highlighted text={displayLabel(entry.label)} query={filterQuery} />
                   </span>
-                  {isListValuedLabel(entry.label) ? (
+                  {shouldRenderAsList(entry.label, entry.value) ? (
                     <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
                       {splitListValue(entry.value).map((item, idx) => {
                         const display = isCharacterLabel(entry.label)

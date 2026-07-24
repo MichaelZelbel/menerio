@@ -1,47 +1,77 @@
 /**
- * Client-side mirror of `LIST_VALUED_LABELS` from
- * `supabase/functions/_shared/profile-canonical-schema.ts`. Duplicated (not
- * imported) because the browser bundle can't reach into edge-function code.
- * Keep in sync with the server list.
+ * Presentation-layer helpers for profile entries. These decide how a stored
+ * (label, value) pair is *rendered* — they never rewrite what's saved in the
+ * database. The edge-function normalizer still owns canonicalization at
+ * write time; this file just makes existing rows and novel LLM-invented
+ * labels display consistently.
  */
-const LIST_VALUED_LABELS: ReadonlySet<string> = new Set(
+
+const norm = (s: string) => String(s ?? "").trim().toLowerCase();
+
+/**
+ * Labels whose value is a single natural-language fact that may legitimately
+ * contain commas ("pizza, extra cheese, no olives"). Never render as a list
+ * even when the value has multiple comma-separated fragments.
+ */
+const SINGLE_FACT_LABELS: ReadonlySet<string> = new Set(
+  [
+    "Favorite McDonald's order",
+    "Favorite mcdonalds order",
+    "Go-to recipe",
+    "Signature dish",
+    "Current address",
+    "Previous address",
+    "Home address",
+    "Work address",
+    "Wedding location",
+    "Place of birth",
+    "Full name",
+    "Legal name",
+    "Preferred name",
+    "Date of birth",
+    "Birthday",
+    "Dietary style",
+    "Cooking skill level",
+    "Timezone",
+    "Job title",
+    "Employer",
+    "Company",
+    "Height",
+    "Weight",
+    "Eye color",
+    "Hair color",
+    "Blood type",
+    "Phone",
+    "Email",
+    "Website",
+  ].map(norm),
+);
+
+/**
+ * Labels that should always render as a bulleted list, even when the value
+ * currently holds a single item — keeps the visual language consistent for
+ * collection-style fields.
+ */
+const ALWAYS_LIST_LABELS: ReadonlySet<string> = new Set(
   [
     "Nickname",
+    "Nicknames",
     "Aliases",
-    "Favorite foods",
-    "Favorite drinks",
-    "Favorite desserts",
-    "Favorite snacks",
-    "Favorite fruits",
-    "Favorite restaurants",
-    "Favorite songs",
-    "Favorite movies",
-    "Favorite TV shows",
-    "Favorite music artists",
-    "Favorite characters",
-    "Favorite YouTubers",
-    "Favorite places",
-    "Love language",
+    "Skills",
     "Skill",
+    "Hobbies",
     "Hobby",
+    "Interests",
     "Interest",
     "Allergies",
     "Health conditions",
     "Medications",
     "Pets",
     "Personality traits",
-    "VRChat setup",
-    "VRChat equipment",
-    "VRChat activities",
-    "Favorite games",
-    "Hobbies",
     "Likes",
-  ].map((s) => s.toLowerCase()),
+    "Dislikes",
+  ].map(norm),
 );
-
-export function isListValuedLabel(label: string): boolean {
-  return LIST_VALUED_LABELS.has(String(label || "").trim().toLowerCase());
-}
 
 /**
  * Split a comma-separated profile value into individual items. Trims each
@@ -52,6 +82,72 @@ export function splitListValue(value: string): string[] {
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
+}
+
+/**
+ * Decide whether a stored (label, value) pair should render as a bulleted
+ * list. Shape-based: any label that isn't a known single-fact label and
+ * whose value contains 2+ comma-separated items is a list. Handful of
+ * always-list labels render as bullets even with a single item.
+ */
+export function shouldRenderAsList(label: string, value: string): boolean {
+  const key = norm(label);
+  if (SINGLE_FACT_LABELS.has(key)) return false;
+  if (ALWAYS_LIST_LABELS.has(key)) return true;
+  return splitListValue(value).length >= 2;
+}
+
+/**
+ * Legacy alias — some callers still import `isListValuedLabel`. Prefer
+ * `shouldRenderAsList` since it accounts for the actual value shape.
+ */
+export function isListValuedLabel(label: string): boolean {
+  return ALWAYS_LIST_LABELS.has(norm(label));
+}
+
+/**
+ * Existing rows in the DB still carry singular labels the LLM invented
+ * before the plural canonicals landed. Present them in plural at render
+ * time; storage stays untouched.
+ */
+const DISPLAY_LABEL_MAP: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    "favorite restaurant": "Favorite restaurants",
+    "favorite snack": "Favorite snacks",
+    "favorite tv show": "Favorite TV shows",
+    "favorite movie": "Favorite movies",
+    "favorite song": "Favorite songs",
+    "favorite music artist": "Favorite music artists",
+    "favorite artist": "Favorite artists",
+    "favorite character": "Favorite characters",
+    "favorite youtuber": "Favorite YouTubers",
+    "favorite fruit": "Favorite fruits",
+    "favorite dessert": "Favorite desserts",
+    "favorite drink": "Favorite drinks",
+    "favorite food": "Favorite foods",
+    "favorite place": "Favorite places",
+    "favorite game": "Favorite games",
+    "favorite color": "Favorite colors",
+    "favorite animal": "Favorite animals",
+    "favorite book": "Favorite books",
+    "favorite author": "Favorite authors",
+    "favorite podcast": "Favorite podcasts",
+    "favorite band": "Favorite bands",
+    "favorite album": "Favorite albums",
+    "favorite hobby": "Favorite hobbies",
+    "favorite show": "Favorite shows",
+    "favorite series": "Favorite series",
+    "favorite sport": "Favorite sports",
+  }),
+);
+
+/**
+ * Map a stored label to the label used in the UI. Falls back to the raw
+ * stored label so unknown singulars aren't mangled by a generic pluralizer.
+ */
+export function displayLabel(label: string): string {
+  const raw = String(label ?? "");
+  return DISPLAY_LABEL_MAP.get(norm(raw)) ?? raw;
 }
 
 /**
@@ -66,8 +162,7 @@ export function titleCaseCharacterName(name: string): string {
   return trimmed.replace(/\b([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
-const CHARACTER_LABEL = "favorite characters";
-
 export function isCharacterLabel(label: string): boolean {
-  return String(label || "").trim().toLowerCase() === CHARACTER_LABEL;
+  const key = norm(label);
+  return key === "favorite characters" || key === "favorite character";
 }

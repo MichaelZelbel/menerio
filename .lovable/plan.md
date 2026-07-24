@@ -1,65 +1,70 @@
-## Goal
+## What's actually broken
 
-Fix three UI/data issues visible on Yumei's profile (and every other profile) in the Food & Drink and Music & Entertainment sections:
+Confirmed against the live DB — the current entries under Yumei include labels like:
 
-1. Inconsistent label pluralization ("Favorite restaurant" vs "Favorite characters").
-2. Comma-separated blobs are unreadable — should be one item per line.
-3. "Favorite characters" values are all-lowercase — names should be capitalized.
+- `Favorite restaurant` (still singular)
+- `Favorite snack` (still singular)
+- `Favorite TV show` (still singular)
+- `Favorite Pokémon`, `Favorite hobbies`, `Favorite animals`, `Favorite mythical animals`, `Favorite avatar creators`, `Favorite colors`
+- `Favorite McDonald's order` (has commas but is a single meal)
 
-## 1. Consistent plural labels for list-valued fields
+My previous change used a static `LIST_VALUED_LABELS` set to decide when to render bullets and when to pluralize. That set:
 
-Any label that is `LIST_VALUED` semantically holds multiple items and should read in plural. Update `supabase/functions/_shared/profile-canonical-schema.ts`:
+1. Doesn't contain the singular forms sitting in existing rows (so `Favorite restaurant`, `Favorite snack`, `Favorite TV show` render as blobs).
+2. Doesn't contain novel labels the LLM invents (`Favorite Pokémon`, `Favorite mythical animals`, `Favorite avatar creators`, `Favorite colors`, `Favorite hobbies`, `Favorite animals`) — those render as blobs too.
+3. Would falsely bullet-list `Favorite McDonald's order` if we naively lowered the bar to "any Favorite label".
 
-- Rename canonical forms and add aliases so old singular labels fold into the new plural canonical:
+A static allowlist cannot cover both existing data and future LLM-invented labels. The fix has to be presentation-layer and shape-based.
+
+## Fix — presentation-only
+
+All changes in the frontend. No DB migration, no edge-function change, no data mutation.
+
+### 1. Render bullets based on VALUE SHAPE, not label allowlist
+
+In `src/lib/profile-list-labels.ts`, replace `isListValuedLabel(label)` with `shouldRenderAsList(label, value)`:
+
+- Return `false` for a hard denylist of "single fact with commas" labels: `Favorite McDonald's order`, `Go-to recipe`, `Current address`, `Previous address`, `Wedding location`, `Place of birth`, `Full name`, `Preferred name`, `Date of birth`, `Dietary style`, `Cooking skill level`, `Timezone`, `Job title`, `Employer`, `Height`, `Eye color`, `Hair color`, `Blood type`. (These are labels a natural-language value might contain commas in without meaning "multiple items".)
+- Otherwise return `true` when `splitListValue(value).length >= 2`.
+- Keep the known-list overrides (Nickname, Aliases, Skills, Hobbies, Allergies, …) as an allowlist that returns `true` even for single-item values, so a one-item list still renders as a bullet for consistency inside that label family. Optional; if it clutters single-item cases we skip it.
+
+Update `CompactCategorySection.tsx` to call `shouldRenderAsList(entry.label, entry.value)` instead of `isListValuedLabel(entry.label)`.
+
+### 2. Pluralize labels at display time
+
+Existing rows have singular labels; the alias map only folds new writes. Fix presentation:
+
+- Add `displayLabel(label)` in `src/lib/profile-list-labels.ts` — a small table mapping the singulars seen in DB to their plural display form:
   - `Favorite restaurant` → `Favorite restaurants`
   - `Favorite snack` → `Favorite snacks`
-  - `Favorite dessert` → `Favorite desserts` (already list-valued)
-  - `Favorite drink` → `Favorite drinks`
-  - `Favorite food` → `Favorite foods`
-  - `Favorite fruit` → `Favorite fruits`
-  - `Favorite song` → `Favorite songs`
+  - `Favorite TV show` → `Favorite TV shows`
   - `Favorite movie` → `Favorite movies`
-  - `Favorite show` / `Favorite TV show` → `Favorite TV shows`
-  - `Favorite series` → `Favorite series` (unchanged, invariant plural)
+  - `Favorite song` → `Favorite songs`
   - `Favorite music artist` → `Favorite music artists`
   - `Favorite character` → `Favorite characters`
   - `Favorite YouTuber` → `Favorite YouTubers`
-  - `Favorite game` → `Favorite games` (already handled)
+  - `Favorite fruit` → `Favorite fruits`
+  - `Favorite dessert` → `Favorite desserts`
+  - `Favorite drink` → `Favorite drinks`
+  - `Favorite food` → `Favorite foods`
   - `Favorite place` → `Favorite places`
-  - `Favorite McDonald's order` → keep singular (single-order concept, not a list)
-  - `Go-to recipe` → keep singular
-- Add each new plural to `LIST_VALUED_LABELS`.
-- Add old-singular → new-plural entries to `OPEN_CATEGORY_LABEL_ALIASES` so the normalizer folds existing rows on the next pass.
+  - `Favorite game` → `Favorite games`
+  - `Favorite color` → `Favorite colors`
+  - `Favorite animal` → `Favorite animals`
+- Additionally: when a label is not in that map, if `shouldRenderAsList(label, value)` returns true AND the label ends in a singular common noun with a trivial plural (regex-based, guarded), still leave it alone — don't auto-mangle unknown labels. Keep this table explicit and small.
+- `CompactCategorySection.tsx` renders `displayLabel(entry.label)` (and passes it to `Highlighted`); editing/saving still uses the raw stored label so nothing gets renamed at the DB.
 
-## 2. One-item-per-line rendering for list-valued values
+### 3. Character title-casing (unchanged)
 
-Change how comma-separated values render in the contact profile, without changing storage (values stay stored as `"a, b, c"` — the DB dedup/normalizer logic already depends on that shape).
-
-In `src/components/people/profile/CompactCategorySection.tsx`, split rendering by label type:
-
-- Import a small helper `isListValuedLabel` (mirror the server-side set client-side in `src/lib/profile-taxonomy.ts` or a new `src/lib/profile-list-labels.ts` so we don't import from `supabase/functions/`).
-- For entries whose canonical label is list-valued, render the value as a `<ul>` with one `<li>` per comma-split token (trimmed, empties dropped), each on its own line, with a subtle bullet or dash. Preserve the search highlight per item.
-- For non-list entries, keep the current inline single-line rendering.
-- Editing (`EntryForm`) still shows the raw comma-joined text — no change to input UX in this pass.
-
-## 3. Capitalize items in "Favorite characters"
-
-Capitalization is a presentation concern here — the raw text from notes is lowercased by the LLM pipeline. Two-part fix:
-
-- **Display-side (immediate):** in the new list renderer, when the entry's canonical label is `Favorite characters`, apply a Title-Case transform per list item at render time (capitalize the first letter of each word; leave tokens that already contain an uppercase letter untouched so brand-style names like `d3r` or `6arelyhuman` in other fields aren't affected — but this rule only fires for `Favorite characters`, so those aren't at risk anyway).
-- **No mutation of stored values** in this pass. This keeps the change safe and reversible; if we later want persisted capitalization, we can add a one-shot backfill.
-
-Do NOT apply title-casing globally to all list values — it would wrongly capitalize song titles, band names, and stylized handles elsewhere.
+Keep `titleCaseCharacterName`, applied only when `entry.label` normalized === `favorite characters` (matches whether stored as "Favorite character" or "Favorite characters").
 
 ## Files touched
 
-- `supabase/functions/_shared/profile-canonical-schema.ts` — canonical renames, alias additions, LIST_VALUED_LABELS additions.
-- `src/lib/profile-list-labels.ts` (new, small) — client-side mirror of the list-valued label set + `isListValuedLabel` + `titleCaseCharacterName` helper.
-- `src/components/people/profile/CompactCategorySection.tsx` — split value renderer: list vs inline; apply character-name title-casing only for `Favorite characters`.
-- `src/lib/__tests__/profile-list-labels.test.ts` (new) — unit tests for `isListValuedLabel` and the title-case helper (leaves mixed-case tokens alone, capitalizes plain lowercase names, handles multi-word names like `geum seong je` → `Geum Seong Je`).
+- `src/lib/profile-list-labels.ts` — replace `isListValuedLabel` with `shouldRenderAsList(label, value)`; add `displayLabel(label)`; keep `splitListValue`, `titleCaseCharacterName`, `isCharacterLabel`.
+- `src/components/people/profile/CompactCategorySection.tsx` — use `shouldRenderAsList` for the render branch; render `displayLabel(entry.label)` in the label span (both in the header and inside the `Highlighted` component input).
 
 ## Out of scope
 
-- No DB migration / no rewrite of existing stored values. Old singular-labeled rows fold to the new plural canonical the next time the normalizer runs on that profile (existing mechanism).
-- No changes to the LLM extraction prompts.
-- No global title-casing across other fields.
+- No DB rename of existing rows. Storage stays as-is; the normalizer will still fold future writes toward the plural canonical.
+- No LLM prompt change.
+- Editing UX (EntryForm) is unchanged.
