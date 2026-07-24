@@ -3252,6 +3252,10 @@ export type Database = {
         Args: { p_canonical: string }
         Returns: boolean
       }
+      profile_label_token_priority: {
+        Args: { _label: string }
+        Returns: number
+      }
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
       profile_token_key_contains: {
