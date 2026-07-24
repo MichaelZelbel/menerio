@@ -128,7 +128,12 @@ function useNotesRemote(filter: "all" | "favorites" | "trash") {
   return useQuery<Note[]>({
     queryKey: ["notes", filter, user?.id],
     enabled: !!user,
+    // Always revalidate against Supabase when a component (in particular a
+    // popped-out note window) first mounts, so a fresh window never renders
+    // a persisted-but-stale copy of the notes list.
+    refetchOnMount: "always",
     queryFn: async () => {
+
       let query = supabase
         .from("notes" as any)
         .select(NOTE_COLUMNS)
