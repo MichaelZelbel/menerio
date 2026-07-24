@@ -50,13 +50,10 @@ interface NoteMetadataEditorProps {
 export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
-  // Always default to collapsed on note open — an expanded metadata panel
-  // pushes the note content off-screen. Users can expand per-note as needed.
-  const [isOpen, setIsOpen] = useState(false);
-  // Reset collapse state when switching notes. NoteEditor reuses this
-  // component instance across notes (no `key` prop, to avoid a duplication
-  // glitch), so state does NOT reset on its own. Do not remove.
-  useEffect(() => { setIsOpen(false); }, [noteId]);
+  // Sticky global preference: remembers the user's expand/collapse choice
+  // across notes and reloads. Defaults to collapsed until the user opens it.
+  const [isOpen, setIsOpen] = useStickyPanelPreference("note-metadata");
+
 
   const navigate = useNavigate();
   const topicInputRef = useCallback((node: HTMLInputElement | null) => {
