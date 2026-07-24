@@ -16,6 +16,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { RequiresOnline } from "@/components/RequiresOnline";
 import { queryPersister } from "@/lib/query-persister";
+import { installQuerySyncListener } from "@/lib/query-sync";
 import { MaybePowerSyncProvider } from "@/sync/PowerSyncProvider";
 import { SyncManager } from "@/sync/SyncManager";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
