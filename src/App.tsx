@@ -88,6 +88,12 @@ const queryClient = new QueryClient({
   },
 });
 
+// Install cross-window cache sync once at module load. Any window (main app
+// or popped-out note) that saves a note broadcasts an invalidation so other
+// open windows drop their stale cached copy and refetch immediately.
+installQuerySyncListener(queryClient);
+
+
 const LegacyWikiRedirect = () => {
   const { slug } = useParams<{ slug?: string }>();
   return <Navigate to={slug ? `/lexicon/${slug}` : "/lexicon"} replace />;
