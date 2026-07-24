@@ -534,18 +534,12 @@ export default function ReviewQueue() {
     }
   };
 
-  // Batched bulk-action machinery. Prior implementation fired N sequential
-  // updateStatus.mutate() calls; each call invalidated the review-queue query,
-  // which refetched up to 1000 rows and re-rendered every card — O(N²) DOM
-  // churn that froze the browser at ~2k items. We now:
-  //   • bulk-flip status for already-applied items in a single UPDATE,
-  //   • run pending-item side effects in small concurrent batches,
-  //   • refresh queries exactly once at the end.
-  const BULK_BATCH = 8;
+  // Server-side bulk actions. The client fires ONE request; the review-queue-bulk
+  // edge function processes every row in the background and writes progress into
+  // review_queue_bulk_jobs, which we poll every 2 seconds. No per-item work runs
+  // in the browser — that was what froze the tab at 2k+ items.
   const BULK_CONFIRM_THRESHOLD = 100;
-
-  const [isBulkRunning, setIsBulkRunning] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkJobId, setBulkJobId] = useState<string | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState<null | {
     kind: "keep" | "remove" | "block";
     label: string;
@@ -553,129 +547,55 @@ export default function ReviewQueue() {
     run: () => Promise<void>;
   }>(null);
 
-  const runInBatches = async <T,>(
-    list: T[],
-    size: number,
-    fn: (item: T) => Promise<void>,
-    onDone: () => void,
-  ) => {
-    for (let i = 0; i < list.length; i += size) {
-      const chunk = list.slice(i, i + size);
-      await Promise.allSettled(chunk.map((t) => fn(t).finally(onDone)));
-    }
-  };
-
-  const bulkFlipStatus = async (ids: string[], status: "kept" | "removed" | "blocked") => {
-    if (ids.length === 0) return;
-    const now = new Date().toISOString();
-    const patch: Record<string, unknown> = { status, reviewed_at: now };
-    if (status === "blocked") patch.blocked_at = now;
-    // Chunk the .in() to keep URLs sane.
-    for (let i = 0; i < ids.length; i += 500) {
-      const chunk = ids.slice(i, i + 500);
-      const { error } = await supabase
-        .from("review_queue" as any)
-        .update(patch as any)
-        .in("id", chunk);
+  const { data: bulkJob } = useQuery({
+    queryKey: ["review-queue-bulk-job", bulkJobId],
+    enabled: !!bulkJobId,
+    refetchInterval: (query) => {
+      const j = query.state.data as any;
+      if (!j) return 2000;
+      return j.status === "running" ? 2000 : false;
+    },
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("review_queue_bulk_jobs" as any)
+        .select("id,status,total,done,failed,last_error,action")
+        .eq("id", bulkJobId!)
+        .maybeSingle();
       if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    if (!bulkJob || (bulkJob as any).status === "running") return;
+    // Job finished: refresh everything once and show a toast.
+    refreshReviewQueues();
+    invalidateProfileQueries();
+    queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+    queryClient.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+    queryClient.invalidateQueries({ queryKey: ["moments"] });
+    queryClient.invalidateQueries({ queryKey: ["timeline"] });
+    const j = bulkJob as any;
+    if (j.status === "error") {
+      showToast.error(`Bulk action failed: ${j.last_error || "Unknown error"}`);
+    } else {
+      const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
+      if (Number(j.failed) === 0) showToast.success(`${Number(j.done).toLocaleString()} changes ${verb}`);
+      else showToast.info(`${Number(j.done).toLocaleString()} ${verb}, ${Number(j.failed).toLocaleString()} failed`);
     }
-  };
+    setBulkJobId(null);
+  }, [bulkJob]);
 
-  const runBulk = async (opts: {
-    kind: "keep" | "remove" | "block";
-    handlePending: (item: ReviewItem) => Promise<void>;
-    handleAlreadyAppliedIds: (ids: string[]) => Promise<void>;
-    handleWiki: (rev: WikiRevisionReviewItem) => Promise<void>;
-    successMessage: (ok: number, fail: number) => string;
-  }) => {
-    const alreadyAppliedIds: string[] = [];
-    const pending: ReviewItem[] = [];
-    for (const item of items) {
-      if (item.target_entity_id && item.applied_at) alreadyAppliedIds.push(item.id);
-      else pending.push(item);
+  const invokeBulk = async (action: "keep" | "rollback" | "never_again") => {
+    const { data, error } = await supabase.functions.invoke("review-queue-bulk", {
+      body: { action, scope: "all" },
+    });
+    if (error || !data?.job_id) {
+      showToast.error("Could not start bulk action: " + (error?.message || "Unknown error"));
+      return;
     }
-    const profileReviewIds = opts.kind === "keep"
-      ? pending.filter((item) => item.suggestion_type === "add_profile_entry").map((item) => item.id)
-      : [];
-    const pendingIndividual = profileReviewIds.length > 0
-      ? pending.filter((item) => item.suggestion_type !== "add_profile_entry")
-      : pending;
-    const total = alreadyAppliedIds.length + pending.length + wikiRevisions.length;
-    if (total === 0) return;
-
-    setIsBulkRunning(true);
-    setBulkProgress({ done: 0, total });
-    let ok = 0;
-    let fail = 0;
-    const bump = (success: boolean) => {
-      if (success) ok++; else fail++;
-      setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
-    };
-
-    try {
-      // 1) Bulk-flip already-applied items in a single UPDATE.
-      try {
-        await opts.handleAlreadyAppliedIds(alreadyAppliedIds);
-        for (let i = 0; i < alreadyAppliedIds.length; i++) bump(true);
-      } catch (err: any) {
-        for (let i = 0; i < alreadyAppliedIds.length; i++) bump(false);
-        showToast.error(`Bulk update failed: ${err?.message || "Unknown error"}`);
-      }
-
-      // 2) Profile-entry approvals run server-side in chunks so thousands of
-      // dedup checks/inserts do not execute in the browser.
-      for (let i = 0; i < profileReviewIds.length; i += 500) {
-        const chunk = profileReviewIds.slice(i, i + 500);
-        try {
-          const { data, error } = await supabase.functions.invoke("normalize-profile", {
-            body: { action: "bulk_profile_reviews", decision: "keep", review_ids: chunk },
-          });
-          if (error || !data?.ok) throw new Error(error?.message || data?.reason || "Bulk profile review failed");
-          const failedCount = Number(data.summary?.failed || 0);
-          ok += Math.max(0, chunk.length - failedCount);
-          fail += failedCount;
-          setBulkProgress((p) => (p ? { ...p, done: p.done + chunk.length } : p));
-        } catch (err: any) {
-          fail += chunk.length;
-          setBulkProgress((p) => (p ? { ...p, done: p.done + chunk.length } : p));
-          showToast.error(`Bulk profile cleanup failed: ${err?.message || "Unknown error"}`);
-        }
-      }
-
-      // 3) Other pending items — small concurrent batches.
-      await runInBatches(pendingIndividual, BULK_BATCH, async (item) => {
-        try {
-          await opts.handlePending(item);
-          ok++;
-        } catch (err: any) {
-          fail++;
-          console.warn("Bulk item failed", item.id, err);
-        }
-      }, () => {
-        setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
-      });
-
-      // 4) Wiki revisions.
-      await runInBatches(wikiRevisions, BULK_BATCH, async (rev) => {
-        try {
-          await opts.handleWiki(rev);
-          ok++;
-        } catch (err: any) {
-          fail++;
-          console.warn("Bulk wiki failed", rev.id, err);
-        }
-      }, () => {
-        setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
-      });
-    } finally {
-      refreshReviewQueues();
-      invalidateProfileQueries();
-      setIsBulkRunning(false);
-      setBulkProgress(null);
-    }
-
-    if (fail === 0) showToast.success(opts.successMessage(ok, fail));
-    else showToast.info(opts.successMessage(ok, fail));
+    setBulkJobId(data.job_id);
   };
 
   const confirmIfLarge = (
@@ -691,85 +611,12 @@ export default function ReviewQueue() {
     }
   };
 
-  const handleRemoveAll = () => {
-    confirmIfLarge("remove", "Roll back", () =>
-      runBulk({
-        kind: "remove",
-        handleAlreadyAppliedIds: async (ids) => {
-          // Revert side effects then flip status.
-          const byId = new Map(items.map((i) => [i.id, i] as const));
-          await runInBatches(ids, BULK_BATCH, async (id) => {
-            const item = byId.get(id);
-            if (item) await revertAppliedChange(item);
-          }, () => {});
-          await bulkFlipStatus(ids, "removed");
-        },
-        handlePending: async (item) => {
-          await revertAppliedChange(item);
-          await bulkFlipStatus([item.id], "removed");
-        },
-        handleWiki: async (rev) => {
-          await rollbackWikiRevisionById(rev.id);
-        },
-        successMessage: (ok, fail) =>
-          fail === 0 ? "All visible changes removed" : `Removed ${ok}, failed ${fail}`,
-      }),
-    );
-  };
+  const handleRemoveAll = () => confirmIfLarge("remove", "Roll back", () => invokeBulk("rollback"));
+  const handleNeverAgainAll = () => confirmIfLarge("block", "Never Again", () => invokeBulk("never_again"));
+  const handleKeepAll = () => confirmIfLarge("keep", "Keep", () => invokeBulk("keep"));
 
-  const handleNeverAgainAll = () => {
-    confirmIfLarge("block", "Never Again", () =>
-      runBulk({
-        kind: "block",
-        handleAlreadyAppliedIds: async (ids) => {
-          const byId = new Map(items.map((i) => [i.id, i] as const));
-          await runInBatches(ids, BULK_BATCH, async (id) => {
-            const item = byId.get(id);
-            if (!item) return;
-            await revertAppliedChange(item);
-            await createSuppression(item);
-          }, () => {});
-          await bulkFlipStatus(ids, "blocked");
-        },
-        handlePending: async (item) => {
-          await revertAppliedChange(item);
-          await createSuppression(item);
-          await bulkFlipStatus([item.id], "blocked");
-        },
-        handleWiki: async (rev) => {
-          await rollbackWikiRevisionById(rev.id);
-        },
-        successMessage: (ok, fail) =>
-          fail === 0
-            ? "All visible changes blocked and rolled back"
-            : `Blocked ${ok}, failed ${fail}`,
-      }),
-    );
-  };
+  const isBulkRunning = !!bulkJobId;
 
-  const handleKeepAll = () => {
-    confirmIfLarge("keep", "Keep", () =>
-      runBulk({
-        kind: "keep",
-        handleAlreadyAppliedIds: async (ids) => {
-          await bulkFlipStatus(ids, "kept");
-        },
-        handlePending: async (item) => {
-          // handleAccept performs the real side-effects (insert profile entry,
-          // moment, relationship, alias, etc.) and calls updateStatus.mutate.
-          // In bulk mode we accept the per-item invalidation cost because the
-          // pending set is typically small; the huge auto-applied set was
-          // handled by the fast path above.
-          await handleAccept(item);
-        },
-        handleWiki: async (rev) => {
-          await handleWikiLooksGood(rev);
-        },
-        successMessage: (ok, fail) =>
-          fail === 0 ? "All visible changes kept" : `Kept ${ok}, failed ${fail}`,
-      }),
-    );
-  };
 
 
   const hasReviewItems = items.length + wikiRevisions.length > 0;
