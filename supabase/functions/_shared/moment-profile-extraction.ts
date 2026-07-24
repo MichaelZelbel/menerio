@@ -268,6 +268,7 @@ async function prepareForInsert(
         .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
         .select("id")
         .single();
+      if (error && (error as any).code === "23505") return { ...s, status: "removed" };
       if (error || !data) return { ...s, status: "pending_review" };
       return { ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() };
     }
