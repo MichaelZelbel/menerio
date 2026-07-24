@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
 import { formatDistanceToNow } from "date-fns";
 
 interface OutgoingLinksPanelProps {
