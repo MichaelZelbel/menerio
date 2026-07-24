@@ -19,10 +19,8 @@ interface Backlink {
 
 export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
   const { user } = useAuth();
-  const [expanded, setExpanded] = useState(false);
-  // Reset on note switch — NoteEditor reuses this instance (no `key`
-  // remount, which caused a duplication glitch). Do not remove.
-  useEffect(() => { setExpanded(false); }, [noteId]);
+  const [expanded, setExpanded] = useStickyPanelPreference("note-backlinks");
+
 
   const { data: backlinks = [], isLoading } = useQuery<Backlink[]>({
     queryKey: ["backlinks", noteId, user?.id],
