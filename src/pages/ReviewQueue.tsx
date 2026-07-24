@@ -683,9 +683,11 @@ export default function ReviewQueue() {
             <Check className="h-4 w-4 mr-1" />
             Keep
           </Button>
-          {isBulkRunning && bulkProgress && (
+          {isBulkRunning && (
             <span className="text-xs text-muted-foreground ml-2">
-              Processing {bulkProgress.done.toLocaleString()} / {bulkProgress.total.toLocaleString()}…
+              {bulkJob && (bulkJob as any).total > 0
+                ? `Processing ${Number((bulkJob as any).done).toLocaleString()} / ${Number((bulkJob as any).total).toLocaleString()}…`
+                : "Starting…"}
             </span>
           )}
         </div>
