@@ -38,8 +38,9 @@ import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
 import {
+  displayLabel,
   isCharacterLabel,
-  isListValuedLabel,
+  shouldRenderAsList,
   splitListValue,
   titleCaseCharacterName,
 } from "@/lib/profile-list-labels";
