@@ -50,17 +50,21 @@ export function useReviewQueue() {
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["review-queue", user?.id],
     queryFn: async () => {
+      // Only fetch the columns a card actually renders, and cap at 500 rows.
+      // The full count is served by the separate head:true query below.
       const { data, error } = await supabase
         .from("review_queue" as any)
-        .select("*, source_note:notes!review_queue_source_note_id_fkey(title)")
+        .select("id,user_id,suggestion_type,target_entity_id,target_entity_type,applied_at,source_note_id,suppression_key,extracted_value,is_sensitive,title,description,payload,status,created_at,reviewed_at,confidence_score,blocked_at, source_note:notes!review_queue_source_note_id_fkey(title)")
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
         .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(0, 499);
       if (error) throw error;
       return (data || []) as unknown as ReviewItem[];
     },
     enabled: !!user,
-    refetchInterval: 60_000,
+    // No polling on the heavy list — the count badge below refreshes instead.
+    staleTime: 30_000,
   });
 
   const { data: pendingCount = 0 } = useQuery({
