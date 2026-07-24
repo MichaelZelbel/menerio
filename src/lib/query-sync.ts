@@ -1,5 +1,4 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { queryPersister } from "@/lib/query-persister";
 
 // Cross-window cache sync. When a mutation invalidates a query in one browser
 // window (e.g. the main Notes view), other windows of the same app (e.g. a
