@@ -3069,6 +3069,10 @@ export type Database = {
           notes_hidden: number
         }[]
       }
+      cleanup_profile_duplicates: {
+        Args: { _contact_id: string; _user_id: string }
+        Returns: Json
+      }
       deduct_ai_tokens:
         | {
             Args: {
@@ -3220,7 +3224,11 @@ export type Database = {
         Args: { _user_id: string }
         Returns: string[]
       }
+      profile_canonical_label: { Args: { t: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
+      profile_norm_label: { Args: { t: string }; Returns: string }
+      profile_norm_value: { Args: { t: string }; Returns: string }
+      profile_tokenize_value: { Args: { t: string }; Returns: string[] }
       replace_group_members_section: {
         Args: { p_content: string; p_members_section: string }
         Returns: string
