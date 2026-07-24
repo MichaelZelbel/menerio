@@ -424,6 +424,8 @@ export function useDuplicateNote() {
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
+      broadcastInvalidation([["notes"]]);
+
       showToast.success("Duplicated note");
       if ((note.title || note.content || "").trim().length >= 20) {
         invokeWikiIngest(note.id, "INSERT");
