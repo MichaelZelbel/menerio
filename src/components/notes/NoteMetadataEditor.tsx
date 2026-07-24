@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
