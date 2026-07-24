@@ -231,9 +231,19 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
   [
     "Nickname",
     "Aliases",
-    "Favorite food",
-    "Favorite drink",
-    "Favorite dessert",
+    "Favorite foods",
+    "Favorite drinks",
+    "Favorite desserts",
+    "Favorite snacks",
+    "Favorite fruits",
+    "Favorite restaurants",
+    "Favorite songs",
+    "Favorite movies",
+    "Favorite TV shows",
+    "Favorite music artists",
+    "Favorite characters",
+    "Favorite YouTubers",
+    "Favorite places",
     "Love language",
     "Skill",
     "Hobby",
@@ -251,6 +261,7 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Likes",
   ].map((s) => s.toLowerCase()),
 );
+
 
 export function isListValuedLabel(canonicalLabel: string): boolean {
   return LIST_VALUED_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
