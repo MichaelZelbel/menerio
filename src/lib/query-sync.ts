@@ -73,32 +73,17 @@ export function broadcastInvalidation(keys: QueryKey[]) {
   postViaStorage(msg);
 }
 
-async function removePersistedForKeys(qc: QueryClient, keys: QueryKey[]) {
-  // Drop persisted (IndexedDB) copies so a cold reload of this window doesn't
-  // paint the stale note before the refetch resolves.
-  const cache = qc.getQueryCache();
-  const removals: Promise<unknown>[] = [];
-  for (const key of keys) {
-    const matches = cache.findAll({ queryKey: key });
-    for (const q of matches) {
-      try {
-        removals.push(Promise.resolve(queryPersister.persisterFn(q).removeClient?.()));
-      } catch {
-        // best-effort
-      }
-    }
-  }
-  await Promise.allSettled(removals);
-}
-
 function handleMessage(qc: QueryClient, msg: InvalidateMessage) {
   if (!msg || msg.type !== "invalidate") return;
   if (msg.origin === originId) return;
   for (const key of msg.keys) {
-    qc.invalidateQueries({ queryKey: key });
+    // refetchType "all" also refetches inactive queries so a popped-out
+    // window updates even if the query it consumes hasn't been observed
+    // there yet (list hydrates from persisted cache first).
+    qc.invalidateQueries({ queryKey: key, refetchType: "all" });
   }
-  void removePersistedForKeys(qc, msg.keys);
 }
+
 
 /**
  * Install the cross-window listener. Returns a cleanup function.
