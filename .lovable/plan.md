@@ -1,91 +1,102 @@
-## What is going wrong
+# Profile duplicate prevention — proof-driven fix
 
-I checked the live database and the current deployed runner state. The automatic cleanup is not actually reaching the normalizer.
+## 1. Live diagnostic (already run, contact_id=cf9b5d76 "Yumei", 134 entries)
 
-Confirmed findings:
+Concrete duplicate clusters found in the live database:
 
-- Yumei still has duplicate-like profile rows, especially same-label variants such as `Pets`, `Personality traits`, `VRChat setup/equipment`, `Health conditions`, and similar list/near-duplicate fields.
-- The exact duplicate database guard is not the main issue here: the duplicates are mostly semantic/list-overlap duplicates, not byte-for-byte identical rows.
-- A normalization job for Yumei is queued, but it has not been processed.
-- The scheduled cron job is firing every 6 hours, but the HTTP response from `admin-normalize` is `403 {"error":"forbidden"}`.
-- The cron command is sending `Authorization: Bearer ` plus `current_setting('supabase.service_role_key', true)`, but that database setting is empty in this project. So the job reports as “succeeded” in cron because it successfully made an HTTP request, while the Edge Function rejects the request.
-- `admin-normalize` also is not listed in `supabase/config.toml`, so depending on deployment defaults it may be less explicit than the other internal functions.
-- A previous `profile_normalization_runs` row for Yumei is stuck in `running`, which can mislead diagnostics even though the real blocker is the rejected cron request.
+**Exact same (label, value):**
+- `Moved out at age` / `Age moved out` = "16"
+- `Japanese name` / `Full name (Japanese)` = "Yumei"
+- `Brazilian name` / `Full name (Brazilian)` = "Yasmin"
+- `VRChat identity` / `VRChat persona` = "Puppy/kitty/princess aesthetic, internet angel, semi/non-verbal, very sensitive"
+- `VRChat avatar creators` / `Favorite avatar creators` = "angelcore.club, Awo's Bakery, Yura"
 
-So the reason “nothing happens after six hours” is: the scheduler is running, but it is unauthenticated, so the backend refuses to do the work.
+**Same label, list value where one row's tokens ⊆ another:**
+- `Favorite artists` ⊇ `Favorite musician / band` ⊇ `Favorite music artists` ⊇ `Favorite music`
+- `Favorite food` ⊇ `Favorite foods and drinks` ⊇ `Favorite fast food` ⊇ `Favorite restaurant` (KFC/McDonald's)
+- `Favorite games` ⊇ `Comfort game`
+- `Favorite movies` ⊇ `Favorite movie` ⊇ `Comfort movie` (all → Grease)
+- `Health conditions` ⊇ `Mental health diagnoses` ⊇ `Physical condition` ⊇ `Suspected condition`
+- `VRChat equipment` ≈ `VRChat setup` ≈ `VRChat activities` ≈ `VR equipment` ≈ `VRChat hobbies` ≈ `Full body tracking:Yes`
+- `Hobbies` ⊇ `VRChat hobbies`
 
-## Fix plan
+**Same value on a paraphrased label:**
+- `Hospitalization history` ≈ `Medical history` ≈ `Health conditions` (all "hospitalized as a child for mental health")
 
-### 1. Make the scheduled runner authenticate correctly
+**Same-label, semantically conflicting (must NOT auto-merge → Review Queue):**
+- `Favorite restaurant` = "KFC" vs `Favorite restaurant` = "McDonald's"
+- `Favorite characters` (Alice-in-Borderland set) vs `Favorite characters` (Nekopara set)
+- `Routine` = "Cleans house in morning" vs `Routine` = "Wakes up around 5 AM" (complementary, keep both)
 
-Update the scheduled cron job so it calls `admin-normalize` with a real secret that already exists in Edge Function secrets, instead of relying on the missing database setting.
+## 2. Duplicate invariant (code definition)
 
-Best minimal approach:
+Two rows `A`, `B` on the same `(user_id, contact_id)` are **safe to collapse** into the row with the more complete value when ALL hold:
 
-- Use `MCP_ACCESS_KEY` as the shared internal admin key.
-- Store the value in a database setting or secure cron-compatible mechanism only if available; otherwise update the cron call to use the anon key for routing plus an `x-admin-key` header whose value is injected via SQL configuration.
-- If the secret cannot be read from Postgres safely, replace the pg_cron trigger with a small scheduled Edge Function pattern that can read Edge secrets directly.
+1. `canonical(A.label) == canonical(B.label)` (via `canonicalLabelMap` + slug-normalize: lowercase, strip punctuation, collapse whitespace, singular).
+2. Either:
+   - `norm(A.value) == norm(B.value)` (exact after normalize), OR
+   - `tokens(A.value) ⊆ tokens(B.value)` OR vice versa, where `tokens(v) = split(v, /[,;/·•]|\s(?:and|&|\+)\s/)` → lowercase → strip stopwords/punctuation.
+3. Neither row is `is_pinned`.
 
-### 2. Make `admin-normalize` cron-safe and explicit
+Rows are **conflicting** (→ Review Queue, never auto-delete) when:
+- Same canonical label but token sets have non-empty symmetric difference AND neither is a subset (e.g. KFC vs McDonald's for `Favorite restaurant`).
+- Different labels but overlapping value tokens ≥ 50% (e.g. `Personality traits` vs `Semi-verbal:true`) — merge suggestion goes to review.
 
-Update `supabase/config.toml` to include:
+## 3. Deterministic write-time prevention
 
-```toml
-[functions.admin-normalize]
-verify_jwt = false
-```
+- **DB unique index** (partial, case-insensitive): `UNIQUE (user_id, contact_id, lower(btrim(label)), lower(btrim(value)))` on `profile_entries`. Prevents the trivial "insert exact clone" path that produced 5 of the clusters above.
+- Change every insert site to `upsert(..., { onConflict: 'user_id,contact_id,label_norm,value_norm' })` via a generated columns `label_norm`, `value_norm` (`lower(btrim(...))`) so we don't fight PostgREST on expression indexes.
+- Add pre-insert `resolveProfileWrite()` helper in `_shared/profile-dedup.ts` that:
+  1. Canonicalizes label.
+  2. Fetches existing rows for `(contact_id, canonical_label)`.
+  3. If new value is a subset of any existing → skip write (log).
+  4. If new value is a superset → UPDATE existing row's value in place.
+  5. If exact match → skip.
+  6. If conflicting → insert AND enqueue `review_queue` item of type `merge_profile_entries`.
+- Wire this helper into all 5 write sites: `process-note`, `moment-profile-extraction`, `user-profile`, `generate-profile-suggestions`, `enrich-person-from-lexicon`.
 
-Keep the function protected by its own in-code shared-secret check. This matches how the project handles internal/server-auth functions.
+## 4. Deterministic cleanup (DB-side, no LLM, no timeout)
 
-### 3. Repair stale normalization state
+New SQL function `public.cleanup_profile_duplicates(_user_id, _contact_id)` that, for each `(canonical_label)` group:
+1. Deletes exact-value duplicates keeping oldest `created_at`.
+2. Deletes rows whose token-set is a strict subset of another row in the group; retained row's `updated_at` bumped.
+3. For different-label groups that share canonical label, folds into the canonical label.
+4. For token-conflicting pairs (rule 2 fails), inserts a `review_queue` row with both ids and returns without deleting.
+5. Returns `jsonb` summary: `{merged, deleted, review_created, remaining}`.
 
-Clean up stale `profile_normalization_runs` rows that are stuck in `running` for too long by marking them `failed` or allowing the next runner invocation to overwrite them cleanly.
+Called from:
+- `admin-normalize` scheduled cron (already exists, currently runs LLM path).
+- New action `POST /normalize-profile { action: 'deterministic_cleanup', contact_id }`.
+- Automatically after every `resolveProfileWrite()` on that `(contact_id, canonical_label)`.
 
-This prevents the UI/diagnostics from implying that normalization is currently active when it is not.
+## 5. Tests (Vitest)
 
-### 4. Trigger Yumei immediately after the auth fix
+`supabase/functions/_shared/__tests__/profile-dedup.test.ts` extended with Yumei-style fixtures:
+- `VRChat setup` vs `VRChat equipment` (same value, diff label) → merge into canonical `VRChat setup`.
+- `Favorite food` (superset) vs `Favorite fast food` (subset) → keep superset.
+- `Favorite restaurant: KFC` vs `Favorite restaurant: McDonald's` → NO merge, review queue item created.
+- `Health conditions` (long list) vs `Mental health diagnoses` (subset) → merged.
+- `Semi-verbal:true` vs `Personality traits:"...semi-verbal..."` → review suggestion, not auto-merge.
 
-After the cron authentication is fixed, invoke `admin-normalize` for Yumei directly with:
+## 6. Proof
 
-- `scope: "contact"`
-- Yumei’s contact ID
-- `includeNotesContext: true`
-- `changed_only: false`
+Sequence I will run and paste back verbatim:
+1. `SELECT count(*), label, value ... WHERE contact_id=cf9b5d76 ...` (before, already have 134).
+2. Deploy migration + edge functions.
+3. `SELECT public.cleanup_profile_duplicates('4332607c-...', 'cf9b5d76-...');` — paste jsonb output.
+4. Re-run the count query — paste after.
+5. `SELECT ... FROM review_queue WHERE target_entity_id='cf9b5d76-...' AND suggestion_type='merge_profile_entries'` — paste the ambiguous items that were preserved for review.
 
-Then verify:
+If step 3 does not visibly shrink the duplicate clusters listed in §1, I stop and report what's blocking rather than declaring victory.
 
-- the function returns `202`
-- the run finishes as `completed`
-- the queued job is marked `completed`
-- the duplicate-like same-label/list-overlap groups shrink
-- any ambiguous conflicts remain in Review Queue instead of being auto-merged
+## Technical details
 
-### 5. Improve observability so this failure is obvious next time
+- Migration adds two generated columns + unique index + `cleanup_profile_duplicates` SQL function + `merge_profile_entries` allowed value in review_queue.
+- `_shared/profile-dedup.ts` gets `resolveProfileWrite`, `canonicalLabelKey`, `tokenizeListValue`, `subsumes`, `conflicts`.
+- The LLM path in `admin-normalize` stays as an opt-in `mode: 'llm'` but is no longer the default; deterministic cleanup is the default and runs synchronously.
 
-Add logging and status reporting so a future cron failure cannot look successful:
+---
 
-- Log every rejected `admin-normalize` call with reason `forbidden`.
-- Store the last scheduled-run HTTP status somewhere visible, or add a small health query/check that reports:
-  - queued jobs count
-  - oldest queued job age
-  - latest `admin-normalize` status
-  - latest cron HTTP status
+Acceptance = §6 outputs prove clusters in §1 collapsed and conflicts sent to review.
 
-### 6. Optional but recommended: make the normalizer more direct for obvious list duplicates
-
-Because many Yumei duplicates are list-overlap/near-duplicate rows rather than exact duplicates, strengthen deterministic normalization so it merges obvious same-label list rows before asking the LLM.
-
-Examples:
-
-- `Pets: Cat named Pac, guinea pig` + `Pets: Cat (Pac), guinea pig` → one canonical row
-- `VRChat equipment` + `VRChat setup` with overlapping equipment tokens → one row or one canonical label
-- repeated health-condition tokens inside one long value → dedupe tokens in-place
-
-This keeps the LLM for ambiguous decisions, but makes the easy cleanup reliable and cheap.
-
-## Expected result
-
-- The six-hour background job actually runs instead of returning 403.
-- Yumei’s queued normalization job is processed without browser involvement.
-- Future profile writes enqueue jobs and the backend processes them automatically.
-- Obvious duplicates are cleaned server-side; ambiguous profile conflicts are left for review instead of silently losing information.
+Approve and I execute; the plan is intentionally scoped to what SELECT-provable behaviour requires.
