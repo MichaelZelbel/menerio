@@ -8,6 +8,8 @@ import { ilikeContains } from "@/lib/postgrest";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
+import { broadcastInvalidation } from "@/lib/query-sync";
+
 
 export interface RelatedItem {
   type: string;
