@@ -282,6 +282,8 @@ export function useUpdateNote() {
         qc.setQueryData<Note[]>(key, next);
       }
       qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
+      broadcastInvalidation([["notes"]]);
+
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
       }
