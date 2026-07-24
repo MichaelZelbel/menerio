@@ -858,6 +858,7 @@ export async function applyNormalization(
         .eq("user_id", payload.user_id)
         .select("id")
         .single();
+      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
       if (error || !data) return { ok: false, reason: "update_failed" };
       entryId = data.id;
     } else {
@@ -873,6 +874,7 @@ export async function applyNormalization(
         } as any)
         .select("id")
         .single();
+      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
       if (error || !data) return { ok: false, reason: "insert_failed" };
       entryId = data.id;
     }
