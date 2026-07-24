@@ -3074,6 +3074,7 @@ export type Database = {
         Args: { _contact_id: string; _user_id: string }
         Returns: Json
       }
+      cleanup_profile_token_duplicates: { Args: never; Returns: Json }
       deduct_ai_tokens:
         | {
             Args: {
@@ -3226,15 +3227,46 @@ export type Database = {
         Returns: string[]
       }
       profile_canonical_label: { Args: { t: string }; Returns: string }
+      profile_dedup_value_against_keys: {
+        Args: { _seen_keys: string[]; _value: string }
+        Returns: string
+      }
+      profile_dedup_value_tokens: {
+        Args: { _label: string; _value: string }
+        Returns: string
+      }
+      profile_duplicate_scope_key: { Args: { _label: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
+      profile_existing_token_keys: {
+        Args: {
+          _contact_id: string
+          _exclude_id?: string
+          _label: string
+          _user_id: string
+        }
+        Returns: string[]
+      }
       profile_fact_label_key: { Args: { t: string }; Returns: string }
       profile_fact_text_key: { Args: { t: string }; Returns: string }
+      profile_fact_token_key: { Args: { t: string }; Returns: string }
       profile_is_accumulator_label: {
         Args: { p_canonical: string }
         Returns: boolean
       }
+      profile_label_token_priority: {
+        Args: { _label: string }
+        Returns: number
+      }
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
+      profile_token_key_contains: {
+        Args: { subset_key: string; superset_key: string }
+        Returns: boolean
+      }
+      profile_token_keys_overlap: {
+        Args: { a: string; b: string }
+        Returns: boolean
+      }
       profile_tokenize_value: { Args: { t: string }; Returns: string[] }
       profile_value_contains_fact: {
         Args: { subset: string; superset: string }
