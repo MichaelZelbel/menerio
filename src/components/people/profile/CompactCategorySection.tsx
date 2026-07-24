@@ -37,6 +37,12 @@ import { ProfileIcon } from "@/components/profile/ProfileIcon";
 import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
+import {
+  isCharacterLabel,
+  isListValuedLabel,
+  splitListValue,
+  titleCaseCharacterName,
+} from "@/lib/profile-list-labels";
 import type { ProfileCategory } from "@/hooks/useProfile";
 import type { ContactProfileEntry } from "@/hooks/useContactProfile";
 
