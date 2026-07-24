@@ -272,9 +272,24 @@ export function CompactCategorySection({
                   <span className="text-xs text-muted-foreground shrink-0">
                     <Highlighted text={entry.label} query={filterQuery} />
                   </span>
-                  <span className="text-sm break-words">
-                    <Highlighted text={entry.value} query={filterQuery} />
-                  </span>
+                  {isListValuedLabel(entry.label) ? (
+                    <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
+                      {splitListValue(entry.value).map((item, idx) => {
+                        const display = isCharacterLabel(entry.label)
+                          ? titleCaseCharacterName(item)
+                          : item;
+                        return (
+                          <li key={idx}>
+                            <Highlighted text={display} query={filterQuery} />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <span className="text-sm break-words">
+                      <Highlighted text={entry.value} query={filterQuery} />
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/entry:opacity-100 transition-opacity">
                   {entry.linked_note_id && (
