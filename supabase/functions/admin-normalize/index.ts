@@ -201,7 +201,7 @@ serve(async (req) => {
     // Filter subjects to only those with profile_entries updated after their last completed run.
     // Subjects never run before are always included.
     let skippedUnchanged = 0;
-    if (changedOnly && scope !== "contact") {
+    if (changedOnly && scope !== "contact" && jobBySubject.size === 0) {
       const { data: runs } = await db
         .from("profile_normalization_runs")
         .select("contact_id, subject_type, completed_at, status")
