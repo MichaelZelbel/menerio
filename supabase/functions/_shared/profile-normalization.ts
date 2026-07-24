@@ -71,6 +71,16 @@ export function normalizeTokenForList(label: string, token: string): { key: stri
   if (!cleaned) cleaned = String(token || "").trim();
 
   const lower = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const labelLower = String(label || "").trim().toLowerCase();
+  if (labelLower === "pets" || labelLower === "pet") {
+    const petDisplay = cleaned
+      .replace(/\(([^)]+)\)/g, "$1")
+      .replace(/\bnamed\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const petKey = petDisplay.toLowerCase().replace(/\s+/g, " ");
+    return { key: petKey, display: petDisplay };
+  }
   const healthSynonyms: Record<string, string> = {
     "major depressive disorder": "MDD",
     "major depression": "MDD",
@@ -98,6 +108,35 @@ export function splitListTokens(label: string, value: string): Array<{ key: stri
     .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
     .map((t) => normalizeTokenForList(label, t))
     .filter((t) => t.display.length > 0 && t.key.length > 0);
+}
+
+function comparableProfileValue(value: string): string {
+  return normalizeProfileValueForDedup(value)
+    .replace(/[()\[\]{}]/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function meaningfulTokenSet(value: string): Set<string> {
+  const stop = new Set(["a", "an", "and", "as", "at", "for", "from", "has", "in", "is", "of", "on", "or", "the", "to", "with"]);
+  return new Set(
+    comparableProfileValue(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !stop.has(token)),
+  );
+}
+
+function isSubsumedValue(shorterValue: string, longerValue: string): boolean {
+  const shorter = comparableProfileValue(shorterValue);
+  const longer = comparableProfileValue(longerValue);
+  if (!shorter || !longer || shorter === longer) return false;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  const shortTokens = meaningfulTokenSet(shorterValue);
+  if (shortTokens.size < 3) return false;
+  const longTokens = meaningfulTokenSet(longerValue);
+  return [...shortTokens].every((token) => longTokens.has(token));
 }
 
 function buildSchemaDescription(): string {
@@ -145,8 +184,9 @@ export async function planSubjectNormalization(args: {
   userId: string;
   contactId: string | null;
   includeNotesContext?: boolean;
+  deterministicOnly?: boolean;
 }): Promise<NormalizationGroup[]> {
-  const { supabase, userId, contactId, includeNotesContext = false } = args;
+  const { supabase, userId, contactId, includeNotesContext = false, deterministicOnly = false } = args;
 
   // Load all entries for this subject + their categories.
   let entryQuery = supabase
@@ -337,6 +377,47 @@ export async function planSubjectNormalization(args: {
     });
   }
 
+  // --- Same-field subsumption merger (deterministic) ---
+  // If one value for the SAME canonical field clearly contains another, keep
+  // the richest value and delete the shorter duplicate. This covers extractor
+  // repeats like "Weak Hero" / "Weak Hero Season 2" without asking the LLM.
+  type SubsumedMember = { row: ProfileEntryRow; correctedSlug: string; canonLabel: string };
+  const subsumptionBuckets = new Map<string, SubsumedMember[]>();
+  for (const row of rows) {
+    if (deterministicIds.has(row.id)) continue;
+    const currentSlug = slugById.get(row.category_id) || "preferences";
+    const correctedSlug = correctProfileCategory(row.label, currentSlug);
+    const canonLabel = canonicalProfileLabel(correctedSlug, row.label);
+    const key = `${correctedSlug}||${canonLabel.toLowerCase()}`;
+    const member: SubsumedMember = { row, correctedSlug, canonLabel };
+    const bucket = subsumptionBuckets.get(key);
+    if (bucket) bucket.push(member); else subsumptionBuckets.set(key, [member]);
+  }
+  const subsumptionGroups: NormalizationGroup[] = [];
+  for (const members of subsumptionBuckets.values()) {
+    if (members.length < 2) continue;
+    const sorted = [...members].sort((a, b) => comparableProfileValue(b.row.value).length - comparableProfileValue(a.row.value).length);
+    const survivor = sorted[0];
+    const subsumed = sorted.filter((m) => m.row.id !== survivor.row.id && isSubsumedValue(m.row.value, survivor.row.value));
+    if (subsumed.length === 0) continue;
+    const memberIds = [survivor, ...subsumed].map((m) => m.row.id);
+    for (const id of memberIds) deterministicIds.add(id);
+    subsumptionGroups.push({
+      user_id: userId,
+      contact_id: contactId,
+      member_entry_ids: memberIds,
+      survivor_entry_id: survivor.row.id,
+      canonical_category_slug: survivor.correctedSlug,
+      canonical_label: survivor.canonLabel,
+      canonical_value: survivor.row.value,
+      operation: "merge",
+      confidence: 0.95,
+      rationale: `Removed ${subsumed.length} shorter duplicate '${survivor.canonLabel}' value(s) already covered by the richest entry.`,
+      source: "exact",
+      auto_apply_direct: true,
+    });
+  }
+
   // --- Soft single-label multiplicity detector (deterministic) ---
   // For canonical [single] labels with 2+ rows AND 2+ distinct values: emit a
   // low-confidence (0.55) merge group so it routes to REVIEW (never auto-applies).
@@ -395,7 +476,8 @@ export async function planSubjectNormalization(args: {
   // This guarantees zero overlap: the LLM cannot see, and therefore cannot
   // touch, any row claimed by the exact-duplicate or soft-single passes.
   const llmRows = rows.filter((r) => !deterministicIds.has(r.id));
-  if (llmRows.length < 2) return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
+  if (deterministicOnly) return deterministicGroups.concat(listValuedGroups).concat(subsumptionGroups).concat(softSingleGroups);
+  if (llmRows.length < 2) return deterministicGroups.concat(listValuedGroups).concat(subsumptionGroups).concat(softSingleGroups);
 
   const llmEntries = llmRows.map((r) => ({
     id: r.id,
@@ -497,7 +579,7 @@ export async function planSubjectNormalization(args: {
     parsed = JSON.parse(result.content);
   } catch (err) {
     console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups);
+    return deterministicGroups.concat(listValuedGroups).concat(subsumptionGroups).concat(softSingleGroups);
   }
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
@@ -575,7 +657,7 @@ export async function planSubjectNormalization(args: {
       auto_apply_direct: false,
     });
   }
-  return deterministicGroups.concat(listValuedGroups).concat(softSingleGroups).concat(llmGroups);
+  return deterministicGroups.concat(listValuedGroups).concat(subsumptionGroups).concat(softSingleGroups).concat(llmGroups);
 }
 
 function buildPayload(group: NormalizationGroup, rows: ProfileEntryRow[]): NormalizationPayload {
@@ -626,6 +708,7 @@ export async function createNormalizationSuggestions(args: {
   preferences: { mode: string; sensitivity: string; autoAddSensitive: boolean };
   sourceNoteId?: string | null;
   includeNotesContext?: boolean;
+  deterministicOnly?: boolean;
   // injected helpers from process-note (avoids circular import)
   helpers: {
     filterSuppressedSuggestions: (userId: string, s: any[]) => Promise<any[]>;
@@ -634,9 +717,9 @@ export async function createNormalizationSuggestions(args: {
     buildSuppressionKey: (t: string, et: string | null, eid: string | null, v: unknown) => string;
   };
 }): Promise<{ created: number; autoApplied: number; planned: number; applied: number; review: number; skipped: number }> {
-  const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false } = args;
+  const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false, deterministicOnly = false } = args;
 
-  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext });
+  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext, deterministicOnly });
   if (groups.length === 0) return { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.

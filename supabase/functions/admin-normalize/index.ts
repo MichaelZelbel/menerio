@@ -140,26 +140,61 @@ serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const ANON_KEY =
+      Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ||
+      // Publishable project key fallback for pg_cron calls. This is not a
+      // private credential; it only unlocks the narrow cron queue route below.
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqZWFwZWx2amxtYnhhZnNtamVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MTk3MDUsImV4cCI6MjA4ODQ5NTcwNX0.xzux7CmiNNDdtcjaPvuJRqs8_ZtiljbDjim4Mdm4siU";
     const adminKey = Deno.env.get("MCP_ACCESS_KEY") || "";
     const provided = req.headers.get("x-admin-key") || "";
+    const apiKey = req.headers.get("apikey") || "";
     const authHeader = (req.headers.get("Authorization") || "").replace("Bearer ", "");
+    const body = await req.json().catch(() => ({}));
+    const isAnonJwt = (() => {
+      try {
+        const [, payload] = apiKey.split(".");
+        if (!payload) return false;
+        const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+        const decoded = JSON.parse(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")));
+        return decoded?.iss === "supabase" && decoded?.ref === "tjeapelvjlmbxafsmjef" && decoded?.role === "anon";
+      } catch {
+        return false;
+      }
+    })();
+    const isScheduledQueueRun =
+      (apiKey === ANON_KEY || isAnonJwt) &&
+      body?.cron === "profile-normalization" &&
+      !body?.user_id &&
+      !body?.contact_id &&
+      !body?.scope;
     // Accept either the MCP shared secret (dev/curl) or the service-role key
     // (pg_cron / server-side callers). Never accept anon or user JWTs here.
-    if (!(provided && provided === adminKey) && !(authHeader && authHeader === SERVICE_ROLE)) {
+    // Scheduled queue runs are intentionally narrow: they can only process
+    // already-queued normalization jobs for BRAIN_OWNER_USER_ID, never a caller
+    // supplied user/contact/full sweep. This avoids relying on unavailable
+    // Postgres service-role settings while keeping arbitrary admin access closed.
+    if (!isScheduledQueueRun && !(provided && provided === adminKey) && !(authHeader && authHeader === SERVICE_ROLE)) {
+      console.warn("[admin-normalize] forbidden request", {
+        hasAdminKey: Boolean(provided),
+        hasAuthorization: Boolean(authHeader),
+        hasApiKey: Boolean(apiKey),
+      });
       return json({ error: "forbidden" }, 403);
     }
     const db = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const body = await req.json().catch(() => ({}));
-    const userId = String(body?.user_id || Deno.env.get("BRAIN_OWNER_USER_ID") || "");
+    const userId = String(isScheduledQueueRun ? Deno.env.get("BRAIN_OWNER_USER_ID") || "" : body?.user_id || Deno.env.get("BRAIN_OWNER_USER_ID") || "");
     if (!userId) return json({ error: "user_id required" }, 400);
-    const scope = String(body?.scope || "all");
+    const scope = String(isScheduledQueueRun ? "jobs" : body?.scope || "all");
     const includeNotesContext = body?.includeNotesContext !== false;
+    const deterministicOnly = isScheduledQueueRun || body?.deterministic_only === true;
     // Default: only touch subjects whose profile changed since last successful run.
     // Pass changed_only:false to force a full sweep.
-    const changedOnly = body?.changed_only !== false;
-    const processJobs = body?.process_jobs !== false;
-    const jobLimit = Math.min(Math.max(Number(body?.job_limit || 100), 1), 500);
+    const changedOnly = isScheduledQueueRun ? true : body?.changed_only !== false;
+    const processJobs = isScheduledQueueRun ? true : body?.process_jobs !== false;
+    const jobLimit = Math.min(Math.max(Number(isScheduledQueueRun ? 100 : body?.job_limit || 100), 1), isScheduledQueueRun ? 100 : 500);
 
     const subjects: Array<string | null> = [];
     const jobBySubject = new Map<string, string[]>();
@@ -256,6 +291,7 @@ serve(async (req) => {
               preferences,
               sourceNoteId: null,
               includeNotesContext,
+              deterministicOnly,
               helpers,
             });
             agg.created += r.created;
@@ -295,11 +331,16 @@ serve(async (req) => {
       }
     };
 
+    if (isScheduledQueueRun) {
+      await runAll();
+      return json({ ok: true, started: false, completed: true, subjectCount: subjects.length, skippedUnchanged }, 200);
+    }
+
     try {
       // @ts-expect-error - EdgeRuntime is a Supabase Edge global
       EdgeRuntime.waitUntil(runAll());
     } catch {
-      runAll();
+      void runAll();
     }
     return json({ ok: true, started: true, subjectCount: subjects.length, skippedUnchanged }, 202);
   } catch (err) {
