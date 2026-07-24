@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReviewQueue, type ReviewItem, type WikiRevisionReviewItem } from "@/hooks/useReviewQueue";
@@ -662,90 +662,239 @@ export default function ReviewQueue() {
     }
   };
 
-  const handleRemoveAll = async () => {
-    // Isolate each item so one failing revert can't abort the whole loop and
-    // leave the queue half-processed and frozen (no refresh, no toast). Always
-    // refresh in a finally.
-    let failures = 0;
-    try {
-      for (const item of items) {
-        try {
-          await revertAppliedChange(item);
-          updateStatus.mutate({ id: item.id, status: "removed" });
-        } catch (err: any) {
-          failures++;
-          showToast.error(`Failed to remove "${item.title}": ${err?.message || "Unknown error"}`);
-        }
-      }
-      for (const revision of wikiRevisions) {
-        try {
-          await rollbackWikiRevisionById(revision.id);
-        } catch (err: any) {
-          failures++;
-          showToast.error(`Failed to roll back a Lexicon edit: ${err?.message || "Unknown error"}`);
-        }
-      }
-    } finally {
-      refreshReviewQueues();
+  // Batched bulk-action machinery. Prior implementation fired N sequential
+  // updateStatus.mutate() calls; each call invalidated the review-queue query,
+  // which refetched up to 1000 rows and re-rendered every card — O(N²) DOM
+  // churn that froze the browser at ~2k items. We now:
+  //   • bulk-flip status for already-applied items in a single UPDATE,
+  //   • run pending-item side effects in small concurrent batches,
+  //   • refresh queries exactly once at the end.
+  const BULK_BATCH = 8;
+  const BULK_CONFIRM_THRESHOLD = 100;
+
+  const [isBulkRunning, setIsBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<null | {
+    kind: "keep" | "remove" | "block";
+    label: string;
+    total: number;
+    run: () => Promise<void>;
+  }>(null);
+
+  const runInBatches = async <T,>(
+    list: T[],
+    size: number,
+    fn: (item: T) => Promise<void>,
+    onDone: () => void,
+  ) => {
+    for (let i = 0; i < list.length; i += size) {
+      const chunk = list.slice(i, i + size);
+      await Promise.allSettled(chunk.map((t) => fn(t).finally(onDone)));
     }
-    if (failures === 0) showToast.info("All visible changes removed");
   };
 
-  const handleNeverAgainAll = async () => {
-    let failures = 0;
+  const bulkFlipStatus = async (ids: string[], status: "kept" | "removed" | "blocked") => {
+    if (ids.length === 0) return;
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = { status, reviewed_at: now };
+    if (status === "blocked") patch.blocked_at = now;
+    // Chunk the .in() to keep URLs sane.
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { error } = await supabase
+        .from("review_queue" as any)
+        .update(patch as any)
+        .in("id", chunk);
+      if (error) throw error;
+    }
+  };
+
+  const runBulk = async (opts: {
+    kind: "keep" | "remove" | "block";
+    handlePending: (item: ReviewItem) => Promise<void>;
+    handleAlreadyAppliedIds: (ids: string[]) => Promise<void>;
+    handleWiki: (rev: WikiRevisionReviewItem) => Promise<void>;
+    successMessage: (ok: number, fail: number) => string;
+  }) => {
+    const alreadyAppliedIds: string[] = [];
+    const pending: ReviewItem[] = [];
+    for (const item of items) {
+      if (item.target_entity_id && item.applied_at) alreadyAppliedIds.push(item.id);
+      else pending.push(item);
+    }
+    const total = alreadyAppliedIds.length + pending.length + wikiRevisions.length;
+    if (total === 0) return;
+
+    setIsBulkRunning(true);
+    setBulkProgress({ done: 0, total });
+    let ok = 0;
+    let fail = 0;
+    const bump = (success: boolean) => {
+      if (success) ok++; else fail++;
+      setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+    };
+
     try {
-      for (const item of items) {
+      // 1) Bulk-flip already-applied items in a single UPDATE.
+      try {
+        await opts.handleAlreadyAppliedIds(alreadyAppliedIds);
+        for (let i = 0; i < alreadyAppliedIds.length; i++) bump(true);
+      } catch (err: any) {
+        for (let i = 0; i < alreadyAppliedIds.length; i++) bump(false);
+        showToast.error(`Bulk update failed: ${err?.message || "Unknown error"}`);
+      }
+
+      // 2) Pending items — small concurrent batches.
+      await runInBatches(pending, BULK_BATCH, async (item) => {
         try {
+          await opts.handlePending(item);
+          ok++;
+        } catch (err: any) {
+          fail++;
+          console.warn("Bulk item failed", item.id, err);
+        }
+      }, () => {
+        setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+      });
+
+      // 3) Wiki revisions.
+      await runInBatches(wikiRevisions, BULK_BATCH, async (rev) => {
+        try {
+          await opts.handleWiki(rev);
+          ok++;
+        } catch (err: any) {
+          fail++;
+          console.warn("Bulk wiki failed", rev.id, err);
+        }
+      }, () => {
+        setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+      });
+    } finally {
+      refreshReviewQueues();
+      invalidateProfileQueries();
+      setIsBulkRunning(false);
+      setBulkProgress(null);
+    }
+
+    if (fail === 0) showToast.success(opts.successMessage(ok, fail));
+    else showToast.info(opts.successMessage(ok, fail));
+  };
+
+  const confirmIfLarge = (
+    kind: "keep" | "remove" | "block",
+    label: string,
+    run: () => Promise<void>,
+  ) => {
+    const total = items.length + wikiRevisions.length;
+    if (total >= BULK_CONFIRM_THRESHOLD) {
+      setBulkConfirm({ kind, label, total, run });
+    } else {
+      void run();
+    }
+  };
+
+  const handleRemoveAll = () => {
+    confirmIfLarge("remove", "Roll back", () =>
+      runBulk({
+        kind: "remove",
+        handleAlreadyAppliedIds: async (ids) => {
+          // Revert side effects then flip status.
+          const byId = new Map(items.map((i) => [i.id, i] as const));
+          await runInBatches(ids, BULK_BATCH, async (id) => {
+            const item = byId.get(id);
+            if (item) await revertAppliedChange(item);
+          }, () => {});
+          await bulkFlipStatus(ids, "removed");
+        },
+        handlePending: async (item) => {
+          await revertAppliedChange(item);
+          await bulkFlipStatus([item.id], "removed");
+        },
+        handleWiki: async (rev) => {
+          await rollbackWikiRevisionById(rev.id);
+        },
+        successMessage: (ok, fail) =>
+          fail === 0 ? "All visible changes removed" : `Removed ${ok}, failed ${fail}`,
+      }),
+    );
+  };
+
+  const handleNeverAgainAll = () => {
+    confirmIfLarge("block", "Never Again", () =>
+      runBulk({
+        kind: "block",
+        handleAlreadyAppliedIds: async (ids) => {
+          const byId = new Map(items.map((i) => [i.id, i] as const));
+          await runInBatches(ids, BULK_BATCH, async (id) => {
+            const item = byId.get(id);
+            if (!item) return;
+            await revertAppliedChange(item);
+            await createSuppression(item);
+          }, () => {});
+          await bulkFlipStatus(ids, "blocked");
+        },
+        handlePending: async (item) => {
           await revertAppliedChange(item);
           await createSuppression(item);
-          updateStatus.mutate({ id: item.id, status: "blocked", extra: { blocked_at: new Date().toISOString() } });
-        } catch (err: any) {
-          failures++;
-          showToast.error(`Failed to block "${item.title}": ${err?.message || "Unknown error"}`);
-        }
-      }
-      for (const revision of wikiRevisions) {
-        try {
-          await rollbackWikiRevisionById(revision.id);
-        } catch (err: any) {
-          failures++;
-          showToast.error(`Failed to roll back a Lexicon edit: ${err?.message || "Unknown error"}`);
-        }
-      }
-    } finally {
-      refreshReviewQueues();
-    }
-    if (failures === 0) showToast.info("All visible changes blocked where possible and rolled back");
+          await bulkFlipStatus([item.id], "blocked");
+        },
+        handleWiki: async (rev) => {
+          await rollbackWikiRevisionById(rev.id);
+        },
+        successMessage: (ok, fail) =>
+          fail === 0
+            ? "All visible changes blocked and rolled back"
+            : `Blocked ${ok}, failed ${fail}`,
+      }),
+    );
   };
 
-  const handleKeepAll = async () => {
-    // Sequentially apply each item so add_profile_entry / add_relationship /
-    // group_member_suggestion actually write to their tables instead of just
-    // flipping review_queue.status to "kept".
-    for (const item of items) {
-      const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
-      try {
-        if (alreadyApplied) {
-          updateStatus.mutate({ id: item.id, status: "kept" });
-        } else {
+  const handleKeepAll = () => {
+    confirmIfLarge("keep", "Keep", () =>
+      runBulk({
+        kind: "keep",
+        handleAlreadyAppliedIds: async (ids) => {
+          await bulkFlipStatus(ids, "kept");
+        },
+        handlePending: async (item) => {
+          // handleAccept performs the real side-effects (insert profile entry,
+          // moment, relationship, alias, etc.) and calls updateStatus.mutate.
+          // In bulk mode we accept the per-item invalidation cost because the
+          // pending set is typically small; the huge auto-applied set was
+          // handled by the fast path above.
           await handleAccept(item);
-        }
-      } catch (err: any) {
-        showToast.error(`Failed to keep "${item.title}": ${err?.message || "Unknown error"}`);
-      }
-    }
-    for (const revision of wikiRevisions) {
-      await handleWikiLooksGood(revision);
-    }
-    refreshReviewQueues();
-    showToast.success("All visible changes kept");
+        },
+        handleWiki: async (rev) => {
+          await handleWikiLooksGood(rev);
+        },
+        successMessage: (ok, fail) =>
+          fail === 0 ? "All visible changes kept" : `Kept ${ok}, failed ${fail}`,
+      }),
+    );
   };
+
 
   const hasReviewItems = items.length + wikiRevisions.length > 0;
-  const combinedReviewItems = [
-    ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
-    ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
-  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const combinedReviewItems = useMemo(
+    () =>
+      [
+        ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
+        ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [items, wikiRevisions],
+  );
+
+  // Paginate to keep the DOM small even with thousands of pending items.
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(combinedReviewItems.length / PAGE_SIZE));
+  useEffect(() => {
+    if (page > pageCount - 1) setPage(0);
+  }, [page, pageCount]);
+  const pageItems = useMemo(
+    () => combinedReviewItems.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [combinedReviewItems, page],
+  );
 
   if (isLoading) {
     return (
@@ -758,6 +907,8 @@ export default function ReviewQueue() {
     );
   }
 
+  const bulkDisabled = updateStatus.isPending || isBulkRunning || !hasReviewItems;
+
   return (
     <div className="p-6 space-y-6 max-w-3xl">
       <div>
@@ -765,24 +916,37 @@ export default function ReviewQueue() {
         <p className="text-muted-foreground text-sm mt-1">
           Menerio automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
         </p>
+        {hasReviewItems && (
+          <p className="text-xs text-muted-foreground mt-2">
+            {combinedReviewItems.length.toLocaleString()} pending {combinedReviewItems.length === 1 ? "change" : "changes"}
+            {pageCount > 1 && <> · showing {page * PAGE_SIZE + 1}–{Math.min(combinedReviewItems.length, (page + 1) * PAGE_SIZE)}</>}
+          </p>
+        )}
       </div>
 
       {hasReviewItems && (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={updateStatus.isPending || !hasReviewItems}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={bulkDisabled}>
             <X className="h-4 w-4 mr-1" />
             Never Again
           </Button>
-          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={updateStatus.isPending || !hasReviewItems}>
+          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemoveAll} disabled={bulkDisabled}>
             <RotateCcw className="h-4 w-4 mr-1" />
             Roll Back
           </Button>
-          <Button size="sm" onClick={handleKeepAll} disabled={updateStatus.isPending || !hasReviewItems}>
+          <Button size="sm" onClick={handleKeepAll} disabled={bulkDisabled}>
             <Check className="h-4 w-4 mr-1" />
             Keep
           </Button>
+          {isBulkRunning && bulkProgress && (
+            <span className="text-xs text-muted-foreground ml-2">
+              Processing {bulkProgress.done.toLocaleString()} / {bulkProgress.total.toLocaleString()}…
+            </span>
+          )}
         </div>
       )}
+
+
 
       {!hasReviewItems ? (
         <Card>
@@ -796,7 +960,7 @@ export default function ReviewQueue() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {combinedReviewItems.map((entry) => {
+          {pageItems.map((entry) => {
             if (entry.kind === "wiki") {
               const { revision } = entry;
               const diff = buildLineDiff(revision.previous_content, revision.new_content);
@@ -988,6 +1152,31 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0 || isBulkRunning}
+          >
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {page + 1} of {pageCount}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            disabled={page >= pageCount - 1 || isBulkRunning}
+          >
+            Next
+          </Button>
+        </div>
+      )}
+
+
       <Dialog open={!!selectedWikiRevision} onOpenChange={(open) => !open && setSelectedWikiRevision(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
@@ -1024,6 +1213,30 @@ export default function ReviewQueue() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={!!bulkConfirm} onOpenChange={(open) => !open && setBulkConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{bulkConfirm?.label} {bulkConfirm?.total.toLocaleString()} changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will process every visible item in the review queue. Large queues can take a while — you'll see a progress indicator while it runs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const c = bulkConfirm;
+                setBulkConfirm(null);
+                if (c) void c.run();
+              }}
+            >
+              {bulkConfirm?.label} all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
