@@ -1,107 +1,91 @@
-## Goal
-Make duplicate prevention a backend invariant instead of another browser-triggered cleanup pass.
+## What is going wrong
 
-The fix should guarantee that obvious duplicates cannot be inserted again, clean existing duplicates in the background, and keep the browser out of heavy normalization work.
+I checked the live database and the current deployed runner state. The automatic cleanup is not actually reaching the normalizer.
 
-## Confirmed current gaps
-- Profile entries can still be created directly from the browser in Review Queue (`src/pages/ReviewQueue.tsx`) and profile hooks (`src/hooks/useProfile.ts`, `src/hooks/useContactProfile.ts`). That bypasses the token-aware backend guard at the final write step.
-- The extraction pipeline deduplicates before creating suggestions, but an accepted suggestion can become stale by the time it is approved and still insert a duplicate.
-- The database has no uniqueness guard for profile entries beyond the primary key; exact/case-normalized duplicates can exist.
-- The normalizer is currently cleanup-after-the-fact. It helps, but it is not a write barrier.
+Confirmed findings:
 
-## Plan
+- Yumei still has duplicate-like profile rows, especially same-label variants such as `Pets`, `Personality traits`, `VRChat setup/equipment`, `Health conditions`, and similar list/near-duplicate fields.
+- The exact duplicate database guard is not the main issue here: the duplicates are mostly semantic/list-overlap duplicates, not byte-for-byte identical rows.
+- A normalization job for Yumei is queued, but it has not been processed.
+- The scheduled cron job is firing every 6 hours, but the HTTP response from `admin-normalize` is `403 {"error":"forbidden"}`.
+- The cron command is sending `Authorization: Bearer ` plus `current_setting('supabase.service_role_key', true)`, but that database setting is empty in this project. So the job reports as “succeeded” in cron because it successfully made an HTTP request, while the Edge Function rejects the request.
+- `admin-normalize` also is not listed in `supabase/config.toml`, so depending on deployment defaults it may be less explicit than the other internal functions.
+- A previous `profile_normalization_runs` row for Yumei is stuck in `running`, which can mislead diagnostics even though the real blocker is the rejected cron request.
 
-### 1. Add a database-level exact duplicate guard
-Create a migration that:
-- Adds a deterministic profile-entry fingerprint function for obvious duplicates:
-  - trims whitespace
-  - collapses repeated spaces
-  - compares case-insensitively
-  - handles `contact_id IS NULL` consistently for owner profiles
-- Cleans current exact duplicates once so the index can be added safely.
-- Adds a unique index preventing future exact duplicates per:
-  - user
-  - owner/contact subject
-  - category
-  - normalized label
-  - normalized value
+So the reason “nothing happens after six hours” is: the scheduler is running, but it is unauthenticated, so the backend refuses to do the work.
 
-This stops the simplest duplicate class permanently even if a missed code path tries to write one.
+## Fix plan
 
-### 2. Centralize profile entry writes in one server-side path
-Add a small authenticated Edge Function action, likely inside `normalize-profile` or a new focused `profile-entry-write` function, used for creating profile entries.
+### 1. Make the scheduled runner authenticate correctly
 
-It will:
-- Validate input with Zod.
-- Resolve/create the profile category server-side.
-- Canonicalize category/label using the existing profile schema.
-- Re-check saved profile entries at the moment of write.
-- Use the existing token-aware dedup logic for list-valued fields.
-- Return one of these outcomes instead of blindly inserting:
-  - `inserted` — genuinely new fact
-  - `already_exists` — exact or singleton duplicate, no write
-  - `merged_list` — merged new tokens into an existing list row
-  - `rejected_duplicate` — duplicate blocked by the DB guard
-- Enqueue normalization for that subject after the write.
+Update the scheduled cron job so it calls `admin-normalize` with a real secret that already exists in Edge Function secrets, instead of relying on the missing database setting.
 
-Then update browser code so it no longer inserts profile entries directly for:
-- accepting `add_profile_entry` review items
-- owner profile quick/manual entry creation
-- contact profile quick/manual entry creation
+Best minimal approach:
 
-Existing edit/delete paths can remain direct, but they will trigger background normalization.
+- Use `MCP_ACCESS_KEY` as the shared internal admin key.
+- Store the value in a database setting or secure cron-compatible mechanism only if available; otherwise update the cron call to use the anon key for routing plus an `x-admin-key` header whose value is injected via SQL configuration.
+- If the secret cannot be read from Postgres safely, replace the pg_cron trigger with a small scheduled Edge Function pattern that can read Edge secrets directly.
 
-### 3. Add a lightweight background normalization job queue
-Create a server-side job table for normalization work, coalesced by user + subject.
+### 2. Make `admin-normalize` cron-safe and explicit
 
-A database trigger on `profile_entries` will enqueue a job whenever an entry is inserted, updated, or deleted. This means normalization is automatic even if the write came from an old client path, MCP, review queue, or a future integration.
+Update `supabase/config.toml` to include:
 
-The job runner will:
-- process only changed subjects, not every contact every six hours
-- claim jobs in small batches
-- use `EdgeRuntime.waitUntil` so requests return quickly
-- skip unchanged profiles using the existing input hash logic
-- run deterministic cleanup first, LLM cleanup only when needed
-- write audit rows to Review Queue only for real changes
+```toml
+[functions.admin-normalize]
+verify_jwt = false
+```
 
-### 4. Make the normalizer stricter and idempotent
-Extend the deterministic normalizer so “obvious duplicate” includes:
-- same canonical label + same normalized value
-- case-only differences, e.g. `Partner` vs `partner`
-- health checkbox artifacts, e.g. `BPD: true` → `Health conditions: BPD`
-- list-valued overlaps, e.g. repeated `BPD`, repeated foods, repeated allergies
-- known alias families already represented in `profile-dedup.ts`
+Keep the function protected by its own in-code shared-secret check. This matches how the project handles internal/server-auth functions.
 
-The normalizer should be safe to run repeatedly: after it finishes once, running it again should produce zero changes for the same input.
+### 3. Repair stale normalization state
 
-### 5. Move heavy Review Queue profile actions off the browser
-For bulk approval/removal of profile-related review items:
-- Add a server-side batch action for profile suggestions.
-- The browser sends one request with item IDs.
-- The Edge Function processes in chunks and returns progress/summary.
-- The browser only polls/refetches; it does not loop through thousands of mutations.
+Clean up stale `profile_normalization_runs` rows that are stuck in `running` for too long by marking them `failed` or allowing the next runner invocation to overwrite them cleanly.
 
-This avoids the Windows-machine-freeze scenario when the queue is huge.
+This prevents the UI/diagnostics from implying that normalization is currently active when it is not.
 
-### 6. Run one server-side cleanup sweep after deployment
-After the migration and server write path are in place:
-- Trigger the background normalizer for all existing subjects once.
-- Let it clean exact/list duplicates automatically.
-- Leave only genuinely ambiguous conflicts in Review Queue.
-- Verify Yumei’s profile specifically after the sweep.
+### 4. Trigger Yumei immediately after the auth fix
 
-### 7. Add regression tests
-Add tests for:
-- exact duplicate fingerprinting
-- case/spacing duplicate blocking
-- list-token deduplication
-- boolean health transforms
-- accepting the same profile suggestion twice
-- concurrent duplicate writes
-- bulk review action not issuing N browser mutations
+After the cron authentication is fixed, invoke `admin-normalize` for Yumei directly with:
+
+- `scope: "contact"`
+- Yumei’s contact ID
+- `includeNotesContext: true`
+- `changed_only: false`
+
+Then verify:
+
+- the function returns `202`
+- the run finishes as `completed`
+- the queued job is marked `completed`
+- the duplicate-like same-label/list-overlap groups shrink
+- any ambiguous conflicts remain in Review Queue instead of being auto-merged
+
+### 5. Improve observability so this failure is obvious next time
+
+Add logging and status reporting so a future cron failure cannot look successful:
+
+- Log every rejected `admin-normalize` call with reason `forbidden`.
+- Store the last scheduled-run HTTP status somewhere visible, or add a small health query/check that reports:
+  - queued jobs count
+  - oldest queued job age
+  - latest `admin-normalize` status
+  - latest cron HTTP status
+
+### 6. Optional but recommended: make the normalizer more direct for obvious list duplicates
+
+Because many Yumei duplicates are list-overlap/near-duplicate rows rather than exact duplicates, strengthen deterministic normalization so it merges obvious same-label list rows before asking the LLM.
+
+Examples:
+
+- `Pets: Cat named Pac, guinea pig` + `Pets: Cat (Pac), guinea pig` → one canonical row
+- `VRChat equipment` + `VRChat setup` with overlapping equipment tokens → one row or one canonical label
+- repeated health-condition tokens inside one long value → dedupe tokens in-place
+
+This keeps the LLM for ambiguous decisions, but makes the easy cleanup reliable and cheap.
 
 ## Expected result
-- Obvious duplicates are blocked at write time, not merely cleaned later.
-- Existing duplicates are cleaned by the backend without user clicks.
-- Future profile changes automatically enqueue background cleanup.
-- The browser stays responsive because it only triggers/polls server work, not thousands of per-item operations.
+
+- The six-hour background job actually runs instead of returning 403.
+- Yumei’s queued normalization job is processed without browser involvement.
+- Future profile writes enqueue jobs and the backend processes them automatically.
+- Obvious duplicates are cleaned server-side; ambiguous profile conflicts are left for review instead of silently losing information.
