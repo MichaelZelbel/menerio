@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
 import { formatDistanceToNow } from "date-fns";
 
 interface OutgoingLinksPanelProps {
@@ -18,10 +18,8 @@ interface OutgoingLink {
 
 export function OutgoingLinksPanel({ noteId, onNavigate }: OutgoingLinksPanelProps) {
   const { user } = useAuth();
-  const [expanded, setExpanded] = useState(false);
-  // Reset on note switch — NoteEditor reuses this instance (no `key`
-  // remount, which caused a duplication glitch). Do not remove.
-  useEffect(() => { setExpanded(false); }, [noteId]);
+  const [expanded, setExpanded] = useStickyPanelPreference("note-links");
+
 
   const { data: links = [], isLoading } = useQuery<OutgoingLink[]>({
     queryKey: ["outgoing-links", noteId, user?.id],
