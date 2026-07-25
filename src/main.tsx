@@ -11,8 +11,60 @@ if (BRAND.themeClass) document.documentElement.classList.add(BRAND.themeClass);
 
 // The service worker is a web/PWA concern; in the Tauri desktop shell all
 // assets are bundled locally and SW registration on the tauri origin is
-// unreliable — skip it there.
-if (!("__TAURI_INTERNALS__" in window)) {
+// unreliable — skip it there. The Lovable editor preview must also never
+// register a service worker: a preview iframe left open across deploys keeps
+// serving a stale app shell (people-tree avatars, deleted routes, etc.)
+// forever, and users can't easily clear an iframe's storage. In those
+// contexts we actively evict any previously-registered worker + caches.
+const host = typeof window !== "undefined" ? window.location.hostname : "";
+const inTauri = "__TAURI_INTERNALS__" in window;
+const inIframe = (() => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+})();
+const isLovablePreviewHost =
+  host.startsWith("id-preview--") ||
+  host.startsWith("preview--") ||
+  host === "lovableproject.com" ||
+  host.endsWith(".lovableproject.com") ||
+  host === "lovableproject-dev.com" ||
+  host.endsWith(".lovableproject-dev.com") ||
+  host === "beta.lovable.dev" ||
+  host.endsWith(".beta.lovable.dev");
+const swDisabled =
+  inTauri ||
+  inIframe ||
+  isLovablePreviewHost ||
+  !import.meta.env.PROD ||
+  new URLSearchParams(window.location.search).get("sw") === "off";
+
+if (swDisabled) {
+  // Evict any worker previously installed on this origin so the preview
+  // stops serving cached HTML/JS. Runs in the background; failures are safe.
+  if ("serviceWorker" in navigator) {
+    void (async () => {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        if (regs.length === 0) return;
+        for (const r of regs) await r.unregister();
+        if ("caches" in window) {
+          for (const key of await caches.keys()) await caches.delete(key);
+        }
+        // One reload after eviction so the fresh dev/preview bundle takes over.
+        const KEY = "menerio:sw-evicted";
+        if (sessionStorage.getItem(KEY) !== "1") {
+          sessionStorage.setItem(KEY, "1");
+          window.location.reload();
+        }
+      } catch {
+        /* never break boot */
+      }
+    })();
+  }
+} else {
   // Without explicit checks, a browser only looks for a new service worker on
   // navigation — tabs (and installed PWA windows) left open for days keep
   // running a ghost build long after deploys. Poll every 30 minutes and on
@@ -49,11 +101,11 @@ if (!("__TAURI_INTERNALS__" in window)) {
         .map((s) => s.src)
         .map((src) => src.match(/\/assets\/(index-[\w-]+\.js)/)?.[1])
         .find(Boolean);
-      if (!ownChunk) return; // dev server or unexpected layout — not our case
+      if (!ownChunk) return;
       const res = await fetch("/sw.js", { cache: "no-store" });
       if (!res.ok) return;
       const manifest = await res.text();
-      if (manifest.includes(ownChunk)) return; // healthy: SW knows this build
+      if (manifest.includes(ownChunk)) return;
       if (sessionStorage.getItem(GHOST_SHELL_KEY) === "1") return;
       sessionStorage.setItem(GHOST_SHELL_KEY, "1");
       for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
