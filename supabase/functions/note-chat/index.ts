@@ -54,25 +54,6 @@ const WRITE_TOOLS = [
   {
     type: "function",
     function: {
-      name: "append_to_note",
-      description:
-        "Append text (markdown) to the end of the currently open note.",
-      parameters: {
-        type: "object",
-        properties: {
-          text: {
-            type: "string",
-            description: "Markdown text to append to the note",
-          },
-        },
-        required: ["text"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "update_note_metadata",
       description:
         "Update metadata fields on the current note (topics, type, sentiment, people, summary, etc.).",
@@ -134,8 +115,10 @@ const WRITE_TOOLS = [
   },
 ];
 
-// Full tool set = shared read tools (search/lookup) + note-local write tools.
-const TOOLS = [...READ_TOOL_SCHEMAS, ...WRITE_TOOLS];
+// Full tool set = shared read tools + safe content-edit tools + note-local
+// metadata/tag/link write tools.
+const TOOLS = [...READ_TOOL_SCHEMAS, ...NOTE_EDIT_TOOL_SCHEMAS, ...WRITE_TOOLS];
+
 
 // System prompts now resolved at runtime from llm_call_configs
 // (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
