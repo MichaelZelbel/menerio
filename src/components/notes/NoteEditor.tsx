@@ -113,6 +113,12 @@ import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml }
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
 import { buildTitleMap, resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
+import {
+  FLUSH_REQUEST_EVENT,
+  FLUSH_DONE_EVENT,
+  NOTE_UPDATED_EVENT,
+} from "@/lib/note-ai-edit";
+
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
