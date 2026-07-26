@@ -1,53 +1,70 @@
 import { useState } from "react";
 import { useGitHubVersionHistory, useGitHubFileAtCommit, useSyncLogForNote } from "@/hooks/useGitHubSync";
 import { markdownToNote } from "@/utils/markdown-converter";
-import { useUpdateNote } from "@/hooks/useNotes";
-import { Button } from "@/components/ui/button";
+import { useNote, useUpdateNote } from "@/hooks/useNotes";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, GitCommit, RotateCcw, X, ChevronRight } from "lucide-react";
-import { formatDistanceToNow, format } from "date-fns";
+import { Loader2, GitCommit, X, ChevronRight } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { showToast } from "@/lib/toast";
+import { VersionPreviewDialog } from "./VersionPreviewDialog";
 
 interface Props {
   noteId: string;
   onClose: () => void;
 }
 
+interface CommitMeta {
+  sha: string;
+  date?: string | null;
+  author?: string | null;
+  message?: string | null;
+}
+
 export function VersionHistoryPanel({ noteId, onClose }: Props) {
   const { data: versions, isLoading } = useGitHubVersionHistory(noteId);
   const { data: syncLog } = useSyncLogForNote(noteId);
+  const { data: currentNote } = useNote(noteId);
   const fetchFile = useGitHubFileAtCommit();
   const updateNote = useUpdateNote();
-  const [selectedSha, setSelectedSha] = useState<string | null>(null);
-  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [selected, setSelected] = useState<CommitMeta | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [loadingSha, setLoadingSha] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<{ title: string; content: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleViewVersion = async (commitSha: string) => {
-    if (!syncLog?.github_path) return;
-    setSelectedSha(commitSha);
+  const loadVersion = async (commit: CommitMeta) => {
+    if (!syncLog?.github_path) {
+      showToast.error("This note isn't linked to a GitHub file yet");
+      return;
+    }
+    setSelected(commit);
+    setPreviewOpen(true);
+    setParsed(null);
+    setError(null);
+    setLoadingSha(commit.sha);
     try {
-      const content = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha });
-      setPreviewContent(content);
+      const content = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
+      const note = markdownToNote(content);
+      setParsed({ title: note.title || "Untitled", content: note.content || "" });
     } catch {
-      showToast.error("Failed to load version");
+      setError("Couldn't load this version from GitHub.");
+    } finally {
+      setLoadingSha(null);
     }
   };
 
   const handleRestore = async () => {
-    if (!previewContent) return;
+    if (!parsed) return;
     try {
-      const parsed = markdownToNote(previewContent);
-      await updateNote.mutateAsync({
-        id: noteId,
-        title: parsed.title,
-        content: parsed.content,
-      });
+      await updateNote.mutateAsync({ id: noteId, title: parsed.title, content: parsed.content });
       showToast.success("Version restored");
-      setSelectedSha(null);
-      setPreviewContent(null);
+      setPreviewOpen(false);
     } catch {
       showToast.error("Failed to restore version");
     }
   };
+
+  const newestSha = versions?.[0]?.sha;
 
   return (
     <div className="flex flex-col h-full border-l border-border bg-background w-80">
@@ -74,62 +91,66 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
       ) : (
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
-            {versions.map((commit: any) => (
-              <button
-                key={commit.sha}
-                onClick={() => handleViewVersion(commit.sha)}
-                className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors hover:bg-accent/50 ${
-                  selectedSha === commit.sha ? "bg-accent" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-muted-foreground text-[10px]">
-                    {commit.sha.slice(0, 7)}
-                  </span>
-                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                </div>
-                <p className="text-foreground truncate mt-0.5">
-                  {commit.commit?.message || "No message"}
-                </p>
-                <p className="text-muted-foreground mt-0.5">
-                  {formatDistanceToNow(new Date(commit.commit?.author?.date), { addSuffix: true })}
-                </p>
-              </button>
-            ))}
+            {versions.map((commit: any) => {
+              const meta: CommitMeta = {
+                sha: commit.sha,
+                date: commit.commit?.author?.date ?? null,
+                author: commit.commit?.author?.name ?? null,
+                message: commit.commit?.message ?? null,
+              };
+              return (
+                <button
+                  key={commit.sha}
+                  onClick={() => loadVersion(meta)}
+                  className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors hover:bg-accent/50 ${
+                    selected?.sha === commit.sha ? "bg-accent" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-muted-foreground text-[10px]">{commit.sha.slice(0, 7)}</span>
+                    <div className="flex items-center gap-1">
+                      {commit.sha === newestSha && (
+                        <span className="text-[9px] uppercase tracking-wide text-muted-foreground border border-border rounded px-1 py-px">
+                          Current
+                        </span>
+                      )}
+                      {loadingSha === commit.sha ? (
+                        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-foreground truncate mt-0.5">{meta.message || "No message"}</p>
+                  {meta.date && (
+                    <p className="text-muted-foreground mt-0.5">
+                      {formatDistanceToNow(new Date(meta.date), { addSuffix: true })}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </ScrollArea>
       )}
 
-      {/* Preview panel */}
-      {previewContent && (
-        <div className="border-t border-border shrink-0">
-          <div className="px-3 py-2 flex items-center justify-between bg-muted/30">
-            <span className="text-[10px] text-muted-foreground font-mono">
-              {selectedSha?.slice(0, 7)}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 text-[10px] gap-1"
-              onClick={handleRestore}
-              disabled={updateNote.isPending}
-            >
-              {updateNote.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <RotateCcw className="h-3 w-3" />
-              )}
-              Restore
-            </Button>
-          </div>
-          <ScrollArea className="max-h-48">
-            <pre className="p-3 text-[10px] text-muted-foreground whitespace-pre-wrap font-mono">
-              {previewContent.slice(0, 2000)}
-              {previewContent.length > 2000 && "…"}
-            </pre>
-          </ScrollArea>
-        </div>
-      )}
+      <VersionPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        commitSha={selected?.sha ?? null}
+        commitDate={selected?.date}
+        commitAuthor={selected?.author}
+        commitMessage={selected?.message}
+        isLoading={!!loadingSha}
+        error={error}
+        onRetry={selected ? () => loadVersion(selected) : undefined}
+        versionTitle={parsed?.title ?? ""}
+        versionContent={parsed?.content ?? ""}
+        currentTitle={currentNote?.title ?? ""}
+        currentContent={currentNote?.content ?? ""}
+        onRestore={handleRestore}
+        isRestoring={updateNote.isPending}
+      />
     </div>
   );
 }
