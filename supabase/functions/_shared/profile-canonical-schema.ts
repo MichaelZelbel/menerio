@@ -223,6 +223,102 @@ export const OPEN_CATEGORY_LABEL_ALIASES: Record<string, string> = {
   "work arrangement": "Work arrangement",
 };
 
+/**
+ * Labels that must NEVER become profile entries.
+ *
+ * Three families:
+ *  1. Person-to-person edges — the single source of truth is
+ *     `contact_relationships`. Storing "Spouse: Michael" as a profile fact
+ *     duplicates the relationship graph and drifts out of sync.
+ *  2. Event-shaped facts (purchases, orders) — these belong to notes and the
+ *     timeline, not to a person's identity.
+ *  3. `Current address` — retired in favour of the structured
+ *     Current street / Postal code / Current city / Current country fields.
+ *
+ * Values are matched against the normalized label AND its aliases.
+ */
+export const BLOCKED_PROFILE_LABELS: Record<string, string[]> = {
+  // 1) Relationship edges → contact_relationships
+  "Spouse": ["spouse", "wife", "husband", "married to", "ehefrau", "ehemann", "ehepartner"],
+  "Partner": ["partner", "girlfriend", "boyfriend", "fiance", "fiancee", "fiancée", "life partner", "lover"],
+  "Child": ["child", "children", "son", "daughter", "kids", "kid"],
+  "Parent": ["parent", "parents", "mother", "father", "mom", "mum", "dad", "mutter", "vater"],
+  "Sibling": ["sibling", "siblings", "brother", "sister", "bruder", "schwester"],
+  "Relationship status": ["relationship status", "marital status", "beziehungsstatus", "familienstand"],
+  "Friend": ["friend", "friends", "best friend"],
+  // 2) Event-shaped facts → notes / timeline
+  "Purchased item": [
+    "purchased item", "purchased items", "purchase", "purchases", "bought",
+    "recent purchase", "recent purchases", "recently purchased", "acquisition",
+    "order", "orders", "recent order", "shopping", "einkauf", "gekauft",
+  ],
+  // 3) Retired in favour of structured location fields
+  "Current address": ["current address", "address", "home address", "residence", "anschrift", "adresse"],
+  "Previous address": ["previous address", "former address", "old address", "past address"],
+};
+
+const BLOCKED_LABEL_KEYS: Set<string> = new Set();
+for (const [canonical, aliases] of Object.entries(BLOCKED_PROFILE_LABELS)) {
+  BLOCKED_LABEL_KEYS.add(canonical.trim().toLowerCase());
+  for (const a of aliases) BLOCKED_LABEL_KEYS.add(a.trim().toLowerCase());
+}
+
+/** Labels blocked because they are relationship edges (routed to the graph). */
+export const RELATIONSHIP_EDGE_LABELS: Record<string, string> = {
+  spouse: "spouse",
+  wife: "wife",
+  husband: "husband",
+  ehefrau: "wife",
+  ehemann: "husband",
+  ehepartner: "spouse",
+  "married to": "spouse",
+  partner: "partner",
+  girlfriend: "partner",
+  boyfriend: "partner",
+  fiance: "partner",
+  fiancee: "partner",
+  lover: "lover",
+  child: "child",
+  children: "child",
+  son: "son",
+  daughter: "daughter",
+  kids: "child",
+  parent: "parent",
+  mother: "mother",
+  father: "father",
+  mom: "mother",
+  dad: "father",
+  sibling: "sibling",
+  brother: "brother",
+  sister: "sister",
+  friend: "friend",
+};
+
+/**
+ * True when this label must not be stored as a profile entry.
+ * Pure — safe to call from any pipeline stage.
+ */
+export function isBlockedProfileLabel(label: string): boolean {
+  const key = String(label || "")
+    .trim()
+    .replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "")
+    .toLowerCase();
+  if (!key) return false;
+  return BLOCKED_LABEL_KEYS.has(key);
+}
+
+/**
+ * When a blocked label is a person-to-person edge, return the canonical
+ * relationship label so the caller can route it into `contact_relationships`
+ * instead of silently dropping the fact. Returns null for non-edge blocks.
+ */
+export function blockedLabelAsRelationship(label: string): string | null {
+  const key = String(label || "").trim().toLowerCase();
+  return RELATIONSHIP_EDGE_LABELS[key] || null;
+}
+
+
+
 
 /**
  * Canonical labels whose semantic is "a set of tokens" (nicknames, favorite
