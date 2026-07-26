@@ -287,16 +287,18 @@ export function GlobalAIChatFAB() {
         messages: [...nextState.messages, assistantMsg],
       };
 
-      // If a note-modifying tool ran, refresh the editor live + invalidate queries
+      // If a note-modifying tool ran, refresh the editor live + invalidate queries.
+      // `note_edit` carries the exact resulting content, so the editor can apply
+      // it without refetching and without losing the user's in-flight text.
       if (
         noteId &&
-        data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool))
+        (data.note_edit ||
+          data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool)))
       ) {
         queryClient.invalidateQueries({ queryKey: ["notes"] });
-        window.dispatchEvent(
-          new CustomEvent("menerio:note-updated", { detail: { noteId } }),
-        );
+        applyNoteEdit(noteId, data.note_edit?.content ?? null, data.note_edit?.updated_at ?? null);
       }
+
 
       // If a collection-modifying tool ran, dispatch a refresh event
       if (
