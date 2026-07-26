@@ -231,7 +231,7 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   });
 }
 
-}
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
