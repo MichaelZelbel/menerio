@@ -110,9 +110,14 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
 
     try {
       const apiMessages = buildApiMessages(nextState);
+      // Persist any pending autosave first, then tell the agent which version
+      // it is editing. If the note changed underneath, its edit tools refuse
+      // rather than overwrite.
+      const baseUpdatedAt = await flushNoteSave(note.id);
       const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
         body: {
           note_id: note.id,
+          base_updated_at: baseUpdatedAt,
           messages: apiMessages,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
@@ -135,22 +140,34 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         return;
       }
 
+      const noteEdit: NoteEditPayload | null = data.note_edit ?? null;
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: data.reply || "",
         toolResults: data.tool_results,
+        ...(noteEdit
+          ? {
+              noteEdit: {
+                noteId: note.id,
+                previousContent: noteEdit.previous_content ?? null,
+              },
+            }
+          : {}),
       };
       let updated: PersistedChatState = {
         ...nextState,
         messages: [...nextState.messages, assistantMsg],
       };
 
-      // If any tool modified the note, notify parent + the editor.
-      if (data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool))) {
+      // If any tool modified the note, notify parent + the editor. When the
+      // function returned the resulting content, hand it over directly so the
+      // editor never has to refetch (or ignore) the change.
+      if (
+        noteEdit ||
+        data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool))
+      ) {
         onNoteChanged();
-        window.dispatchEvent(
-          new CustomEvent("menerio:note-updated", { detail: { noteId: note.id } }),
-        );
+        applyNoteEdit(note.id, noteEdit?.content ?? null, noteEdit?.updated_at ?? null);
       }
 
       // Roll the summary forward when needed.
@@ -164,6 +181,28 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       setIsLoading(false);
     }
   }, [input, isLoading, session, state, note.id, onNoteChanged, refreshSummaryIfNeeded]);
+
+  /** Restore the note to the version from before an AI edit. */
+  const undoNoteEdit = useCallback(
+    async (previousContent: string | null) => {
+      if (previousContent === null) return;
+      if (!confirm("Restore the note to how it was before this AI edit?")) return;
+      const { data, error: updErr } = await supabase
+        .from("notes")
+        .update({ content: previousContent })
+        .eq("id", note.id)
+        .select("updated_at")
+        .single();
+      if (updErr) {
+        setError(updErr.message);
+        return;
+      }
+      onNoteChanged();
+      applyNoteEdit(note.id, previousContent, (data as any)?.updated_at ?? null);
+    },
+    [note.id, onNoteChanged],
+  );
+
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
