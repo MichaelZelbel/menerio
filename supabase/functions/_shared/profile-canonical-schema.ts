@@ -42,14 +42,16 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
   location: {
     shape: "structured",
     labels: [
-      { canonical: "Current address", single: true, aliases: ["address", "home address", "residence", "current address"] },
+      { canonical: "Current street", single: true, aliases: ["street", "street address", "current street", "strasse", "straße"] },
+      { canonical: "Postal code", single: true, aliases: ["postal code", "zip", "zip code", "postcode", "plz"] },
       { canonical: "Current city", single: true, aliases: ["city", "lives in", "based in", "located in", "current city"] },
       { canonical: "Current country", single: true, aliases: ["country", "current country"] },
-      { canonical: "Previous address", single: false, aliases: ["former address", "old address", "past address", "previous address"] },
       { canonical: "Previous city", single: false, aliases: ["former city", "used to live in", "previous city"] },
       { canonical: "Timezone", single: true, aliases: ["timezone", "time zone"] },
+      { canonical: "Living situation", single: true, aliases: ["living situation", "housing"] },
     ],
   },
+
   professional: {
     shape: "structured",
     labels: [
