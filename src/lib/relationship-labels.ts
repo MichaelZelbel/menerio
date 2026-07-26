@@ -1,108 +1,54 @@
 /**
- * Predefined relationship label pairs for perspective-aware display.
- * Each pair defines: [forward_label, inverse_label]
- * When viewing person A's profile and A→B has label "employee",
- * we show "B — employer" (the inverse).
+ * Relationship label vocabulary for the picker, plus the single display
+ * entry point. All directional/gender logic lives in
+ * `@/lib/relationship-canonical` (`describeRelationship`) so every surface —
+ * profile card, people tree, review queue, lexicon — renders the same
+ * "Role: Name" string.
  */
+import {
+  describeRelationship,
+  inverseLabel,
+  type DescribeRelationshipInput,
+  type RelationshipDescription,
+} from "@/lib/relationship-canonical";
 
-export interface LabelPair {
-  forward: string;
-  inverse: string;
-}
-
-export const RELATIONSHIP_LABEL_PAIRS: LabelPair[] = [
-  { forward: "employee", inverse: "employer" },
-  { forward: "employer", inverse: "employee" },
-  { forward: "friend", inverse: "friend" },
-  { forward: "brother", inverse: "sibling" },
-  { forward: "sister", inverse: "sibling" },
-  { forward: "sibling", inverse: "sibling" },
-  { forward: "mother", inverse: "child" },
-  { forward: "father", inverse: "child" },
-  { forward: "parent", inverse: "child" },
-  { forward: "child", inverse: "parent" },
-  { forward: "son", inverse: "parent" },
-  { forward: "daughter", inverse: "parent" },
-  { forward: "partner", inverse: "partner" },
-  { forward: "spouse", inverse: "spouse" },
-  { forward: "husband", inverse: "wife" },
-  { forward: "wife", inverse: "husband" },
-  { forward: "lover", inverse: "lover" },
-
-  { forward: "mentor", inverse: "mentee" },
-  { forward: "mentee", inverse: "mentor" },
-  { forward: "manager", inverse: "report" },
-  { forward: "report", inverse: "manager" },
-  { forward: "co-worker", inverse: "co-worker" },
-  { forward: "neighbor", inverse: "neighbor" },
-  { forward: "roommate", inverse: "roommate" },
-  { forward: "client", inverse: "provider" },
-  { forward: "provider", inverse: "client" },
-  { forward: "teacher", inverse: "student" },
-  { forward: "student", inverse: "teacher" },
+/** Labels offered in the add/edit picker. Canonical, neutral forms only. */
+export const ALL_RELATIONSHIP_LABELS = [
+  "child",
+  "client",
+  "co-worker",
+  "employee",
+  "employer",
+  "friend",
+  "lover",
+  "manager",
+  "mentee",
+  "mentor",
+  "neighbor",
+  "parent",
+  "partner",
+  "provider",
+  "report",
+  "roommate",
+  "sibling",
+  "spouse",
+  "student",
+  "teacher",
 ];
 
-/** All unique labels for dropdown selection */
-export const ALL_RELATIONSHIP_LABELS = [
-  ...new Set(RELATIONSHIP_LABEL_PAIRS.map((p) => p.forward)),
-].sort();
-
-/**
- * Get the inverse label for a given label.
- * Returns the inverse from the pairs table, or the same label if symmetric/unknown.
- */
+/** Inverse of a stored label (re-exported for callers that only need this). */
 export function getInverseLabel(label: string): string {
-  const pair = RELATIONSHIP_LABEL_PAIRS.find(
-    (p) => p.forward.toLowerCase() === label.toLowerCase()
-  );
-  return pair?.inverse || label;
+  return inverseLabel(label);
 }
 
 /**
- * Perspective-aware display:
- * Given a relationship record and who we're viewing, return:
- * - otherName: the name of the other person
- * - displayLabel: the label from the viewed person's perspective
- *
- * A relationship is stored as source→target with a label describing
- * "source is [label] of target". When viewing source's profile,
- * we show: "target — [label]". When viewing target's profile,
- * we show: "source — [inverse_label]".
+ * Perspective-aware display. Returns the other person's name and the role
+ * THEY hold toward the person whose profile is on screen, plus the composed
+ * "Role: Name" string.
  */
-export function getRelationshipDisplay(params: {
-  sourceType: string;
-  sourceId: string | null;
-  targetType: string;
-  targetId: string | null;
-  label: string;
-  customLabel?: string | null;
-  viewingContactId: string | null; // null = viewing "self" / my profile
-  sourceName: string;
-  targetName: string;
-}): { otherName: string; displayLabel: string } {
-  const {
-    sourceType, sourceId, targetType, targetId,
-    label, customLabel,
-    viewingContactId, sourceName, targetName,
-  } = params;
-
-  const effectiveLabel = customLabel || label;
-
-  // Determine if we're viewing the source or the target
-  const viewingIsSource =
-    (viewingContactId === null && sourceType === "self") ||
-    (viewingContactId !== null && sourceType === "contact" && sourceId === viewingContactId);
-
-  // Display rule: always show "[role-of-the-other-person] OtherName" from the
-  // viewer's perspective. Storage convention is "source is [label] of target",
-  // so when the viewer IS the source, the other person's role is the INVERSE
-  // of the stored label. When the viewer is the target, the stored label
-  // already describes the other person's role. For symmetric labels (spouse,
-  // friend, …) inverseLabel === label so this collapses naturally.
-  if (viewingIsSource) {
-    const inverse = customLabel ? customLabel : getInverseLabel(label);
-    return { otherName: targetName, displayLabel: inverse };
-  } else {
-    return { otherName: sourceName, displayLabel: effectiveLabel };
-  }
+export function getRelationshipDisplay(
+  params: DescribeRelationshipInput,
+): RelationshipDescription & { displayLabel: string } {
+  const described = describeRelationship(params);
+  return { ...described, displayLabel: described.role };
 }
