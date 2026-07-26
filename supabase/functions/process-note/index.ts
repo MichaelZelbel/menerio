@@ -1529,7 +1529,7 @@ async function generateProfileSuggestions(
 
       // Personality traits must describe a stable, general characteristic —
       // never a bare adjective distilled from one situational remark.
-      if (f.category_slug === "personality" && isOvergeneralizedTrait(f.value, noteContent)) {
+      if (f.category_slug === "personality" && isOvergeneralizedTrait(f.value, cleanContent)) {
         console.log(`[profile-extract] Dropping overgeneralized trait "${f.label}: ${f.value}"`);
         continue;
       }
