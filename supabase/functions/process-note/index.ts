@@ -13,10 +13,13 @@ import {
   type EntityRef,
 } from "../_shared/relationship-canonical.ts";
 import {
+  BLOCKED_LABELS_FOR_PROMPT,
   CANONICAL_LABELS_FOR_PROMPT,
   PROFILE_CANONICAL_SCHEMA,
+  blockedLabelAsRelationship,
   canonicalProfileLabel,
   correctProfileCategory,
+  isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
 import {
@@ -329,13 +332,14 @@ function isSensitiveSuggestion(suggestionType: string, payload: Record<string, u
 async function getSuggestionPreferences(userId: string) {
   const { data } = await supabase
     .from("ai_suggestion_preferences")
-    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, person_blocklist")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, person_blocklist, profile_language")
     .eq("user_id", userId)
     .maybeSingle();
 
   return {
     mode: (data as any)?.suggestion_mode || "auto",
     sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    profileLanguage: String((data as any)?.profile_language || "English"),
     autoAddSensitive: (data as any)?.auto_add_sensitive === true,
     personBlocklist: Array.isArray((data as any)?.person_blocklist)
       ? ((data as any).person_blocklist as string[]).map((n) => String(n).trim().toLowerCase()).filter(Boolean)
@@ -726,6 +730,52 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
+/**
+ * Guard against the classic profile failure: one situational remark
+ * ("she feels insecure about her weight") becoming a permanent, global
+ * personality trait ("insecure").
+ *
+ * Deterministic: a trait value is rejected when it is a BARE adjective
+ * (no qualifier of its own) and every mention of that word in the source note
+ * is immediately followed by a qualifier ("about X", "when Y", "with Z", ...).
+ * Traits that already carry their qualifier are kept as-is.
+ */
+const TRAIT_QUALIFIERS = /^(?:\s*)(?:about|regarding|with|when|whenever|around|because|due to|over|towards?|in|at|of|bezüglich|wegen|bei|über)\b/i;
+
+export function isOvergeneralizedTrait(value: string, noteContent: string): boolean {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  // Already qualified ("insecure about her weight") → keep.
+  const words = v.split(/\s+/);
+  if (words.length > 2) return false;
+  if (TRAIT_QUALIFIERS.test(" " + words.slice(1).join(" "))) return false;
+
+  const haystack = String(noteContent || "");
+  const needle = words[0].toLowerCase();
+  if (needle.length < 4) return false;
+
+  let found = 0;
+  let qualified = 0;
+  const re = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*`, "gi");
+  for (const m of haystack.matchAll(re)) {
+    found++;
+    const tail = haystack.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 40);
+    if (TRAIT_QUALIFIERS.test(tail)) qualified++;
+  }
+  // No mention at all → the model invented the generalization: reject.
+  if (found === 0) return true;
+  return qualified === found;
+}
+
+function profileExtractionPrompt(profileLanguage: string): string {
+  return `${PROFILE_EXTRACTION_PROMPT}
+
+PROFILE LANGUAGE — the user's profile language is ${profileLanguage}.
+- Write the VALUE of standardised fields in ${profileLanguage}: job title, industry, nationality, languages, education level, city and country names, relationship labels, colours, and similar closed-vocabulary facts. Example (when the profile language is English): a German note saying "Modedesignerin" must be emitted as "Fashion Designer".
+- Do NOT translate: personal names, company/brand names, street addresses, direct quotes, usernames/handles, or dish/product names that are proper nouns.
+- Never invent a translation you are unsure of — if you cannot translate confidently, keep the original wording.`;
+}
+
 const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
 
 Return a JSON object with two keys:
@@ -767,7 +817,17 @@ DERIVED FACTS — compute the canonical underlying fact when possible:
 
 CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
 ${CANONICAL_LABELS_FOR_PROMPT}
-When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
+When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits.
+
+NEVER EMIT THESE LABELS AS FACTS (${BLOCKED_LABELS_FOR_PROMPT}):
+- Person-to-person relationships (spouse, wife, husband, partner, lover, child, parent, sibling, friend) and "relationship status"/"marital status" are NOT profile facts. Emit them ONLY in the "relationships" array. Use the gendered label when the note makes the gender clear: label_a_to_b "wife" with label_b_to_a "husband" (and vice versa).
+- Purchases, orders, and shopping ("Purchased item", "Bought", "Recent order"). A purchase is an event, not part of who someone is. Skip them entirely.
+- "Current address" as one blob. Split a street address into separate facts: "Current street" (street + number), "Postal code", "Current city", "Current country". Never emit both a full address and its parts.
+
+PERSONALITY TRAITS — do not overgeneralize:
+- Only emit a personality trait when the note describes a STABLE, GENERAL characteristic of the person ("she is always anxious", "he tends to be blunt", "a very generous person").
+- A feeling tied to one situation, object, moment, or topic is NOT a trait. "She feels insecure about her weight" must NOT become "insecure". Either skip it, or keep the qualifier in the value ("insecure about her weight").
+- Never reduce a qualified statement to a bare adjective. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
 
 // Singleton labels = labels with at most one truth per subject. Derived from
 // the shared canonical schema so the two stay in sync. Legacy alias forms are
@@ -1328,7 +1388,7 @@ async function generateProfileSuggestions(
         defaults: {
           provider: "openrouter",
           model: "deepseek/deepseek-v4-flash",
-          systemPrompt: PROFILE_EXTRACTION_PROMPT,
+          systemPrompt: profileExtractionPrompt(preferences.profileLanguage),
         },
         callOptions: { response_format: { type: "json_object" } },
       });
@@ -1449,6 +1509,31 @@ async function generateProfileSuggestions(
       }
       f.label = canonicalProfileLabel(f.category_slug, f.label);
 
+      // Blocked labels never become profile entries. Relationship edges are
+      // re-routed into the relationship graph; everything else is dropped.
+      if (isBlockedProfileLabel(f.label)) {
+        const relLabel = blockedLabelAsRelationship(f.label);
+        if (relLabel && f.value && /^[\p{L}][\p{L}\p{M}'’.\- ]{0,60}$/u.test(f.value)) {
+          extractedRelationships.push({
+            person_a: f.contact_name,
+            person_b: f.value,
+            label_a_to_b: relLabel,
+            label_b_to_a: inverseLabel(relLabel),
+          });
+          console.log(`[profile-extract] Rerouted blocked label "${f.label}" → relationship ${relLabel}`);
+        } else {
+          console.log(`[profile-extract] Dropping fact: blocked label "${f.label}"`);
+        }
+        continue;
+      }
+
+      // Personality traits must describe a stable, general characteristic —
+      // never a bare adjective distilled from one situational remark.
+      if (f.category_slug === "personality" && isOvergeneralizedTrait(f.value, cleanContent)) {
+        console.log(`[profile-extract] Dropping overgeneralized trait "${f.label}: ${f.value}"`);
+        continue;
+      }
+
       const nm = f.contact_name.toLowerCase().trim();
       let target = nameToTarget.get(nm) || null;
       if (!target) {
@@ -1462,6 +1547,7 @@ async function generateProfileSuggestions(
       }
       f.contact_name = target.canonical_name;
       validFacts.push({ ...f, _target: target });
+
     }
 
     console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
