@@ -21,6 +21,14 @@ import {
   loadPersonProfile,
   executeReadTool,
 } from "../_shared/read-tools.ts";
+import {
+  NOTE_EDIT_TOOL_SCHEMAS,
+  NOTE_EDIT_TOOL_NAMES,
+  createNoteEditSession,
+  executeNoteEditTool,
+  type NoteEditSession,
+} from "../_shared/note-edit-tools.ts";
+
 
 // Fallback model for the in-note agent. Overridable per environment via the
 // `llm_call_configs` row for "note-chat.main"/"note-chat.general" (admin LLM
