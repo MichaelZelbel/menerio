@@ -185,6 +185,71 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
+  // One tile per distinct bond. Competing romantic/social labels between the
+  // SAME two people (spouse + partner + lover + friend) collapse to the
+  // strongest one; unrelated edges (employer, sibling…) are all kept.
+  const rows = useMemo(() => {
+    const described = relationships.map((rel) => {
+      const otherIsSelf =
+        contactId === null
+          ? false
+          : rel.source_id === contactId
+            ? rel.target_type === "self"
+            : rel.source_type === "self";
+      const otherContactId =
+        contactId === null
+          ? rel.source_type === "contact"
+            ? rel.source_id
+            : rel.target_type === "contact"
+              ? rel.target_id
+              : null
+          : rel.source_id === contactId
+            ? rel.target_id
+            : rel.source_id;
+      const otherKey = otherIsSelf ? "self" : otherContactId ?? "unknown";
+
+      const description = describeRelationship({
+        sourceType: rel.source_type,
+        sourceId: rel.source_id,
+        targetType: rel.target_type,
+        targetId: rel.target_id,
+        label: rel.label,
+        customLabel: rel.custom_label,
+        viewingContactId: contactId,
+        sourceName: rel.source_type === "self" ? myName : rel.source_contact?.name || "Unknown",
+        targetName: rel.target_type === "self" ? myName : rel.target_contact?.name || "Unknown",
+        otherGender: genderByPerson.get(otherKey) ?? null,
+      });
+
+      return { rel, description, otherKey, otherContactId, otherIsSelf };
+    });
+
+    const kept: typeof described = [];
+    const bondByPerson = new Map<string, number>();
+    const seen = new Set<string>();
+
+    for (const row of described) {
+      const label = row.rel.custom_label || row.rel.label;
+      if (isRomanticSocialBond(label) && !row.rel.custom_label) {
+        const best = bondByPerson.get(row.otherKey) ?? -1;
+        const strength = relationshipStrength(label);
+        if (strength <= best) continue;
+        bondByPerson.set(row.otherKey, strength);
+        // Drop the weaker bond tile previously kept for this person.
+        const idx = kept.findIndex(
+          (k) => k.otherKey === row.otherKey && !k.rel.custom_label && isRomanticSocialBond(k.rel.label),
+        );
+        if (idx >= 0) kept.splice(idx, 1);
+      }
+      const dedupKey = `${row.otherKey}|${row.description.role.toLowerCase()}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      kept.push(row);
+    }
+
+    return kept;
+  }, [relationships, contactId, myName, genderByPerson]);
+
   if (isLoading) return null;
 
   // Derived relationship status — never a stored, LLM-authored string.
@@ -201,9 +266,9 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-medium">Relationships</h3>
-          {relationships.length > 0 && (
+          {rows.length > 0 && (
             <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              {relationships.length}
+              {rows.length}
             </Badge>
           )}
           {derivedStatus && (
@@ -219,69 +284,69 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         )}
       </div>
 
-
-      {/* Existing relationships */}
-      {relationships.length > 0 && (
+      {/* Existing relationships — always "Role: Name", where Role is the role
+          the OTHER person holds toward {contactName}. */}
+      {rows.length > 0 && (
         <div className="px-3 pb-2 space-y-1">
-          {relationships.map((rel) => {
-            const { otherName, displayLabel } = getRelationshipDisplay({
-              sourceType: rel.source_type,
-              sourceId: rel.source_id,
-              targetType: rel.target_type,
-              targetId: rel.target_id,
-              label: rel.label,
-              customLabel: rel.custom_label,
-              viewingContactId: contactId,
-              sourceName: rel.source_type === "self" ? myName : (rel.source_contact?.name || "Unknown"),
-              targetName: rel.target_type === "self" ? myName : (rel.target_contact?.name || "Unknown"),
-            });
-
-            // Determine the other person's contact ID for linking
-            const otherContactId =
-              contactId === null
-                ? (rel.source_type === "contact" ? rel.source_id : rel.target_type === "contact" ? rel.target_id : null)
-                : (rel.source_id === contactId ? rel.target_id : rel.source_id);
-            const otherIsSelf =
-              contactId === null
-                ? false
-                : (rel.source_id === contactId ? rel.target_type === "self" : rel.source_type === "self");
-
-            return (
-              <div key={rel.id} className="flex items-center justify-between group py-1 px-2 rounded hover:bg-muted/50 text-sm">
-                <div className="flex items-center gap-2 min-w-0">
-                  <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <Badge variant="outline" className="text-[10px] shrink-0">{displayLabel}</Badge>
-                  {otherIsSelf ? (
-                    <Link to="/dashboard/profile" className="text-foreground hover:underline truncate">
-                      {myName}
-                    </Link>
-                  ) : otherContactId ? (
-                    <Link to={`/dashboard/people/${otherContactId}`} className="text-foreground hover:underline truncate">
-                      {otherName}
-                    </Link>
-                  ) : (
-                    <span className="truncate">{otherName}</span>
-                  )}
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEdit(rel)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleDelete(rel.id)}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
+          {rows.map(({ rel, description, otherContactId, otherIsSelf }) => (
+            <div
+              key={rel.id}
+              className="flex items-center justify-between group py-1 px-2 rounded hover:bg-muted/50 text-sm"
+            >
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span className="font-medium shrink-0">{description.role}:</span>
+                {otherIsSelf ? (
+                  <Link to="/dashboard/profile" className="text-foreground hover:underline truncate">
+                    {description.otherName}
+                  </Link>
+                ) : otherContactId ? (
+                  <Link
+                    to={`/dashboard/people/${otherContactId}`}
+                    className="text-foreground hover:underline truncate"
+                  >
+                    {description.otherName}
+                  </Link>
+                ) : (
+                  <span className="truncate">{description.otherName}</span>
+                )}
               </div>
-            );
-          })}
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEdit(rel)}>
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-destructive"
+                  onClick={() => handleDelete(rel.id)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {relationships.length === 0 && !adding && (
+      {rows.length === 0 && !adding && (
         <p className="px-3 pb-3 text-xs text-muted-foreground">
           No relationships yet. Add one to track how people are connected.
         </p>
       )}
+
+      {/* Non-edge relational facts live in this same card — one surface. */}
+      {milestones.length > 0 && (
+        <div className="px-3 pb-3 pt-1 border-t border-border/60 space-y-1">
+          {milestones.map((m) => (
+            <div key={m.id} className="flex items-baseline gap-1.5 text-sm px-2">
+              <span className="text-muted-foreground shrink-0">{m.label}:</span>
+              <span className="truncate">{m.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+
 
       {/* Add/edit form */}
       {adding && (
