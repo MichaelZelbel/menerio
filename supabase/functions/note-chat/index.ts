@@ -420,6 +420,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     const loopTools = [...activeTools, webSearchTool, ...(mcp?.tools ?? [])];
 
+    // Per-turn edit session: carries the client's `base_updated_at` (optimistic
+    // concurrency), the dedupe map, and the before/after content so the client
+    // can apply the result and offer an undo.
+    const editSession: NoteEditSession | null = isNoteMode
+      ? createNoteEditSession(note_id, base_updated_at)
+      : null;
+
     // Tool executor closure: web search + MCP passthrough + existing note tools.
     const runTool = async (
       name: string,
@@ -431,7 +438,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (mcp && mcp.hasTool(name)) {
         return mcp.call(name, args);
       }
-      return executeTool(name, args, user.id, note_id);
+      return executeTool(name, args, user.id, note_id, editSession);
     };
 
     try {
@@ -450,10 +457,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({
         reply: loopResult.reply,
         tool_results: loopResult.toolResults,
+        note_edit: editSession?.didWrite
+          ? {
+              note_id,
+              content: editSession.finalContent,
+              previous_content: editSession.originalContent,
+              updated_at: editSession.finalUpdatedAt,
+            }
+          : null,
         credits: c
           ? { remaining_tokens: c.remaining_tokens, remaining_credits: c.remaining_credits }
           : null,
       });
+
     } catch (err: any) {
       if (err?.message === "INSUFFICIENT_CREDITS") {
         return insufficientCreditsResponse(corsHeaders);
