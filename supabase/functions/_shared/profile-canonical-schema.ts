@@ -425,12 +425,18 @@ export function correctProfileCategory(label: string, currentSlug: string): stri
   const RELATIONSHIP_LABELS = new Set([
     "wedding date",
     "wedding location",
-    "spouse",
-    "partner",
-    "child",
-    "parent",
-    "sibling",
+    "anniversary",
+    "how we met",
   ]);
+  const LOCATION_LABELS = new Set([
+    "current street",
+    "postal code",
+    "current city",
+    "current country",
+    "previous city",
+    "living situation",
+  ]);
+
   const HEALTH_LABELS = new Set([
     "allergies",
     "health conditions",
