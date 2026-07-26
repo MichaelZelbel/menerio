@@ -52,18 +52,9 @@ function extractHeadings(markdown: string): WikiHeading[] {
 }
 
 function normalizeWikiContent(content: string): string {
-  const trimmed = content.trim();
-  if (!trimmed) return "";
-  const hasMarkdownStructure = /(^|\n)(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\|.+\|)|\n\s*\n/.test(trimmed);
-  if (hasMarkdownStructure || trimmed.length < 420) return trimmed;
-
-  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) || [trimmed];
-  const paragraphs: string[] = [];
-  for (let i = 0; i < sentences.length; i += 3) {
-    paragraphs.push(sentences.slice(i, i + 3).join(" "));
-  }
-  return paragraphs.join("\n\n");
+  return softStructure(content);
 }
+
 
 function WikiPageSkeleton() {
   return (
