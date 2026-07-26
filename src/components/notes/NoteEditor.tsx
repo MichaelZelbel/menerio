@@ -419,6 +419,60 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }, 3000);
   }, [ghConn, ghSync]);
 
+  // ---------------------------------------------------------------------
+  // Serialized content autosave.
+  //
+  // Every content save funnels through here so that (a) only one write per
+  // note is ever in flight — fast typing queues the latest payload instead of
+  // racing several PATCHes — and (b) we remember the newest server
+  // `updated_at` we produced, which lets the sync effect below ignore any
+  // late-arriving, older copy of the note (that race silently reverted edits).
+  // ---------------------------------------------------------------------
+  const savingRef = useRef(false);
+  const queuedContentRef = useRef<string | null>(null);
+  const lastSavedContentRef = useRef<string | null>(null);
+  const lastSavedUpdatedAtRef = useRef<number>(
+    note.updated_at ? new Date(note.updated_at).getTime() : 0,
+  );
+
+  const saveContentNow = useCallback(
+    (md: string) => {
+      if (savingRef.current) {
+        queuedContentRef.current = md;
+        return;
+      }
+      savingRef.current = true;
+      setSaveStatus("saving");
+      updateNote.mutate(
+        { id: note.id, content: md },
+        {
+          onSuccess: (saved) => {
+            savingRef.current = false;
+            lastSavedContentRef.current = md;
+            const ts = saved?.updated_at ? new Date(saved.updated_at).getTime() : Date.now();
+            if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
+            if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+            const queued = queuedContentRef.current;
+            queuedContentRef.current = null;
+            if (queued !== null && queued !== md) saveContentNow(queued);
+          },
+          onError: () => {
+            savingRef.current = false;
+            // Keep the pending payload so unmount/next keystroke retries it.
+            setSaveStatus("error");
+            const queued = queuedContentRef.current;
+            queuedContentRef.current = null;
+            if (queued !== null && queued !== md) saveContentNow(queued);
+          },
+        },
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [note.id, updateNote],
+  );
+
   const handleOpenAutocomplete = useCallback((pos: number) => {
     // Get caret position from editor view
     const editorEl = document.querySelector(".tiptap-editor .ProseMirror");
@@ -571,20 +625,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       setSaveStatus("saving");
       contentSaveTimer.current = setTimeout(() => {
-        updateNote.mutate(
-          { id: note.id, content: md },
-          {
-            onSuccess: () => {
-              if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
-              setSaveStatus("saved");
-              setLastSavedAt(Date.now());
-            },
-            onError: () => {
-              if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
-              setSaveStatus("error");
-            },
-          }
-        );
+        saveContentNow(md);
         triggerGitHubSync(note.id);
 
         // Sync manual_link connections
@@ -641,8 +682,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // We still cancel the process/sync timers — those are safe to drop.
   useEffect(() => {
     return () => {
-      const pendingContent = pendingSaveContentRef.current;
-      if (pendingContent !== null) {
+      const pendingContent = queuedContentRef.current ?? pendingSaveContentRef.current;
+      if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
         updateNote.mutate({ id: note.id, content: pendingContent });
         pendingSaveContentRef.current = null;
       }
@@ -690,6 +731,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
     }
+    // Staleness guard: a notes-list refetch that started *before* the last
+    // autosave can resolve *after* it. Applying that older row would push the
+    // pre-edit text back into the editor, and the next autosave would then
+    // persist it — silently losing the user's work. Ignore anything older than
+    // the newest version this editor successfully wrote.
+    const incomingTs = note.updated_at ? new Date(note.updated_at).getTime() : 0;
+    if (noteChanged) {
+      lastSavedUpdatedAtRef.current = incomingTs;
+      lastSavedContentRef.current = null;
+      queuedContentRef.current = null;
+    } else if (incomingTs && incomingTs < lastSavedUpdatedAtRef.current) {
+      editor?.setEditable(!note.is_trashed && !note.is_external, false);
+      return;
+    }
     const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
     const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
     if (!editor) return;
@@ -718,7 +773,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
+  }, [note.id, note.content, note.updated_at, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
@@ -980,18 +1035,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       contentSaveTimer.current = setTimeout(() => {
         const md = editorToMarkdown(editor);
         pendingSaveContentRef.current = md;
-        updateNote.mutate(
-          { id: note.id, content: md },
-          {
-            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
-            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
-          }
-        );
+        saveContentNow(md);
         triggerGitHubSync(note.id);
       }, 800);
       setSourceMode(false);
     }
-  }, [editor, sourceMode, sourceText, note, updateNote, triggerGitHubSync]);
+  }, [editor, sourceMode, sourceText, note, saveContentNow, triggerGitHubSync]);
 
   return (
     <div className="flex h-full">
@@ -1337,14 +1386,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               pendingSaveContentRef.current = e.target.value;
               lastLocalContentRef.current = e.target.value;
               contentSaveTimer.current = setTimeout(() => {
-                const nextContent = e.target.value;
-                updateNote.mutate(
-                  { id: note.id, content: nextContent },
-                  {
-                    onSuccess: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
-                    onError: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
-                  }
-                );
+                saveContentNow(e.target.value);
                 triggerGitHubSync(note.id);
               }, 800);
             }}

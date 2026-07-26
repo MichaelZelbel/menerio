@@ -128,10 +128,12 @@ function useNotesRemote(filter: "all" | "favorites" | "trash") {
   return useQuery<Note[]>({
     queryKey: ["notes", filter, user?.id],
     enabled: !!user,
-    // Always revalidate against Supabase when a component (in particular a
-    // popped-out note window) first mounts, so a fresh window never renders
-    // a persisted-but-stale copy of the notes list.
-    refetchOnMount: "always",
+    // The list carries full note bodies, so it is an expensive query for large
+    // vaults. Freshness of the *open* note is guaranteed by `useNote` below
+    // (a cheap single-row query that always revalidates on mount); the list
+    // itself only needs to be eventually consistent.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
 
       let query = supabase
@@ -175,6 +177,31 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
   // stable and hook order never changes between renders.
   // eslint-disable-next-line react-hooks/rules-of-hooks
   return OFFLINE_CORE ? useNotesLocal(filter) : useNotesRemote(filter);
+}
+
+/**
+ * Single-note query. This is the authoritative source for the open editor:
+ * it is a one-row fetch, so it can always revalidate on mount (fresh windows,
+ * pop-outs) without pulling the whole vault over the wire.
+ */
+export function useNote(id: string | null | undefined) {
+  const { user } = useAuth();
+
+  return useQuery<Note | null>({
+    queryKey: ["note", id],
+    enabled: !!id && !!user && !OFFLINE_CORE,
+    refetchOnMount: "always",
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .select(NOTE_COLUMNS)
+        .eq("id", id!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as unknown as Note) ?? null;
+    },
+  });
 }
 
 // Inserts a note into local SQLite with the same defaults the Postgres
@@ -281,8 +308,32 @@ export function useUpdateNote() {
         });
         qc.setQueryData<Note[]>(key, next);
       }
-      qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
-      broadcastInvalidation([["notes"]]);
+      // The open editor reads from ["note", id] — patch it directly.
+      qc.setQueryData<Note | null>(["note", note.id], note);
+
+      // A content-only autosave must NOT invalidate the (expensive) notes list:
+      // for large vaults that meant refetching every note body on every
+      // keystroke burst, and a late-resolving stale list response could
+      // overwrite the just-saved content in the cache.
+      const listVisibleFields = [
+        "title",
+        "tags",
+        "folder_path",
+        "is_favorite",
+        "is_pinned",
+        "is_trashed",
+        "trashed_at",
+        "metadata",
+      ] as const;
+      const listVisibleChanged = listVisibleFields.some(
+        (field) => (variables as Record<string, unknown>)[field] !== undefined,
+      );
+      if (listVisibleChanged) {
+        qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
+        broadcastInvalidation([["notes"], ["note", note.id]]);
+      } else {
+        broadcastInvalidation([["note", note.id]]);
+      }
 
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
