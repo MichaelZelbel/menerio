@@ -127,7 +127,11 @@ export default function WikiPage() {
         .select("id, source_page_id")
         .or(`target_slug.eq.${slug},target_page_id.eq.${page!.id}`);
       if (error) throw error;
-      const sourceIds = [...new Set((links || []).map((link) => link.source_page_id))];
+      // A source page may link to the same target multiple times; only list it once.
+      const uniqueLinks = (links || []).filter((link, index, arr) =>
+        index === arr.findIndex((l) => l.source_page_id === link.source_page_id)
+      );
+      const sourceIds = uniqueLinks.map((link) => link.source_page_id);
       if (sourceIds.length === 0) return [];
       const { data: sourcePages, error: sourceError } = await supabase
         .from("wiki_pages")
@@ -135,7 +139,8 @@ export default function WikiPage() {
         .in("id", sourceIds);
       if (sourceError) throw sourceError;
       const sourceMap = new Map((sourcePages || []).map((source) => [source.id, source]));
-      return (links || []).map((link) => ({ ...link, source: sourceMap.get(link.source_page_id) || null }));
+      return uniqueLinks.map((link) => ({ ...link, source: sourceMap.get(link.source_page_id) || null }));
+
     },
   });
 
