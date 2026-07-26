@@ -237,7 +237,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
-    const { note_id, person_id, messages: chatMessages, mode, timezone } = body;
+    const {
+      note_id,
+      person_id,
+      messages: chatMessages,
+      mode,
+      timezone,
+      base_updated_at,
+    } = body;
+
 
     if (!chatMessages || !Array.isArray(chatMessages))
       return json({ error: "messages required" }, 400);
