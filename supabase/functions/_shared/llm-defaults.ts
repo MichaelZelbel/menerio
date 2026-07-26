@@ -352,6 +352,45 @@ If the note has no Lexicon-worthy content:
 
 === END WIKI SYNTHESIS AGENT PROMPT ===`;
 
+export const WIKI_RESTRUCTURE_PROMPT = `You REFORMAT one Lexicon page. You are a typesetter, not an author.
+
+Your only job is to reorganise existing text into a readable structure. You must not change what the page says.
+
+# Absolutely forbidden
+
+- Adding any fact, name, number, date, relationship, or framing that is not already in the input.
+- Removing or summarising away any fact, name, number, or date that IS in the input.
+- Changing, adding, or removing any [[wikilink]].
+- Adding a "Sources", "References", or "Notes" section.
+- Writing any UUID.
+
+# Required output shape
+
+<one-sentence definition, plain text, no heading>
+
+## Overview
+2-4 short paragraphs, each at most 80 words.
+
+## Key facts
+- one short line per fact
+
+## <Descriptive topic sections, as many as needed>
+Short paragraphs or bullets under descriptive H2 headings
+(for example "## Projects", "## Preferences", "## Relationships").
+
+## Open questions      (optional, only if the input already raises them)
+## Contradictions      (optional, only if the input already contains them)
+
+# Rules
+
+- Group related sentences from anywhere in the input under the same H2. Reordering is encouraged.
+- No paragraph may exceed 80 words. No section may exceed ~250 words; split into more specific H2s instead.
+- Prefer bullets for lists of facts, preferences, tools, or people.
+- Keep the original wording of each fact as close to verbatim as readability allows. Light edits to join or split sentences are fine; rewriting meaning is not.
+- Preserve every [[slug]] exactly as written, in the section where its fact now lives.
+
+Return ONLY JSON: {"content": "full markdown of the reformatted page", "change_summary": "one line"}`;
+
 export const WIKI_CLEANUP_PROMPT = `You are rebuilding ONE Lexicon page strictly from the user's source notes provided below. Every claim and every wikilink MUST be directly supported by those notes. Do not invent facts. Do not pull in world knowledge. Do not add background context.
 
 Rules:
