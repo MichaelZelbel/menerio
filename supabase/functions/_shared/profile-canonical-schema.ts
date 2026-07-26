@@ -302,6 +302,14 @@ export const RELATIONSHIP_EDGE_LABELS: Record<string, string> = {
 };
 
 /**
+ * Relationship-shaped labels that name the other side inline, e.g.
+ * "Relationship to Mike", "Relationship with Yumei". These describe an edge
+ * and must never become a fact row.
+ */
+export const RELATIONSHIP_LABEL_RE =
+  /^(relationship|relation|beziehung)\s*(to|with|zu|mit)\s+.+$/i;
+
+/**
  * True when this label must not be stored as a profile entry.
  * Pure — safe to call from any pipeline stage.
  */
@@ -311,8 +319,10 @@ export function isBlockedProfileLabel(label: string): boolean {
     .replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "")
     .toLowerCase();
   if (!key) return false;
+  if (RELATIONSHIP_LABEL_RE.test(key)) return true;
   return BLOCKED_LABEL_KEYS.has(key);
 }
+
 
 /**
  * When a blocked label is a person-to-person edge, return the canonical
