@@ -17,6 +17,11 @@ import {
   type PersistedChatState,
 } from "@/lib/chat-history";
 import {
+  flushNoteSave,
+  applyNoteEdit,
+  type NoteEditPayload,
+} from "@/lib/note-ai-edit";
+import {
   X,
   Send,
   Loader2,
@@ -25,7 +30,9 @@ import {
   Wrench,
   AlertCircle,
   Trash2,
+  Undo2,
 } from "lucide-react";
+
 import ReactMarkdown from "react-markdown";
 import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 
