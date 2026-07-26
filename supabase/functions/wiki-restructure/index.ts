@@ -117,17 +117,35 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
 
   // 2) LLM reformat when the deterministic pass isn't enough (no headings, oversized sections).
   if (needsRestructure(next)) {
-    try {
-      const chunks = chunkMarkdown(next, 9000);
+    // Smaller chunks keep the model in "reformat" mode instead of summarising.
+    const chunks = chunkMarkdown(next, 3500);
+
+    const attempt = async (strict: boolean) => {
       const rewritten: string[] = [];
       for (let index = 0; index < chunks.length; index += 1) {
-        const label = chunks.length > 1 ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)` : "";
-        const out = await callReformat(systemPrompt, `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}`);
+        const label = chunks.length > 1
+          ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)`
+          : "";
+        const strictNote = strict
+          ? `\n\nSTRICT RETRY: your previous attempt dropped information. Keep EVERY name, number, date and wikilink exactly as written. Only add headings and split paragraphs — never summarise, merge or delete a fact.`
+          : "";
+        const out = await callReformat(
+          systemPrompt,
+          `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}${strictNote}`,
+        );
         if (!out.trim()) throw new Error("empty_llm_output");
         rewritten.push(out.trim());
       }
-      const candidate = softStructure(rewritten.join("\n\n"));
-      const lost = missingFacts(next, candidate);
+      return softStructure(rewritten.join("\n\n"));
+    };
+
+    try {
+      let candidate = await attempt(false);
+      let lost = missingFacts(next, candidate);
+      if (lost.length > 0) {
+        candidate = await attempt(true);
+        lost = missingFacts(next, candidate);
+      }
       if (lost.length > 0) {
         method = "llm_rejected";
         rejectedReason = `lost ${lost.length} tokens: ${lost.slice(0, 8).join(", ")}`;
@@ -140,6 +158,7 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
       rejectedReason = error instanceof Error ? error.message : String(error);
     }
   }
+
 
   next = reattachProtected(next, protectedSectionBodies(original, page.protected_sections || []));
   const after = analyzeStructure(next);
@@ -206,23 +225,26 @@ serve(async (req) => {
 
   try {
     const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
-
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run === true;
     const slugs: string[] = Array.isArray(body.slugs) ? body.slugs.filter((slug: unknown) => typeof slug === "string") : [];
     const force = body.force === true;
 
-    const isServiceCall = token === SUPABASE_SERVICE_ROLE_KEY;
+    // Narrow scheduled sweep (pg_cron): no user/slug targeting allowed, it can
+    // only reformat pages that already fail the readability contract.
+    const isCronSweep = body.cron === "wiki-restructure" && !body.user_id && slugs.length === 0 && !force;
+    if (!token && !isCronSweep) return jsonResponse({ error: "Unauthenticated" }, 401);
+
+    const isServiceCall = isCronSweep || token === SUPABASE_SERVICE_ROLE_KEY;
     let db: any;
     let actorId: string;
 
     if (isServiceCall) {
       db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      actorId = typeof body.user_id === "string" ? body.user_id : "";
+      actorId = !isCronSweep && typeof body.user_id === "string" ? body.user_id : "";
     } else {
       const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      const { data: userData, error: userError } = await authClient.auth.getUser(token);
+      const { data: userData, error: userError } = await authClient.auth.getUser(token!);
       if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
       actorId = userData.user.id;
       db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -230,20 +252,26 @@ serve(async (req) => {
       });
     }
 
+    const perRun = isCronSweep
+      ? Math.min(Number(body.limit) || 25, 50)
+      : MAX_PAGES_PER_RUN;
+
     let query = db
       .from("wiki_pages")
       .select("id, user_id, slug, title, content, protected_sections")
       .order("updated_at", { ascending: false })
-      .limit(MAX_PAGES_PER_RUN);
+      .limit(isCronSweep ? 500 : perRun);
     if (slugs.length > 0) query = query.in("slug", slugs);
     if (isServiceCall && actorId) query = query.eq("user_id", actorId);
+
 
     const { data, error } = await query;
     if (error) throw error;
 
-    const candidates = ((data || []) as PageRow[]).filter(
-      (page) => force || slugs.length > 0 || needsRestructure(page.content || ""),
-    );
+    const candidates = ((data || []) as PageRow[])
+      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""))
+      .slice(0, perRun);
+
 
     if (candidates.length === 0) {
       return jsonResponse({ accepted: true, total: 0, message: "All Lexicon pages already pass the readability checks." });

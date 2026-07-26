@@ -206,6 +206,10 @@ export function softStructure(markdown: string): string {
 /**
  * Fact fingerprint used to prove a reformat is lossless.
  * Captures wikilink slugs, numbers, and capitalised entity tokens.
+ *
+ * Sentence-initial capitalised words (e.g. "Known for…", "He's…") are NOT
+ * facts — they are an artefact of sentence position, and counting them made
+ * every legitimate reformat look lossy.
  */
 export function factFingerprint(markdown: string): Set<string> {
   const source = markdown || "";
@@ -220,10 +224,17 @@ export function factFingerprint(markdown: string): Set<string> {
   }
   const plain = source.replace(/\[\[[^\]]+\]\]/g, " ");
   for (const match of plain.matchAll(/\b[A-Z][A-Za-z0-9'’&-]{2,}\b/g)) {
+    const index = match.index ?? 0;
+    // Look back for the nearest non-space character: start of line/section,
+    // a sentence terminator, or a list/heading marker means this capital is
+    // positional, not an entity.
+    const before = plain.slice(Math.max(0, index - 60), index);
+    if (/(^|[.!?:;]|[-*+>|]|#|\n)\s*(["'“”(\[]\s*)?$/.test(before)) continue;
     tokens.add(`ent:${match[0].toLowerCase()}`);
   }
   return tokens;
 }
+
 
 /** Tokens present before but missing after — any result means the rewrite lost facts. */
 export function missingFacts(before: string, after: string): string[] {
