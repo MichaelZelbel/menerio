@@ -46,32 +46,34 @@ export function DashboardSearch() {
   // Freeze updates while the pointer is inside the dropdown so the row under
   // the cursor can never change identity mid-click.
   const isHoveringRef = useRef(false);
+  const resultsRef = useRef<SemanticSearchResult[]>([]);
   const pendingRef = useRef<SemanticSearchResult[] | null>(null);
   const requestIdRef = useRef(0);
 
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
 
+  const setVisible = useCallback((next: SemanticSearchResult[]) => {
+    resultsRef.current = next;
+    pendingRef.current = null;
+    setResults(next);
+  }, []);
+
   const commit = useCallback((updater: (prev: SemanticSearchResult[]) => SemanticSearchResult[]) => {
+    const base = pendingRef.current ?? resultsRef.current;
+    const next = updater(base);
     if (isHoveringRef.current) {
-      const base = pendingRef.current ?? null;
-      setResults((prev) => {
-        pendingRef.current = updater(base ?? prev);
-        return prev; // keep the visible list frozen
-      });
+      pendingRef.current = next; // keep the visible list frozen
       return;
     }
-    pendingRef.current = null;
-    setResults(updater);
-  }, []);
+    setVisible(next);
+  }, [setVisible]);
 
   const flushPending = useCallback(() => {
     isHoveringRef.current = false;
-    if (pendingRef.current) {
-      setResults(pendingRef.current);
-      pendingRef.current = null;
-    }
-  }, []);
+    if (pendingRef.current) setVisible(pendingRef.current);
+  }, [setVisible]);
+
 
   // Close on click outside
   useEffect(() => {
