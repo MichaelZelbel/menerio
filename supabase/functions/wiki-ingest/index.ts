@@ -328,9 +328,12 @@ function validateAction(
     }
   }
 
+  // Structural safety net: no page may land as a wall of text, even if the model ignores the template.
+  const structured = softStructure(cleaned);
+
   const nextAction: WikiAction = action.op === "update"
-    ? { ...action, patch: cleaned }
-    : { ...action, content: cleaned };
+    ? { ...action, patch: structured }
+    : { ...action, content: structured };
 
   return { ok: true, action: nextAction, strippedLinks, strippedUuids, removedSections };
 }
