@@ -113,6 +113,12 @@ import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml }
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
 import { buildTitleMap, resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
+import {
+  FLUSH_REQUEST_EVENT,
+  FLUSH_DONE_EVENT,
+  NOTE_UPDATED_EVENT,
+} from "@/lib/note-ai-edit";
+
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -775,34 +781,119 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     editor.setEditable(!note.is_trashed && !note.is_external, false);
   }, [note.id, note.content, note.updated_at, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
 
-  // Listen for AI-driven updates (from FAB chat or side panel) and refresh
-  // the editor live so the user sees the agent's edits without reloading.
+  // The AI chat asks us to persist any pending autosave BEFORE it runs, so the
+  // agent always reads (and writes on top of) the user's newest text. We answer
+  // with the note's newest `updated_at`, which the chat sends as its edit base.
   useEffect(() => {
     const handler = async (e: Event) => {
-      const detail = (e as CustomEvent<{ noteId?: string }>).detail;
+      const detail = (e as CustomEvent<{ noteId?: string; requestId?: string }>).detail;
+      if (!detail?.noteId || detail.noteId !== note.id || !detail.requestId) return;
+      const respond = (updatedAt: string | null) =>
+        window.dispatchEvent(
+          new CustomEvent(FLUSH_DONE_EVENT, {
+            detail: { requestId: detail.requestId, noteId: note.id, updatedAt },
+          }),
+        );
+      try {
+        if (contentSaveTimer.current) {
+          clearTimeout(contentSaveTimer.current);
+          contentSaveTimer.current = null;
+        }
+        // Wait for any in-flight save to land (bounded).
+        for (let i = 0; i < 40 && savingRef.current; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        const pending = queuedContentRef.current ?? pendingSaveContentRef.current;
+        if (pending !== null && pending !== lastSavedContentRef.current) {
+          savingRef.current = true;
+          try {
+            const saved = await updateNote.mutateAsync({ id: note.id, content: pending });
+            lastSavedContentRef.current = pending;
+            queuedContentRef.current = null;
+            if (pendingSaveContentRef.current === pending) pendingSaveContentRef.current = null;
+            const ts = saved?.updated_at ? new Date(saved.updated_at).getTime() : Date.now();
+            if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+            respond(saved?.updated_at ?? new Date(lastSavedUpdatedAtRef.current).toISOString());
+            return;
+          } finally {
+            savingRef.current = false;
+          }
+        }
+        const latest = lastSavedUpdatedAtRef.current
+          ? new Date(lastSavedUpdatedAtRef.current).toISOString()
+          : (note.updated_at ?? null);
+        respond(latest);
+      } catch {
+        respond(null);
+      }
+    };
+    window.addEventListener(FLUSH_REQUEST_EVENT, handler as EventListener);
+    return () => window.removeEventListener(FLUSH_REQUEST_EVENT, handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id, note.updated_at, updateNote]);
+
+  // Listen for AI-driven updates (from FAB chat or side panel) and refresh
+  // the editor live so the user sees the agent's edits without reloading.
+  //
+  // The chat passes the exact resulting content, so we apply it directly rather
+  // than refetching — and we apply it even when the editor is focused, because
+  // otherwise the next autosave would push our stale copy back over the AI's
+  // edit (that is how AI edits used to disappear).
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent<{ noteId?: string; content?: string; updatedAt?: string }>).detail;
       if (!detail?.noteId || detail.noteId !== note.id) return;
       try {
-        const { data, error } = await supabase
-          .from("notes")
-          .select("content, tags, metadata")
-          .eq("id", note.id)
-          .single();
-        if (error || !data) return;
-        const html = resolveWikilinks(contentToEditorHtml((data as any).content || "", note));
-        if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML()) && !editor.isFocused) {
+        let content = detail.content;
+        let updatedAt = detail.updatedAt;
+        if (typeof content !== "string") {
+          const { data, error } = await supabase
+            .from("notes")
+            .select("content, updated_at, tags, metadata")
+            .eq("id", note.id)
+            .single();
+          if (error || !data) return;
+          content = ((data as any).content || "") as string;
+          updatedAt = (data as any).updated_at;
+        }
+        const html = resolveWikilinks(contentToEditorHtml(content, note));
+        if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML())) {
+          const wasFocused = editor.isFocused;
+          const caret = editor.state.selection.from;
+          // Drop any queued autosave of the pre-edit text — it is stale now.
+          if (contentSaveTimer.current) {
+            clearTimeout(contentSaveTimer.current);
+            contentSaveTimer.current = null;
+          }
+          queuedContentRef.current = null;
+          pendingSaveContentRef.current = null;
           setEditorContentWithAttachments(html, note.id);
-          lastLocalContentRef.current = (data as any).content || "";
+          lastLocalContentRef.current = content;
+          lastSavedContentRef.current = content;
+          if (updatedAt) {
+            const ts = new Date(updatedAt).getTime();
+            if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
+          }
+          if (wasFocused) {
+            const max = editor.state.doc.content.size;
+            editor.commands.focus(Math.min(caret, Math.max(0, max - 1)));
+          }
+          setSaveStatus("saved");
         }
         // Refresh the cached note in React Query so list/sidebar update too.
+        queryClient.invalidateQueries({ queryKey: ["note", note.id] });
         queryClient.invalidateQueries({ queryKey: ["notes"] });
         queryClient.invalidateQueries({ queryKey: ["backlinks"] });
       } catch {
         // ignore
       }
     };
-    window.addEventListener("menerio:note-updated", handler as EventListener);
-    return () => window.removeEventListener("menerio:note-updated", handler as EventListener);
+    window.addEventListener(NOTE_UPDATED_EVENT, handler as EventListener);
+    return () => window.removeEventListener(NOTE_UPDATED_EVENT, handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient, setEditorContentWithAttachments]);
+
 
   // One-shot attachment resolution on editor mount. Replaces the previous
   // reactive effect, which fed itself through `note.content` → autosave →

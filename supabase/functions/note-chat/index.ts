@@ -21,6 +21,14 @@ import {
   loadPersonProfile,
   executeReadTool,
 } from "../_shared/read-tools.ts";
+import {
+  NOTE_EDIT_TOOL_SCHEMAS,
+  NOTE_EDIT_TOOL_NAMES,
+  createNoteEditSession,
+  executeNoteEditTool,
+  type NoteEditSession,
+} from "../_shared/note-edit-tools.ts";
+
 
 // Fallback model for the in-note agent. Overridable per environment via the
 // `llm_call_configs` row for "note-chat.main"/"note-chat.general" (admin LLM
@@ -51,25 +59,6 @@ function json(body: unknown, status = 200) {
 // person lookup) are shared with conversation-chat via _shared/read-tools.ts;
 // the write tools below are local to note-chat (they act on the current note).
 const WRITE_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "append_to_note",
-      description:
-        "Append text (markdown) to the end of the currently open note.",
-      parameters: {
-        type: "object",
-        properties: {
-          text: {
-            type: "string",
-            description: "Markdown text to append to the note",
-          },
-        },
-        required: ["text"],
-        additionalProperties: false,
-      },
-    },
-  },
   {
     type: "function",
     function: {
@@ -134,8 +123,22 @@ const WRITE_TOOLS = [
   },
 ];
 
-// Full tool set = shared read tools (search/lookup) + note-local write tools.
-const TOOLS = [...READ_TOOL_SCHEMAS, ...WRITE_TOOLS];
+// Full tool set = shared read tools + safe content-edit tools + note-local
+// metadata/tag/link write tools.
+const TOOLS = [...READ_TOOL_SCHEMAS, ...NOTE_EDIT_TOOL_SCHEMAS, ...WRITE_TOOLS];
+
+/** Non-negotiable editing rules, appended to whatever prompt is configured. */
+const NOTE_EDIT_CONTRACT = `
+
+EDITING CONTRACT (non-negotiable):
+- The user's existing text is sacred. Never delete, shorten, reorder or rewrite it unless the user explicitly asked for that specific change.
+- To add content use append_to_note or insert_into_note. Never re-send the whole note.
+- Use replace_in_note only for an explicitly requested change; \`find\` must be copied verbatim from the note and occur exactly once. Set confirm_delete: true only when the user explicitly asked to delete or shorten that text.
+- Call each edit tool ONCE per requested change. If the result says already_present, duplicate_call or unchanged, the work is done — do NOT append or retry it in another form.
+- On an error (stale, not_found, ambiguous, anchor_not_found, deletion_blocked) do not improvise a workaround; fix the argument if it is clearly safe, otherwise tell the user what happened.
+- After editing, briefly state what you added or changed.`;
+
+
 
 // System prompts now resolved at runtime from llm_call_configs
 // (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
@@ -146,7 +149,8 @@ async function executeTool(
   name: string,
   args: Record<string, unknown>,
   userId: string,
-  noteId: string
+  noteId: string,
+  editSession: NoteEditSession | null
 ): Promise<string> {
   // Read/lookup tools (note search, media search, person profile) are shared
   // with conversation-chat via _shared/read-tools.ts.
@@ -154,32 +158,18 @@ async function executeTool(
     return executeReadTool(db, OPENROUTER_API_KEY, userId, name, args);
   }
 
-  switch (name) {
-    case "append_to_note": {
-      const text = args.text as string;
-      // Fetch current content, append, update
-      const { data: note } = await db
-        .from("notes")
-        .select("content")
-        .eq("id", noteId)
-        .eq("user_id", userId)
-        .single();
-      if (!note) return JSON.stringify({ error: "Note not found" });
-      const newContent = note.content + "\n\n" + text;
-      const { error } = await db
-        .from("notes")
-        .update({ content: newContent })
-        .eq("id", noteId)
-        .eq("user_id", userId);
-      if (error) return JSON.stringify({ error: error.message });
-      return JSON.stringify({
-        success: true,
-        action: "append_to_note",
-        appended_text: text,
-      });
+  // Content edits go through the safe, idempotent, non-destructive editor.
+  if (NOTE_EDIT_TOOL_NAMES.includes(name)) {
+    if (!editSession) {
+      return JSON.stringify({ error: "No note is open — cannot edit." });
     }
+    return executeNoteEditTool(db, userId, editSession, name, args);
+  }
 
+  switch (name) {
     case "update_note_metadata": {
+
+
       const newMeta = args.metadata as Record<string, unknown>;
       const { data: note } = await db
         .from("notes")
@@ -259,7 +249,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
-    const { note_id, person_id, messages: chatMessages, mode, timezone } = body;
+    const {
+      note_id,
+      person_id,
+      messages: chatMessages,
+      mode,
+      timezone,
+      base_updated_at,
+    } = body;
+
 
     if (!chatMessages || !Array.isArray(chatMessages))
       return json({ error: "messages required" }, 400);
@@ -373,9 +371,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       systemMessage = {
         role: "system",
-        content: await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext }),
+        // The editing contract is appended in code (not only in the default
+        // prompt) so it still applies when an admin overrides the prompt in
+        // llm_call_configs. The user's writing must never be lost.
+        content:
+          (await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext })) +
+          NOTE_EDIT_CONTRACT,
       };
       activeTools = TOOLS;
+
     } else {
       // General assistant mode — read tools over notes, media, and people.
       let systemContent = await resolveSystemPrompt(db, "note-chat.general", NOTE_CHAT_GENERAL_MODE_PROMPT);
@@ -434,6 +438,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     const loopTools = [...activeTools, webSearchTool, ...(mcp?.tools ?? [])];
 
+    // Per-turn edit session: carries the client's `base_updated_at` (optimistic
+    // concurrency), the dedupe map, and the before/after content so the client
+    // can apply the result and offer an undo.
+    const editSession: NoteEditSession | null = isNoteMode
+      ? createNoteEditSession(note_id, base_updated_at)
+      : null;
+
     // Tool executor closure: web search + MCP passthrough + existing note tools.
     const runTool = async (
       name: string,
@@ -445,7 +456,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (mcp && mcp.hasTool(name)) {
         return mcp.call(name, args);
       }
-      return executeTool(name, args, user.id, note_id);
+      return executeTool(name, args, user.id, note_id, editSession);
     };
 
     try {
@@ -464,10 +475,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({
         reply: loopResult.reply,
         tool_results: loopResult.toolResults,
+        note_edit: editSession?.didWrite
+          ? {
+              note_id,
+              content: editSession.finalContent,
+              previous_content: editSession.originalContent,
+              updated_at: editSession.finalUpdatedAt,
+            }
+          : null,
         credits: c
           ? { remaining_tokens: c.remaining_tokens, remaining_credits: c.remaining_credits }
           : null,
       });
+
     } catch (err: any) {
       if (err?.message === "INSUFFICIENT_CREDITS") {
         return insufficientCreditsResponse(corsHeaders);

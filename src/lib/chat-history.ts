@@ -16,7 +16,13 @@ export interface PersistedChatMessage {
     args: Record<string, unknown>;
     result: Record<string, unknown>;
   }>;
+  /** Set when this turn edited the open note — enables one-click undo. */
+  noteEdit?: {
+    noteId: string;
+    previousContent: string | null;
+  };
 }
+
 
 export interface PersistedChatState {
   messages: PersistedChatMessage[];
@@ -124,10 +130,13 @@ export function buildApiMessages(state: PersistedChatState): Array<{
 /** Note-modifying tools we should react to in the UI. */
 export const NOTE_MODIFYING_TOOLS = [
   "append_to_note",
+  "insert_into_note",
+  "replace_in_note",
   "update_note_metadata",
   "update_note_tags",
   "add_wikilink",
 ];
+
 
 /** Collection-modifying tools (create/update/delete items) — used by CollectionChatPanel. */
 export const COLLECTION_MODIFYING_TOOLS = [
