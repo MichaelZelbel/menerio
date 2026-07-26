@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type SuggestionMode = "auto" | "ask" | "off";
 type SuggestionSensitivity = "conservative" | "balanced" | "exploratory";
@@ -17,12 +18,21 @@ interface Preferences {
   suggestion_mode: SuggestionMode;
   suggestion_sensitivity: SuggestionSensitivity;
   auto_add_sensitive: boolean;
+  profile_language: string;
 }
+
+// Languages the profile normaliser can standardise facts into.
+const PROFILE_LANGUAGES = [
+  "English", "German", "French", "Spanish", "Italian", "Portuguese", "Dutch",
+  "Polish", "Swedish", "Danish", "Norwegian", "Finnish", "Czech", "Turkish",
+  "Chinese", "Japanese", "Korean", "Russian", "Arabic", "Hindi",
+];
 
 const defaults: Preferences = {
   suggestion_mode: "auto",
   suggestion_sensitivity: "balanced",
   auto_add_sensitive: false,
+  profile_language: "English",
 };
 
 const modeOptions: Array<{ value: SuggestionMode; label: string; description: string }> = [
@@ -73,7 +83,7 @@ export function AISuggestionPreferences() {
 
     supabase
       .from("ai_suggestion_preferences" as any)
-      .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive")
+      .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, profile_language")
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -83,6 +93,7 @@ export function AISuggestionPreferences() {
             suggestion_mode: row.suggestion_mode || defaults.suggestion_mode,
             suggestion_sensitivity: row.suggestion_sensitivity || defaults.suggestion_sensitivity,
             auto_add_sensitive: row.auto_add_sensitive ?? defaults.auto_add_sensitive,
+            profile_language: row.profile_language || defaults.profile_language,
           });
         }
         setLoading(false);
@@ -185,6 +196,27 @@ export function AISuggestionPreferences() {
             checked={prefs.auto_add_sensitive}
             onCheckedChange={(checked) => setPrefs((p) => ({ ...p, auto_add_sensitive: checked }))}
           />
+        </div>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <Label className="text-sm font-semibold">Profile language</Label>
+          <p className="text-xs text-muted-foreground">
+            Standardised profile facts — job title, nationality, languages, city and country names — are written in
+            this language, even when the note was written in another one. Names, addresses and quotes are never translated.
+          </p>
+          <Select
+            value={prefs.profile_language}
+            onValueChange={(value) => setPrefs((p) => ({ ...p, profile_language: value }))}
+          >
+            <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PROFILE_LANGUAGES.map((lang) => (
+                <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <Button onClick={save} disabled={saving}>
