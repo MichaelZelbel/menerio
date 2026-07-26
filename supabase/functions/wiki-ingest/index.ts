@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
+import { softStructure } from "../_shared/wiki-structure.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
