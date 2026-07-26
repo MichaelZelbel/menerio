@@ -707,8 +707,12 @@ serve(async (req) => {
             .from("review_queue")
             .update({ status: "removed", reviewed_at: new Date().toISOString() })
             .eq("id", reviewId);
+          // Not an error: the row was resolved server-side. Return 200 so the
+          // client (and the platform error reporter) don't treat it as a failure.
+          return json({ ok: false, reason: result.reason, resolved: true }, 200);
         }
         return json({ ok: false, reason: result.reason }, 409);
+
       }
 
       await db
