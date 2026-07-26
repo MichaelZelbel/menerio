@@ -644,17 +644,27 @@ export default function Notes() {
     return sorted;
   }, [allNotes, searchMode, searchResults, entityFilter, topicFilter, personFilter, metaTypeFilter, sortField, sortDirection]);
 
+  // The open note is fetched as a single row so it is always fresh without
+  // refetching the whole (potentially very large) notes list. The list copy is
+  // only a fallback for the first paint / offline mode.
+  const { data: selectedNoteRow } = useNote(selectedId);
   const selectedNote = useMemo(() => {
     if (!selectedId) return null;
-    return (
+    const fallback =
       allNotes.find((n) => n.id === selectedId) ||
       trashNotes.find((n) => n.id === selectedId) ||
       favNotes.find((n) => n.id === selectedId) ||
       // Also check current search results (semantic/ilike may return notes not yet in cache)
       (searchResults ?? []).find((n) => n.id === selectedId) ||
-      null
-    );
-  }, [selectedId, allNotes, trashNotes, favNotes, searchResults]);
+      null;
+    if (!selectedNoteRow) return fallback;
+    if (!fallback) return selectedNoteRow;
+    // Prefer whichever copy is newer so a stale list entry can never clobber
+    // the freshly saved row (and vice-versa).
+    const rowTs = new Date(selectedNoteRow.updated_at || 0).getTime();
+    const fallbackTs = new Date(fallback.updated_at || 0).getTime();
+    return rowTs >= fallbackTs ? selectedNoteRow : fallback;
+  }, [selectedId, selectedNoteRow, allNotes, trashNotes, favNotes, searchResults]);
 
   
 
