@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { diffChangedSectionSlugs } from "@/lib/wiki-sections";
+import { softStructure } from "@/lib/wiki-structure";
 
 type WikiPageRow = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevisionRow = Database["public"]["Tables"]["wiki_revisions"]["Row"];
