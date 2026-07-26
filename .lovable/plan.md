@@ -1,30 +1,25 @@
-## What's wrong
+## The problem
 
-Clicking a version in the Version History panel fetches the note's GitHub file at that commit and dumps the first 2000 characters of the **raw file** into a ~200px `<pre>` at the bottom of the sidebar. That raw file starts with YAML frontmatter including a base64 `menerio_metadata` blob — that's the "codes" you saw. It's truncated, unstyled, and unreadable.
+`DashboardSearch` runs two searches per keystroke: a fast keyword (ILIKE) pass, then a slower semantic pass. The rendered list is `[...semanticResults, ...remaining ilikeResults]` — so when the semantic pass returns, the whole list is **re-sorted and prepended to**. Every row shifts, and a click in flight lands on a different note. A "Semantic results" header is also injected at that moment, pushing everything down one more row.
 
-## The fix
+## The fix: append-only, position-stable result list
 
-**1. Full-screen version preview dialog**
+1. **Keep a single ordered result list per query.** Instead of deriving the render list from two arrays, maintain one `orderedResults` array keyed by note id:
+   - When the ILIKE pass returns, seed the list in its order.
+   - When the semantic pass returns, **only append ids not already present**, and merge extra data (similarity score, match_source) into rows already displayed *in place* — never reorder.
+   - Reset the list only when the query text changes (new debounce cycle), not when a slower pass lands.
 
-Clicking a version opens a large dialog (not the bottom strip):
-- Header: version title as it was at that commit, commit short SHA, author, and absolute date + relative time ("14 Mar 2026, 09:12 · 4 months ago").
-- Body: the note parsed with `markdownToNote()` (strips frontmatter and the base64 metadata) and rendered read-only through the same `RichTextEditor` used by the note editor — so headings, lists, tables, checkboxes, wikilinks and images look exactly like the note did.
-- Scrollable, no 2000-char truncation.
+2. **Reserve the row height / drop the shifting header.** Remove the conditional "Semantic results" section header that appears mid-flight. Instead, mark semantically-matched rows with the existing sparkle icon and the `%` badge, which occupy space already allocated in the row.
 
-**2. Clear compare / decide affordances**
+3. **Freeze the list while the pointer is over it.** Even append-only can surprise a user if the container scrolls. When the mouse is inside the dropdown (`onMouseEnter`) or a row has keyboard focus, buffer any pending list update and apply it on `onMouseLeave`. This guarantees the row under the cursor never changes identity.
 
-- A "Current version" ↔ "This version" toggle at the top of the dialog so you can flip between the historical content and today's content in place before deciding.
-- Footer actions: **Close** and **Restore this version**.
-- Restore asks for confirmation ("Replace the current note with this version? Your current content stays in GitHub history.") before writing.
-- After restore: dialog closes, history panel stays open, success toast.
+4. **Guard against out-of-order responses.** Track a request id (incrementing counter) for each debounce cycle; discard any ILIKE/semantic response whose id is stale, so a slow response from an earlier query can't repopulate the list.
 
-**3. Sidebar list polish**
-
-- Keep the list as the picker; the chevron now genuinely opens the preview.
-- Show a loading spinner on the row being fetched, and mark the selected row.
-- Show "Current" badge on the newest commit.
-- Empty/error states stay as-is but the fetch error becomes an inline retry instead of only a toast.
+5. **Single loading affordance.** Keep the spinner visible until *both* passes for the current query settle, so the list never looks "done" while more is coming. Optionally show a subtle "refining…" line at the bottom of the dropdown so added rows are expected.
 
 ## Technical notes
 
-Files touched: `src/components/notes/VersionHistoryPanel.tsx` only (plus a small extracted `VersionPreviewDialog` component in the same folder). Uses existing hooks `useGitHubFileAtCommit`, `useSyncLogForNote`, `useUpdateNote`, existing `markdownToNote`, `RichTextEditor` (`editable={false}`, `showToolbar={false}`) and shadcn `Dialog`/`AlertDialog`. No database, edge function, or GitHub API changes; restore keeps its current behaviour of writing title + content via `useUpdateNote`.
+- All changes are contained in `src/components/layout/DashboardSearch.tsx`.
+- Replace `ilikeResults` / `semanticResults` / `useMemo` merge with a single `results` state plus a `pendingResults` ref used for the hover freeze.
+- Row identity stays keyed on `r.id`, so React reuses DOM nodes and no reconciliation flicker occurs when a row's similarity score is filled in.
+- No backend, query, or search-logic change — ranking semantics are unchanged, only presentation order stability.
