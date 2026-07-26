@@ -43,15 +43,17 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
     setError(null);
     setLoadingSha(commit.sha);
     try {
-      const content = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
-      const note = markdownToNote(content);
-      setParsed({ title: note.title || "Untitled", content: note.content || "" });
-    } catch {
-      setError("Couldn't load this version from GitHub.");
+      const raw = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
+      const { title, body } = splitFrontmatter(raw);
+      setParsed({ title: title || "Untitled", content: markdownToHtml(body) });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(msg ? `Couldn't load this version: ${msg}` : "Couldn't load this version from GitHub.");
     } finally {
       setLoadingSha(null);
     }
   };
+
 
   const handleRestore = async () => {
     if (!parsed) return;
