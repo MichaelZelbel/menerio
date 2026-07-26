@@ -129,7 +129,8 @@ async function executeTool(
   name: string,
   args: Record<string, unknown>,
   userId: string,
-  noteId: string
+  noteId: string,
+  editSession: NoteEditSession | null
 ): Promise<string> {
   // Read/lookup tools (note search, media search, person profile) are shared
   // with conversation-chat via _shared/read-tools.ts.
@@ -137,32 +138,16 @@ async function executeTool(
     return executeReadTool(db, OPENROUTER_API_KEY, userId, name, args);
   }
 
-  switch (name) {
-    case "append_to_note": {
-      const text = args.text as string;
-      // Fetch current content, append, update
-      const { data: note } = await db
-        .from("notes")
-        .select("content")
-        .eq("id", noteId)
-        .eq("user_id", userId)
-        .single();
-      if (!note) return JSON.stringify({ error: "Note not found" });
-      const newContent = note.content + "\n\n" + text;
-      const { error } = await db
-        .from("notes")
-        .update({ content: newContent })
-        .eq("id", noteId)
-        .eq("user_id", userId);
-      if (error) return JSON.stringify({ error: error.message });
-      return JSON.stringify({
-        success: true,
-        action: "append_to_note",
-        appended_text: text,
-      });
+  // Content edits go through the safe, idempotent, non-destructive editor.
+  if (NOTE_EDIT_TOOL_NAMES.includes(name)) {
+    if (!editSession) {
+      return JSON.stringify({ error: "No note is open — cannot edit." });
     }
+    return executeNoteEditTool(db, userId, editSession, name, args);
+  }
 
-    case "update_note_metadata": {
+  switch (name) {
+
       const newMeta = args.metadata as Record<string, unknown>;
       const { data: note } = await db
         .from("notes")
