@@ -529,3 +529,6 @@ export const CANONICAL_LABELS_FOR_PROMPT: string = (() => {
   }
   return lines.join("\n");
 })();
+
+// Banned labels, rendered for LLM system prompts.
+export const BLOCKED_LABELS_FOR_PROMPT: string = Object.keys(BLOCKED_PROFILE_LABELS).join(", ");
