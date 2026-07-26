@@ -20,6 +20,16 @@ interface CommitMeta {
   message?: string | null;
 }
 
+/** Browser-safe frontmatter split (gray-matter needs Node Buffer and throws in the browser). */
+function splitFrontmatter(raw: string): { title: string; body: string } {
+  const text = raw.replace(/^\uFEFF/, "");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) return { title: "", body: text };
+  const titleLine = /^title:\s*(.*)$/m.exec(match[1]);
+  const title = (titleLine?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+  return { title, body: text.slice(match[0].length) };
+}
+
 export function VersionHistoryPanel({ noteId, onClose }: Props) {
   const { data: versions, isLoading } = useGitHubVersionHistory(noteId);
   const { data: syncLog } = useSyncLogForNote(noteId);
