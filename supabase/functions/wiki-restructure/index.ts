@@ -65,9 +65,14 @@ async function callReformat(systemPrompt: string, userContent: string): Promise<
         { role: "user", content: userContent },
       ],
       temperature: 0,
+      // Without an explicit ceiling OpenRouter reserves the model maximum (65k)
+      // and rejects the call with 402 unless the account holds a large balance.
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     }),
+    signal: AbortSignal.timeout(120_000),
   });
+
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`OpenRouter failed: ${response.status} ${text}`);
@@ -201,24 +206,32 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   const results: unknown[] = [];
   let failed = 0;
   const systemPrompt = await resolveSystemPrompt(db, "wiki-restructure.main", WIKI_RESTRUCTURE_PROMPT, {});
+  const operation = dryRun ? "restructure_dry_run" : "restructure";
 
   for (const page of pages) {
+    let result: unknown;
     try {
-      results.push(await restructurePage(db, page, systemPrompt, dryRun));
+      result = await restructurePage(db, page, systemPrompt, dryRun);
     } catch (error) {
       failed += 1;
       console.error("wiki-restructure page failed", page.slug, error);
-      results.push({ slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) });
+      result = { slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) };
     }
+    results.push(result);
+    // Log per page so progress survives a runtime shutdown mid-sweep.
+    await logWiki(db, actorId, operation, { total: 1, failed: 0, page: page.slug, results: [result] });
   }
 
-  await logWiki(db, actorId, dryRun ? "restructure_dry_run" : "restructure", {
+  await logWiki(db, actorId, operation, {
     total: pages.length,
     failed,
+    summary: true,
     duration_ms: Date.now() - startedAt,
     results: results.slice(0, 100),
   });
 }
+
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
