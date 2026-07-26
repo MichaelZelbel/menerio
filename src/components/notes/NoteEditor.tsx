@@ -731,6 +731,20 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
     }
+    // Staleness guard: a notes-list refetch that started *before* the last
+    // autosave can resolve *after* it. Applying that older row would push the
+    // pre-edit text back into the editor, and the next autosave would then
+    // persist it — silently losing the user's work. Ignore anything older than
+    // the newest version this editor successfully wrote.
+    const incomingTs = note.updated_at ? new Date(note.updated_at).getTime() : 0;
+    if (noteChanged) {
+      lastSavedUpdatedAtRef.current = incomingTs;
+      lastSavedContentRef.current = null;
+      queuedContentRef.current = null;
+    } else if (incomingTs && incomingTs < lastSavedUpdatedAtRef.current) {
+      editor?.setEditable(!note.is_trashed && !note.is_external, false);
+      return;
+    }
     const incomingMatchesPendingSave = normalizeSavedMarkdown(pendingSaveContentRef.current) === normalizeSavedMarkdown(note.content);
     const incomingMatchesLastLocal = normalizeSavedMarkdown(lastLocalContentRef.current) === normalizeSavedMarkdown(note.content);
     if (!editor) return;
@@ -759,7 +773,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       pendingSaveContentRef.current = null;
     }
     editor.setEditable(!note.is_trashed && !note.is_external, false);
-  }, [note.id, note.content, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
+  }, [note.id, note.content, note.updated_at, note.title, note.folder_path, note.is_external, note.is_trashed, editor, setEditorContentWithAttachments]);
 
   // Listen for AI-driven updates (from FAB chat or side panel) and refresh
   // the editor live so the user sees the agent's edits without reloading.
