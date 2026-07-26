@@ -16,7 +16,13 @@ export interface PersistedChatMessage {
     args: Record<string, unknown>;
     result: Record<string, unknown>;
   }>;
+  /** Set when this turn edited the open note — enables one-click undo. */
+  noteEdit?: {
+    noteId: string;
+    previousContent: string | null;
+  };
 }
+
 
 export interface PersistedChatState {
   messages: PersistedChatMessage[];
