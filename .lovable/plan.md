@@ -1,81 +1,65 @@
-## What's wrong today
+# Profile Quality Overhaul
 
-The `michael` Lexicon page is 55,116 characters with only 158 line breaks — effectively one enormous paragraph. Across all 350 pages: 21 have no headings at all, 15 are over 3,000 characters, average length is 926 chars. The cause is in the synthesis pipeline, not the renderer:
+Five fixes, all rooted in the same cause: the extraction LLM is allowed to invent labels and duplicate facts across two storage systems, with no guardrails on what belongs in a profile.
 
-- The `wiki-ingest` prompt only says "use short paragraphs and 2–4 sections" — a soft suggestion with no enforced structure, no length ceiling, and no rule against ever-growing prose.
-- Updates ask the model to return the **full page** and "prefer additive updates", so each new note glues another sentence onto the same blob. Over months this compounds into a wall.
-- The frontend's `normalizeWikiContent` only splits text into paragraphs when the page is under a threshold and has no markdown structure — it can't rescue a 55k blob.
+## 1. Relationships: one section, one source of truth
 
-## Plan
+Today the same fact lives twice: as `profile_entries` rows in the "Relationships & Family" category (`Spouse`, `Partner`, `Relationship status`) and as edges in `contact_relationships` rendered by the separate Relationships section. Nothing syncs them, which is why Xihui shows "status: wife", "Partner: Rick", "Spouse: Michael" alongside a correct edge list (partner/spouse Michael, lover Rick, friend Lucy).
 
-### 1. A required page template (the contract)
+**Decision: `contact_relationships` is the single source of truth for who-is-who.**
 
-Every Lexicon page must follow one shape, enforced everywhere:
+- Add `Spouse`, `Partner`, `Child`, `Parent`, `Sibling`, `Relationship status` to a new **blocked-label** list in `profile-canonical-schema.ts`. Extraction never writes them as profile entries; they are routed into `contact_relationships` instead.
+- Keep only genuinely non-edge facts in the "Relationships & Family" category: `Wedding date`, `Wedding location`, `How we met`, `Anniversary`.
+- **Gendered edge labels**: extend `relationship-canonical.ts` so `husband` / `wife` are first-class labels (currently folded into `spouse`). `wife` ↔ `husband` become inverses; `ehefrau`/`ehemann` map onto them. Xihui → Michael becomes `husband`, Michael → Xihui becomes `wife`.
+- **Derived status line**: the Relationships section header renders a computed status ("Married") from the presence of a spouse/husband/wife edge — never a stored, LLM-authored string. No more "status: wife".
+- **Migration/backfill**: convert existing `profile_entries` rows with blocked relationship labels into `contact_relationships` edges (dedup via the existing `relationshipPairKey`), then delete the entries. Rows that can't be resolved to a known contact are written to the review queue instead of dropped.
+- **UI**: the Relationships section moves up to sit directly where "Relationships & Family" was, so there's one visual block.
 
-```text
-<one-sentence definition, plain text, no heading>
+## 2. No overgeneralized personality traits
 
-## Overview
-2-4 short paragraphs, max ~80 words each
+"insecure about her weight" must not become the trait "Insecure".
 
-## Key facts
-- bullet per fact, one line each
+- Add an explicit rule to `PROFILE_EXTRACTION_PROMPT`: only record a personality trait when the note states it as a **stable, general** characteristic of the person. A feeling tied to a specific object, event, or moment is not a trait — skip it or record it with its qualifier intact.
+- Deterministic guard: reject single-adjective trait values under the `personality` category unless the source sentence contains a generality marker ("always", "generally", "is a … person", "tends to"). Rejected candidates go to the review queue at low confidence rather than auto-applying.
+- Lower the auto-apply threshold for `personality` facts so traits effectively always require review.
 
-## <Topic sections, as many as needed>
-Short paragraphs or bullets under descriptive H2s
-(e.g. "## Projects", "## Preferences", "## Relationships")
+## 3. Ban purchases (and other event-shaped facts) from profiles
 
-## Open questions      (optional)
-## Contradictions      (optional, only when sources conflict)
-```
+Purchases are events, not identity.
 
-Hard rules: no paragraph over ~80 words, no section over ~250 words (split into sub-topics instead), sentences stay short, facts of the same kind get grouped under one H2 rather than appended chronologically.
+- New **blocked-label** list covers `Purchased item`, `Purchase`, `Bought`, `Recent purchase`, plus other event-shaped labels. Blocked facts are dropped at extraction, before the review queue.
+- Cleanup pass deletes existing entries matching the blocked labels (they remain in notes and the timeline, which is where they belong).
+- The same block list gets a deterministic "value hygiene" step for everything that *is* kept: strip redundant leading adjectives (`new`, `some`) and normalize obvious accidental plurals for count-one purchases — but this only matters for surviving labels, since purchases go away entirely.
 
-### 2. Fix generation (new pages are always structured)
+## 4. Profile language (configurable, default English)
 
-- Rewrite the `wiki-ingest` system prompt in `supabase/functions/_shared/llm-defaults.ts` to embed the template above, with the length ceilings and an explicit "never emit a paragraph longer than 80 words" rule.
-- Update the same prompt row in `llm_call_configs` (`call_site: wiki-ingest.main`) so the live config matches the default — the DB copy is what actually runs.
-- Change the update rule from "append to the end" to "place each new fact under the correct existing H2; create a new H2 if none fits; never grow a paragraph past the ceiling".
+- New per-user setting **Profile language** (default: English), stored on the user's settings row and exposed in Settings → Preferences.
+- Extraction prompt gains a target-language instruction: values for **normalizable fields** (job title, relationship status, nationality, languages, marital status, education level, city/country names) are written in the target language — "Modedesignerin" → "Fashion Designer".
+- Free-text/verbatim fields (quotes, names, addresses, favorite dishes with proper nouns) stay as written. Names are never translated.
+- A one-off normalization pass re-translates existing structured-field values into the user's chosen language, routed through the review queue so nothing changes silently.
 
-### 3. Structural validation before any write
+## 5. Location: structured, no duplication
 
-Add a shared `wiki-structure.ts` module used by `wiki-ingest` (and reused by the backfill):
+Adopt structured fields and drop the redundant blob.
 
-- `analyzeStructure(markdown)` → paragraph word counts, section word counts, heading presence, total length.
-- `needsRestructure(markdown)` → true when a page has no H2, a paragraph over the word ceiling, or a section over the section ceiling.
-- `softStructure(markdown)` → deterministic repair used as a safety net: splits runaway paragraphs at sentence boundaries into ~3-sentence paragraphs, promotes obvious list-like runs into bullets. No facts added or removed.
-
-`wiki-ingest` runs `softStructure` on every `content`/`patch` before saving, so even a badly behaved model response never lands as a wall of text.
-
-### 4. Backfill all existing pages
-
-New edge function `wiki-restructure`:
-
-- `POST { scope: "all" | "user" | "slugs", dry_run?: boolean }`, admin/owner scoped.
-- Selects pages where `needsRestructure` is true, processes them in the background via `EdgeRuntime.waitUntil`, returns a job id immediately (same pattern as `review-queue-bulk`).
-- Per page: deterministic `softStructure` first, then one LLM pass with a **reformat-only** prompt — reorganise into the template, group related facts, split long paragraphs. Explicitly forbidden: adding facts, removing facts, changing wikilinks, adding a Sources section.
-- **Lossless guard** before saving: extract the fact-bearing content of the before/after (all `[[slugs]]`, all numbers, all capitalised entity tokens). If the after-version drops any of them, the rewrite is rejected and the page keeps only the deterministic `softStructure` result. Long pages are chunked by existing paragraph groups so the 55k page doesn't blow the context window.
-- Writes a `wiki_revisions` row with `change_type: 'restructured'` for every page, so any page can be rolled back from the existing revisions UI.
-- Respects `protected_sections` — user-edited sections are moved but never reworded.
-
-Then run it once over all 350 pages (dry run first, reporting counts and a sample diff).
-
-### 5. Keep it that way
-
-- A `pg_cron` job (weekly) calls `wiki-restructure` with `scope: "all"`, which is a no-op for pages that already pass `needsRestructure`.
-- Extend `wiki-lint` to report "unstructured page" as a finding type, so the Lexicon health route surfaces regressions.
-
-### 6. Reading experience (frontend)
-
-In `src/pages/WikiPage.tsx`:
-
-- Replace `normalizeWikiContent` with the shared structure helper so the client-side fallback matches the server rules.
-- Constrain article measure (~72ch), increase paragraph spacing and line height for the Lexicon article view, and style H2/H3 with clear separation.
-- Long pages: collapse sections beyond the first few behind an expandable control, with the existing "On this page" rail as the primary navigation.
+- Canonical `location` labels become: `Current city`, `Current street`, `Postal code`, `Country`, `Timezone`, `Living situation`.
+- `Current address` is retired: added to the blocked list, with aliases (`Address`, `Home address`) folded into the structured fields.
+- Backfill: parse existing `Current address` values into street / postal code / city / country where confidently parseable; ambiguous ones go to the review queue for confirmation. "Forstwaldstr. 365" → `Current street`; Krefeld already exists as `Current city`, so the duplicate collapses.
 
 ## Technical notes
 
-- Files: `supabase/functions/_shared/llm-defaults.ts`, new `supabase/functions/_shared/wiki-structure.ts`, `supabase/functions/wiki-ingest/index.ts`, new `supabase/functions/wiki-restructure/index.ts`, `supabase/functions/wiki-lint/index.ts`, `src/pages/WikiPage.tsx`, `src/index.css` (Lexicon article typography).
-- Migration: one row update on `llm_call_configs` for `wiki-ingest.main`, a `wiki-restructure.main` config row, and the cron schedule.
-- Cost: the backfill is one LLM call per unstructured page (roughly 21–40 pages by current counts, plus chunked calls for the 15 oversized ones). Pages that already look fine are skipped.
-- Verification before I report done: re-run the structure query (`no_headings`, `very_long`, max paragraph length) and show the before/after of the `michael` page.
+- `supabase/functions/_shared/profile-canonical-schema.ts`: add `BLOCKED_PROFILE_LABELS` (with alias matching) + `isBlockedProfileLabel()`; revise `location` and `relationships` label sets; export the block list into the prompt vocabulary.
+- `supabase/functions/process-note/index.ts`: enforce the block list right after canonicalization (alongside the existing `PROFILE_CATEGORY_SLUGS` check); add the trait-generality guard; add language instruction; keep routing relationship facts to `contact_relationships`.
+- `supabase/functions/_shared/moment-profile-extraction.ts`: reconcile its independent label seed list with the canonical schema so it can't reintroduce banned labels.
+- `supabase/functions/normalize-profile/index.ts` + `_shared/profile-normalization.ts`: block-list enforcement in `writeProfileEntrySafely`, so quick-add and MCP writes are covered too; new backfill actions for relationship migration, address parsing, and language normalization, all run via `EdgeRuntime.waitUntil`.
+- `src/lib/relationship-canonical.ts` / `relationship-labels.ts`: add `husband`/`wife` with correct inverses and German aliases.
+- `src/components/people/ContactProfileTab.tsx` / `RelationshipsSection.tsx`: reorder so relationships render as one block; derived "Married" status line.
+- One migration for the settings column; data backfills run through the insert/data path, not migrations.
+
+## Sequencing
+
+1. Schema module: block list, revised label sets, husband/wife labels (fast, unblocks everything else).
+2. Extraction + write-path enforcement (`process-note`, `normalize-profile`, moment extraction).
+3. Frontend relationship consolidation and derived status.
+4. Profile-language setting + prompt wiring.
+5. Backfills: purchases/blocked-label cleanup → relationship migration → address parsing → language normalization, each verified with a SELECT count before and after.
