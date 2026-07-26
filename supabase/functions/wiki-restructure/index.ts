@@ -117,17 +117,35 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
 
   // 2) LLM reformat when the deterministic pass isn't enough (no headings, oversized sections).
   if (needsRestructure(next)) {
-    try {
-      const chunks = chunkMarkdown(next, 9000);
+    // Smaller chunks keep the model in "reformat" mode instead of summarising.
+    const chunks = chunkMarkdown(next, 3500);
+
+    const attempt = async (strict: boolean) => {
       const rewritten: string[] = [];
       for (let index = 0; index < chunks.length; index += 1) {
-        const label = chunks.length > 1 ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)` : "";
-        const out = await callReformat(systemPrompt, `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}`);
+        const label = chunks.length > 1
+          ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)`
+          : "";
+        const strictNote = strict
+          ? `\n\nSTRICT RETRY: your previous attempt dropped information. Keep EVERY name, number, date and wikilink exactly as written. Only add headings and split paragraphs — never summarise, merge or delete a fact.`
+          : "";
+        const out = await callReformat(
+          systemPrompt,
+          `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}${strictNote}`,
+        );
         if (!out.trim()) throw new Error("empty_llm_output");
         rewritten.push(out.trim());
       }
-      const candidate = softStructure(rewritten.join("\n\n"));
-      const lost = missingFacts(next, candidate);
+      return softStructure(rewritten.join("\n\n"));
+    };
+
+    try {
+      let candidate = await attempt(false);
+      let lost = missingFacts(next, candidate);
+      if (lost.length > 0) {
+        candidate = await attempt(true);
+        lost = missingFacts(next, candidate);
+      }
       if (lost.length > 0) {
         method = "llm_rejected";
         rejectedReason = `lost ${lost.length} tokens: ${lost.slice(0, 8).join(", ")}`;
@@ -140,6 +158,7 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
       rejectedReason = error instanceof Error ? error.message : String(error);
     }
   }
+
 
   next = reattachProtected(next, protectedSectionBodies(original, page.protected_sections || []));
   const after = analyzeStructure(next);
