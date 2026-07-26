@@ -65,9 +65,14 @@ async function callReformat(systemPrompt: string, userContent: string): Promise<
         { role: "user", content: userContent },
       ],
       temperature: 0,
+      // Without an explicit ceiling OpenRouter reserves the model maximum (65k)
+      // and rejects the call with 402 unless the account holds a large balance.
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     }),
+    signal: AbortSignal.timeout(120_000),
   });
+
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`OpenRouter failed: ${response.status} ${text}`);
