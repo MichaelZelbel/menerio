@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ExternalLink, FileText, History, Save, Users } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, History, Save, Users, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { RichTextEditor } from "@/components/RichTextEditor";
