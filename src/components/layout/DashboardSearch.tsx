@@ -90,17 +90,16 @@ export function DashboardSearch() {
   useEffect(() => {
     if (!query.trim()) {
       requestIdRef.current += 1;
-      pendingRef.current = null;
-      setResults([]);
+      setVisible([]);
       setIsSearching(false);
       return;
     }
 
     const timer = setTimeout(async () => {
       const reqId = ++requestIdRef.current;
-      pendingRef.current = null;
-      setResults([]);
+      setVisible([]);
       setIsSearching(true);
+
 
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
