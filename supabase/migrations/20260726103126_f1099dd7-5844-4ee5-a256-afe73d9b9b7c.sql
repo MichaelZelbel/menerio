@@ -1,0 +1,2 @@
+ALTER TABLE public.wiki_log DROP CONSTRAINT IF EXISTS wiki_log_operation_check;
+ALTER TABLE public.wiki_log ADD CONSTRAINT wiki_log_operation_check CHECK (operation = ANY (ARRAY['ingest','ingest_skipped','ingest_failed','lint','lint_failed','restructure','restructure_dry_run']));

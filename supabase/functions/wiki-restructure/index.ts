@@ -206,23 +206,26 @@ serve(async (req) => {
 
   try {
     const token = extractBearer(req);
-    if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
-
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run === true;
     const slugs: string[] = Array.isArray(body.slugs) ? body.slugs.filter((slug: unknown) => typeof slug === "string") : [];
     const force = body.force === true;
 
-    const isServiceCall = token === SUPABASE_SERVICE_ROLE_KEY;
+    // Narrow scheduled sweep (pg_cron): no user/slug targeting allowed, it can
+    // only reformat pages that already fail the readability contract.
+    const isCronSweep = body.cron === "wiki-restructure" && !body.user_id && slugs.length === 0 && !force;
+    if (!token && !isCronSweep) return jsonResponse({ error: "Unauthenticated" }, 401);
+
+    const isServiceCall = isCronSweep || token === SUPABASE_SERVICE_ROLE_KEY;
     let db: any;
     let actorId: string;
 
     if (isServiceCall) {
       db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      actorId = typeof body.user_id === "string" ? body.user_id : "";
+      actorId = !isCronSweep && typeof body.user_id === "string" ? body.user_id : "";
     } else {
       const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      const { data: userData, error: userError } = await authClient.auth.getUser(token);
+      const { data: userData, error: userError } = await authClient.auth.getUser(token!);
       if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
       actorId = userData.user.id;
       db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -230,20 +233,26 @@ serve(async (req) => {
       });
     }
 
+    const perRun = isCronSweep
+      ? Math.min(Number(body.limit) || 25, 50)
+      : MAX_PAGES_PER_RUN;
+
     let query = db
       .from("wiki_pages")
       .select("id, user_id, slug, title, content, protected_sections")
       .order("updated_at", { ascending: false })
-      .limit(MAX_PAGES_PER_RUN);
+      .limit(isCronSweep ? 500 : perRun);
     if (slugs.length > 0) query = query.in("slug", slugs);
     if (isServiceCall && actorId) query = query.eq("user_id", actorId);
+
 
     const { data, error } = await query;
     if (error) throw error;
 
-    const candidates = ((data || []) as PageRow[]).filter(
-      (page) => force || slugs.length > 0 || needsRestructure(page.content || ""),
-    );
+    const candidates = ((data || []) as PageRow[])
+      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""))
+      .slice(0, perRun);
+
 
     if (candidates.length === 0) {
       return jsonResponse({ accepted: true, total: 0, message: "All Lexicon pages already pass the readability checks." });
