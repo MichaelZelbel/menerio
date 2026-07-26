@@ -730,6 +730,43 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
+/**
+ * Guard against the classic profile failure: one situational remark
+ * ("she feels insecure about her weight") becoming a permanent, global
+ * personality trait ("insecure").
+ *
+ * Deterministic: a trait value is rejected when it is a BARE adjective
+ * (no qualifier of its own) and every mention of that word in the source note
+ * is immediately followed by a qualifier ("about X", "when Y", "with Z", ...).
+ * Traits that already carry their qualifier are kept as-is.
+ */
+const TRAIT_QUALIFIERS = /^(?:\s*)(?:about|regarding|with|when|whenever|around|because|due to|over|towards?|in|at|of|bezüglich|wegen|bei|über)\b/i;
+
+export function isOvergeneralizedTrait(value: string, noteContent: string): boolean {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  // Already qualified ("insecure about her weight") → keep.
+  const words = v.split(/\s+/);
+  if (words.length > 2) return false;
+  if (TRAIT_QUALIFIERS.test(" " + words.slice(1).join(" "))) return false;
+
+  const haystack = String(noteContent || "");
+  const needle = words[0].toLowerCase();
+  if (needle.length < 4) return false;
+
+  let found = 0;
+  let qualified = 0;
+  const re = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*`, "gi");
+  for (const m of haystack.matchAll(re)) {
+    found++;
+    const tail = haystack.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 40);
+    if (TRAIT_QUALIFIERS.test(tail)) qualified++;
+  }
+  // No mention at all → the model invented the generalization: reject.
+  if (found === 0) return true;
+  return qualified === found;
+}
+
 function profileExtractionPrompt(profileLanguage: string): string {
   return `${PROFILE_EXTRACTION_PROMPT}
 
