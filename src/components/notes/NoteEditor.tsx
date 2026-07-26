@@ -682,8 +682,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // We still cancel the process/sync timers — those are safe to drop.
   useEffect(() => {
     return () => {
-      const pendingContent = pendingSaveContentRef.current;
-      if (pendingContent !== null) {
+      const pendingContent = queuedContentRef.current ?? pendingSaveContentRef.current;
+      if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
         updateNote.mutate({ id: note.id, content: pendingContent });
         pendingSaveContentRef.current = null;
       }
