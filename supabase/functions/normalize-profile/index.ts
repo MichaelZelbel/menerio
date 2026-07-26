@@ -12,6 +12,7 @@ import {
 import {
   canonicalProfileLabel,
   correctProfileCategory,
+  isBlockedProfileLabel,
   isListValuedLabel,
 } from "../_shared/profile-canonical-schema.ts";
 import {
@@ -202,6 +203,14 @@ async function writeProfileEntrySafely(args: {
   }
 
   const fact = normalizeIncomingFact(categorySlug, input.label, input.value);
+
+  // Hard gate: relationship edges, purchase/event facts and the retired
+  // "Current address" blob must never reach profile_entries — no matter which
+  // path (LLM, review queue, manual add) tried to write them.
+  if (isBlockedProfileLabel(fact.label)) {
+    return { ok: false, outcome: "rejected_duplicate", reason: "blocked_label" };
+  }
+
   const category = await resolveCategoryForWrite(db, userId, contactId, input, fact.categorySlug);
   if (!category?.id) return { ok: false, outcome: "rejected_duplicate", reason: "category_unresolved" };
 
