@@ -7,14 +7,14 @@ export type EntityRef = {
 };
 
 const LABEL_CANONICAL: Record<string, string> = {
-  wife: "spouse",
-  husband: "spouse",
+  wife: "wife",
+  husband: "husband",
   spouse: "spouse",
   married: "spouse",
   marriage: "spouse",
   "life partner": "spouse",
-  ehefrau: "spouse",
-  ehemann: "spouse",
+  ehefrau: "wife",
+  ehemann: "husband",
   ehepartner: "spouse",
   partner: "partner",
   girlfriend: "partner",
@@ -67,6 +67,8 @@ const LABEL_CANONICAL: Record<string, string> = {
 };
 
 const INVERSE_LABEL: Record<string, string> = {
+  wife: "husband",
+  husband: "wife",
   mother: "child",
   father: "child",
   parent: "child",
@@ -107,6 +109,15 @@ export function inverseLabel(label: string): string {
   return INVERSE_LABEL[c] || c;
 }
 
+// spouse / husband / wife describe the SAME marriage edge. Collapse them for
+// dedup so a gendered label never creates a second row next to a legacy
+// "spouse" row.
+const MARRIAGE_EQUIVALENT = new Set<string>(["spouse", "husband", "wife"]);
+
+function pairKeyLabel(canonical: string): string {
+  return MARRIAGE_EQUIVALENT.has(canonical) ? "spouse" : canonical;
+}
+
 function refKey(ref: EntityRef): string {
   return `${ref.type}:${ref.id || "self"}`;
 }
@@ -117,7 +128,7 @@ export function relationshipPairKey(
   b: EntityRef,
   label: string,
 ): string {
-  const c = canonicalLabel(label);
+  const c = pairKeyLabel(canonicalLabel(label));
   if (isSymmetricLabel(c)) {
     const [x, y] = [refKey(a), refKey(b)].sort();
     return `${userId}|sym|${c}|${x}|${y}`;
