@@ -75,19 +75,19 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
     ],
   },
   relationships: {
+    // NOTE: person-to-person edges (spouse/partner/child/parent/sibling and
+    // "relationship status") deliberately do NOT live here — they belong in
+    // `contact_relationships` and are enforced by BLOCKED_PROFILE_LABELS below.
+    // Only non-edge relational facts remain.
     shape: "structured",
     labels: [
-      { canonical: "Spouse", single: true, aliases: ["wife", "husband", "married to", "spouse"] },
-      { canonical: "Partner", single: true, aliases: ["girlfriend", "boyfriend", "fiance", "fiancee", "fiancée", "life partner", "partner"] },
-      { canonical: "Child", single: false, aliases: ["son", "daughter", "kids", "child", "children"] },
-      { canonical: "Parent", single: false, aliases: ["mother", "father", "mom", "dad", "parent"] },
-      { canonical: "Sibling", single: false, aliases: ["brother", "sister", "sibling"] },
-      { canonical: "Relationship status", single: true, aliases: ["relationship status"] },
       { canonical: "How we met", single: false, aliases: ["how we met"] },
       { canonical: "Wedding date", single: true, aliases: ["marriage date", "wedding anniversary", "anniversary (marriage)", "hochzeitstag", "wedding date"] },
       { canonical: "Wedding location", single: true, aliases: ["marriage location", "married in", "wedding location"] },
+      { canonical: "Anniversary", single: true, aliases: ["anniversary"] },
     ],
   },
+
   communication: {
     shape: "structured",
     labels: [
