@@ -1,21 +1,77 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, FileText, Loader2, Sparkles, Image } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useIlikeSearch, useSemanticSearch, type SemanticSearchResult } from "@/hooks/useNotes";
-import { cn } from "@/lib/utils";
+
+/**
+ * Merge incoming results into the existing list WITHOUT reordering.
+ * - Rows already present keep their exact position; only their data is enriched.
+ * - Genuinely new rows are appended at the end.
+ */
+function mergeStable(
+  current: SemanticSearchResult[],
+  incoming: SemanticSearchResult[],
+  max: number
+): SemanticSearchResult[] {
+  const byId = new Map(current.map((r) => [r.id, r]));
+  const merged = current.map((r) => {
+    const next = incoming.find((i) => i.id === r.id);
+    if (!next) return r;
+    return {
+      ...r,
+      ...next,
+      // Never let an enrichment blank out what is already rendered
+      title: next.title || r.title,
+      similarity: next.similarity ?? r.similarity,
+      match_source: next.match_source ?? r.match_source,
+    };
+  });
+  for (const item of incoming) {
+    if (!byId.has(item.id) && merged.length < max) merged.push(item);
+  }
+  return merged.slice(0, max);
+}
+
+const MAX_RESULTS = 8;
 
 export function DashboardSearch() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const [ilikeResults, setIlikeResults] = useState<SemanticSearchResult[]>([]);
-  const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
-  const [mode, setMode] = useState<"idle" | "ilike" | "semantic">("idle");
+  const [results, setResults] = useState<SemanticSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  // Freeze updates while the pointer is inside the dropdown so the row under
+  // the cursor can never change identity mid-click.
+  const isHoveringRef = useRef(false);
+  const pendingRef = useRef<SemanticSearchResult[] | null>(null);
+  const requestIdRef = useRef(0);
+
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
+
+  const commit = useCallback((updater: (prev: SemanticSearchResult[]) => SemanticSearchResult[]) => {
+    if (isHoveringRef.current) {
+      const base = pendingRef.current ?? null;
+      setResults((prev) => {
+        pendingRef.current = updater(base ?? prev);
+        return prev; // keep the visible list frozen
+      });
+      return;
+    }
+    pendingRef.current = null;
+    setResults(updater);
+  }, []);
+
+  const flushPending = useCallback(() => {
+    isHoveringRef.current = false;
+    if (pendingRef.current) {
+      setResults(pendingRef.current);
+      pendingRef.current = null;
+    }
+  }, []);
 
   // Close on click outside
   useEffect(() => {
@@ -28,41 +84,39 @@ export function DashboardSearch() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Debounced search
+  // Debounced search — both passes feed one stable, append-only list
   useEffect(() => {
     if (!query.trim()) {
-      setIlikeResults([]);
-      setSemanticResults([]);
-      setMode("idle");
+      requestIdRef.current += 1;
+      pendingRef.current = null;
+      setResults([]);
+      setIsSearching(false);
       return;
     }
 
     const timer = setTimeout(async () => {
-      setMode("ilike");
-      // Fire ILIKE instantly
+      const reqId = ++requestIdRef.current;
+      pendingRef.current = null;
+      setResults([]);
+      setIsSearching(true);
+
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
-        setIlikeResults(ilike.slice(0, 8));
+        if (requestIdRef.current !== reqId) return;
+        commit((prev) => mergeStable(prev, ilike, MAX_RESULTS));
       } catch { /* ignore */ }
 
-      // Fire semantic in background
-      setMode("semantic");
       try {
-        const res = await semanticSearch.mutateAsync({ query, limit: 8, threshold: 0.25 });
-        setSemanticResults(res.results.slice(0, 8));
+        const res = await semanticSearch.mutateAsync({ query, limit: MAX_RESULTS, threshold: 0.25 });
+        if (requestIdRef.current !== reqId) return;
+        commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
       } catch { /* ignore */ }
+
+      if (requestIdRef.current === reqId) setIsSearching(false);
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query]);
-
-  const results = useMemo(() => {
-    if (semanticResults.length === 0) return ilikeResults;
-    const seenIds = new Set(semanticResults.map(r => r.id));
-    const extra = ilikeResults.filter(r => !seenIds.has(r.id));
-    return [...semanticResults, ...extra].slice(0, 8);
-  }, [semanticResults, ilikeResults]);
-  const isSearching = ilikeSearch.isPending || semanticSearch.isPending;
+  }, [query, commit]);
 
   const selectNote = useCallback((noteId: string) => {
     setOpen(false);
@@ -109,7 +163,11 @@ export function DashboardSearch() {
       </div>
 
       {open && query.trim() && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border bg-popover shadow-lg overflow-hidden">
+        <div
+          className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border bg-popover shadow-lg overflow-hidden"
+          onMouseEnter={() => { isHoveringRef.current = true; }}
+          onMouseLeave={flushPending}
+        >
           {results.length === 0 && !isSearching && (
             <p className="text-sm text-muted-foreground text-center py-6">No results found</p>
           )}
@@ -118,11 +176,6 @@ export function DashboardSearch() {
           )}
           {results.length > 0 && (
             <div className="max-h-[320px] overflow-y-auto">
-              {semanticResults.length > 0 && (
-                <p className="px-3 pt-2 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="h-3 w-3" /> Semantic results
-                </p>
-              )}
               {results.map((r) => (
                 <button
                   key={r.id}
@@ -138,6 +191,11 @@ export function DashboardSearch() {
                   )}
                 </button>
               ))}
+              {isSearching && (
+                <p className="px-3 py-1.5 text-[10px] text-muted-foreground border-t">
+                  Refining results…
+                </p>
+              )}
             </div>
           )}
         </div>
