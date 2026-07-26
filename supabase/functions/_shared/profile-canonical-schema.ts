@@ -245,6 +245,13 @@ export const BLOCKED_PROFILE_LABELS: Record<string, string[]> = {
   "Parent": ["parent", "parents", "mother", "father", "mom", "mum", "dad", "mutter", "vater"],
   "Sibling": ["sibling", "siblings", "brother", "sister", "bruder", "schwester"],
   "Relationship status": ["relationship status", "marital status", "beziehungsstatus", "familienstand"],
+  // Generic relationship-shaped labels — the bond belongs in the graph, never
+  // as a fact row. "Relationship to <name>" is caught by RELATIONSHIP_LABEL_RE.
+  "Relationship": [
+    "relationship", "relation", "relationship type", "relationship kind",
+    "relationship category", "relationship role", "beziehung", "beziehungstyp",
+  ],
+
   "Friend": ["friend", "friends", "best friend"],
   // 2) Event-shaped facts → notes / timeline
   "Purchased item": [
