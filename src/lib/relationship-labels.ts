@@ -25,6 +25,10 @@ export const RELATIONSHIP_LABEL_PAIRS: LabelPair[] = [
   { forward: "daughter", inverse: "parent" },
   { forward: "partner", inverse: "partner" },
   { forward: "spouse", inverse: "spouse" },
+  { forward: "husband", inverse: "wife" },
+  { forward: "wife", inverse: "husband" },
+  { forward: "lover", inverse: "lover" },
+
   { forward: "mentor", inverse: "mentee" },
   { forward: "mentee", inverse: "mentor" },
   { forward: "manager", inverse: "report" },
