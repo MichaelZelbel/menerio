@@ -1472,6 +1472,31 @@ async function generateProfileSuggestions(
       }
       f.label = canonicalProfileLabel(f.category_slug, f.label);
 
+      // Blocked labels never become profile entries. Relationship edges are
+      // re-routed into the relationship graph; everything else is dropped.
+      if (isBlockedProfileLabel(f.label)) {
+        const relLabel = blockedLabelAsRelationship(f.label);
+        if (relLabel && f.value && /^[\p{L}][\p{L}\p{M}'’.\- ]{0,60}$/u.test(f.value)) {
+          extractedRelationships.push({
+            person_a: f.contact_name,
+            person_b: f.value,
+            label_a_to_b: relLabel,
+            label_b_to_a: inverseLabel(relLabel),
+          });
+          console.log(`[profile-extract] Rerouted blocked label "${f.label}" → relationship ${relLabel}`);
+        } else {
+          console.log(`[profile-extract] Dropping fact: blocked label "${f.label}"`);
+        }
+        continue;
+      }
+
+      // Personality traits must describe a stable, general characteristic —
+      // never a bare adjective distilled from one situational remark.
+      if (f.category_slug === "personality" && isOvergeneralizedTrait(f.value, noteContent)) {
+        console.log(`[profile-extract] Dropping overgeneralized trait "${f.label}: ${f.value}"`);
+        continue;
+      }
+
       const nm = f.contact_name.toLowerCase().trim();
       let target = nameToTarget.get(nm) || null;
       if (!target) {
@@ -1485,6 +1510,7 @@ async function generateProfileSuggestions(
       }
       f.contact_name = target.canonical_name;
       validFacts.push({ ...f, _target: target });
+
     }
 
     console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
