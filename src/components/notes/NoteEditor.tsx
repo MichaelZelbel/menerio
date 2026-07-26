@@ -1021,13 +1021,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       contentSaveTimer.current = setTimeout(() => {
         const md = editorToMarkdown(editor);
         pendingSaveContentRef.current = md;
-        updateNote.mutate(
-          { id: note.id, content: md },
-          {
-            onSuccess: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
-            onError: () => { if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null; },
-          }
-        );
+        saveContentNow(md);
         triggerGitHubSync(note.id);
       }, 800);
       setSourceMode(false);
