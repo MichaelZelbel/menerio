@@ -359,9 +359,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       systemMessage = {
         role: "system",
-        content: await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext }),
+        // The editing contract is appended in code (not only in the default
+        // prompt) so it still applies when an admin overrides the prompt in
+        // llm_call_configs. The user's writing must never be lost.
+        content:
+          (await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext })) +
+          NOTE_EDIT_CONTRACT,
       };
       activeTools = TOOLS;
+
     } else {
       // General assistant mode — read tools over notes, media, and people.
       let systemContent = await resolveSystemPrompt(db, "note-chat.general", NOTE_CHAT_GENERAL_MODE_PROMPT);
