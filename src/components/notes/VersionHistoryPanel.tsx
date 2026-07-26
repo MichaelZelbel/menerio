@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useGitHubVersionHistory, useGitHubFileAtCommit, useSyncLogForNote } from "@/hooks/useGitHubSync";
-import { markdownToNote } from "@/utils/markdown-converter";
+import { markdownToHtml } from "@/utils/markdown-converter";
 import { useNote, useUpdateNote } from "@/hooks/useNotes";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, GitCommit, X, ChevronRight } from "lucide-react";
