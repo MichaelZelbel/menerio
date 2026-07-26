@@ -671,6 +671,14 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
+    call_site: "wiki-restructure.main",
+    description: "Reformats one Lexicon page into the readable page template without changing facts.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: WIKI_RESTRUCTURE_PROMPT,
+    temperature: 0, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
     call_site: "wiki-ingest.main",
     description: "Synthesizes Lexicon updates from a single note. {{existingPagesIndex}} is the slug index.",
     provider: "openrouter",
