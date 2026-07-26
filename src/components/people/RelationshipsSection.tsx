@@ -79,6 +79,33 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     enabled: !!user,
   });
 
+  // Gender / pronoun facts for everyone, so a role can be rendered in the
+  // other person's own gender ("Husband: Michael"). Keyed by contact id;
+  // the "self" key holds the owner's own facts. Never guessed from a name.
+  const { data: genderByPerson = new Map<string, Gender>() } = useQuery({
+    queryKey: ["relationship-genders", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profile_entries")
+        .select("contact_id, label, value")
+        .eq("user_id", user!.id)
+        .in("label", ["Gender", "Pronouns"]);
+      const raw = new Map<string, { gender?: string; pronouns?: string }>();
+      for (const row of (data || []) as Array<{ contact_id: string | null; label: string; value: string }>) {
+        const key = row.contact_id ?? "self";
+        const bucket = raw.get(key) ?? {};
+        if (row.label === "Gender") bucket.gender = row.value;
+        else bucket.pronouns = row.value;
+        raw.set(key, bucket);
+      }
+      const out = new Map<string, Gender>();
+      for (const [key, v] of raw) out.set(key, genderFromFacts(v.gender, v.pronouns));
+      return out;
+    },
+  });
+
+
   const resetForm = () => {
     setFormLabel("");
     setFormCustomLabel("");
