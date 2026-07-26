@@ -308,8 +308,32 @@ export function useUpdateNote() {
         });
         qc.setQueryData<Note[]>(key, next);
       }
-      qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
-      broadcastInvalidation([["notes"]]);
+      // The open editor reads from ["note", id] — patch it directly.
+      qc.setQueryData<Note | null>(["note", note.id], note);
+
+      // A content-only autosave must NOT invalidate the (expensive) notes list:
+      // for large vaults that meant refetching every note body on every
+      // keystroke burst, and a late-resolving stale list response could
+      // overwrite the just-saved content in the cache.
+      const listVisibleFields = [
+        "title",
+        "tags",
+        "folder_path",
+        "is_favorite",
+        "is_pinned",
+        "is_trashed",
+        "trashed_at",
+        "metadata",
+      ] as const;
+      const listVisibleChanged = listVisibleFields.some(
+        (field) => (variables as Record<string, unknown>)[field] !== undefined,
+      );
+      if (listVisibleChanged) {
+        qc.invalidateQueries({ queryKey: ["notes"], refetchType: "inactive" });
+        broadcastInvalidation([["notes"], ["note", note.id]]);
+      } else {
+        broadcastInvalidation([["note", note.id]]);
+      }
 
       if (variables.title !== undefined || variables.content !== undefined) {
         invokeWikiIngest(note.id, "UPDATE");
