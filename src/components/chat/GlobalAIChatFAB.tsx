@@ -237,6 +237,9 @@ export function GlobalAIChatFAB() {
     try {
       const apiMessages = buildApiMessages(nextState);
       const chatFn = collectionId ? "collection-chat" : "note-chat";
+      // Flush the open editor's pending autosave so the agent edits on top of
+      // the user's newest text (and knows which version it is based on).
+      const baseUpdatedAt = noteId && !collectionId ? await flushNoteSave(noteId) : null;
       const invokeBody = collectionId
         ? {
             collection_id: collectionId,
@@ -246,10 +249,12 @@ export function GlobalAIChatFAB() {
           }
         : {
             note_id: noteId || undefined,
+            base_updated_at: baseUpdatedAt,
             person_id: personId || undefined,
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           };
+
 
       const { data, error: fnErr } = await supabase.functions.invoke(chatFn, {
         body: invokeBody,
