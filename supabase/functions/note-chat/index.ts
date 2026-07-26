@@ -127,6 +127,18 @@ const WRITE_TOOLS = [
 // metadata/tag/link write tools.
 const TOOLS = [...READ_TOOL_SCHEMAS, ...NOTE_EDIT_TOOL_SCHEMAS, ...WRITE_TOOLS];
 
+/** Non-negotiable editing rules, appended to whatever prompt is configured. */
+const NOTE_EDIT_CONTRACT = `
+
+EDITING CONTRACT (non-negotiable):
+- The user's existing text is sacred. Never delete, shorten, reorder or rewrite it unless the user explicitly asked for that specific change.
+- To add content use append_to_note or insert_into_note. Never re-send the whole note.
+- Use replace_in_note only for an explicitly requested change; \`find\` must be copied verbatim from the note and occur exactly once. Set confirm_delete: true only when the user explicitly asked to delete or shorten that text.
+- Call each edit tool ONCE per requested change. If the result says already_present, duplicate_call or unchanged, the work is done — do NOT append or retry it in another form.
+- On an error (stale, not_found, ambiguous, anchor_not_found, deletion_blocked) do not improvise a workaround; fix the argument if it is clearly safe, otherwise tell the user what happened.
+- After editing, briefly state what you added or changed.`;
+
+
 
 // System prompts now resolved at runtime from llm_call_configs
 // (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
