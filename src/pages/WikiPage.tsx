@@ -227,6 +227,16 @@ export default function WikiPage() {
     onError: () => toast.error("Could not save Lexicon page"),
   });
 
+  const restructureMutation = useMutation({
+    mutationFn: async () => {
+      if (!page) throw new Error("No page");
+      const { error } = await supabase.functions.invoke("wiki-restructure", { body: { slugs: [page.slug] } });
+      if (error) throw error;
+    },
+    onSuccess: () => toast.success("Reformatting this page in the background. Refresh in a moment."),
+    onError: () => toast.error("Could not reformat this page"),
+  });
+
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
   const displayContent = useMemo(() => page ? normalizeWikiContent(page.content) : "", [page]);
   const headings = useMemo(() => extractHeadings(displayContent), [displayContent]);
