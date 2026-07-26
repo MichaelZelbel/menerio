@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { flushNoteSave, applyNoteEdit } from "@/lib/note-ai-edit";
+
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
