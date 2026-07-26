@@ -1,0 +1,11 @@
+REVOKE EXECUTE ON FUNCTION public.relationship_dedup_guard() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.relationship_normalize_label(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_label_map(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_canonical_label(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_is_symmetric(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_inverse_label(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_strength(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_is_bond(text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_person_pair(uuid, text, uuid, text, uuid) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.relationship_pair_key(uuid, text, uuid, text, uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.relationship_dedup_guard() TO service_role;

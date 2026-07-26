@@ -760,6 +760,7 @@ export type Database = {
           id: string
           inverse_id: string | null
           label: string
+          pair_key: string | null
           source_id: string | null
           source_type: string
           target_id: string | null
@@ -773,6 +774,7 @@ export type Database = {
           id?: string
           inverse_id?: string | null
           label: string
+          pair_key?: string | null
           source_id?: string | null
           source_type: string
           target_id?: string | null
@@ -786,6 +788,7 @@ export type Database = {
           id?: string
           inverse_id?: string | null
           label?: string
+          pair_key?: string | null
           source_id?: string | null
           source_type?: string
           target_id?: string | null
@@ -3323,6 +3326,34 @@ export type Database = {
         Args: { subset: string; superset: string }
         Returns: boolean
       }
+      relationship_canonical_label: { Args: { p: string }; Returns: string }
+      relationship_inverse_label: { Args: { p: string }; Returns: string }
+      relationship_is_bond: { Args: { p: string }; Returns: boolean }
+      relationship_is_symmetric: { Args: { p: string }; Returns: boolean }
+      relationship_label_map: { Args: { p_key: string }; Returns: string }
+      relationship_normalize_label: { Args: { p: string }; Returns: string }
+      relationship_pair_key: {
+        Args: {
+          p_label: string
+          p_user: string
+          s_id: string
+          s_type: string
+          t_id: string
+          t_type: string
+        }
+        Returns: string
+      }
+      relationship_person_pair: {
+        Args: {
+          p_user: string
+          s_id: string
+          s_type: string
+          t_id: string
+          t_type: string
+        }
+        Returns: string
+      }
+      relationship_strength: { Args: { p: string }; Returns: number }
       replace_group_members_section: {
         Args: { p_content: string; p_members_section: string }
         Returns: string

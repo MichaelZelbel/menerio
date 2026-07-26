@@ -93,6 +93,18 @@ export function ContactProfileTab({
     upsertEntry.mutate({ id: entry.id, is_pinned: !entry.is_pinned });
   };
 
+  // Relationship-adjacent facts (Wedding date, Anniversary, How we met…) are
+  // rendered INSIDE the Relationships card, so a profile has exactly one
+  // relationship surface. They are removed from the facts panel here.
+  const relationshipCategoryIds = new Set(
+    categories.filter((c) => c.slug === "relationships").map((c) => c.id),
+  );
+  const factCategories = categories.filter((c) => !relationshipCategoryIds.has(c.id));
+  const factEntries = entries.filter((e) => !relationshipCategoryIds.has(e.category_id));
+  const milestones = entries
+    .filter((e) => relationshipCategoryIds.has(e.category_id))
+    .map((e) => ({ id: e.id, label: e.label, value: e.value }));
+
   return (
     <div className="space-y-3">
       <Card>
@@ -115,9 +127,11 @@ export function ContactProfileTab({
         </CardContent>
       </Card>
 
+      <RelationshipsSection contactId={contactId} contactName={contactName} milestones={milestones} />
+
       <ProfileFactsPanel
-        categories={categories}
-        entries={entries}
+        categories={factCategories}
+        entries={factEntries}
         onSaveEntry={(data) => upsertEntry.mutate(data)}
         onDeleteEntry={(id) => deleteEntry.mutate(id)}
         onTogglePin={handleTogglePin}
@@ -136,9 +150,8 @@ export function ContactProfileTab({
         )}
       </ProfileFactsPanel>
 
-      <RelationshipsSection contactId={contactId} contactName={contactName} />
-
       <LifeEventsStrip contactId={contactId} />
+
 
 
       <Card>

@@ -1,65 +1,45 @@
-# Profile Quality Overhaul
+## What I found (verified against the live database)
 
-Five fixes, all rooted in the same cause: the extraction LLM is allowed to invent labels and duplicate facts across two storage systems, with no guardrails on what belongs in a profile.
+Viewing Xihui, several things go wrong at once:
 
-## 1. Relationships: one section, one source of truth
+1. **Two sections by design, which is wrong.** The graph card ("Relationships") and the fact category ("Relationships & Family") are separate components. The fact category still holds rows for this person (`Wedding date`, plus leftovers `Relationship`, `Relationship type`, `Relationship to Mike`, `Watched series together`), so it renders too. The block list added last time covers `spouse/partner/...` but not `Relationship`, `Relationship type`, `Relationship to <name>`.
 
-Today the same fact lives twice: as `profile_entries` rows in the "Relationships & Family" category (`Spouse`, `Partner`, `Relationship status`) and as edges in `contact_relationships` rendered by the separate Relationships section. Nothing syncs them, which is why Xihui shows "status: wife", "Partner: Rick", "Spouse: Michael" alongside a correct edge list (partner/spouse Michael, lover Rick, friend Lucy).
+2. **Edges are not canonicalized on write.** For one Xihui record the database holds, all pointing at me: `spouse`, `partner`, `romantic partner`, `intimate partner`, `sexual partner`, `romantic interest`, `companion`, `partner (companion)`, `lover`, `friend`, `friend/colleague`, `friend or colleague`, `acquaintance`, `team member`, `collaborator`, `manager or coordinator`, `employer`. A pair-key helper exists, but free-text LLM labels like "romantic partner" aren't in the synonym map, so each variant becomes its own row.
 
-**Decision: `contact_relationships` is the single source of truth for who-is-who.**
+3. **Direction is ambiguous in the UI.** Tiles render the label next to a name with no indication of who holds the role.
 
-- Add `Spouse`, `Partner`, `Child`, `Parent`, `Sibling`, `Relationship status` to a new **blocked-label** list in `profile-canonical-schema.ts`. Extraction never writes them as profile entries; they are routed into `contact_relationships` instead.
-- Keep only genuinely non-edge facts in the "Relationships & Family" category: `Wedding date`, `Wedding location`, `How we met`, `Anniversary`.
-- **Gendered edge labels**: extend `relationship-canonical.ts` so `husband` / `wife` are first-class labels (currently folded into `spouse`). `wife` ↔ `husband` become inverses; `ehefrau`/`ehemann` map onto them. Xihui → Michael becomes `husband`, Michael → Xihui becomes `wife`.
-- **Derived status line**: the Relationships section header renders a computed status ("Married") from the presence of a spouse/husband/wife edge — never a stored, LLM-authored string. No more "status: wife".
-- **Migration/backfill**: convert existing `profile_entries` rows with blocked relationship labels into `contact_relationships` edges (dedup via the existing `relationshipPairKey`), then delete the entries. Rows that can't be resolved to a known contact are written to the review queue instead of dropped.
-- **UI**: the Relationships section moves up to sit directly where "Relationships & Family" was, so there's one visual block.
+4. **Duplicate contacts.** Four `Xihui` rows exist; two are merged into one, but `7d18…` and `ee7a…` are both live, each with its own edges and facts.
 
-## 2. No overgeneralized personality traits
+## Plan
 
-"insecure about her weight" must not become the trait "Insecure".
+### 1. Directional, gendered display: "Role: Name"
+- Every relationship tile renders as **`Role: Name`**, where *Role* is always the role **the other person holds toward the profile owner**. On Xihui's profile: `Husband: Michael`. On Yumei's profile: `Boyfriend: Michael`. On my own profile: `Wife: Xihui`, `Girlfriend: Yumei`.
+- Implement as a single `describeRelationship(viewedPerson, otherPerson, storedEdge)` helper used everywhere (profile card, People tree, review queue, lexicon) so no surface can disagree.
+- **Gender resolution** for gendered roles, in order: the other person's `gender`/pronoun fact in their profile → an explicitly gendered stored label (`husband`, `wife`, `boyfriend`) → neutral fallback (`Spouse:`, `Partner:`). Never guess from the name.
+- Gendered pairs handled: spouse → Husband/Wife, partner → Boyfriend/Girlfriend, parent → Father/Mother, child → Son/Daughter, sibling → Brother/Sister. Everything else stays neutral (`Friend:`, `Manager:`, `Employer:`).
+- Storage stays neutral and canonical (`spouse`, `partner`); gender is applied at render time only, so a corrected gender fact instantly fixes every tile.
 
-- Add an explicit rule to `PROFILE_EXTRACTION_PROMPT`: only record a personality trait when the note states it as a **stable, general** characteristic of the person. A feeling tied to a specific object, event, or moment is not a trait — skip it or record it with its qualifier intact.
-- Deterministic guard: reject single-adjective trait values under the `personality` category unless the source sentence contains a generality marker ("always", "generally", "is a … person", "tends to"). Rejected candidates go to the review queue at low confidence rather than auto-applying.
-- Lower the auto-apply threshold for `personality` facts so traits effectively always require review.
+### 2. One relationship surface, everywhere
+- Extend the block list so `Relationship`, `Relationship status`, `Relationship type`, `Relationship to <anything>`, `Relation` never become profile entries; the ones naming a person get routed into the graph.
+- Move remaining relational facts (`Wedding date`, `Anniversary`, `How we met`) into the single **Relationships** card as a small milestones strip, and stop rendering the `relationships` fact category as a separate section.
+- Result: exactly one Relationships card per profile, identical structure everywhere.
 
-## 3. Ban purchases (and other event-shaped facts) from profiles
+### 3. Canonicalize every label on write
+- Expand the synonym map: `romantic/intimate/sexual partner`, `romantic interest`, `companion`, `partner (companion)`, `girlfriend`, `boyfriend`, `fiancé(e)` → `partner`; `wife`/`husband`/`married` → `spouse`; `friend/colleague`, `friend or colleague`, `buddy`, `acquaintance` → `friend`; `team member`, `collaborator` → `co-worker`; `manager or coordinator`, `boss`, `supervisor` → `manager`. Unmapped labels are stored lowercase-trimmed so they can't duplicate themselves.
+- Same map in both the frontend and the edge-function copy.
 
-Purchases are events, not identity.
+### 4. Prevent duplicates at the database level
+- Normalized pair-key column + unique index on `contact_relationships`, and a before-insert trigger that canonicalizes the label and rejects an insert matching an existing pair in either direction (respecting symmetric vs. inverse labels).
+- Precedence for the same pair: `spouse` > `partner` > `lover` > `friend` > `acquaintance`. So Xihui collapses to a single `Husband: Michael` tile and the `spouse`/`partner`/`spouse` rows disappear. Different edges to *different* people are untouched.
 
-- New **blocked-label** list covers `Purchased item`, `Purchase`, `Bought`, `Recent purchase`, plus other event-shaped labels. Blocked facts are dropped at extraction, before the review queue.
-- Cleanup pass deletes existing entries matching the blocked labels (they remain in notes and the timeline, which is where they belong).
-- The same block list gets a deterministic "value hygiene" step for everything that *is* kept: strip redundant leading adjectives (`new`, `some`) and normalize obvious accidental plurals for count-one purchases — but this only matters for surviving labels, since purchases go away entirely.
+### 5. Clean up existing data
+- One-off migration: canonicalize all labels, collapse duplicates by pair key with the precedence rule, delete relationship-shaped profile entries, keep wedding/anniversary/how-we-met facts.
+- Surface the two live `Xihui` contacts in the existing merge flow for you to confirm — no silent merge.
 
-## 4. Profile language (configurable, default English)
-
-- New per-user setting **Profile language** (default: English), stored on the user's settings row and exposed in Settings → Preferences.
-- Extraction prompt gains a target-language instruction: values for **normalizable fields** (job title, relationship status, nationality, languages, marital status, education level, city/country names) are written in the target language — "Modedesignerin" → "Fashion Designer".
-- Free-text/verbatim fields (quotes, names, addresses, favorite dishes with proper nouns) stay as written. Names are never translated.
-- A one-off normalization pass re-translates existing structured-field values into the user's chosen language, routed through the review queue so nothing changes silently.
-
-## 5. Location: structured, no duplication
-
-Adopt structured fields and drop the redundant blob.
-
-- Canonical `location` labels become: `Current city`, `Current street`, `Postal code`, `Country`, `Timezone`, `Living situation`.
-- `Current address` is retired: added to the blocked list, with aliases (`Address`, `Home address`) folded into the structured fields.
-- Backfill: parse existing `Current address` values into street / postal code / city / country where confidently parseable; ambiguous ones go to the review queue for confirmation. "Forstwaldstr. 365" → `Current street`; Krefeld already exists as `Current city`, so the duplicate collapses.
+### 6. Proof
+Before/after counts from direct SQL plus the exact resulting tiles for Xihui and Yumei pasted back to you.
 
 ## Technical notes
-
-- `supabase/functions/_shared/profile-canonical-schema.ts`: add `BLOCKED_PROFILE_LABELS` (with alias matching) + `isBlockedProfileLabel()`; revise `location` and `relationships` label sets; export the block list into the prompt vocabulary.
-- `supabase/functions/process-note/index.ts`: enforce the block list right after canonicalization (alongside the existing `PROFILE_CATEGORY_SLUGS` check); add the trait-generality guard; add language instruction; keep routing relationship facts to `contact_relationships`.
-- `supabase/functions/_shared/moment-profile-extraction.ts`: reconcile its independent label seed list with the canonical schema so it can't reintroduce banned labels.
-- `supabase/functions/normalize-profile/index.ts` + `_shared/profile-normalization.ts`: block-list enforcement in `writeProfileEntrySafely`, so quick-add and MCP writes are covered too; new backfill actions for relationship migration, address parsing, and language normalization, all run via `EdgeRuntime.waitUntil`.
-- `src/lib/relationship-canonical.ts` / `relationship-labels.ts`: add `husband`/`wife` with correct inverses and German aliases.
-- `src/components/people/ContactProfileTab.tsx` / `RelationshipsSection.tsx`: reorder so relationships render as one block; derived "Married" status line.
-- One migration for the settings column; data backfills run through the insert/data path, not migrations.
-
-## Sequencing
-
-1. Schema module: block list, revised label sets, husband/wife labels (fast, unblocks everything else).
-2. Extraction + write-path enforcement (`process-note`, `normalize-profile`, moment extraction).
-3. Frontend relationship consolidation and derived status.
-4. Profile-language setting + prompt wiring.
-5. Backfills: purchases/blocked-label cleanup → relationship migration → address parsing → language normalization, each verified with a SELECT count before and after.
+- Files: `src/lib/relationship-canonical.ts`, `src/lib/relationship-labels.ts` (rewritten around `describeRelationship`), `src/hooks/useContactRelationships.ts`, `src/components/people/RelationshipsSection.tsx`, `src/components/people/ContactProfileTab.tsx`, `supabase/functions/_shared/relationship-canonical.ts`, `_shared/profile-canonical-schema.ts`, `process-note`, `normalize-profile`.
+- Two migrations: schema (pair-key column, unique index, trigger) and data cleanup.
+- Unit tests for `describeRelationship` covering both viewing directions, gendered/neutral fallback, and symmetric labels; plus a test asserting the frontend and edge canonical maps are identical so they can't drift.
