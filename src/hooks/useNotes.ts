@@ -179,6 +179,31 @@ export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
   return OFFLINE_CORE ? useNotesLocal(filter) : useNotesRemote(filter);
 }
 
+/**
+ * Single-note query. This is the authoritative source for the open editor:
+ * it is a one-row fetch, so it can always revalidate on mount (fresh windows,
+ * pop-outs) without pulling the whole vault over the wire.
+ */
+export function useNote(id: string | null | undefined) {
+  const { user } = useAuth();
+
+  return useQuery<Note | null>({
+    queryKey: ["note", id],
+    enabled: !!id && !!user && !OFFLINE_CORE,
+    refetchOnMount: "always",
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notes" as any)
+        .select(NOTE_COLUMNS)
+        .eq("id", id!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as unknown as Note) ?? null;
+    },
+  });
+}
+
 // Inserts a note into local SQLite with the same defaults the Postgres
 // schema applies server-side; PowerSync uploads the full row on sync.
 async function createNoteLocal(userId: string, input: NoteInsert): Promise<Note> {
