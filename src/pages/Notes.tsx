@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { SEOHead } from "@/components/SEOHead";
 import {
   useNotes,
+  useNote,
   useCreateNote,
   useUpdateNote,
   useIlikeSearch,
