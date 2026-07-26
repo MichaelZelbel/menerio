@@ -730,6 +730,15 @@ const SENSITIVE_TERMS = [
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
+function profileExtractionPrompt(profileLanguage: string): string {
+  return `${PROFILE_EXTRACTION_PROMPT}
+
+PROFILE LANGUAGE — the user's profile language is ${profileLanguage}.
+- Write the VALUE of standardised fields in ${profileLanguage}: job title, industry, nationality, languages, education level, city and country names, relationship labels, colours, and similar closed-vocabulary facts. Example (when the profile language is English): a German note saying "Modedesignerin" must be emitted as "Fashion Designer".
+- Do NOT translate: personal names, company/brand names, street addresses, direct quotes, usernames/handles, or dish/product names that are proper nouns.
+- Never invent a translation you are unsure of — if you cannot translate confidently, keep the original wording.`;
+}
+
 const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
 
 Return a JSON object with two keys:
@@ -771,7 +780,17 @@ DERIVED FACTS — compute the canonical underlying fact when possible:
 
 CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
 ${CANONICAL_LABELS_FOR_PROMPT}
-When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
+When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits.
+
+NEVER EMIT THESE LABELS AS FACTS (${BLOCKED_LABELS_FOR_PROMPT}):
+- Person-to-person relationships (spouse, wife, husband, partner, lover, child, parent, sibling, friend) and "relationship status"/"marital status" are NOT profile facts. Emit them ONLY in the "relationships" array. Use the gendered label when the note makes the gender clear: label_a_to_b "wife" with label_b_to_a "husband" (and vice versa).
+- Purchases, orders, and shopping ("Purchased item", "Bought", "Recent order"). A purchase is an event, not part of who someone is. Skip them entirely.
+- "Current address" as one blob. Split a street address into separate facts: "Current street" (street + number), "Postal code", "Current city", "Current country". Never emit both a full address and its parts.
+
+PERSONALITY TRAITS — do not overgeneralize:
+- Only emit a personality trait when the note describes a STABLE, GENERAL characteristic of the person ("she is always anxious", "he tends to be blunt", "a very generous person").
+- A feeling tied to one situation, object, moment, or topic is NOT a trait. "She feels insecure about her weight" must NOT become "insecure". Either skip it, or keep the qualifier in the value ("insecure about her weight").
+- Never reduce a qualified statement to a bare adjective. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
 
 // Singleton labels = labels with at most one truth per subject. Derived from
 // the shared canonical schema so the two stay in sync. Legacy alias forms are
@@ -1332,7 +1351,7 @@ async function generateProfileSuggestions(
         defaults: {
           provider: "openrouter",
           model: "deepseek/deepseek-v4-flash",
-          systemPrompt: PROFILE_EXTRACTION_PROMPT,
+          systemPrompt: profileExtractionPrompt(preferences.profileLanguage),
         },
         callOptions: { response_format: { type: "json_object" } },
       });
