@@ -117,7 +117,7 @@ export function DashboardSearch() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query, commit]);
+  }, [query, commit, setVisible]);
 
   const selectNote = useCallback((noteId: string) => {
     setOpen(false);
