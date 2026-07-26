@@ -419,6 +419,60 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     }, 3000);
   }, [ghConn, ghSync]);
 
+  // ---------------------------------------------------------------------
+  // Serialized content autosave.
+  //
+  // Every content save funnels through here so that (a) only one write per
+  // note is ever in flight — fast typing queues the latest payload instead of
+  // racing several PATCHes — and (b) we remember the newest server
+  // `updated_at` we produced, which lets the sync effect below ignore any
+  // late-arriving, older copy of the note (that race silently reverted edits).
+  // ---------------------------------------------------------------------
+  const savingRef = useRef(false);
+  const queuedContentRef = useRef<string | null>(null);
+  const lastSavedContentRef = useRef<string | null>(null);
+  const lastSavedUpdatedAtRef = useRef<number>(
+    note.updated_at ? new Date(note.updated_at).getTime() : 0,
+  );
+
+  const saveContentNow = useCallback(
+    (md: string) => {
+      if (savingRef.current) {
+        queuedContentRef.current = md;
+        return;
+      }
+      savingRef.current = true;
+      setSaveStatus("saving");
+      updateNote.mutate(
+        { id: note.id, content: md },
+        {
+          onSuccess: (saved) => {
+            savingRef.current = false;
+            lastSavedContentRef.current = md;
+            const ts = saved?.updated_at ? new Date(saved.updated_at).getTime() : Date.now();
+            if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
+            if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+            const queued = queuedContentRef.current;
+            queuedContentRef.current = null;
+            if (queued !== null && queued !== md) saveContentNow(queued);
+          },
+          onError: () => {
+            savingRef.current = false;
+            // Keep the pending payload so unmount/next keystroke retries it.
+            setSaveStatus("error");
+            const queued = queuedContentRef.current;
+            queuedContentRef.current = null;
+            if (queued !== null && queued !== md) saveContentNow(queued);
+          },
+        },
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [note.id, updateNote],
+  );
+
   const handleOpenAutocomplete = useCallback((pos: number) => {
     // Get caret position from editor view
     const editorEl = document.querySelector(".tiptap-editor .ProseMirror");
