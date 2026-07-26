@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { BookOpen, FileText, Search } from "lucide-react";
+import { BookOpen, FileText, Search, Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "d
   created: "success",
   updated: "info",
   manual_edit: "secondary",
+  restructured: "info",
   rolled_back: "destructive",
 };
 
@@ -66,6 +68,7 @@ function WikiHomeSkeleton() {
 export default function WikiHome() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const [restructuring, setRestructuring] = useState(false);
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery<WikiPage[]>({
     queryKey: ["wiki-pages"],
@@ -115,12 +118,40 @@ export default function WikiHome() {
     <div className="space-y-6">
       <SEOHead title="Lexicon — Menerio" noIndex />
 
-      <div className="border-b border-border pb-5">
-        <h1 className="text-3xl font-display font-bold">Lexicon</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Your AI-generated knowledge lexicon, built automatically from your notes.
-        </p>
+      <div className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-display font-bold">Lexicon</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Your AI-generated knowledge lexicon, built automatically from your notes.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          className="shrink-0"
+          disabled={restructuring}
+          onClick={async () => {
+            setRestructuring(true);
+            try {
+              const { data, error } = await supabase.functions.invoke("wiki-restructure", { body: {} });
+              if (error) throw error;
+              const total = (data as { total?: number } | null)?.total ?? 0;
+              toast.success(
+                total === 0
+                  ? "All Lexicon pages are already well structured."
+                  : `Reformatting ${total} page${total === 1 ? "" : "s"} in the background. Refresh in a few minutes.`,
+              );
+            } catch {
+              toast.error("Could not start the readability pass.");
+            } finally {
+              setRestructuring(false);
+            }
+          }}
+        >
+          <Wand2 className="h-4 w-4" />
+          {restructuring ? "Starting…" : "Improve readability"}
+        </Button>
       </div>
+
 
       <div className="relative max-w-xl">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

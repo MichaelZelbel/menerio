@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ExternalLink, FileText, History, Save, Users } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, History, Save, Users, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
 import { RichTextEditor } from "@/components/RichTextEditor";
@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { diffChangedSectionSlugs } from "@/lib/wiki-sections";
+import { softStructure } from "@/lib/wiki-structure";
 
 type WikiPageRow = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevisionRow = Database["public"]["Tables"]["wiki_revisions"]["Row"];
@@ -28,6 +29,7 @@ const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "d
   created: "success",
   updated: "info",
   manual_edit: "secondary",
+  restructured: "info",
   rolled_back: "destructive",
 };
 
@@ -52,18 +54,9 @@ function extractHeadings(markdown: string): WikiHeading[] {
 }
 
 function normalizeWikiContent(content: string): string {
-  const trimmed = content.trim();
-  if (!trimmed) return "";
-  const hasMarkdownStructure = /(^|\n)(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\|.+\|)|\n\s*\n/.test(trimmed);
-  if (hasMarkdownStructure || trimmed.length < 420) return trimmed;
-
-  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) || [trimmed];
-  const paragraphs: string[] = [];
-  for (let i = 0; i < sentences.length; i += 3) {
-    paragraphs.push(sentences.slice(i, i + 3).join(" "));
-  }
-  return paragraphs.join("\n\n");
+  return softStructure(content);
 }
+
 
 function WikiPageSkeleton() {
   return (
@@ -234,6 +227,16 @@ export default function WikiPage() {
     onError: () => toast.error("Could not save Lexicon page"),
   });
 
+  const restructureMutation = useMutation({
+    mutationFn: async () => {
+      if (!page) throw new Error("No page");
+      const { error } = await supabase.functions.invoke("wiki-restructure", { body: { slugs: [page.slug] } });
+      if (error) throw error;
+    },
+    onSuccess: () => toast.success("Reformatting this page in the background. Refresh in a moment."),
+    onError: () => toast.error("Could not reformat this page"),
+  });
+
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
   const displayContent = useMemo(() => page ? normalizeWikiContent(page.content) : "", [page]);
   const headings = useMemo(() => extractHeadings(displayContent), [displayContent]);
@@ -310,6 +313,9 @@ export default function WikiPage() {
           ) : (
             <>
               {groupSlug && <Button asChild variant="outline"><Link to={`/dashboard/groups/${groupSlug}`}><Users className="h-4 w-4" /> View as Group</Link></Button>}
+              <Button variant="outline" onClick={() => restructureMutation.mutate()} disabled={restructureMutation.isPending}>
+                <Wand2 className="h-4 w-4" /> {restructureMutation.isPending ? "Reformatting…" : "Reformat"}
+              </Button>
               <Button variant="outline" onClick={() => setEditMode(true)}>Edit</Button>
               <Button variant="secondary" onClick={() => setRevisionsOpen(true)}><History className="h-4 w-4" /> View revisions</Button>
             </>

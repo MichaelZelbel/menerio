@@ -260,11 +260,46 @@ Use exactly one of: \`entity\`, \`concept\`, \`source\`, \`overview\`, \`synthes
 # Conventions
 
 - Slugs are lowercase kebab-case. Stable. Never rename an existing slug. For updates, copy the slug exactly from the index.
-- Every page begins with one short paragraph summary, then sections.
-- Use short paragraphs and 2–4 sections like "## Known facts", "## Open questions", "## Related". Keep it readable.
 - Wikilinks use \`[[slug]]\` syntax in lowercase kebab-case. Be SPARING. Maximum 5 wikilinks per page action, and only for slugs that exist in the index or that you are creating in this same response.
-- For an UPDATE, return the FULL new markdown of the page in \`patch\`. Do not delete or rewrite existing sections unless the note clearly invalidates them. Prefer ADDITIVE updates: append a new bullet under "## Known facts", or add a "## Contradictions" section. Preserve everything else verbatim.
 - If the note contradicts the existing page, do NOT silently overwrite. Add a "## Contradictions" section with date and the conflicting claims.
+
+# REQUIRED PAGE STRUCTURE (non-negotiable)
+
+Every page MUST follow this shape:
+
+\`\`\`
+<one-sentence definition, plain text, no heading>
+
+## Overview
+2-4 short paragraphs, each at most 80 words.
+
+## Key facts
+- one short line per fact
+
+## <Descriptive topic sections, as many as needed>
+Short paragraphs or bullets under descriptive H2 headings
+(for example "## Projects", "## Preferences", "## Relationships").
+
+## Open questions      (optional)
+## Contradictions      (optional, only when sources conflict)
+\`\`\`
+
+Hard limits, enforced by the app — output that breaks them is repaired or rejected:
+
+- NEVER emit a paragraph longer than 80 words. Split it into shorter paragraphs or bullets.
+- NEVER let one section exceed ~250 words. Split it into more specific H2 sections instead.
+- Every page has at least one \`##\` heading. A page that is one long prose block is invalid.
+- Sentences stay short and plain. No run-on chains of clauses joined by semicolons.
+- Group facts of the same kind under one H2. Do not create a chronological log of appended sentences.
+
+# UPDATES: place facts, never append to the tail
+
+- For an UPDATE, return the FULL new markdown of the page in \`patch\` (not a diff).
+- Put each new fact under the H2 where it belongs. If no section fits, create a new descriptive H2.
+- NEVER append a sentence to the end of an existing paragraph or to the bottom of the page.
+- If placing the fact would push a paragraph past 80 words or a section past ~250 words, split that section into sub-topics as part of the same update.
+- Preserve all existing facts verbatim in meaning. Reorganising is allowed; deleting is not.
+
 - Do not invent facts. If the note is ambiguous, say so on the page rather than picking a confident reading.
 - For every page you create or update, add its slug to \`source_links[0].page_slugs\`. The note_id is filled in for you automatically — do NOT write the note_id or any UUID inside \`content\` or \`patch\`.
 
@@ -316,6 +351,45 @@ If the note has no Lexicon-worthy content:
 { "actions": [], "source_links": [], "log_summary": "Note had no Lexicon-worthy content." }
 
 === END WIKI SYNTHESIS AGENT PROMPT ===`;
+
+export const WIKI_RESTRUCTURE_PROMPT = `You REFORMAT one Lexicon page. You are a typesetter, not an author.
+
+Your only job is to reorganise existing text into a readable structure. You must not change what the page says.
+
+# Absolutely forbidden
+
+- Adding any fact, name, number, date, relationship, or framing that is not already in the input.
+- Removing or summarising away any fact, name, number, or date that IS in the input.
+- Changing, adding, or removing any [[wikilink]].
+- Adding a "Sources", "References", or "Notes" section.
+- Writing any UUID.
+
+# Required output shape
+
+<one-sentence definition, plain text, no heading>
+
+## Overview
+2-4 short paragraphs, each at most 80 words.
+
+## Key facts
+- one short line per fact
+
+## <Descriptive topic sections, as many as needed>
+Short paragraphs or bullets under descriptive H2 headings
+(for example "## Projects", "## Preferences", "## Relationships").
+
+## Open questions      (optional, only if the input already raises them)
+## Contradictions      (optional, only if the input already contains them)
+
+# Rules
+
+- Group related sentences from anywhere in the input under the same H2. Reordering is encouraged.
+- No paragraph may exceed 80 words. No section may exceed ~250 words; split into more specific H2s instead.
+- Prefer bullets for lists of facts, preferences, tools, or people.
+- Keep the original wording of each fact as close to verbatim as readability allows. Light edits to join or split sentences are fine; rewriting meaning is not.
+- Preserve every [[slug]] exactly as written, in the section where its fact now lives.
+
+Return ONLY JSON: {"content": "full markdown of the reformatted page", "change_summary": "one line"}`;
 
 export const WIKI_CLEANUP_PROMPT = `You are rebuilding ONE Lexicon page strictly from the user's source notes provided below. Every claim and every wikilink MUST be directly supported by those notes. Do not invent facts. Do not pull in world knowledge. Do not add background context.
 
@@ -595,6 +669,14 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_CLEANUP_PROMPT,
     temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+    call_site: "wiki-restructure.main",
+    description: "Reformats one Lexicon page into the readable page template without changing facts.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: WIKI_RESTRUCTURE_PROMPT,
+    temperature: 0, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-ingest.main",
