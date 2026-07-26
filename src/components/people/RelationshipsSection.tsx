@@ -139,6 +139,14 @@ export function RelationshipsSection({ contactId, contactName }: RelationshipsSe
 
   if (isLoading) return null;
 
+  // Derived relationship status — never a stored, LLM-authored string.
+  const derivedStatus = (() => {
+    const labels = relationships.map((r) => canonicalLabel(r.custom_label || r.label));
+    if (labels.some((l) => l === "spouse" || l === "husband" || l === "wife")) return "Married";
+    if (labels.some((l) => l === "partner")) return "In a relationship";
+    return null;
+  })();
+
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="flex items-center justify-between p-3 pb-2">
@@ -150,6 +158,11 @@ export function RelationshipsSection({ contactId, contactName }: RelationshipsSe
               {relationships.length}
             </Badge>
           )}
+          {derivedStatus && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+              {derivedStatus}
+            </Badge>
+          )}
         </div>
         {!adding && (
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setAdding(true)}>
@@ -157,6 +170,7 @@ export function RelationshipsSection({ contactId, contactName }: RelationshipsSe
           </Button>
         )}
       </div>
+
 
       {/* Existing relationships */}
       {relationships.length > 0 && (
