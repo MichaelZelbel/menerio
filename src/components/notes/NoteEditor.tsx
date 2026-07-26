@@ -1026,7 +1026,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }, 800);
       setSourceMode(false);
     }
-  }, [editor, sourceMode, sourceText, note, updateNote, triggerGitHubSync]);
+  }, [editor, sourceMode, sourceText, note, saveContentNow, triggerGitHubSync]);
 
   return (
     <div className="flex h-full">
@@ -1372,14 +1372,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               pendingSaveContentRef.current = e.target.value;
               lastLocalContentRef.current = e.target.value;
               contentSaveTimer.current = setTimeout(() => {
-                const nextContent = e.target.value;
-                updateNote.mutate(
-                  { id: note.id, content: nextContent },
-                  {
-                    onSuccess: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
-                    onError: () => { if (pendingSaveContentRef.current === nextContent) pendingSaveContentRef.current = null; },
-                  }
-                );
+                saveContentNow(e.target.value);
                 triggerGitHubSync(note.id);
               }, 800);
             }}
