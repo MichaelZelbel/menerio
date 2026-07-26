@@ -136,9 +136,10 @@ export function ContactProfileTab({
         )}
       </ProfileFactsPanel>
 
+      <RelationshipsSection contactId={contactId} contactName={contactName} />
+
       <LifeEventsStrip contactId={contactId} />
 
-      <RelationshipsSection contactId={contactId} contactName={contactName} />
 
       <Card>
         <CardHeader>
