@@ -20,6 +20,7 @@ const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "d
   created: "success",
   updated: "info",
   manual_edit: "secondary",
+  restructured: "info",
   rolled_back: "destructive",
 };
 
