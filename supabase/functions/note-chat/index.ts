@@ -147,6 +147,8 @@ async function executeTool(
   }
 
   switch (name) {
+    case "update_note_metadata": {
+
 
       const newMeta = args.metadata as Record<string, unknown>;
       const { data: note } = await db
