@@ -171,8 +171,20 @@ export function canonicalLabel(label: string | null | undefined): string {
     const first = key.split(" / ")[0].trim();
     if (LABEL_CANONICAL[first]) return LABEL_CANONICAL[first];
   }
+  // Modifier + known role ("spicy partner", "online boyfriend", "work friend")
+  // folds onto the role. "ex-"/"former " keeps a distinct past-tense label so a
+  // former bond never overwrites a current one.
+  const words = key.split(" ");
+  const isEx = /^(ex-|ex\s|former\s)/.test(key);
+  const last = LABEL_CANONICAL[words[words.length - 1].replace(/^ex-/, "")];
+  if (last && words.length > 1) return isEx ? `ex-${last}` : last;
+  if (isEx && words.length === 1) {
+    const bare = LABEL_CANONICAL[key.replace(/^ex-/, "")];
+    if (bare) return `ex-${bare}`;
+  }
   return key;
 }
+
 
 export function isSymmetricLabel(label: string): boolean {
   return SYMMETRIC_LABELS.has(canonicalLabel(label));
