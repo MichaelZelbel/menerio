@@ -305,6 +305,18 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
                   ))}
                 </div>
               )}
+
+              {msg.noteEdit && msg.noteEdit.previousContent !== null && (
+                <button
+                  type="button"
+                  onClick={() => undoNoteEdit(msg.noteEdit!.previousContent)}
+                  className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  Undo this note edit
+                </button>
+              )}
+
             </div>
             {msg.role === "user" && (
               <User className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
