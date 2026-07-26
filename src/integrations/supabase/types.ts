@@ -214,6 +214,7 @@ export type Database = {
           created_at: string
           id: string
           person_blocklist: string[]
+          profile_language: string
           suggestion_mode: string
           suggestion_sensitivity: string
           updated_at: string
@@ -224,6 +225,7 @@ export type Database = {
           created_at?: string
           id?: string
           person_blocklist?: string[]
+          profile_language?: string
           suggestion_mode?: string
           suggestion_sensitivity?: string
           updated_at?: string
@@ -234,6 +236,7 @@ export type Database = {
           created_at?: string
           id?: string
           person_blocklist?: string[]
+          profile_language?: string
           suggestion_mode?: string
           suggestion_sensitivity?: string
           updated_at?: string
