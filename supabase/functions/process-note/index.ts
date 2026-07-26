@@ -13,10 +13,13 @@ import {
   type EntityRef,
 } from "../_shared/relationship-canonical.ts";
 import {
+  BLOCKED_LABELS_FOR_PROMPT,
   CANONICAL_LABELS_FOR_PROMPT,
   PROFILE_CANONICAL_SCHEMA,
+  blockedLabelAsRelationship,
   canonicalProfileLabel,
   correctProfileCategory,
+  isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
 import {
@@ -329,13 +332,14 @@ function isSensitiveSuggestion(suggestionType: string, payload: Record<string, u
 async function getSuggestionPreferences(userId: string) {
   const { data } = await supabase
     .from("ai_suggestion_preferences")
-    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, person_blocklist")
+    .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, person_blocklist, profile_language")
     .eq("user_id", userId)
     .maybeSingle();
 
   return {
     mode: (data as any)?.suggestion_mode || "auto",
     sensitivity: (data as any)?.suggestion_sensitivity || "balanced",
+    profileLanguage: String((data as any)?.profile_language || "English"),
     autoAddSensitive: (data as any)?.auto_add_sensitive === true,
     personBlocklist: Array.isArray((data as any)?.person_blocklist)
       ? ((data as any).person_blocklist as string[]).map((n) => String(n).trim().toLowerCase()).filter(Boolean)
