@@ -66,6 +66,7 @@ function WikiHomeSkeleton() {
 export default function WikiHome() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const [restructuring, setRestructuring] = useState(false);
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery<WikiPage[]>({
     queryKey: ["wiki-pages"],
