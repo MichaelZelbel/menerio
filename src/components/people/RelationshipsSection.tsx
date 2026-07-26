@@ -1,28 +1,47 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Pencil, Trash2, Users, ArrowRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
-import { ALL_RELATIONSHIP_LABELS, getRelationshipDisplay } from "@/lib/relationship-labels";
-import { canonicalLabel } from "@/lib/relationship-canonical";
+import { ALL_RELATIONSHIP_LABELS } from "@/lib/relationship-labels";
+import {
+  canonicalLabel,
+  describeRelationship,
+  genderFromFacts,
+  isRomanticSocialBond,
+  relationshipStrength,
+  type Gender,
+} from "@/lib/relationship-canonical";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 
+export interface RelationshipMilestone {
+  id: string;
+  label: string;
+  value: string;
+}
+
 interface RelationshipsSectionProps {
   /** null = viewing own profile ("self") */
   contactId: string | null;
   contactName: string;
+  /**
+   * Non-edge relational facts (Wedding date, Anniversary, How we met…). They
+   * render inside this card so a profile has exactly ONE relationship surface.
+   */
+  milestones?: RelationshipMilestone[];
 }
 
-export function RelationshipsSection({ contactId, contactName }: RelationshipsSectionProps) {
+export function RelationshipsSection({ contactId, contactName, milestones = [] }: RelationshipsSectionProps) {
   const { user } = useAuth();
   const { relationships, isLoading, upsertRelationship, deleteRelationship } = useContactRelationships(contactId);
+
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formLabel, setFormLabel] = useState("");
