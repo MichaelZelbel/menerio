@@ -303,6 +303,9 @@ export default function WikiPage() {
           ) : (
             <>
               {groupSlug && <Button asChild variant="outline"><Link to={`/dashboard/groups/${groupSlug}`}><Users className="h-4 w-4" /> View as Group</Link></Button>}
+              <Button variant="outline" onClick={() => restructureMutation.mutate()} disabled={restructureMutation.isPending}>
+                <Wand2 className="h-4 w-4" /> {restructureMutation.isPending ? "Reformatting…" : "Reformat"}
+              </Button>
               <Button variant="outline" onClick={() => setEditMode(true)}>Edit</Button>
               <Button variant="secondary" onClick={() => setRevisionsOpen(true)}><History className="h-4 w-4" /> View revisions</Button>
             </>
