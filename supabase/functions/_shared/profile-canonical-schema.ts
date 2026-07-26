@@ -445,8 +445,10 @@ export function correctProfileCategory(label: string, currentSlug: string): stri
 
   if (IDENTITY_LABELS.has(canonLower)) return "identity";
   if (RELATIONSHIP_LABELS.has(canonLower)) return "relationships";
+  if (LOCATION_LABELS.has(canonLower)) return "location";
   if (HEALTH_LABELS.has(canonLower)) return "health";
   return currentSlug;
+
 }
 
 export function isSingleValueLabel(canonicalLabel: string): boolean {
