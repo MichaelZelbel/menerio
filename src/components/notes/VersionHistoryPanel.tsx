@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useGitHubVersionHistory, useGitHubFileAtCommit, useSyncLogForNote } from "@/hooks/useGitHubSync";
-import { markdownToNote } from "@/utils/markdown-converter";
+import { markdownToHtml } from "@/utils/markdown-converter";
 import { useNote, useUpdateNote } from "@/hooks/useNotes";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, GitCommit, X, ChevronRight } from "lucide-react";
@@ -18,6 +18,16 @@ interface CommitMeta {
   date?: string | null;
   author?: string | null;
   message?: string | null;
+}
+
+/** Browser-safe frontmatter split (gray-matter needs Node Buffer and throws in the browser). */
+function splitFrontmatter(raw: string): { title: string; body: string } {
+  const text = raw.replace(/^\uFEFF/, "");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) return { title: "", body: text };
+  const titleLine = /^title:\s*(.*)$/m.exec(match[1]);
+  const title = (titleLine?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+  return { title, body: text.slice(match[0].length) };
 }
 
 export function VersionHistoryPanel({ noteId, onClose }: Props) {
@@ -43,15 +53,17 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
     setError(null);
     setLoadingSha(commit.sha);
     try {
-      const content = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
-      const note = markdownToNote(content);
-      setParsed({ title: note.title || "Untitled", content: note.content || "" });
-    } catch {
-      setError("Couldn't load this version from GitHub.");
+      const raw = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
+      const { title, body } = splitFrontmatter(raw);
+      setParsed({ title: title || "Untitled", content: markdownToHtml(body) });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(msg ? `Couldn't load this version: ${msg}` : "Couldn't load this version from GitHub.");
     } finally {
       setLoadingSha(null);
     }
   };
+
 
   const handleRestore = async () => {
     if (!parsed) return;
