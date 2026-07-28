@@ -70,7 +70,7 @@ Key authenticated routes:
 | **Groups** | `suggest-group-members`, `generate-group-briefing`, `suggest-group-next-step` |
 | **Lexicon** | `wiki-ingest`, `wiki-lint` |
 | **Hub API** | `hub-api-keys`, `hub-api-notes`, `hub-api-contacts`, `hub-api-actions`, `hub-api-stats` |
-| **MCP Server** | `open-brain-mcp` |
+| **MCP Server** | `menerio-mcp` |
 | **Sync / Import** | `github-sync-export`, `github-sync-pull`, `github-import-vault`, `github-sync-scheduled` |
 | **Capture** | `quick-capture`, `ingest-thought`, `telegram-capture`, `discord-capture`, `slack-capture`, `receive-note` |
 | **Moderation** | `moderate-content`, `ai-moderate-content` |

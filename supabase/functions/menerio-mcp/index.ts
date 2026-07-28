@@ -514,7 +514,7 @@ async function resolveOrCreateContactsByName(names: string[]) {
 
 // --- MCP Server Setup ---
 const server = new McpServer({
-  name: "open-brain",
+  name: "menerio",
   version: "1.0.0",
 });
 
@@ -3329,7 +3329,7 @@ app.all("*", async (c) => {
   // Unauthenticated GET → return server metadata (no user data).
   if (!authHeader && method === "GET") {
     return c.json({
-      name: "open-brain",
+      name: "menerio",
       version: "1.0.0",
       transport: "streamable-http",
       auth: "Authorization: Bearer mnr_mcp_<token>",

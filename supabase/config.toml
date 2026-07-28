@@ -17,7 +17,7 @@ verify_jwt = false
 [functions.ingest-thought]
 verify_jwt = false
 
-[functions.open-brain-mcp]
+[functions.menerio-mcp]
 verify_jwt = false
 
 [functions.extract-event]

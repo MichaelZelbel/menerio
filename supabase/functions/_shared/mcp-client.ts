@@ -16,12 +16,12 @@
  * has enabled servers. This keeps the SDK — a heavy npm dependency with Node
  * internals — out of the function's boot path entirely, so it can never crash
  * the chat for the common case (no MCP servers). SDK pinned to match the server
- * side (open-brain-mcp/deno.json → 1.24.3), loaded via `npm:` like the server.
+ * side (menerio-mcp/deno.json → 1.24.3), loaded via `npm:` like the server.
  */
 
 // Specifiers held as variables so `deno check` doesn't eagerly resolve them
 // (the root package.json makes local npm: resolution fail); Supabase's runtime
-// resolves `npm:` specifiers natively, as open-brain-mcp already relies on.
+// resolves `npm:` specifiers natively, as menerio-mcp already relies on.
 const CLIENT_SPEC = "npm:@modelcontextprotocol/sdk@1.24.3/client/index.js";
 const TRANSPORT_SPEC = "npm:@modelcontextprotocol/sdk@1.24.3/client/streamableHttp.js";
 

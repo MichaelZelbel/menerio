@@ -2,7 +2,7 @@
  * Shared "who is the user" assembly.
  *
  * Ports the core of the MCP server's `get_user_profile` tool
- * (open-brain-mcp/index.ts) into a reusable helper so the chat agents
+ * (menerio-mcp/index.ts) into a reusable helper so the chat agents
  * (note-chat, conversation-chat) can inject the user's own profile and their
  * explicit agent instructions without duplicating the query logic.
  *

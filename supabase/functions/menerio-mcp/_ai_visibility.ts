@@ -5,7 +5,7 @@
 // NOTE: column is now `ai_visibility` (renamed from `mcp_visibility`).
 // "Hidden" means hidden from ALL AI pipelines (Lexicon, People, Graph,
 // AI Chat) and MCP clients. This file kept its old name to avoid churn
-// inside open-brain-mcp; the semantics are AI-wide.
+// inside menerio-mcp; the semantics are AI-wide.
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const cache = new AsyncLocalStorage<{
