@@ -1821,7 +1821,7 @@
 
 ### TS-API-005: MCP — Generate Token and Connect Client
 
-- **Objective:** Validate MCP token issuance and `open-brain-mcp` proxy
+- **Objective:** Validate MCP token issuance and `menerio-mcp` proxy
 - **Preconditions:** Signed in
 - **Steps:**
   1. Open `/dashboard/settings` → MCP Connection Manager
