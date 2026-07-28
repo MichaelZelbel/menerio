@@ -3277,6 +3277,7 @@ server.registerTool(
 );
 
 const app = new Hono();
+const transport = new StreamableHTTPTransport();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
 app.get("/favicon.ico", (c) => {
@@ -3352,8 +3353,9 @@ app.all("*", async (c) => {
   return await requestContext.run({ userId: auth.userId! }, async () => {
     return await enterVisibilityScope(async () => {
       addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
-      const transport = new StreamableHTTPTransport();
-      await server.connect(transport);
+      if (!server.isConnected()) {
+        await server.connect(transport);
+      }
       return await transport.handleRequest(c);
     });
   });
