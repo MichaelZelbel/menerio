@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { WIKI_RESTRUCTURE_PROMPT } from "../_shared/llm-defaults.ts";
 import {
   analyzeStructure,
@@ -18,11 +18,19 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
 // A page is only rewritten by the LLM when a deterministic pass can't make it readable.
 const MAX_PAGES_PER_RUN = 200;
+
+// A page that keeps failing must never be retried forever: after this many
+// consecutive LLM failures the page is parked until its content changes.
+const MAX_CONSECUTIVE_FAILURES = 3;
+// Backoff for transient failures, indexed by attempt count.
+const BACKOFF_HOURS = [1, 6, 24];
+// Pages longer than this are not worth an LLM rewrite: the deterministic pass
+// handles them and we never pay for output that gets thrown away.
+const MAX_LLM_PAGE_CHARS = 24_000;
+const CHUNK_CHARS = 3500;
 
 type PageRow = {
   id: string;
@@ -31,7 +39,23 @@ type PageRow = {
   title: string;
   content: string;
   protected_sections: string[] | null;
+  restructure_attempts?: number | null;
+  restructure_blocked_until?: string | null;
+  restructure_content_hash?: string | null;
 };
+
+/** Raised when the provider is out of credit: abort the sweep, don't burn the rest. */
+class SweepAbort extends Error {}
+
+async function contentHash(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function isOutOfCredit(message: string): boolean {
+  return /\b402\b/.test(message) || /requires more credits|insufficient/i.test(message);
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
