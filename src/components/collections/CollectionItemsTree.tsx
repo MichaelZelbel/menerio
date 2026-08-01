@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   Folder,
   FolderPlus,
   Pencil,
@@ -58,6 +59,7 @@ export interface CollectionItemsTreeProps {
   onReparentFolder: (folderId: string, parentFolderId: string | null) => void;
   onMoveItemToFolder: (itemId: string, folderId: string | null) => void;
   onCreateItem: (folderId: string | null) => void;
+  onDuplicateItem: (itemId: string) => void;
   onDeleteItem: (itemId: string) => void;
 }
 
@@ -70,6 +72,7 @@ interface Handlers {
   onDeleteFolder: (folderId: string) => void;
   onMoveItemToFolder: (itemId: string, folderId: string | null) => void;
   onCreateItem: (folderId: string | null) => void;
+  onDuplicateItem: (itemId: string) => void;
   onDeleteItem: (itemId: string) => void;
   onToggleFolder: (folderId: string) => void;
   onDropOnFolder: (event: DragEvent, folderId: string) => void;
@@ -192,6 +195,9 @@ const ItemRow = memo(function ItemRow({
             Remove from folder
           </ContextMenuItem>
         )}
+        <ContextMenuItem onClick={() => handlers.onDuplicateItem(item.id)}>
+          <Copy className="mr-2 h-3.5 w-3.5" /> Make a copy
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => handlers.onDeleteItem(item.id)}
@@ -441,6 +447,7 @@ export function CollectionItemsTree({
   onReparentFolder,
   onMoveItemToFolder,
   onCreateItem,
+  onDuplicateItem,
   onDeleteItem,
 }: CollectionItemsTreeProps) {
   const depthStep = 12;
@@ -578,6 +585,7 @@ export function CollectionItemsTree({
       onDeleteFolder,
       onMoveItemToFolder,
       onCreateItem,
+      onDuplicateItem,
       onDeleteItem,
       onToggleFolder: handleToggleFolder,
       onDropOnFolder: handleDropOnFolder,
@@ -592,6 +600,7 @@ export function CollectionItemsTree({
       onDeleteFolder,
       onMoveItemToFolder,
       onCreateItem,
+      onDuplicateItem,
       onDeleteItem,
       handleToggleFolder,
       handleDropOnFolder,

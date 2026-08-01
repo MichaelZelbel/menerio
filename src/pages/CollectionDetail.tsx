@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   DollarSign,
   ExternalLink,
   FileText,
@@ -101,6 +102,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
+import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
 import { CollectionItemsTree as CollectionItemsFolderTree } from "@/components/collections/CollectionItemsTree";
@@ -700,6 +702,7 @@ function CollectionItemsTree({
   onDeleteFolder,
   onReparentFolder,
   onMoveItemToFolder,
+  onDuplicateItem,
   onDeleteItem,
 }: {
   collection: Collection | null;
@@ -718,6 +721,7 @@ function CollectionItemsTree({
   onDeleteFolder: (folderId: string) => void;
   onReparentFolder: (folderId: string, parentFolderId: string | null) => void;
   onMoveItemToFolder: (itemId: string, folderId: string | null) => void;
+  onDuplicateItem: (itemId: string) => void;
   onDeleteItem: (itemId: string) => void;
 }) {
   return (
@@ -770,6 +774,7 @@ function CollectionItemsTree({
             void folderId;
             onNewItem();
           }}
+          onDuplicateItem={onDuplicateItem}
           onDeleteItem={onDeleteItem}
         />
       )}
@@ -1705,6 +1710,7 @@ function ItemSheet({
   onOpenChange,
   onSaved,
   onDeleted,
+  onDuplicate,
   collections,
   inline = false,
 }: {
@@ -1715,6 +1721,7 @@ function ItemSheet({
   onOpenChange: (open: boolean) => void;
   onSaved: (item: CollectionItem) => void;
   onDeleted: (id: string) => void;
+  onDuplicate?: (item: CollectionItem) => void;
   collections: Collection[];
   /** Render as a routed inline detail view (full-width) instead of a right-side Sheet. */
   inline?: boolean;
@@ -1926,6 +1933,20 @@ function ItemSheet({
             <h2 className="truncate text-xl font-semibold font-display">{title}</h2>
             <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
           </div>
+          {!isCreate && item && onDuplicate && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="Item actions">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onDuplicate(item)}>
+                  <Copy className="mr-2 h-4 w-4" /> Make a copy
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         {body}
       </div>
@@ -2724,19 +2745,65 @@ export default function CollectionDetail() {
 
   const duplicateItem = async (item: CollectionItem) => {
     if (!user || !collection) return;
-    const { error } = await supabase.from("collection_items").insert({
-      user_id: user.id,
-      collection_id: collection.id,
-      data: item.data,
-      title: item.title ? `${item.title} copy` : null,
-    });
-    if (error)
-      return toast.error("Could not duplicate item", {
-        description: error.message,
+    // Same container (collection + folder), Obsidian-style " N" title suffix,
+    // favorite/last-viewed reset, provenance recorded in the item data.
+    const siblingTitles = new Set(
+      treeItems
+        .filter((row) => (row.folder_id ?? null) === (item.folder_id ?? null))
+        .map((row) => (row.title ?? "").trim())
+        .filter(Boolean),
+    );
+    const nextTitle = item.title
+      ? nextDuplicateTitle(item.title, siblingTitles)
+      : null;
+    const sourceData =
+      item.data && typeof item.data === "object" && !Array.isArray(item.data)
+        ? (item.data as Record<string, unknown>)
+        : {};
+    const { data: created, error } = await supabase
+      .from("collection_items")
+      .insert({
+        user_id: user.id,
+        collection_id: collection.id,
+        data: { ...sourceData, duplicated_from: item.id } as Json,
+        title: nextTitle,
+        folder_id: item.folder_id ?? null,
+        is_favorite: false,
+      })
+      .select("*")
+      .single();
+    if (error || !created)
+      return toast.error("Could not make a copy", {
+        description: error?.message,
       });
-    toast.success("Item duplicated");
+    toast.success("Made a copy");
     setCursorStack((current) => [...current]);
+    refreshTree();
+    openItem(created as CollectionItem);
   };
+
+  const handleDuplicateItemFromTree = useCallback(
+    async (itemId: string) => {
+      const target = items.find((row) => row.id === itemId);
+      if (target) {
+        await duplicateItem(target);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("collection_items")
+        .select("*")
+        .eq("id", itemId)
+        .maybeSingle();
+      if (error || !data) {
+        toast.error("Could not make a copy", { description: error?.message });
+        return;
+      }
+      await duplicateItem(data as CollectionItem);
+    },
+    // duplicateItem is re-created per render but only closes over stable state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, treeItems, user, collection],
+  );
 
   const deleteItem = async (item: CollectionItem) => {
     const { error } = await supabase
@@ -3009,6 +3076,7 @@ export default function CollectionDetail() {
         onDeleteFolder={handleDeleteFolder}
         onReparentFolder={handleReparentFolder}
         onMoveItemToFolder={handleMoveItemToFolder}
+        onDuplicateItem={handleDuplicateItemFromTree}
         onDeleteItem={handleDeleteItemFromTree}
       />
       <section className="min-w-0 flex-1 overflow-y-auto p-6">
@@ -3108,6 +3176,7 @@ export default function CollectionDetail() {
           collection={collection}
           fields={fields}
           item={selectedItem}
+          onDuplicate={(target) => duplicateItem(target)}
           open={true}
           onOpenChange={(open) => {
             if (!open) closeItem();
@@ -3418,7 +3487,7 @@ export default function CollectionDetail() {
                               <DropdownMenuItem
                                 onClick={() => duplicateItem(item)}
                               >
-                                Duplicate
+                                <Copy className="mr-2 h-4 w-4" /> Make a copy
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
