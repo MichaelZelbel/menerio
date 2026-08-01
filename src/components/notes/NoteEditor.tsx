@@ -24,7 +24,7 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
 import { TaskListShortcut } from "./extensions/TaskListShortcut";
-import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote } from "@/hooks/useNotes";
+import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote, useDuplicateNote } from "@/hooks/useNotes";
 import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink, ShareNoteResult } from "@/hooks/useNoteSharing";
 import { ModerationResult } from "@/lib/moderateContent";
 import { ModerationBlockDialog } from "@/components/moderation/ModerationBlockDialog";
@@ -328,6 +328,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const shareNote = useShareNote();
   const unshareNote = useUnshareNote();
   const copyShareLink = useCopyShareLink();
+  const duplicateNote = useDuplicateNote();
   const { data: sharedNote } = useSharedNote(note.id);
   const { checkCredits } = useAICreditsGate();
   const { user } = useAuth();
@@ -975,6 +976,41 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     navigate(`/dashboard/notes/${duplicateTarget.id}`);
   };
 
+  // "Make a copy": flush any pending autosave first so the copy contains the
+  // newest text, then duplicate and open the copy.
+  const makeACopy = async () => {
+    if (contentSaveTimer.current) {
+      clearTimeout(contentSaveTimer.current);
+      contentSaveTimer.current = null;
+    }
+    for (let i = 0; i < 40 && savingRef.current; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const pendingContent = queuedContentRef.current ?? pendingSaveContentRef.current;
+    const pendingTitle = pendingSaveTitleRef.current;
+    try {
+      if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
+        savingRef.current = true;
+        try {
+          await updateNote.mutateAsync({ id: note.id, content: pendingContent });
+          lastSavedContentRef.current = pendingContent;
+          queuedContentRef.current = null;
+          pendingSaveContentRef.current = null;
+        } finally {
+          savingRef.current = false;
+        }
+      }
+      if (pendingTitle !== null && pendingTitle !== note.title) {
+        await updateNote.mutateAsync({ id: note.id, title: pendingTitle });
+        pendingSaveTitleRef.current = null;
+      }
+      const copy = await duplicateNote.mutateAsync(note.id);
+      navigate(`/dashboard/notes/${copy.id}`);
+    } catch {
+      // useDuplicateNote / useUpdateNote surface their own error toasts.
+    }
+  };
+
   const keepDuplicateSafely = () => {
     updateNote.mutate({ id: note.id, title: pendingDuplicateTitle, metadata: { ...(note.metadata || {}), allow_duplicate_title: true } });
     setDuplicateTarget(null);
@@ -1316,6 +1352,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
                 <DropdownMenuSeparator />
 
+                <DropdownMenuItem onClick={makeACopy} disabled={duplicateNote.isPending}>
+                  <Copy className="mr-2 h-4 w-4" /> Make a copy
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}>
                   <Copy className="mr-2 h-4 w-4" /> Copy to clipboard
                 </DropdownMenuItem>
