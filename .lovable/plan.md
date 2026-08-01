@@ -1,30 +1,53 @@
 ## Goal
-Remove the "open-brain" name (a competitor's product) from the MCP server and rename everything to `menerio-mcp`.
 
-## What currently carries the name
-- `supabase/functions/open-brain-mcp/` (folder = deployed function slug, so it's part of the URL `…/functions/v1/open-brain-mcp`)
-- `index.ts` — the MCP server identifies itself to clients as `name: "open-brain"` in two places (server info + a health/info response)
-- `supabase/config.toml` — `[functions.open-brain-mcp] verify_jwt = false`
-- Comments in `_shared/user-profile.ts`, `_shared/mcp-client.ts`, `open-brain-mcp/_ai_visibility.ts`
-- Docs: `docs/ARCHITECTURE.md`, `docs/TEST_SCENARIOS.md`
+One predictable duplicate action across content types: same label ("Make a copy"), same icon (`Copy`), same placement, same result — a fresh unsynced draft named `<Title> 1`, opened immediately, never linked to external sync.
 
-## Plan
-1. Move `supabase/functions/open-brain-mcp/` → `supabase/functions/menerio-mcp/` (keeping `index.ts`, `_ai_visibility.ts`, `deno.json` unchanged apart from the renames below).
-2. In `index.ts`, change the advertised server name `"open-brain"` → `"menerio"` (both occurrences). This is the string MCP clients display.
-3. Update `supabase/config.toml` to `[functions.menerio-mcp] verify_jwt = false`.
-4. Update the stale comments in `_shared/user-profile.ts`, `_shared/mcp-client.ts`, `_ai_visibility.ts`.
-5. Update the two doc references.
-6. Deploy `menerio-mcp`. Keep the old `open-brain-mcp` function deployed for now (no delete) so nothing breaks mid-cutover.
+## Current state (verified)
 
-## The one thing that needs your action (URL cutover)
-Clients connect to `https://mcp.menerio.com`, which your Cloudflare worker proxies to the Supabase function path `…/functions/v1/open-brain-mcp`. Renaming the function changes that path, so **the worker must be pointed at `/functions/v1/menerio-mcp`** — I can't edit the Cloudflare worker from here.
+- Notes: `useDuplicateNote` in `src/hooks/useNotes.ts` — Obsidian-style " N" title suffix, copies content/tags/folder/structured fields, stamps `metadata.duplicated_from`, resets pinned/favorite/trashed and sync fields. Exposed only in `NoteTree.tsx` context menu ("Make a copy", `Copy` icon). The note editor's ⋯ menu has "Copy to clipboard" / "Copy note link" but no duplicate (except a special "Duplicate to edit" button for synced/read-only notes).
+- Collection items: `CollectionDetail.tsx` table row menu has a "Duplicate" item (no icon, different wording). The new tree context menu (`CollectionItemsTree.tsx`) and the inline item detail view have no duplicate action.
+- Moments: `TimelinePage.tsx` drawer only offers "Edit Moment"; no duplicate anywhere.
+- People: no duplicate anywhere.
 
-Sequence to avoid downtime:
-1. I deploy `menerio-mcp` (old one still live).
-2. You update the worker's target path to `menerio-mcp`.
-3. Once confirmed working, I delete the old `open-brain-mcp` function.
+## UX decision
 
-No user-facing change otherwise: `mcp.menerio.com`, the `mnr_mcp_` tokens, and all 53 tools stay identical, so connected clients don't need reconfiguring — though some may need a fresh session after the swap.
+**Placement rule (two spots, always the same two):**
+1. Right-click context menu of the item in its tree/list — under the favorite/move block, above the destructive block.
+2. The ⋯ overflow menu in the detail/editor header — in the same "Copy to clipboard / Copy link" group, as the first entry of that group.
 
-## Not touched
-Token table `mcp_api_tokens`, token prefix, the frontend `MCPConnectionManager` UI (it only references `mcp.menerio.com`), and all tool names/behaviour.
+**Wording & icon:** always `Copy` (lucide) + "Make a copy". Rename the collection table's "Duplicate" to match.
+
+**Behavior contract (shared):** copy is created in the same container (folder / collection / date), title gets the ` N` suffix via the existing `nextDuplicateTitle` helper, favorite/pin/trash reset, external sync identity dropped, `duplicated_from: <source id>` recorded in metadata, success toast "Made a copy", and the new item is selected/opened so the user lands in the copy.
+
+**People: deliberately excluded.** A contact is an identity, not a document. The app actively fights duplicate people (merge dialog, duplicate hints, fuzzy auto-link, dedup triggers), so a copy button would manufacture exactly the state those systems clean up. Instead, People keep "Merge". If you still want it, the sane variant is "New person from this as template" — say the word and I'll add it.
+
+## Implementation
+
+**1. Shared helper — `src/lib/duplicate-entity.ts` (new)**
+- Move `nextDuplicateTitle` out of `useNotes.ts` (re-export from there to avoid touching note logic) so all types share the exact suffix rules.
+- Export `MAKE_A_COPY_LABEL = "Make a copy"` for consistent wording.
+
+**2. Note editor — `src/components/notes/NoteEditor.tsx`**
+- Add a "Make a copy" `DropdownMenuItem` (`Copy` icon) in the ⋯ menu above "Copy to clipboard", wired to `useDuplicateNote()`.
+- Before duplicating, flush any pending autosave (the existing pending-save ref/flush path) so the copy contains the latest text, then navigate to `/dashboard/notes/<new id>`.
+- Leave the existing "Duplicate to edit" banner for synced notes as-is.
+
+**3. Collection items — `src/pages/CollectionDetail.tsx` + `src/components/collections/CollectionItemsTree.tsx`**
+- Refactor the existing `duplicateItem` to use the shared title suffix (instead of whatever it currently appends), preserve `folder_id`, field values and item type, reset favorite, record `duplicated_from`, then select the new item in the URL-driven detail view.
+- Add `onDuplicateItem` to the tree's handlers and render "Make a copy" (`Copy` icon) in the item context menu, above the Delete separator.
+- Add the same entry to the inline item detail header ⋯ menu.
+- Relabel the table row action from "Duplicate" to "Make a copy" and add the `Copy` icon.
+
+**4. Moments — `src/pages/TimelinePage.tsx`**
+- Add a `duplicateMoment` handler: insert a new `moments` row copying title (suffixed), description, `happened_at`/`happened_end`, impact and confidence levels, with `source: "manual"`, `status` reset to the default manual status, and `duplicated_from` in metadata; then copy `moment_participants` rows for the new moment. `moment_provenance` is deliberately **not** copied — provenance belongs to the original extraction.
+- Surface it in the moment drawer next to "Edit Moment" as a ⋯ menu with "Make a copy", and in the timeline row context menu if one exists (otherwise add the ⋯ trigger on the row).
+- Invalidate the timeline query and open the copy's edit dialog so the user can adjust the date right away.
+
+**5. Consistency pass**
+- Grep for remaining "Duplicate" labels on user-facing item actions and align them to "Make a copy" + `Copy` icon.
+
+## Notes / trade-offs
+
+- Moments copy participants but not provenance, so a duplicated moment reads as user-authored rather than AI-extracted — this keeps the review/audit trail honest.
+- Duplicated notes still trigger the existing wiki-ingest path when long enough (unchanged behavior); collection items and moments do not gain new AI processing.
+- No database migration is needed; all three types already have the columns required.
