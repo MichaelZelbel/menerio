@@ -696,6 +696,14 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     placeholders: ["existingPagesIndex"],
   },
   {
+    call_site: "wiki-ingest.group-insights",
+    description: "Rewrites only the Insights section of a group Lexicon page.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
+    temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
     call_site: "wiki-lint.main",
     description: "Audits the Lexicon for contradictions, drift, gaps, and stale syntheses.",
     provider: "openrouter",
