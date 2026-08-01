@@ -345,32 +345,34 @@ async function logWiki(db: any, userId: string, operation: string, details: Reco
   if (error) console.error("wiki_log insert failed", error);
 }
 
-async function callSynthesis(systemPrompt: string, userContent: string): Promise<{ raw: string; usage?: Record<string, unknown> }> {
-  if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
+/**
+ * All Lexicon synthesis goes through the central router so the Admin LLM
+ * config (provider + model) is authoritative, credits are deducted, and every
+ * call lands in `llm_usage_log` instead of only on the provider invoice.
+ */
+async function callSynthesis(
+  db: any,
+  userId: string,
+  callSite: string,
+  defaultSystemPrompt: string,
+  userContent: string,
+  templateVars?: Record<string, string | number | null | undefined>,
+): Promise<{ raw: string; usage?: Record<string, unknown> }> {
+  const result = await runChat({
+    db,
+    userId,
+    callSite,
+    messages: [{ role: "user", content: userContent }],
+    defaults: {
+      provider: "openrouter",
+      model: "deepseek/deepseek-v4-flash",
+      systemPrompt: defaultSystemPrompt,
       temperature: 0.1,
-      response_format: { type: "json_object" },
-    }),
+    },
+    callOptions: { response_format: { type: "json_object" } },
+    templateVars,
   });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`OpenRouter failed: ${response.status} ${text}`);
-  }
-
-  const data = await response.json();
-  return { raw: data.choices?.[0]?.message?.content || "", usage: data.usage };
+  return { raw: result.content || "" };
 }
 
 function replaceInsightsSection(content: string, nextSection: string) {
