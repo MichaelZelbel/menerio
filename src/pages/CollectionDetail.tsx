@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   DollarSign,
   ExternalLink,
   FileText,
@@ -101,6 +102,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
+import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
 import { CollectionItemsTree as CollectionItemsFolderTree } from "@/components/collections/CollectionItemsTree";
@@ -3174,6 +3176,7 @@ export default function CollectionDetail() {
           collection={collection}
           fields={fields}
           item={selectedItem}
+          onDuplicate={(target) => duplicateItem(target)}
           open={true}
           onOpenChange={(open) => {
             if (!open) closeItem();
