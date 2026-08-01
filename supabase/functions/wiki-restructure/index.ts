@@ -315,14 +315,25 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   const startedAt = Date.now();
   const results: unknown[] = [];
   let failed = 0;
-  const systemPrompt = await resolveSystemPrompt(db, "wiki-restructure.main", WIKI_RESTRUCTURE_PROMPT, {});
+  let aborted: string | null = null;
   const operation = dryRun ? "restructure_dry_run" : "restructure";
 
   for (const page of pages) {
     let result: unknown;
     try {
-      result = await restructurePage(db, page, systemPrompt, dryRun);
+      result = await restructurePage(db, page, dryRun);
     } catch (error) {
+      if (error instanceof SweepAbort) {
+        // Provider out of credit — stop immediately instead of burning the
+        // remaining pages on calls that can only fail.
+        aborted = error.message;
+        console.error("wiki-restructure sweep aborted (out of credit)", error.message);
+        await db.from("wiki_pages").update({
+          restructure_blocked_until: new Date(Date.now() + 6 * 3_600_000).toISOString(),
+          restructure_last_error: "provider out of credit",
+        }).in("id", pages.map((p) => p.id));
+        break;
+      }
       failed += 1;
       console.error("wiki-restructure page failed", page.slug, error);
       result = { slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) };
@@ -335,6 +346,7 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   await logWiki(db, actorId, operation, {
     total: pages.length,
     failed,
+    aborted,
     summary: true,
     duration_ms: Date.now() - startedAt,
     results: results.slice(0, 100),
