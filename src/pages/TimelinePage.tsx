@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { Calendar, CheckCircle2, ChevronDown, FileText, Filter, Loader2, Pencil, Search, Users, X } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronDown, Copy, FileText, Filter, Loader2, MoreHorizontal, Pencil, Search, Users, X } from "lucide-react";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { showToast } from "@/lib/toast";
+import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 import { Input } from "@/components/ui/input";
 import { SEOHead } from "@/components/SEOHead";
 import { supabase } from "@/integrations/supabase/client";
@@ -164,6 +168,47 @@ export default function TimelinePage() {
     setEditDialogOpen(true);
   };
 
+  // Unified "Make a copy": same date and details, suffixed title, participants
+  // carried over. Provenance is deliberately NOT copied — it belongs to the
+  // original extraction, so a copy reads as user-authored.
+  const duplicateMoment = async (moment: TimelineMoment) => {
+    if (!user) return;
+    const existing = new Set(moments.map((m) => (m.title || "").trim()).filter(Boolean));
+    const nextTitle = nextDuplicateTitle(moment.title, existing);
+    const { data, error } = await supabase
+      .from("moments" as any)
+      .insert({
+        user_id: user.id,
+        title: nextTitle,
+        description: moment.description,
+        happened_at: moment.happened_at,
+        happened_end: moment.happened_end,
+        status: moment.status,
+        impact_level: moment.impact_level,
+        confidence_date: moment.confidence_date,
+        confidence_truth: moment.confidence_truth,
+        source: "manual",
+        verified: false,
+      } as any)
+      .select("*")
+      .single();
+    if (error || !data) {
+      showToast.error("Could not make a copy");
+      return;
+    }
+    const copy = data as unknown as TimelineMoment;
+    const participantIds = participantMap[moment.id] || [];
+    if (participantIds.length > 0) {
+      await supabase
+        .from("moment_participants" as any)
+        .insert(participantIds.map((personId) => ({ moment_id: copy.id, person_id: personId })) as any);
+    }
+    showToast.success("Made a copy");
+    setDrawerOpen(false);
+    await fetchData();
+    openEditDialog({ ...copy, participants: people.filter((p) => participantIds.includes(p.id)) });
+  };
+
   const clearFilters = () => { setMinImpact(1); setMinConfTruth(0); setMinConfDate(0); setStatusFilter([]); setPersonFilter([]); setSearchQuery(""); };
 
   return (
@@ -213,9 +258,9 @@ export default function TimelinePage() {
         </CollapsibleContent>
       </Collapsible>
 
-      {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div> : groupedByYear.length === 0 ? (searchQuery.trim() || statusFilter.length > 0 || personFilter.length > 0 || minImpact > 1 || minConfTruth > 0 || minConfDate > 0) ? <div className="text-center py-20 text-muted-foreground space-y-4"><Search className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments match your filters</p><Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button></div> : <div className="text-center py-20 text-muted-foreground space-y-4"><Calendar className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments yet</p><p className="text-sm">Add moments manually to build your timeline.</p><AddEventDialog people={people} onCreated={fetchData} /></div> : <div className="space-y-8">{groupedByYear.map(([year, yearMoments]) => <div key={year}><div className="flex items-center gap-3 mb-4"><span className="text-2xl font-bold text-foreground">{year}</span><Separator className="flex-1" /><span className="text-xs text-muted-foreground">{yearMoments.length} moment{yearMoments.length !== 1 ? "s" : ""}</span></div><div className="relative ml-4 border-l-2 border-border pl-6 space-y-4">{yearMoments.map((moment) => <button key={moment.id} onClick={() => openMomentDrawer(moment)} className="block w-full text-left group"><div className="absolute -left-[9px] h-4 w-4 rounded-full border-2 border-background bg-primary mt-1" /><Card className="transition-shadow hover:shadow-md cursor-pointer"><CardContent className="py-3 px-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="font-medium text-sm truncate">{moment.title}</p><p className="text-xs text-muted-foreground mt-0.5">{format(new Date(moment.happened_at), "MMM d, yyyy")}{moment.happened_end && ` — ${format(new Date(moment.happened_end), "MMM d, yyyy")}`}</p></div><div className="flex items-center gap-1.5 shrink-0"><Badge variant="outline" className={`text-[10px] px-1.5 ${statusClasses[moment.status] || ""}`}>{moment.status.replace("_", " ")}</Badge>{(provenanceMap[moment.id] || []).length > 0 && <FileText className="h-3 w-3 text-muted-foreground" />}{moment.verified && <CheckCircle2 className="h-3 w-3 text-success" />}</div></div></CardContent></Card></button>)}</div></div>)}</div>}
+      {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div> : groupedByYear.length === 0 ? (searchQuery.trim() || statusFilter.length > 0 || personFilter.length > 0 || minImpact > 1 || minConfTruth > 0 || minConfDate > 0) ? <div className="text-center py-20 text-muted-foreground space-y-4"><Search className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments match your filters</p><Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button></div> : <div className="text-center py-20 text-muted-foreground space-y-4"><Calendar className="mx-auto h-12 w-12 opacity-40" /><p className="text-lg font-medium">No moments yet</p><p className="text-sm">Add moments manually to build your timeline.</p><AddEventDialog people={people} onCreated={fetchData} /></div> : <div className="space-y-8">{groupedByYear.map(([year, yearMoments]) => <div key={year}><div className="flex items-center gap-3 mb-4"><span className="text-2xl font-bold text-foreground">{year}</span><Separator className="flex-1" /><span className="text-xs text-muted-foreground">{yearMoments.length} moment{yearMoments.length !== 1 ? "s" : ""}</span></div><div className="relative ml-4 border-l-2 border-border pl-6 space-y-4">{yearMoments.map((moment) => <ContextMenu key={moment.id}><ContextMenuTrigger asChild><button onClick={() => openMomentDrawer(moment)} className="block w-full text-left group"><div className="absolute -left-[9px] h-4 w-4 rounded-full border-2 border-background bg-primary mt-1" /><Card className="transition-shadow hover:shadow-md cursor-pointer"><CardContent className="py-3 px-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="font-medium text-sm truncate">{moment.title}</p><p className="text-xs text-muted-foreground mt-0.5">{format(new Date(moment.happened_at), "MMM d, yyyy")}{moment.happened_end && ` — ${format(new Date(moment.happened_end), "MMM d, yyyy")}`}</p></div><div className="flex items-center gap-1.5 shrink-0"><Badge variant="outline" className={`text-[10px] px-1.5 ${statusClasses[moment.status] || ""}`}>{moment.status.replace("_", " ")}</Badge>{(provenanceMap[moment.id] || []).length > 0 && <FileText className="h-3 w-3 text-muted-foreground" />}{moment.verified && <CheckCircle2 className="h-3 w-3 text-success" />}</div></div></CardContent></Card></button></ContextMenuTrigger><ContextMenuContent className="w-48"><ContextMenuItem onClick={() => openEditDialog(moment)}><Pencil className="mr-2 h-3.5 w-3.5" /> Edit</ContextMenuItem><ContextMenuItem onClick={() => duplicateMoment(moment)}><Copy className="mr-2 h-3.5 w-3.5" /> Make a copy</ContextMenuItem></ContextMenuContent></ContextMenu>)}</div></div>)}</div>}
 
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}><SheetContent className="sm:max-w-lg overflow-y-auto">{selectedMoment && <><SheetHeader><SheetTitle>{selectedMoment.title}</SheetTitle><SheetDescription>{format(new Date(selectedMoment.happened_at), "MMMM d, yyyy")}{selectedMoment.happened_end && ` — ${format(new Date(selectedMoment.happened_end), "MMMM d, yyyy")}`}</SheetDescription></SheetHeader><div className="mt-6 space-y-6"><Button variant="outline" size="sm" onClick={() => openEditDialog(selectedMoment)}><Pencil className="mr-2 h-4 w-4" /> Edit Moment</Button>{selectedMoment.description && <p className="text-sm text-muted-foreground">{selectedMoment.description}</p>}<div className="grid grid-cols-3 gap-3 text-center"><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Impact</p><p className="text-lg font-bold">{selectedMoment.impact_level}/4</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Truth</p><p className="text-lg font-bold">{selectedMoment.confidence_truth}/10</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Date</p><p className="text-lg font-bold">{selectedMoment.confidence_date}/10</p></div></div><div className="flex gap-2 flex-wrap"><Badge variant="outline" className={statusClasses[selectedMoment.status] || ""}>{selectedMoment.status.replace("_", " ")}</Badge><Badge variant="outline">Source: {selectedMoment.source}</Badge></div>{selectedMoment.participants && selectedMoment.participants.length > 0 && <div><h2 className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="h-4 w-4" /> Participants</h2><div className="flex gap-2 flex-wrap">{selectedMoment.participants.map((p) => <Badge key={p.id} variant="secondary">{p.name}</Badge>)}</div></div>}</div></>}</SheetContent></Sheet>
+      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}><SheetContent className="sm:max-w-lg overflow-y-auto">{selectedMoment && <><SheetHeader><SheetTitle>{selectedMoment.title}</SheetTitle><SheetDescription>{format(new Date(selectedMoment.happened_at), "MMMM d, yyyy")}{selectedMoment.happened_end && ` — ${format(new Date(selectedMoment.happened_end), "MMMM d, yyyy")}`}</SheetDescription></SheetHeader><div className="mt-6 space-y-6"><div className="flex items-center gap-2"><Button variant="outline" size="sm" onClick={() => openEditDialog(selectedMoment)}><Pencil className="mr-2 h-4 w-4" /> Edit Moment</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="h-8 w-8" aria-label="Moment actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => duplicateMoment(selectedMoment)}><Copy className="mr-2 h-4 w-4" /> Make a copy</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>{selectedMoment.description && <p className="text-sm text-muted-foreground">{selectedMoment.description}</p>}<div className="grid grid-cols-3 gap-3 text-center"><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Impact</p><p className="text-lg font-bold">{selectedMoment.impact_level}/4</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Truth</p><p className="text-lg font-bold">{selectedMoment.confidence_truth}/10</p></div><div className="rounded-lg bg-muted p-3"><p className="text-xs text-muted-foreground">Conf. Date</p><p className="text-lg font-bold">{selectedMoment.confidence_date}/10</p></div></div><div className="flex gap-2 flex-wrap"><Badge variant="outline" className={statusClasses[selectedMoment.status] || ""}>{selectedMoment.status.replace("_", " ")}</Badge><Badge variant="outline">Source: {selectedMoment.source}</Badge></div>{selectedMoment.participants && selectedMoment.participants.length > 0 && <div><h2 className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="h-4 w-4" /> Participants</h2><div className="flex gap-2 flex-wrap">{selectedMoment.participants.map((p) => <Badge key={p.id} variant="secondary">{p.name}</Badge>)}</div></div>}</div></>}</SheetContent></Sheet>
       <AddEventDialog people={people} onCreated={fetchData} editEvent={editMomentData} open={editDialogOpen} onOpenChange={setEditDialogOpen} />
       <AddEventDialog people={people} onCreated={fetchData} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
     </div>
