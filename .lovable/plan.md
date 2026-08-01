@@ -1,53 +1,61 @@
-## Goal
+## What's actually happening
 
-One predictable duplicate action across content types: same label ("Make a copy"), same icon (`Copy`), same placement, same result — a fresh unsynced draft named `<Title> 1`, opened immediately, never linked to external sync.
+Your config isn't being ignored — two functions never go through the config layer at all.
 
-## Current state (verified)
+`wiki-restructure` and `wiki-ingest` call `https://openrouter.ai/api/v1/chat/completions` directly with a hardcoded `google/gemini-2.5-flash`. They don't use `llm-router`/`runChat`, so:
+- the Admin LLM config (provider = Lovable AI gateway) has no effect on them,
+- no credits are deducted and nothing is written to `llm_usage_log`, so the spend is invisible in-app.
 
-- Notes: `useDuplicateNote` in `src/hooks/useNotes.ts` — Obsidian-style " N" title suffix, copies content/tags/folder/structured fields, stamps `metadata.duplicated_from`, resets pinned/favorite/trashed and sync fields. Exposed only in `NoteTree.tsx` context menu ("Make a copy", `Copy` icon). The note editor's ⋯ menu has "Copy to clipboard" / "Copy note link" but no duplicate (except a special "Duplicate to edit" button for synced/read-only notes).
-- Collection items: `CollectionDetail.tsx` table row menu has a "Duplicate" item (no icon, different wording). The new tree context menu (`CollectionItemsTree.tsx`) and the inline item detail view have no duplicate action.
-- Moments: `TimelinePage.tsx` drawer only offers "Edit Moment"; no duplicate anywhere.
-- People: no duplicate anywhere.
+That explains why the spend has nothing to do with Note Chat or Conversation Chat — you never triggered it. A pg_cron job does, every 30 minutes.
 
-## UX decision
+## The burn: an infinite retry loop
 
-**Placement rule (two spots, always the same two):**
-1. Right-click context menu of the item in its tree/list — under the favorite/move block, above the destructive block.
-2. The ⋯ overflow menu in the detail/editor header — in the same "Copy to clipboard / Copy link" group, as the first entry of that group.
+`cron.job` id 5 runs every 30 min: `wiki-restructure` with `limit: 25`. It picks pages that fail `needsRestructure()`, sends each to Gemini 2.5 Flash with `max_tokens: 8000`, and writes the result back only if the response parses and passes the guards.
 
-**Wording & icon:** always `Copy` (lucide) + "Make a copy". Rename the collection table's "Duplicate" to match.
+From `wiki_log` (last 3 days), the same six pages are retried over and over, and **none of them ever succeeds**:
 
-**Behavior contract (shared):** copy is created in the same container (folder / collection / date), title gets the ` N` suffix via the existing `nextDuplicateTitle` helper, favorite/pin/trash reset, external sync identity dropped, `duplicated_from: <source id>` recorded in metadata, success toast "Made a copy", and the new item is selected/opened so the user lands in the copy.
+| Page | Runs in 3 days | Changed | Failure |
+|---|---|---|---|
+| group-dream-100-querino | 144 | 0 | `Unterminated string in JSON at position 910` |
+| michael | 100 | 0 | `Unterminated string in JSON at position 79` |
+| the-vrchat-pleasure-manual | 96 | 0 | truncated JSON |
+| vrchat | 96 | 0 | OpenRouter 402 |
+| craigs-cronjobs | 95 | 0 | OpenRouter 402 |
+| love-relationships-strategy | 95 | 0 | truncated JSON |
 
-**People: deliberately excluded.** A contact is an identity, not a document. The app actively fights duplicate people (merge dialog, duplicate hints, fuzzy auto-link, dedup triggers), so a copy button would manufacture exactly the state those systems clean up. Instead, People keep "Merge". If you still want it, the sane variant is "New person from this as template" — say the word and I'll add it.
+Two distinct failures, one shared consequence:
+1. **Truncated JSON** — the page is larger than the 8k output ceiling, so the model streams up to 8000 output tokens (fully billed), gets cut mid-string, `JSON.parse` throws, the write is skipped. The page stays unstructured, so it re-qualifies 30 minutes later. Forever.
+2. **OpenRouter 402** — happens only once your balance drops; note the message says the request needed more credits than remained, i.e. the earlier successful-but-unusable calls already spent it.
 
-## Implementation
+So you're paying for roughly 30–45 full-length 8k-output Gemini 2.5 Flash generations per day whose output is thrown away — indefinitely, because failure is the condition that schedules the retry.
 
-**1. Shared helper — `src/lib/duplicate-entity.ts` (new)**
-- Move `nextDuplicateTitle` out of `useNotes.ts` (re-export from there to avoid touching note logic) so all types share the exact suffix rules.
-- Export `MAKE_A_COPY_LABEL = "Make a copy"` for consistent wording.
+## The fix
 
-**2. Note editor — `src/components/notes/NoteEditor.tsx`**
-- Add a "Make a copy" `DropdownMenuItem` (`Copy` icon) in the ⋯ menu above "Copy to clipboard", wired to `useDuplicateNote()`.
-- Before duplicating, flush any pending autosave (the existing pending-save ref/flush path) so the copy contains the latest text, then navigate to `/dashboard/notes/<new id>`.
-- Leave the existing "Duplicate to edit" banner for synced notes as-is.
+**1. Break the retry loop (the actual money fix)**
+Add per-page failure tracking so a page that fails is not re-attempted endlessly:
+- record attempt count + last error on the page (new `restructure_attempts`, `restructure_last_error`, `restructure_blocked_until` columns on `wiki_pages`, or an equivalent side table),
+- skip any page with ≥3 consecutive LLM failures until its `content` changes,
+- exponential backoff on transient failures (402 / 5xx / timeout) instead of a fixed 30-minute retry.
 
-**3. Collection items — `src/pages/CollectionDetail.tsx` + `src/components/collections/CollectionItemsTree.tsx`**
-- Refactor the existing `duplicateItem` to use the shared title suffix (instead of whatever it currently appends), preserve `folder_id`, field values and item type, reset favorite, record `duplicated_from`, then select the new item in the URL-driven detail view.
-- Add `onDuplicateItem` to the tree's handlers and render "Make a copy" (`Copy` icon) in the item context menu, above the Delete separator.
-- Add the same entry to the inline item detail header ⋯ menu.
-- Relabel the table row action from "Duplicate" to "Make a copy" and add the `Copy` icon.
+**2. Stop paying for truncated output**
+Chunk oversized pages before the call (`chunkMarkdown` already exists in `_shared/wiki-structure.ts` and is imported but unused on this path), and size `max_tokens` from the input length. If a page is too large to restructure in one call after chunking, fall back to the deterministic `softStructure()` pass and mark it done — no LLM call.
 
-**4. Moments — `src/pages/TimelinePage.tsx`**
-- Add a `duplicateMoment` handler: insert a new `moments` row copying title (suffixed), description, `happened_at`/`happened_end`, impact and confidence levels, with `source: "manual"`, `status` reset to the default manual status, and `duplicated_from` in metadata; then copy `moment_participants` rows for the new moment. `moment_provenance` is deliberately **not** copied — provenance belongs to the original extraction.
-- Surface it in the moment drawer next to "Edit Moment" as a ⋯ menu with "Make a copy", and in the timeline row context menu if one exists (otherwise add the ⋯ trigger on the row).
-- Invalidate the timeline query and open the copy's edit dialog so the user can adjust the date right away.
+**3. Kill the 402 loop**
+On a 402 from OpenRouter, abort the whole sweep immediately rather than continuing through the remaining 24 pages, and set a global cooldown.
 
-**5. Consistency pass**
-- Grep for remaining "Duplicate" labels on user-facing item actions and align them to "Make a copy" + `Copy` icon.
+**4. Route both functions through the config layer**
+Convert `wiki-restructure` and `wiki-ingest` to `runChat()` from `_shared/llm-router.ts` with call sites `wiki-restructure.main` / `wiki-ingest.main` (both already exist in `llm-defaults.ts`). This makes the Admin LLM config authoritative for them, deducts AI credits, and logs every call to `llm_usage_log` so this class of leak shows up in the Admin dashboard instead of only on your OpenRouter invoice.
 
-## Notes / trade-offs
+**5. Reduce the sweep's baseline cost**
+Lower cron frequency from every 30 min to every 6 hours (matching the profile normalizer), and drop `limit` from 25 to 10. Restructuring is not latency-sensitive; manual "Restructure" from the Lexicon page stays immediate.
 
-- Moments copy participants but not provenance, so a duplicated moment reads as user-authored rather than AI-extracted — this keeps the review/audit trail honest.
-- Duplicated notes still trigger the existing wiki-ingest path when long enough (unchanged behavior); collection items and moments do not gain new AI processing.
-- No database migration is needed; all three types already have the columns required.
+**6. Clean up the six stuck pages**
+One-off: run the deterministic `softStructure()` pass over the six pages above so they stop qualifying, then verify no page reappears in `wiki_log` more than twice.
+
+## Also worth flagging
+
+`wiki-ingest` (same hardcoded direct-OpenRouter path) logged 88 `ingest_failed` on Jul 31 and 32–35/day before that. It's triggered per note save from `useNotes.ts`, so failed ingests are also billed, unlogged spend. Items 2 and 4 cover it; I'd also surface `ingest_failed` reasons in the Admin dashboard.
+
+## Verification
+
+After the change: no page appears in `wiki_log` with `method: "llm"` more than 3 times, `llm_usage_log` shows rows for `wiki-restructure.main`, and OpenRouter daily spend should drop to near zero for Gemini 2.5 Flash.

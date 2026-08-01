@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 import { softStructure } from "../_shared/wiki-structure.ts";
 
@@ -11,8 +11,6 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
 // Maximum % of existing content that an update may delete before we reject it as drift.
 const MAX_DELETION_RATIO = 0.4;
@@ -345,32 +343,34 @@ async function logWiki(db: any, userId: string, operation: string, details: Reco
   if (error) console.error("wiki_log insert failed", error);
 }
 
-async function callSynthesis(systemPrompt: string, userContent: string): Promise<{ raw: string; usage?: Record<string, unknown> }> {
-  if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
+/**
+ * All Lexicon synthesis goes through the central router so the Admin LLM
+ * config (provider + model) is authoritative, credits are deducted, and every
+ * call lands in `llm_usage_log` instead of only on the provider invoice.
+ */
+async function callSynthesis(
+  db: any,
+  userId: string,
+  callSite: string,
+  defaultSystemPrompt: string,
+  userContent: string,
+  templateVars?: Record<string, string | number | null | undefined>,
+): Promise<{ raw: string; usage?: Record<string, unknown> }> {
+  const result = await runChat({
+    db,
+    userId,
+    callSite,
+    messages: [{ role: "user", content: userContent }],
+    defaults: {
+      provider: "openrouter",
+      model: "deepseek/deepseek-v4-flash",
+      systemPrompt: defaultSystemPrompt,
       temperature: 0.1,
-      response_format: { type: "json_object" },
-    }),
+    },
+    callOptions: { response_format: { type: "json_object" } },
+    templateVars,
   });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`OpenRouter failed: ${response.status} ${text}`);
-  }
-
-  const data = await response.json();
-  return { raw: data.choices?.[0]?.message?.content || "", usage: data.usage };
+  return { raw: result.content || "" };
 }
 
 function replaceInsightsSection(content: string, nextSection: string) {
@@ -466,6 +466,9 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     ].join("\n\n");
 
     const { raw } = await callSynthesis(
+      db,
+      userId,
+      "wiki-ingest.group-insights",
       "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
       context,
     );
@@ -572,10 +575,16 @@ async function processIngest(
           .join("\n")
       : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
-    const systemPrompt = await resolveSystemPrompt(db, "wiki-ingest.main", WIKI_INGEST_PROMPT, { existingPagesIndex: index });
     const userMessage = `# ${note.title || "Untitled"}\n\n${contentText}`;
 
-    const { raw } = await callSynthesis(systemPrompt, userMessage);
+    const { raw } = await callSynthesis(
+      db,
+      userId,
+      "wiki-ingest.main",
+      WIKI_INGEST_PROMPT,
+      userMessage,
+      { existingPagesIndex: index },
+    );
     let parsed: SynthesisResult;
     try {
       parsed = normalizeResult(extractJson(raw), noteId);

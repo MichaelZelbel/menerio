@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { WIKI_RESTRUCTURE_PROMPT } from "../_shared/llm-defaults.ts";
 import {
   analyzeStructure,
@@ -18,11 +18,19 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
 // A page is only rewritten by the LLM when a deterministic pass can't make it readable.
 const MAX_PAGES_PER_RUN = 200;
+
+// A page that keeps failing must never be retried forever: after this many
+// consecutive LLM failures the page is parked until its content changes.
+const MAX_CONSECUTIVE_FAILURES = 3;
+// Backoff for transient failures, indexed by attempt count.
+const BACKOFF_HOURS = [1, 6, 24];
+// Pages longer than this are not worth an LLM rewrite: the deterministic pass
+// handles them and we never pay for output that gets thrown away.
+const MAX_LLM_PAGE_CHARS = 24_000;
+const CHUNK_CHARS = 3500;
 
 type PageRow = {
   id: string;
@@ -31,7 +39,23 @@ type PageRow = {
   title: string;
   content: string;
   protected_sections: string[] | null;
+  restructure_attempts?: number | null;
+  restructure_blocked_until?: string | null;
+  restructure_content_hash?: string | null;
 };
+
+/** Raised when the provider is out of credit: abort the sweep, don't burn the rest. */
+class SweepAbort extends Error {}
+
+async function contentHash(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function isOutOfCredit(message: string): boolean {
+  return /\b402\b/.test(message) || /requires more credits|insufficient/i.test(message);
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -51,37 +75,64 @@ async function logWiki(db: any, userId: string, operation: string, details: Reco
   if (error) console.error("wiki_log insert failed", error);
 }
 
-async function callReformat(systemPrompt: string, userContent: string): Promise<string> {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0,
-      // Without an explicit ceiling OpenRouter reserves the model maximum (65k)
-      // and rejects the call with 402 unless the account holds a large balance.
-      max_tokens: 8000,
-      response_format: { type: "json_object" },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`OpenRouter failed: ${response.status} ${text}`);
+/**
+ * Parse the model's reply into markdown. Models routinely emit raw newlines
+ * inside the JSON string, which makes `JSON.parse` throw ("Unterminated
+ * string") even though the content is perfectly usable — we repair that
+ * instead of discarding a call we already paid for.
+ */
+function parseReformatted(raw: string): string {
+  const cleaned = (raw || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  if (!cleaned) return "";
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed?.content === "string") return parsed.content;
+  } catch {
+    // fall through to repair
   }
-  const data = await response.json();
-  const raw = data.choices?.[0]?.message?.content || "";
-  const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const parsed = JSON.parse(cleaned);
-  return typeof parsed.content === "string" ? parsed.content : "";
+  const match = cleaned.match(/"content"\s*:\s*"([\s\S]*?)"\s*[,}]\s*$/)
+    ?? cleaned.match(/"content"\s*:\s*"([\s\S]*)$/);
+  if (match) {
+    return match[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\")
+      .replace(/"\s*}?\s*$/, "");
+  }
+  // Not JSON at all — the model answered with plain markdown.
+  if (!cleaned.startsWith("{")) return cleaned;
+  return "";
+}
+
+async function callReformat(
+  db: any,
+  userId: string,
+  userContent: string,
+  maxTokens: number,
+): Promise<string> {
+  try {
+    const result = await runChat({
+      db,
+      userId,
+      callSite: "wiki-restructure.main",
+      messages: [{ role: "user", content: userContent }],
+      defaults: {
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4-flash",
+        systemPrompt: WIKI_RESTRUCTURE_PROMPT,
+        temperature: 0,
+      },
+      // Ceiling sized from the input: without one OpenRouter reserves the model
+      // maximum and 402s, with a fixed 8k we paid for truncated output.
+      callOptions: { response_format: { type: "json_object" }, max_tokens: maxTokens },
+    });
+    return parseReformatted(result.content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isOutOfCredit(message)) throw new SweepAbort(message);
+    throw error;
+  }
 }
 
 /** Never touch sections the user has edited by hand: keep their bodies verbatim. */
@@ -111,56 +162,73 @@ function reattachProtected(content: string, protectedMap: Map<string, string>): 
   return next;
 }
 
-async function restructurePage(db: any, page: PageRow, systemPrompt: string, dryRun: boolean) {
+async function restructurePage(db: any, page: PageRow, dryRun: boolean) {
   const original = page.content || "";
   const before = analyzeStructure(original);
 
   // 1) Deterministic repair first — always lossless.
   let next = softStructure(original);
-  let method: "soft" | "llm" | "llm_rejected" = "soft";
+  let method: "soft" | "llm" | "llm_rejected" | "soft_only" = "soft";
   let rejectedReason: string | null = null;
+  let llmFailed = false;
 
   // 2) LLM reformat when the deterministic pass isn't enough (no headings, oversized sections).
   if (needsRestructure(next)) {
-    // Smaller chunks keep the model in "reformat" mode instead of summarising.
-    const chunks = chunkMarkdown(next, 3500);
+    if (next.length > MAX_LLM_PAGE_CHARS) {
+      // Too large to rewrite economically: keep the deterministic result and
+      // stop qualifying, rather than paying for a rewrite every sweep.
+      method = "soft_only";
+      rejectedReason = `page too large for LLM restructure (${next.length} chars)`;
+      llmFailed = true;
+    } else {
+      // Smaller chunks keep the model in "reformat" mode instead of summarising.
+      const chunks = chunkMarkdown(next, CHUNK_CHARS);
 
-    const attempt = async (strict: boolean) => {
-      const rewritten: string[] = [];
-      for (let index = 0; index < chunks.length; index += 1) {
-        const label = chunks.length > 1
-          ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)`
-          : "";
-        const strictNote = strict
-          ? `\n\nSTRICT RETRY: your previous attempt dropped information. Keep EVERY name, number, date and wikilink exactly as written. Only add headings and split paragraphs — never summarise, merge or delete a fact.`
-          : "";
-        const out = await callReformat(
-          systemPrompt,
-          `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}${strictNote}`,
-        );
-        if (!out.trim()) throw new Error("empty_llm_output");
-        rewritten.push(out.trim());
-      }
-      return softStructure(rewritten.join("\n\n"));
-    };
+      const attempt = async (strict: boolean) => {
+        const rewritten: string[] = [];
+        for (let index = 0; index < chunks.length; index += 1) {
+          const label = chunks.length > 1
+            ? `\n\n(This is part ${index + 1} of ${chunks.length} of the page "${page.title}". Do not add an intro sentence to parts after the first.)`
+            : "";
+          const strictNote = strict
+            ? `\n\nSTRICT RETRY: your previous attempt dropped information. Keep EVERY name, number, date and wikilink exactly as written. Only add headings and split paragraphs — never summarise, merge or delete a fact.`
+            : "";
+          // Reformatting can only grow the text modestly; ~1 token per 3 chars
+          // plus headroom is plenty and keeps the provider from reserving more.
+          const maxTokens = Math.min(8000, Math.ceil(chunks[index].length / 3) + 900);
+          const out = await callReformat(
+            db,
+            page.user_id,
+            `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}${strictNote}`,
+            maxTokens,
+          );
+          if (!out.trim()) throw new Error("empty_llm_output");
+          rewritten.push(out.trim());
+        }
+        return softStructure(rewritten.join("\n\n"));
+      };
 
-    try {
-      let candidate = await attempt(false);
-      let lost = missingFacts(next, candidate);
-      if (lost.length > 0) {
-        candidate = await attempt(true);
-        lost = missingFacts(next, candidate);
-      }
-      if (lost.length > 0) {
+      try {
+        let candidate = await attempt(false);
+        let lost = missingFacts(next, candidate);
+        if (lost.length > 0) {
+          candidate = await attempt(true);
+          lost = missingFacts(next, candidate);
+        }
+        if (lost.length > 0) {
+          method = "llm_rejected";
+          rejectedReason = `lost ${lost.length} tokens: ${lost.slice(0, 8).join(", ")}`;
+          llmFailed = true;
+        } else {
+          next = candidate;
+          method = "llm";
+        }
+      } catch (error) {
+        if (error instanceof SweepAbort) throw error;
         method = "llm_rejected";
-        rejectedReason = `lost ${lost.length} tokens: ${lost.slice(0, 8).join(", ")}`;
-      } else {
-        next = candidate;
-        method = "llm";
+        rejectedReason = error instanceof Error ? error.message : String(error);
+        llmFailed = true;
       }
-    } catch (error) {
-      method = "llm_rejected";
-      rejectedReason = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -191,6 +259,33 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
     if (updateError) throw updateError;
   }
 
+  if (!dryRun) {
+    // Bookkeeping: a page that failed must back off, and park permanently after
+    // MAX_CONSECUTIVE_FAILURES until someone edits it (content hash changes).
+    const finalContent = changed ? next : original;
+    const hash = await contentHash(finalContent);
+    if (llmFailed) {
+      const attempts = (page.restructure_attempts ?? 0) + 1;
+      const hours = BACKOFF_HOURS[Math.min(attempts, BACKOFF_HOURS.length) - 1];
+      const blockedUntil = attempts >= MAX_CONSECUTIVE_FAILURES
+        ? null // parked: gated by the hash instead of a timestamp
+        : new Date(Date.now() + hours * 3_600_000).toISOString();
+      await db.from("wiki_pages").update({
+        restructure_attempts: attempts,
+        restructure_last_error: rejectedReason,
+        restructure_blocked_until: blockedUntil,
+        restructure_content_hash: hash,
+      }).eq("id", page.id);
+    } else {
+      await db.from("wiki_pages").update({
+        restructure_attempts: 0,
+        restructure_last_error: null,
+        restructure_blocked_until: null,
+        restructure_content_hash: hash,
+      }).eq("id", page.id);
+    }
+  }
+
   return {
     slug: page.slug,
     method,
@@ -201,18 +296,44 @@ async function restructurePage(db: any, page: PageRow, systemPrompt: string, dry
   };
 }
 
+/**
+ * True when a page is allowed to consume an LLM call right now: it is not in
+ * backoff and it hasn't already burned its attempts on this exact content.
+ */
+async function isRestructureAllowed(page: PageRow): Promise<boolean> {
+  const attempts = page.restructure_attempts ?? 0;
+  if (attempts === 0) return true;
+  const hash = await contentHash(page.content || "");
+  // Content changed since the last failure → fresh start.
+  if (page.restructure_content_hash && page.restructure_content_hash !== hash) return true;
+  if (attempts >= MAX_CONSECUTIVE_FAILURES) return false;
+  if (page.restructure_blocked_until && new Date(page.restructure_blocked_until) > new Date()) return false;
+  return true;
+}
+
 async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolean) {
   const startedAt = Date.now();
   const results: unknown[] = [];
   let failed = 0;
-  const systemPrompt = await resolveSystemPrompt(db, "wiki-restructure.main", WIKI_RESTRUCTURE_PROMPT, {});
+  let aborted: string | null = null;
   const operation = dryRun ? "restructure_dry_run" : "restructure";
 
   for (const page of pages) {
     let result: unknown;
     try {
-      result = await restructurePage(db, page, systemPrompt, dryRun);
+      result = await restructurePage(db, page, dryRun);
     } catch (error) {
+      if (error instanceof SweepAbort) {
+        // Provider out of credit — stop immediately instead of burning the
+        // remaining pages on calls that can only fail.
+        aborted = error.message;
+        console.error("wiki-restructure sweep aborted (out of credit)", error.message);
+        await db.from("wiki_pages").update({
+          restructure_blocked_until: new Date(Date.now() + 6 * 3_600_000).toISOString(),
+          restructure_last_error: "provider out of credit",
+        }).in("id", pages.map((p) => p.id));
+        break;
+      }
       failed += 1;
       console.error("wiki-restructure page failed", page.slug, error);
       result = { slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) };
@@ -225,6 +346,7 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   await logWiki(db, actorId, operation, {
     total: pages.length,
     failed,
+    aborted,
     summary: true,
     duration_ms: Date.now() - startedAt,
     results: results.slice(0, 100),
@@ -266,12 +388,12 @@ serve(async (req) => {
     }
 
     const perRun = isCronSweep
-      ? Math.min(Number(body.limit) || 25, 50)
+      ? Math.min(Number(body.limit) || 10, 25)
       : MAX_PAGES_PER_RUN;
 
     let query = db
       .from("wiki_pages")
-      .select("id, user_id, slug, title, content, protected_sections")
+      .select("id, user_id, slug, title, content, protected_sections, restructure_attempts, restructure_blocked_until, restructure_content_hash")
       .order("updated_at", { ascending: false })
       .limit(isCronSweep ? 500 : perRun);
     if (slugs.length > 0) query = query.in("slug", slugs);
@@ -281,9 +403,18 @@ serve(async (req) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const candidates = ((data || []) as PageRow[])
-      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""))
-      .slice(0, perRun);
+    const preFiltered = ((data || []) as PageRow[])
+      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""));
+
+    // A page that already burned its attempts on this exact content never gets
+    // another LLM call until it is edited (or the user forces it explicitly).
+    const allowed: PageRow[] = [];
+    for (const page of preFiltered) {
+      if (force || (await isRestructureAllowed(page))) allowed.push(page);
+      if (allowed.length >= perRun) break;
+    }
+    const candidates = allowed;
+
 
 
     if (candidates.length === 0) {
