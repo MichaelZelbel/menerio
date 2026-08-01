@@ -75,37 +75,64 @@ async function logWiki(db: any, userId: string, operation: string, details: Reco
   if (error) console.error("wiki_log insert failed", error);
 }
 
-async function callReformat(systemPrompt: string, userContent: string): Promise<string> {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0,
-      // Without an explicit ceiling OpenRouter reserves the model maximum (65k)
-      // and rejects the call with 402 unless the account holds a large balance.
-      max_tokens: 8000,
-      response_format: { type: "json_object" },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`OpenRouter failed: ${response.status} ${text}`);
+/**
+ * Parse the model's reply into markdown. Models routinely emit raw newlines
+ * inside the JSON string, which makes `JSON.parse` throw ("Unterminated
+ * string") even though the content is perfectly usable — we repair that
+ * instead of discarding a call we already paid for.
+ */
+function parseReformatted(raw: string): string {
+  const cleaned = (raw || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  if (!cleaned) return "";
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed?.content === "string") return parsed.content;
+  } catch {
+    // fall through to repair
   }
-  const data = await response.json();
-  const raw = data.choices?.[0]?.message?.content || "";
-  const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const parsed = JSON.parse(cleaned);
-  return typeof parsed.content === "string" ? parsed.content : "";
+  const match = cleaned.match(/"content"\s*:\s*"([\s\S]*?)"\s*[,}]\s*$/)
+    ?? cleaned.match(/"content"\s*:\s*"([\s\S]*)$/);
+  if (match) {
+    return match[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\")
+      .replace(/"\s*}?\s*$/, "");
+  }
+  // Not JSON at all — the model answered with plain markdown.
+  if (!cleaned.startsWith("{")) return cleaned;
+  return "";
+}
+
+async function callReformat(
+  db: any,
+  userId: string,
+  userContent: string,
+  maxTokens: number,
+): Promise<string> {
+  try {
+    const result = await runChat({
+      db,
+      userId,
+      callSite: "wiki-restructure.main",
+      messages: [{ role: "user", content: userContent }],
+      defaults: {
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4-flash",
+        systemPrompt: WIKI_RESTRUCTURE_PROMPT,
+        temperature: 0,
+      },
+      // Ceiling sized from the input: without one OpenRouter reserves the model
+      // maximum and 402s, with a fixed 8k we paid for truncated output.
+      callOptions: { response_format: { type: "json_object" }, max_tokens: maxTokens },
+    });
+    return parseReformatted(result.content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isOutOfCredit(message)) throw new SweepAbort(message);
+    throw error;
+  }
 }
 
 /** Never touch sections the user has edited by hand: keep their bodies verbatim. */
