@@ -388,12 +388,12 @@ serve(async (req) => {
     }
 
     const perRun = isCronSweep
-      ? Math.min(Number(body.limit) || 25, 50)
+      ? Math.min(Number(body.limit) || 10, 25)
       : MAX_PAGES_PER_RUN;
 
     let query = db
       .from("wiki_pages")
-      .select("id, user_id, slug, title, content, protected_sections")
+      .select("id, user_id, slug, title, content, protected_sections, restructure_attempts, restructure_blocked_until, restructure_content_hash")
       .order("updated_at", { ascending: false })
       .limit(isCronSweep ? 500 : perRun);
     if (slugs.length > 0) query = query.in("slug", slugs);
@@ -403,9 +403,18 @@ serve(async (req) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const candidates = ((data || []) as PageRow[])
-      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""))
-      .slice(0, perRun);
+    const preFiltered = ((data || []) as PageRow[])
+      .filter((page) => force || slugs.length > 0 || needsRestructure(page.content || ""));
+
+    // A page that already burned its attempts on this exact content never gets
+    // another LLM call until it is edited (or the user forces it explicitly).
+    const allowed: PageRow[] = [];
+    for (const page of preFiltered) {
+      if (force || (await isRestructureAllowed(page))) allowed.push(page);
+      if (allowed.length >= perRun) break;
+    }
+    const candidates = allowed;
+
 
 
     if (candidates.length === 0) {
