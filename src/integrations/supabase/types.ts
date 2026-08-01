@@ -2970,6 +2970,10 @@ export type Database = {
           metadata: Json
           page_type: string
           protected_sections: string[]
+          restructure_attempts: number
+          restructure_blocked_until: string | null
+          restructure_content_hash: string | null
+          restructure_last_error: string | null
           slug: string
           source_count: number
           summary: string | null
@@ -2986,6 +2990,10 @@ export type Database = {
           metadata?: Json
           page_type?: string
           protected_sections?: string[]
+          restructure_attempts?: number
+          restructure_blocked_until?: string | null
+          restructure_content_hash?: string | null
+          restructure_last_error?: string | null
           slug: string
           source_count?: number
           summary?: string | null
@@ -3002,6 +3010,10 @@ export type Database = {
           metadata?: Json
           page_type?: string
           protected_sections?: string[]
+          restructure_attempts?: number
+          restructure_blocked_until?: string | null
+          restructure_content_hash?: string | null
+          restructure_last_error?: string | null
           slug?: string
           source_count?: number
           summary?: string | null
