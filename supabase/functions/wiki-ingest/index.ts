@@ -468,6 +468,9 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     ].join("\n\n");
 
     const { raw } = await callSynthesis(
+      db,
+      userId,
+      "wiki-ingest.group-insights",
       "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
       context,
     );
