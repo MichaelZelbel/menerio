@@ -9,6 +9,7 @@ import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
 import { broadcastInvalidation } from "@/lib/query-sync";
+import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 
 
 export interface RelatedItem {
