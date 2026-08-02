@@ -288,13 +288,19 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
 
   switch (r.suggestion_type) {
     case "normalize_profile_entry": {
-      await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
         body: JSON.stringify({ action: "apply", review_id: r.id, user_id: userId }),
       });
+      const j = await res.json().catch(() => ({} as any));
+      // `resolved: true` means the row was closed server-side (stale suggestion).
+      if (!res.ok || (j?.ok !== true && j?.resolved !== true)) {
+        throw new Error(`normalize-profile apply failed (${res.status}): ${String(j?.reason || j?.error || "unknown")}`);
+      }
       return;
     }
+
     case "add_contact": {
       const name = String(p.name || "").trim();
       if (!name) return void await markKept();
