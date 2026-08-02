@@ -582,7 +582,9 @@ export default function ReviewQueue() {
     } else {
       const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
       if (Number(j.failed) === 0) showToast.success(`${Number(j.done).toLocaleString()} changes ${verb}`);
-      else showToast.info(`${Number(j.done).toLocaleString()} ${verb}, ${Number(j.failed).toLocaleString()} failed`);
+      else showToast.error(
+        `${Number(j.done).toLocaleString()} ${verb}, ${Number(j.failed).toLocaleString()} could not be applied${j.last_error ? ` — ${j.last_error}` : ""}. They are still in the queue.`,
+      );
     }
     setBulkJobId(null);
   }, [bulkJob]);
