@@ -164,7 +164,9 @@ async function runJob(
 
   let done = 0;
   let failed = 0;
+  let lastError: string | null = null;
   let lastFlush = 0;
+  const note = (msg: string) => { lastError = msg; };
   const flush = async (force = false) => {
     const now = Date.now();
     if (!force && now - lastFlush < 1500) return;
@@ -174,7 +176,7 @@ async function runJob(
 
   try {
     if (body.action === "keep") {
-      await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush);
+      await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, note);
     } else if (body.action === "rollback") {
       await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false);
     } else {
@@ -185,6 +187,7 @@ async function runJob(
       status: "done",
       done,
       failed,
+      ...(lastError ? { last_error: lastError } : {}),
       finished_at: new Date().toISOString(),
     }).eq("id", jobId);
   }
@@ -199,6 +202,7 @@ async function runKeep(
   wikiIds: string[],
   bump: (ok: number, fail: number) => void,
   flush: (force?: boolean) => Promise<void>,
+  note: (msg: string) => void,
 ) {
   // Split by whether they already have side effects (applied_at) or not.
   const applied: ReviewRow[] = [];
