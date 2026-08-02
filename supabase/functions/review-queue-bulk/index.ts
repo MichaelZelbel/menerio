@@ -164,7 +164,9 @@ async function runJob(
 
   let done = 0;
   let failed = 0;
+  let lastError: string | null = null;
   let lastFlush = 0;
+  const note = (msg: string) => { lastError = msg; };
   const flush = async (force = false) => {
     const now = Date.now();
     if (!force && now - lastFlush < 1500) return;
@@ -174,7 +176,7 @@ async function runJob(
 
   try {
     if (body.action === "keep") {
-      await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush);
+      await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, note);
     } else if (body.action === "rollback") {
       await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false);
     } else {
@@ -185,6 +187,7 @@ async function runJob(
       status: "done",
       done,
       failed,
+      ...(lastError ? { last_error: lastError } : {}),
       finished_at: new Date().toISOString(),
     }).eq("id", jobId);
   }
@@ -199,6 +202,7 @@ async function runKeep(
   wikiIds: string[],
   bump: (ok: number, fail: number) => void,
   flush: (force?: boolean) => Promise<void>,
+  note: (msg: string) => void,
 ) {
   // Split by whether they already have side effects (applied_at) or not.
   const applied: ReviewRow[] = [];
@@ -234,10 +238,20 @@ async function runKeep(
         },
         body: JSON.stringify({ action: "bulk_profile_reviews", decision: "keep", review_ids: chunk, user_id: userId }),
       });
-      const j = await res.json().catch(() => ({}));
-      const failedCount = Number(j?.summary?.failed || 0);
-      bump(Math.max(0, chunk.length - failedCount), failedCount);
-    } catch {
+      const j = await res.json().catch(() => ({} as any));
+      if (!res.ok || !j?.summary) {
+        // A transport/auth failure applies to nothing in the chunk — never
+        // report these rows as kept, they are still sitting in the queue.
+        console.warn("bulk_profile_reviews failed", res.status, JSON.stringify(j).slice(0, 300));
+        bump(0, chunk.length);
+      } else {
+        // rejected_duplicate rows are left untouched server-side, so they are
+        // failures from the queue's point of view, not successes.
+        const failedCount = Number(j.summary.failed || 0) + Number(j.summary.rejected_duplicate || 0);
+        bump(Math.max(0, chunk.length - failedCount), Math.min(chunk.length, failedCount));
+      }
+    } catch (e) {
+      console.warn("bulk_profile_reviews threw", e);
       bump(0, chunk.length);
     }
     await flush();
@@ -256,6 +270,7 @@ async function runKeep(
     await flush();
   }
 
+
   // Wiki revisions → mark reviewed (bulk).
   for (let i = 0; i < wikiIds.length; i += PAGE) {
     const chunk = wikiIds.slice(i, i + PAGE);
@@ -266,8 +281,28 @@ async function runKeep(
     await flush();
   }
 
+  // Verification pass: "done" must mean the row actually left the queue.
+  // Anything still pending is reclassified from done → failed so the progress
+  // counter can never claim success while items remain in the user's queue.
+  const allIds = rows.map((r) => r.id);
+  let stillPending = 0;
+  for (let i = 0; i < allIds.length; i += PAGE) {
+    const chunk = allIds.slice(i, i + PAGE);
+    const { data, error } = await db.from("review_queue")
+      .select("id")
+      .in("id", chunk)
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+    if (error) continue;
+    stillPending += data?.length || 0;
+  }
+  if (stillPending > 0) {
+    bump(-stillPending, stillPending);
+    note(`${stillPending} item(s) could not be applied and remain in the queue`);
+  }
+
   await flush(true);
 }
+
 
 async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
   const p = (r.payload || {}) as any;
@@ -277,13 +312,19 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
 
   switch (r.suggestion_type) {
     case "normalize_profile_entry": {
-      await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
         body: JSON.stringify({ action: "apply", review_id: r.id, user_id: userId }),
       });
+      const j = await res.json().catch(() => ({} as any));
+      // `resolved: true` means the row was closed server-side (stale suggestion).
+      if (!res.ok || (j?.ok !== true && j?.resolved !== true)) {
+        throw new Error(`normalize-profile apply failed (${res.status}): ${String(j?.reason || j?.error || "unknown")}`);
+      }
       return;
     }
+
     case "add_contact": {
       const name = String(p.name || "").trim();
       if (!name) return void await markKept();
