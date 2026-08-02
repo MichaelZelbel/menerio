@@ -482,13 +482,30 @@ serve(async (req) => {
     const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const db = createClient(SUPABASE_URL, SERVICE_ROLE);
-    const anonClient = createClient(SUPABASE_URL, ANON);
-    const { data: { user }, error: authErr } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (authErr || !user) return json({ error: "Unauthorized" }, 401);
-    const userId = user.id;
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "");
+
+    // Trusted server-to-server calls (e.g. review-queue-bulk) authenticate with
+    // the service-role key, which is NOT a user JWT — auth.getUser() would fail
+    // on it. In that case the acting user is taken from the request body.
+    // Every downstream check still compares row.user_id against this value.
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isServiceCall = !!SERVICE_ROLE && bearer === SERVICE_ROLE;
+
+    let userId: string;
+    if (isServiceCall) {
+      const claimed = String(body?.user_id || "");
+      if (!z.string().uuid().safeParse(claimed).success) {
+        return json({ error: "user_id required for service-role calls" }, 400);
+      }
+      userId = claimed;
+    } else {
+      const anonClient = createClient(SUPABASE_URL, ANON);
+      const { data: { user }, error: authErr } = await anonClient.auth.getUser(bearer);
+      if (authErr || !user) return json({ error: "Unauthorized" }, 401);
+      userId = user.id;
+    }
 
     const prepareSuggestionForInsert = makePrepareSuggestion(db);
     const helpers = { filterSuppressedSuggestions: (uid: string, s: any[]) => filterSuppressedSuggestions(db, uid, s), prepareSuggestionForInsert, isSensitiveSuggestion, buildSuppressionKey };
