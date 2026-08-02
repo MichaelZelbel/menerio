@@ -277,8 +277,28 @@ async function runKeep(
     await flush();
   }
 
+  // Verification pass: "done" must mean the row actually left the queue.
+  // Anything still pending is reclassified from done → failed so the progress
+  // counter can never claim success while items remain in the user's queue.
+  const allIds = rows.map((r) => r.id);
+  let stillPending = 0;
+  for (let i = 0; i < allIds.length; i += PAGE) {
+    const chunk = allIds.slice(i, i + PAGE);
+    const { data, error } = await db.from("review_queue")
+      .select("id")
+      .in("id", chunk)
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+    if (error) continue;
+    stillPending += data?.length || 0;
+  }
+  if (stillPending > 0) {
+    bump(-stillPending, stillPending);
+    note(`${stillPending} item(s) could not be applied and remain in the queue`);
+  }
+
   await flush(true);
 }
+
 
 async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
   const p = (r.payload || {}) as any;
