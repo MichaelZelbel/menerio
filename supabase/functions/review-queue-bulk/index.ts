@@ -234,10 +234,20 @@ async function runKeep(
         },
         body: JSON.stringify({ action: "bulk_profile_reviews", decision: "keep", review_ids: chunk, user_id: userId }),
       });
-      const j = await res.json().catch(() => ({}));
-      const failedCount = Number(j?.summary?.failed || 0);
-      bump(Math.max(0, chunk.length - failedCount), failedCount);
-    } catch {
+      const j = await res.json().catch(() => ({} as any));
+      if (!res.ok || !j?.summary) {
+        // A transport/auth failure applies to nothing in the chunk — never
+        // report these rows as kept, they are still sitting in the queue.
+        console.warn("bulk_profile_reviews failed", res.status, JSON.stringify(j).slice(0, 300));
+        bump(0, chunk.length);
+      } else {
+        // rejected_duplicate rows are left untouched server-side, so they are
+        // failures from the queue's point of view, not successes.
+        const failedCount = Number(j.summary.failed || 0) + Number(j.summary.rejected_duplicate || 0);
+        bump(Math.max(0, chunk.length - failedCount), Math.min(chunk.length, failedCount));
+      }
+    } catch (e) {
+      console.warn("bulk_profile_reviews threw", e);
       bump(0, chunk.length);
     }
     await flush();
@@ -255,6 +265,7 @@ async function runKeep(
     }
     await flush();
   }
+
 
   // Wiki revisions → mark reviewed (bulk).
   for (let i = 0; i < wikiIds.length; i += PAGE) {
