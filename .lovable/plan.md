@@ -1,61 +1,51 @@
-## What's actually happening
+## What's happening
 
-Your config isn't being ignored — two functions never go through the config layer at all.
+Your last "Keep all" job (01:33 UTC today) recorded `total: 6, done: 6, failed: 0` — the backend reported complete success, yet items stayed in the queue. So the bug is not that processing stops early; it's that some items are counted as done without ever being applied.
 
-`wiki-restructure` and `wiki-ingest` call `https://openrouter.ai/api/v1/chat/completions` directly with a hardcoded `google/gemini-2.5-flash`. They don't use `llm-router`/`runChat`, so:
-- the Admin LLM config (provider = Lovable AI gateway) has no effect on them,
-- no credits are deducted and nothing is written to `llm_usage_log`, so the spend is invisible in-app.
+## Root cause (confirmed by reading the code)
 
-That explains why the spend has nothing to do with Note Chat or Conversation Chat — you never triggered it. A pg_cron job does, every 30 minutes.
+`review-queue-bulk` delegates profile-related items to the `normalize-profile` edge function and authenticates with the **service-role key**, passing `user_id` in the body:
 
-## The burn: an infinite retry loop
+```
+Authorization: Bearer SERVICE_ROLE   +  body { user_id }
+```
 
-`cron.job` id 5 runs every 30 min: `wiki-restructure` with `limit: 25`. It picks pages that fail `needsRestructure()`, sends each to Gemini 2.5 Flash with `max_tokens: 8000`, and writes the result back only if the response parses and passes the guards.
+But `normalize-profile` resolves the caller like this (index.ts:486):
 
-From `wiki_log` (last 3 days), the same six pages are retried over and over, and **none of them ever succeeds**:
+```ts
+const { data: { user } } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
+if (authErr || !user) return json({ error: "Unauthorized" }, 401);
+```
 
-| Page | Runs in 3 days | Changed | Failure |
-|---|---|---|---|
-| group-dream-100-querino | 144 | 0 | `Unterminated string in JSON at position 910` |
-| michael | 100 | 0 | `Unterminated string in JSON at position 79` |
-| the-vrchat-pleasure-manual | 96 | 0 | truncated JSON |
-| vrchat | 96 | 0 | OpenRouter 402 |
-| craigs-cronjobs | 95 | 0 | OpenRouter 402 |
-| love-relationships-strategy | 95 | 0 | truncated JSON |
+A service-role API key is **not** a user JWT, so `getUser` fails and every one of these calls returns **401**. `body.user_id` is never read. This affects both delegated paths:
 
-Two distinct failures, one shared consequence:
-1. **Truncated JSON** — the page is larger than the 8k output ceiling, so the model streams up to 8000 output tokens (fully billed), gets cut mid-string, `JSON.parse` throws, the write is skipped. The page stays unstructured, so it re-qualifies 30 minutes later. Forever.
-2. **OpenRouter 402** — happens only once your balance drops; note the message says the request needed more credits than remained, i.e. the earlier successful-but-unusable calls already spent it.
+- `normalize_profile_entry` → `keepPending()` fires the fetch and **never inspects the response**, then counts `bump(1, 0)`.
+- `add_profile_entry` → `bulk_profile_reviews`; on 401 the body has no `summary`, so `failedCount = Number(undefined || 0) = 0` and the whole chunk is counted as successful.
 
-So you're paying for roughly 30–45 full-length 8k-output Gemini 2.5 Flash generations per day whose output is thrown away — indefinitely, because failure is the condition that schedules the retry.
+That matches the leftovers in your queue: the remaining rows are almost all `normalize_profile_entry` (plus `add_profile_entry`), while the item types handled inline by `review-queue-bulk` (contacts, aliases, relationships, moments, wiki revisions) went through.
+
+A second, smaller silent-failure path exists even once auth is fixed: `acceptProfileEntryReview` returns `{ok:false, outcome:"rejected_duplicate"}` (e.g. blocked by the duplicate-fact trigger, invalid payload) and leaves the row `pending_review`, but `bulk_profile_reviews` only counts explicit exceptions in `summary.failed`, so those also report as done.
 
 ## The fix
 
-**1. Break the retry loop (the actual money fix)**
-Add per-page failure tracking so a page that fails is not re-attempted endlessly:
-- record attempt count + last error on the page (new `restructure_attempts`, `restructure_last_error`, `restructure_blocked_until` columns on `wiki_pages`, or an equivalent side table),
-- skip any page with ≥3 consecutive LLM failures until its `content` changes,
-- exponential backoff on transient failures (402 / 5xx / timeout) instead of a fixed 30-minute retry.
+**1. Make `normalize-profile` accept trusted service-role calls**
+- If the bearer token equals `SUPABASE_SERVICE_ROLE_KEY`, take `userId` from `body.user_id` (validated as a UUID) instead of calling `getUser`. Otherwise keep the existing user-JWT path unchanged. All existing ownership checks (`row.user_id !== userId`) stay in place, so no privilege widening.
 
-**2. Stop paying for truncated output**
-Chunk oversized pages before the call (`chunkMarkdown` already exists in `_shared/wiki-structure.ts` and is imported but unused on this path), and size `max_tokens` from the input length. If a page is too large to restructure in one call after chunking, fall back to the deterministic `softStructure()` pass and mark it done — no LLM call.
+**2. Stop swallowing failures in `review-queue-bulk`**
+- `keepPending()` `normalize_profile_entry` branch: check `res.ok` and the JSON body; throw when the call failed or `ok !== true` and it wasn't resolved server-side, so the row counts as `failed` instead of `done`.
+- `bulk_profile_reviews` branch: treat a non-2xx response or a missing `summary` as a full-chunk failure; also count `rejected_duplicate` toward `failed`.
 
-**3. Kill the 402 loop**
-On a 402 from OpenRouter, abort the whole sweep immediately rather than continuing through the remaining 24 pages, and set a global cooldown.
+**3. Make "done" mean actually resolved (verification pass)**
+- After the keep loop, re-query the processed IDs for rows still in a pending status and reclassify them from `done` to `failed`, writing a short reason into the job's `last_error`. This guarantees the progress counter can never claim success while rows remain in the queue.
 
-**4. Route both functions through the config layer**
-Convert `wiki-restructure` and `wiki-ingest` to `runChat()` from `_shared/llm-router.ts` with call sites `wiki-restructure.main` / `wiki-ingest.main` (both already exist in `llm-defaults.ts`). This makes the Admin LLM config authoritative for them, deducts AI credits, and logs every call to `llm_usage_log` so this class of leak shows up in the Admin dashboard instead of only on your OpenRouter invoice.
+**4. Surface it in the UI**
+- `ReviewQueue.tsx` already reads `failed` from the job row; show a warning toast ("Kept 3, 3 could not be applied") instead of a plain success message when `failed > 0`, and keep the remaining items visible.
 
-**5. Reduce the sweep's baseline cost**
-Lower cron frequency from every 30 min to every 6 hours (matching the profile normalizer), and drop `limit` from 25 to 10. Restructuring is not latency-sensitive; manual "Restructure" from the Lexicon page stays immediate.
+**5. Resolve the current stragglers**
+- After deploying, re-run "Keep all"; the previously-401'd items should now apply. Anything that still fails will show a real reason in the job's `last_error` rather than disappearing silently.
 
-**6. Clean up the six stuck pages**
-One-off: run the deterministic `softStructure()` pass over the six pages above so they stop qualifying, then verify no page reappears in `wiki_log` more than twice.
+## Technical notes
 
-## Also worth flagging
-
-`wiki-ingest` (same hardcoded direct-OpenRouter path) logged 88 `ingest_failed` on Jul 31 and 32–35/day before that. It's triggered per note save from `useNotes.ts`, so failed ingests are also billed, unlogged spend. Items 2 and 4 cover it; I'd also surface `ingest_failed` reasons in the Admin dashboard.
-
-## Verification
-
-After the change: no page appears in `wiki_log` with `method: "llm"` more than 3 times, `llm_usage_log` shows rows for `wiki-restructure.main`, and OpenRouter daily spend should drop to near zero for Gemini 2.5 Flash.
+- Files: `supabase/functions/normalize-profile/index.ts` (auth block only), `supabase/functions/review-queue-bulk/index.ts` (keep paths + verification), `src/pages/ReviewQueue.tsx` (toast copy).
+- No database migration needed; `review_queue_bulk_jobs` already has `failed` and `last_error`.
+- Worth checking after: `grep` for other edge functions calling `normalize-profile` with the service-role key — they'd have the same silent 401.
