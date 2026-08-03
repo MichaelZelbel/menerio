@@ -719,8 +719,18 @@ export function NoteTree({
     return normalizePath(selected?.folder_path);
   }, [notes, selectedId]);
 
+  // Favorites and Recent are derived from ONE pool (the main list plus the
+  // favorites query), so a note can never be visible in one virtual section
+  // and silently missing from the other.
+  const notePool = useMemo(() => {
+    const byId = new Map<string, (typeof notes)[number]>();
+    for (const n of notes) byId.set(n.id, n);
+    for (const n of favoriteNotes ?? []) if (!byId.has(n.id)) byId.set(n.id, n);
+    return Array.from(byId.values());
+  }, [notes, favoriteNotes]);
+
   const favoritesList = useMemo(() => {
-    const list = favoriteNotes ?? notes.filter((n) => "is_favorite" in n && n.is_favorite);
+    const list = notePool.filter((n) => "is_favorite" in n && n.is_favorite);
     const dir = sortDirection === "asc" ? 1 : -1;
     return [...list].sort((a, b) => {
       if (sortField === "title") return dir * (a.title || "Untitled").localeCompare(b.title || "Untitled");
@@ -730,13 +740,14 @@ export function NoteTree({
       const bTs = typeof bRaw === "string" ? new Date(bRaw).getTime() : 0;
       return dir * (aTs - bTs);
     });
-  }, [favoriteNotes, notes, sortField, sortDirection]);
+  }, [notePool, sortField, sortDirection]);
 
   const recentList = useMemo(() => {
-    return [...notes]
+    return [...notePool]
       .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 20);
-  }, [notes]);
+  }, [notePool]);
+
 
   const trashList = useMemo(() => {
     const list = trashedNotes ?? [];
