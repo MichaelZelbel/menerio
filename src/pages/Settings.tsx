@@ -453,9 +453,11 @@ export default function Settings() {
         </TabsContent>
 
         {/* ── GitHub Sync Tab ── */}
-        <TabsContent value="github">
+        <TabsContent value="github" className="space-y-4">
+          <LocalReplicaPanel />
           <GitHubSyncSettings />
         </TabsContent>
+
 
         {/* ── API Keys Tab ── */}
         <TabsContent value="apikeys">
