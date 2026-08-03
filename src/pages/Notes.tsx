@@ -1,5 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { OFFLINE_CORE } from "@/lib/flags";
+import { localNoteUpdatedAt, upsertNotesLocal } from "@/sync/local-replica";
+
 import { SEOHead } from "@/components/SEOHead";
 import {
   useNotes,
@@ -665,6 +668,31 @@ export default function Notes() {
     const fallbackTs = new Date(fallback.updated_at || 0).getTime();
     return rowTs >= fallbackTs ? selectedNoteRow : fallback;
   }, [selectedId, selectedNoteRow, allNotes, trashNotes, favNotes, searchResults]);
+
+  // Self-heal: on the local-first path a note can be opened (via the server
+  // single-row query or search) while the local SQLite replica is missing or
+  // behind on that row — which is why it could vanish from the tree's
+  // Favorites/Recent. Write the fresher server copy back into the replica.
+  useEffect(() => {
+    if (!OFFLINE_CORE || !selectedNoteRow) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const localTs = await localNoteUpdatedAt(selectedNoteRow.id);
+        if (cancelled) return;
+        const serverTs = new Date(selectedNoteRow.updated_at || 0).getTime();
+        if (localTs && new Date(localTs).getTime() >= serverTs) return;
+        await upsertNotesLocal([selectedNoteRow]);
+      } catch (error) {
+        console.warn("Local replica self-heal failed", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNoteRow]);
+
+
 
   
 

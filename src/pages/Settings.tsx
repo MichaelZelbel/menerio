@@ -36,6 +36,8 @@ import { UserMcpServersManager } from "@/components/settings/UserMcpServersManag
 import { ImportMigrate } from "@/components/settings/ImportMigrate";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
+import { LocalReplicaPanel } from "@/components/settings/LocalReplicaPanel";
+
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
@@ -453,9 +455,11 @@ export default function Settings() {
         </TabsContent>
 
         {/* ── GitHub Sync Tab ── */}
-        <TabsContent value="github">
+        <TabsContent value="github" className="space-y-4">
+          <LocalReplicaPanel />
           <GitHubSyncSettings />
         </TabsContent>
+
 
         {/* ── API Keys Tab ── */}
         <TabsContent value="apikeys">
