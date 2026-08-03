@@ -190,9 +190,13 @@ export function useNote(id: string | null | undefined) {
 
   return useQuery<Note | null>({
     queryKey: ["note", id],
-    enabled: !!id && !!user && !OFFLINE_CORE,
+    // Also enabled on the local-first (desktop) path: the single row keeps the
+    // open editor converged with the server even if the local replica lags.
+    // Offline it simply fails and callers fall back to the local copy.
+    enabled: !!id && !!user,
     refetchOnMount: "always",
     staleTime: 0,
+
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notes" as any)
