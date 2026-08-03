@@ -1,51 +1,40 @@
-## What's happening
+# Fix: favorited note missing from the Notes tree (desktop)
 
-Your last "Keep all" job (01:33 UTC today) recorded `total: 6, done: 6, failed: 0` — the backend reported complete success, yet items stayed in the queue. So the bug is not that processing stops early; it's that some items are counted as done without ever being applied.
+## What is confirmed
 
-## Root cause (confirmed by reading the code)
+- The note "Michael's Discord Status Log" (`3e24bedb…`) is correct on the server: `is_favorite = true`, `is_trashed = false`, `updated_at = 2026-08-03`. The account has 289 active notes and 7 favorites, which matches what the tree shows now.
+- The screenshot is the desktop app (Tauri). On desktop the local-first path is always on (`IS_DESKTOP` forces `OFFLINE_CORE`), so the **tree reads from the local SQLite replica** (PowerSync), not from Supabase.
+- The **open note in the editor does not come from that same local list**. `Notes.tsx` resolves the open note from the list *or* from search results, and search (semantic search especially) hits the server directly. So a note that is missing or stale in the local replica can still be opened and shown as starred in the editor while being absent from Favorites and Recent in the tree.
 
-`review-queue-bulk` delegates profile-related items to the `normalize-profile` edge function and authenticates with the **service-role key**, passing `user_id` in the body:
+That asymmetry — server-fresh editor vs. local-replica tree — is exactly the symptom reported. What is **not** yet confirmed is *why* the row was missing locally: either the local replica never received/updated that row (sync stalled, upload queue wedged, or the row arrived after the snapshot), or it was present but stale. There is no way to inspect the desktop's SQLite from here, so verification has to be the first step and has to run on the device.
 
-```
-Authorization: Bearer SERVICE_ROLE   +  body { user_id }
-```
+## Plan
 
-But `normalize-profile` resolves the caller like this (index.ts:486):
+### 1. Add a sync self-check (diagnosis + permanent value)
 
-```ts
-const { data: { user } } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
-if (authErr || !user) return json({ error: "Unauthorized" }, 401);
-```
+Extend the Sync section in Settings with a "Local replica" panel that shows, on desktop:
 
-A service-role API key is **not** a user JWT, so `getUser` fails and every one of these calls returns **401**. `body.user_id` is never read. This affects both delegated paths:
+- local note count vs. server note count (and local favorites vs. server favorites),
+- PowerSync connection state, last completed sync time, and pending upload-queue size,
+- a list of ids present on the server but missing locally (capped), so a gap names the exact rows.
 
-- `normalize_profile_entry` → `keepPending()` fires the fetch and **never inspects the response**, then counts `bump(1, 0)`.
-- `add_profile_entry` → `bulk_profile_reviews`; on 401 the body has no `summary`, so `failedCount = Number(undefined || 0) = 0` and the whole chunk is counted as successful.
+This turns the current guesswork into a one-click answer the next time something is missing, and it will confirm or rule out the "row missing locally" cause immediately.
 
-That matches the leftovers in your queue: the remaining rows are almost all `normalize_profile_entry` (plus `add_profile_entry`), while the item types handled inline by `review-queue-bulk` (contacts, aliases, relationships, moments, wiki revisions) went through.
+### 2. Make the tree self-heal instead of silently hiding notes
 
-A second, smaller silent-failure path exists even once auth is fixed: `acceptProfileEntryReview` returns `{ok:false, outcome:"rejected_duplicate"}` (e.g. blocked by the duplicate-fact trigger, invalid payload) and leaves the row `pending_review`, but `bulk_profile_reviews` only counts explicit exceptions in `summary.failed`, so those also report as done.
+- When a note is opened that is **not** in the local replica (the case that produced this report), write it into local SQLite so it immediately appears in the tree, and log it to the sync panel as a reconciliation event.
+- Add a "Repair local copy" action to the sync panel that pulls the full note set from Supabase and upserts it into SQLite, without wiping local pending writes.
 
-## The fix
+### 3. Close the freshness gap for the open note on desktop
 
-**1. Make `normalize-profile` accept trusted service-role calls**
-- If the bearer token equals `SUPABASE_SERVICE_ROLE_KEY`, take `userId` from `body.user_id` (validated as a UUID) instead of calling `getUser`. Otherwise keep the existing user-JWT path unchanged. All existing ownership checks (`row.user_id !== userId`) stay in place, so no privilege widening.
+`useNote` is disabled when the local-first path is on, so the editor relies on the list/search copy. Enable the single-row server fetch on desktop as well when online, and keep the existing "newest `updated_at` wins" merge. That guarantees the editor and tree converge on the same row instead of drifting.
 
-**2. Stop swallowing failures in `review-queue-bulk`**
-- `keepPending()` `normalize_profile_entry` branch: check `res.ok` and the JSON body; throw when the call failed or `ok !== true` and it wasn't resolved server-side, so the row counts as `failed` instead of `done`.
-- `bulk_profile_reviews` branch: treat a non-2xx response or a missing `summary` as a full-chunk failure; also count `rejected_duplicate` toward `failed`.
+### 4. Make favorites/recent consistent with the active filters
 
-**3. Make "done" mean actually resolved (verification pass)**
-- After the keep loop, re-query the processed IDs for rows still in a pending status and reclassify them from `done` to `failed`, writing a short reason into the job's `last_error`. This guarantees the progress counter can never claim success while rows remain in the queue.
-
-**4. Surface it in the UI**
-- `ReviewQueue.tsx` already reads `failed` from the job row; show a warning toast ("Kept 3, 3 could not be applied") instead of a plain success message when `failed > 0`, and keep the remaining items visible.
-
-**5. Resolve the current stragglers**
-- After deploying, re-run "Keep all"; the previously-401'd items should now apply. Anything that still fails will show a real reason in the job's `last_error` rather than disappearing silently.
+Favorites in the tree come from a separate query while Recent is derived from the filtered list, so an entity/topic/person filter can hide a note from one section but not the other. Derive both from the same source so a note can never disappear from just one of them.
 
 ## Technical notes
 
-- Files: `supabase/functions/normalize-profile/index.ts` (auth block only), `supabase/functions/review-queue-bulk/index.ts` (keep paths + verification), `src/pages/ReviewQueue.tsx` (toast copy).
-- No database migration needed; `review_queue_bulk_jobs` already has `failed` and `last_error`.
-- Worth checking after: `grep` for other edge functions calling `normalize-profile` with the service-role key — they'd have the same silent 401.
+- Files: `src/pages/Notes.tsx` (selected-note resolution, filter sources), `src/hooks/useNotes.ts` (enable `useNote` on desktop, local upsert helper), `src/components/notes/NoteTree.tsx` (favorites/recent source), `src/components/settings/SyncDashboard.tsx` (replica panel), `src/sync/db.ts` (repair/upsert helpers).
+- No database migration and no change to the PowerSync sync rules is needed; the rules already select every column the client schema declares.
+- Step 1 ships first so the next occurrence is diagnosable even if steps 2–4 turn out to cover the cause completely.
