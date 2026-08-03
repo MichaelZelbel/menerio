@@ -189,11 +189,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
         insight = chatResult.content || null;
         lastCredits = chatResult.credits ?? lastCredits;
       } catch (err: any) {
-        if (err.message === "INSUFFICIENT_CREDITS") {
-          insight = null; // Skip insight generation if credits ran out
-        } else {
-          throw err;
-        }
+        // The AI insight is optional — never fail the whole request because of it
+        // (out of credits, provider 402/429/5xx, timeouts, ...).
+        console.warn("[find-connections] insight generation skipped:", err?.message ?? err);
+        insight = null;
       }
     }
 
