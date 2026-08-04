@@ -7,9 +7,22 @@ The idea is strong. Phone-scan → Drive folder → Menerio note is a genuinely 
 Feasibility: medium. The only genuinely new piece is per-user Google authorization. Everything downstream (store file, create note, OCR, title, file into a folder) already exists.
 
 Main caveats to accept up front:
-- Polling, not push. Drive push notifications need renewable webhook channels; a 15-minute cron poll is far simpler and good enough for scans.
 - The 20 MB attachment limit applies; larger scans get skipped with a visible error.
 - OCR costs AI credits per page, so imports must go through the existing credit check and stop cleanly when the balance is empty.
+
+## How fast can it be?
+
+What the n8n videos show is not push. n8n's Google Drive Trigger ("On changes involving a specific folder") is a **polling** trigger — its default interval is every minute. It feels instant because the poll is frequent and the file is small, not because Drive pushed anything.
+
+Google Drive does support real push: the Drive API `changes.watch` endpoint registers a notification channel that POSTs to a public HTTPS URL whenever anything in the user's Drive changes. The catches are that channels expire (a few hours to a day) and must be renewed, notifications are "something changed" pings rather than payloads (you re-query with a `startPageToken`), and they cover the whole Drive so we filter by parent folder ourselves.
+
+So the design is **push-first with a polling safety net**:
+- `gdrive-webhook`: a public edge function (`verify_jwt = false`) registered as the Drive notification channel. It validates the channel token, looks up the connection, and kicks off a sync run for that user. Latency: seconds.
+- A short polling cron (every 2 minutes) that only runs for connections whose last webhook is stale or whose channel failed — a backstop, not the main path.
+- A channel-renewal job that re-registers watch channels before they expire and records `channel_id`, `channel_token`, `channel_expires_at`, `start_page_token`.
+
+Phase 2 ships polling only (simple, correct); Phase 3 adds the webhook and drops the poll to backstop duty.
+
 
 ## How it works (user view)
 
