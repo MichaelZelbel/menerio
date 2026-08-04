@@ -17,6 +17,7 @@ import {
   Loader2,
   CheckCircle2,
   Circle,
+  HardDrive,
 } from "lucide-react";
 
 interface IntegrationsOverviewProps {
@@ -30,6 +31,7 @@ type StatusKey =
   | "integrations"
   | "singlefile"
   | "github"
+  | "gdrive"
   | "mcp"
   | "apikeys";
 
@@ -50,6 +52,7 @@ const INTEGRATIONS: IntegrationDef[] = [
   { key: "integrations", tab: "integrations", name: "Slack", description: "Send Slack messages straight to Menerio", icon: MessageSquare },
   { key: "singlefile", tab: "singlefile", name: "Web Clipper", description: "Save web pages as Markdown notes", icon: Globe },
   { key: "github", tab: "github", name: "GitHub Sync", description: "Two-way sync with an Obsidian vault", icon: Github },
+  { key: "gdrive", tab: "gdrive", name: "Google Drive Scans", description: "Auto-import scans from a Drive folder", icon: HardDrive },
   { key: "mcp", tab: "mcp", name: "MCP Server", description: "Connect Claude / ChatGPT via MCP tokens", icon: Brain },
   { key: "apikeys", tab: "apikeys", name: "Hub API Keys", description: "Bearer keys (mnr_) for the Hub REST API", icon: Key },
 ];
@@ -71,6 +74,7 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
         telegram,
         discord,
         github,
+        gdrive,
         mcp,
       ] = await Promise.all([
         supabase
@@ -90,6 +94,10 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
           .not("discord_user_id", "is", null),
         supabase
           .from("github_connections" as never)
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id),
+        supabase
+          .from("gdrive_connections" as never)
           .select("id", { count: "exact", head: true })
           .eq("user_id", user.id),
         supabase
@@ -135,6 +143,7 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
         integrations: slackOn,
         singlefile: singleFileOn,
         github: (github.count || 0) > 0,
+        gdrive: (gdrive.count || 0) > 0,
         mcp: (mcp.count || 0) > 0,
         apikeys: apiKeysOn,
       });

@@ -43,6 +43,8 @@ const WikiHome = lazy(() => import("./pages/WikiHome"));
 const WikiLintPlaceholder = lazy(() => import("./pages/WikiLintPlaceholder"));
 const WikiPage = lazy(() => import("./pages/WikiPage"));
 const Settings = lazy(() => import("./pages/Settings"));
+const GDriveCallback = lazy(() => import("./pages/GDriveCallback"));
+
 
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Terms = lazy(() => import("./pages/Terms"));
@@ -135,6 +137,8 @@ const App = () => (
                   </Route>
 
                   <Route path="/shared/:token" element={<SharedNote />} />
+                  <Route path="/gdrive-callback" element={<GDriveCallback />} />
+
 
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
