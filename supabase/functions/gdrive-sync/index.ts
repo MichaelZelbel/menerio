@@ -279,7 +279,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
 
     let targetUserId: string | null = null;
-    const isService = token && token === SERVICE_ROLE_KEY;
+    const cronSecret = Deno.env.get("GDRIVE_CRON_SECRET");
+    const isCron = !!cronSecret && req.headers.get("x-cron-key") === cronSecret;
+    const isService = isCron || (!!token && token === SERVICE_ROLE_KEY);
 
     if (!isService) {
       if (!token) return json({ error: "Unauthorized" }, 401);
