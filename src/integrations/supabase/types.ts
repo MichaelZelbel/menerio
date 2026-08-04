@@ -1026,6 +1026,116 @@ export type Database = {
           },
         ]
       }
+      gdrive_connections: {
+        Row: {
+          channel_expires_at: string | null
+          channel_id: string | null
+          channel_token: string | null
+          connection_key: string | null
+          created_at: string
+          google_email: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          last_webhook_at: string | null
+          start_page_token: string | null
+          sync_enabled: boolean
+          target_note_folder: string
+          updated_at: string
+          user_id: string
+          watch_folder_id: string | null
+          watch_folder_name: string | null
+        }
+        Insert: {
+          channel_expires_at?: string | null
+          channel_id?: string | null
+          channel_token?: string | null
+          connection_key?: string | null
+          created_at?: string
+          google_email?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          last_webhook_at?: string | null
+          start_page_token?: string | null
+          sync_enabled?: boolean
+          target_note_folder?: string
+          updated_at?: string
+          user_id: string
+          watch_folder_id?: string | null
+          watch_folder_name?: string | null
+        }
+        Update: {
+          channel_expires_at?: string | null
+          channel_id?: string | null
+          channel_token?: string | null
+          connection_key?: string | null
+          created_at?: string
+          google_email?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          last_webhook_at?: string | null
+          start_page_token?: string | null
+          sync_enabled?: boolean
+          target_note_folder?: string
+          updated_at?: string
+          user_id?: string
+          watch_folder_id?: string | null
+          watch_folder_name?: string | null
+        }
+        Relationships: []
+      }
+      gdrive_imports: {
+        Row: {
+          created_at: string
+          error: string | null
+          file_id: string
+          file_name: string | null
+          id: string
+          imported_at: string
+          mime_type: string | null
+          note_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          file_id: string
+          file_name?: string | null
+          id?: string
+          imported_at?: string
+          mime_type?: string | null
+          note_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          file_id?: string
+          file_name?: string | null
+          id?: string
+          imported_at?: string
+          mime_type?: string | null
+          note_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gdrive_imports_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generation_logs: {
         Row: {
           created_at: string
