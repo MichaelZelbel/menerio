@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key, Globe } from "lucide-react";
+import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key, Globe, HardDrive } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { AppIntegrations } from "@/components/settings/AppIntegrations";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
@@ -36,6 +36,8 @@ import { UserMcpServersManager } from "@/components/settings/UserMcpServersManag
 import { ImportMigrate } from "@/components/settings/ImportMigrate";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { GitHubSyncSettings } from "@/components/settings/GitHubSyncSettings";
+import { GoogleDriveScans } from "@/components/settings/GoogleDriveScans";
+
 import { LocalReplicaPanel } from "@/components/settings/LocalReplicaPanel";
 
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
@@ -257,6 +259,8 @@ export default function Settings() {
           <TabsTrigger value="discord" className="gap-1.5 text-xs"><Gamepad2 className="h-3.5 w-3.5 hidden sm:block" /> Discord</TabsTrigger>
           <TabsTrigger value="singlefile" className="gap-1.5 text-xs"><Globe className="h-3.5 w-3.5 hidden sm:block" /> Web Clipper</TabsTrigger>
           <TabsTrigger value="github" className="gap-1.5 text-xs"><Github className="h-3.5 w-3.5 hidden sm:block" /> GitHub</TabsTrigger>
+          <TabsTrigger value="gdrive" className="gap-1.5 text-xs"><HardDrive className="h-3.5 w-3.5 hidden sm:block" /> Drive Scans</TabsTrigger>
+
           <TabsTrigger value="apikeys" className="gap-1.5 text-xs"><Key className="h-3.5 w-3.5 hidden sm:block" /> API Keys</TabsTrigger>
           <TabsTrigger value="credits" className="gap-1.5 text-xs"><Sparkles className="h-3.5 w-3.5 hidden sm:block" /> Credits</TabsTrigger>
           <TabsTrigger value="subscription" className="gap-1.5 text-xs"><CreditCard className="h-3.5 w-3.5 hidden sm:block" /> Plan</TabsTrigger>
@@ -459,6 +463,13 @@ export default function Settings() {
           <LocalReplicaPanel />
           <GitHubSyncSettings />
         </TabsContent>
+
+        {/* ── Google Drive Scans Tab ── */}
+        <TabsContent value="gdrive">
+          <GoogleDriveScans />
+        </TabsContent>
+
+
 
 
         {/* ── API Keys Tab ── */}
