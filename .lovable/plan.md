@@ -51,19 +51,21 @@ Phase 2 ships polling only (simple, correct); Phase 3 adds the webhook and drops
   5. record the row in `gdrive_imports`.
   Guarded by the existing credit `checkBalance`; on 402 the run stops and writes `last_error` instead of looping. Heavy work runs under `EdgeRuntime.waitUntil`, batched (e.g. 10 files per run) so it never times out.
 
-**Cron** — pg_cron every 15 minutes calling `gdrive-sync` with the service-role key, same shape as `github-sync-scheduled`.
+- `gdrive-webhook` (public, `verify_jwt = false`): receives Drive channel notifications. Reads `X-Goog-Channel-ID` / `X-Goog-Channel-Token`, matches them against `gdrive_connections`, rejects unknown or mismatched tokens, updates `last_webhook_at`, and fires a sync run for that one user under `EdgeRuntime.waitUntil`. Always returns 200 fast so Google does not back off. Debounced (skip if a run for that user started in the last ~10 s) since Drive can send bursts.
+- `gdrive-watch-maintenance` (service-role, cron): registers `changes.watch` channels for newly connected users, renews channels within an hour of expiry, and re-registers after webhook failures.
 
-**Frontend** — new `src/components/settings/GoogleDriveScans.tsx` modeled on `GitHubSyncSettings.tsx`, registered in the Integrations overview: connect/disconnect, folder picker, target-folder input, toggles, last-sync status, import log, "Sync now".
+**Scheduling** — two pg_cron jobs: `gdrive-watch-maintenance` every 30 minutes, and `gdrive-sync` every 2 minutes as a backstop that only picks up connections with a stale or missing push channel. Same service-role call shape as `github-sync-scheduled`.
+
+**Frontend** — new `src/components/settings/GoogleDriveScans.tsx` modeled on `GitHubSyncSettings.tsx`, registered in the Integrations overview: connect/disconnect, folder picker, target-folder input, delivery-mode indicator (live push vs polling), last-sync status, import log, "Sync now".
 
 ## Rollout
 
 Phase 1 — connector client setup + `gdrive_connections` / `gdrive_imports` tables + `gdrive-proxy` + settings panel with connect and folder picker.
-Phase 2 — `gdrive-sync` import pipeline with manual "Sync now".
-Phase 3 — pg_cron schedule, import log UI, error surfacing and credit-aware pausing.
+Phase 2 — `gdrive-sync` import pipeline with manual "Sync now" and the 2-minute backstop cron; credit-aware pausing and import log UI.
+Phase 3 — `gdrive-webhook` + `gdrive-watch-maintenance` for near-instant push, with the cron demoted to backstop.
 
-## Open questions
+## Decisions locked in
 
-Answering these before Phase 1 avoids rework; defaults in parentheses are what I'll use otherwise.
-- Images as well as PDFs from the watch folder? (default: PDFs only, image toggle available)
-- One watch folder or several? (default: one, expandable later)
-- After import, leave the file in Drive untouched? (default: yes, read-only scope)
+- Import both PDFs and images.
+- Exactly one watch folder per user.
+- Read-only Drive access; imported files are left untouched in Drive.
