@@ -28,9 +28,9 @@ Phase 2 ships polling only (simple, correct); Phase 3 adds the webhook and drops
 
 1. Settings → Integrations → "Google Drive scans": click Connect, approve Google in a popup.
 2. Pick a Drive folder (browsable list) as the watch folder.
-3. Choose the target note folder, default `auto-import/`, and whether to auto-import PDFs only or images too.
-4. Every ~15 minutes Menerio checks the folder. Each new file becomes a note: attachment stored, text extracted, AI title generated, filed into the chosen folder.
-5. The settings panel shows last sync time, imported count, and a per-file log with errors; a "Sync now" button forces a run.
+3. Choose the target note folder, default `auto-import/`. Both PDFs and images are imported.
+4. Drop a scan into the folder and it shows up in Menerio within seconds: attachment stored, text extracted, AI title generated, filed into the chosen folder.
+5. The settings panel shows connection health (live / falling back to polling), last sync time, imported count, and a per-file log with errors; a "Sync now" button forces a run.
 
 ## Technical design
 
