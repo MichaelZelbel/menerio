@@ -205,6 +205,21 @@ Deno.serve(async (req) => {
         console.error("save_settings failed", error);
         return jsonResponse({ error: "Could not save settings" }, 500);
       }
+      // A new watch folder needs a fresh Drive push channel.
+      if (updates.watch_folder_id !== undefined) {
+        // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
+        EdgeRuntime.waitUntil(
+          fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/gdrive-watch-maintenance`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ user_id: userId, force: true }),
+          }).catch((e) => console.error("watch registration failed", e)),
+        );
+      }
+
       return jsonResponse({ connection: publicConn(await getConn()) });
     }
 
