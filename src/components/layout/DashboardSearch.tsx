@@ -35,11 +35,14 @@ function mergeStable(
 
 const MAX_RESULTS = 8;
 
+type SearchStatus = "idle" | "pending" | "running" | "done";
+
 export function DashboardSearch() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<SemanticSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [status, setStatus] = useState<SearchStatus>("idle");
+  const isSearching = status === "pending" || status === "running";
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
