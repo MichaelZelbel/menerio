@@ -10,6 +10,22 @@
  *     of it ignoring the update because it happens to be focused).
  */
 
+/**
+ * Stable content hash (FNV-1a, hex). Must stay byte-identical to
+ * `hashNoteContent` in `supabase/functions/_shared/note-edit-tools.ts` — the
+ * AI edit guard compares the two to detect real content changes (as opposed to
+ * background jobs bumping `updated_at`).
+ */
+export function hashNoteContent(content: string | null | undefined): string {
+  const s = content ?? "";
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(16)}:${s.length}`;
+}
+
 export const FLUSH_REQUEST_EVENT = "menerio:flush-note-save";
 export const FLUSH_DONE_EVENT = "menerio:flush-note-save-done";
 export const NOTE_UPDATED_EVENT = "menerio:note-updated";

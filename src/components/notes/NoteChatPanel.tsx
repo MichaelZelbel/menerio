@@ -125,6 +125,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         body: {
           note_id: note.id,
           base_updated_at: baseUpdatedAt,
+          base_content_hash: hashNoteContent(note.content ?? ""),
           messages: apiMessages,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
