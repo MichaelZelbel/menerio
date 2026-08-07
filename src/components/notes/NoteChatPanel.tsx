@@ -18,6 +18,7 @@ import {
 } from "@/lib/chat-history";
 import {
   flushNoteSave,
+  hashNoteContent,
   applyNoteEdit,
   type NoteEditPayload,
 } from "@/lib/note-ai-edit";
@@ -120,12 +121,12 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       // Persist any pending autosave first, then tell the agent which version
       // it is editing. If the note changed underneath, its edit tools refuse
       // rather than overwrite.
-      const baseUpdatedAt = await flushNoteSave(note.id);
+      const flushed = await flushNoteSave(note.id);
       const { data, error: fnErr } = await supabase.functions.invoke("note-chat", {
         body: {
           note_id: note.id,
-          base_updated_at: baseUpdatedAt,
-          base_content_hash: hashNoteContent(note.content ?? ""),
+          base_updated_at: flushed.updatedAt,
+          base_content_hash: hashNoteContent(flushed.content ?? note.content ?? ""),
           messages: apiMessages,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },

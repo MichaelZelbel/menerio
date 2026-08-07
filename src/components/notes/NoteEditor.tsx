@@ -789,10 +789,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const handler = async (e: Event) => {
       const detail = (e as CustomEvent<{ noteId?: string; requestId?: string }>).detail;
       if (!detail?.noteId || detail.noteId !== note.id || !detail.requestId) return;
-      const respond = (updatedAt: string | null) =>
+      const respond = (updatedAt: string | null, content: string | null) =>
         window.dispatchEvent(
           new CustomEvent(FLUSH_DONE_EVENT, {
-            detail: { requestId: detail.requestId, noteId: note.id, updatedAt },
+            detail: { requestId: detail.requestId, noteId: note.id, updatedAt, content },
           }),
         );
       try {
@@ -816,7 +816,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
             setSaveStatus("saved");
             setLastSavedAt(Date.now());
-            respond(saved?.updated_at ?? new Date(lastSavedUpdatedAtRef.current).toISOString());
+            respond(
+              saved?.updated_at ?? new Date(lastSavedUpdatedAtRef.current).toISOString(),
+              pending,
+            );
             return;
           } finally {
             savingRef.current = false;
@@ -825,9 +828,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         const latest = lastSavedUpdatedAtRef.current
           ? new Date(lastSavedUpdatedAtRef.current).toISOString()
           : (note.updated_at ?? null);
-        respond(latest);
+        respond(latest, lastSavedContentRef.current ?? note.content ?? null);
       } catch {
-        respond(null);
+        respond(null, null);
       }
     };
     window.addEventListener(FLUSH_REQUEST_EVENT, handler as EventListener);
