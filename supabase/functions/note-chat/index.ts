@@ -256,6 +256,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       mode,
       timezone,
       base_updated_at,
+      base_content_hash,
     } = body;
 
 
@@ -442,7 +443,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // concurrency), the dedupe map, and the before/after content so the client
     // can apply the result and offer an undo.
     const editSession: NoteEditSession | null = isNoteMode
-      ? createNoteEditSession(note_id, base_updated_at)
+      ? createNoteEditSession(note_id, base_updated_at, base_content_hash)
       : null;
 
     // Tool executor closure: web search + MCP passthrough + existing note tools.
