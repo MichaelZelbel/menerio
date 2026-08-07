@@ -94,15 +94,16 @@ export function DashboardSearch() {
     if (!query.trim()) {
       requestIdRef.current += 1;
       setVisible([]);
-      setIsSearching(false);
+      setStatus("idle");
       return;
     }
+
+    setStatus("pending");
 
     const timer = setTimeout(async () => {
       const reqId = ++requestIdRef.current;
       setVisible([]);
-      setIsSearching(true);
-
+      setStatus("running");
 
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
@@ -116,8 +117,8 @@ export function DashboardSearch() {
         commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
       } catch { /* ignore */ }
 
-      if (requestIdRef.current === reqId) setIsSearching(false);
-    }, 250);
+      if (requestIdRef.current === reqId) setStatus("done");
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [query, commit, setVisible]);
