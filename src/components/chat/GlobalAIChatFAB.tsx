@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { flushNoteSave, applyNoteEdit } from "@/lib/note-ai-edit";
+import { flushNoteSave, applyNoteEdit, hashNoteContent } from "@/lib/note-ai-edit";
 
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -241,7 +241,10 @@ export function GlobalAIChatFAB() {
       const chatFn = collectionId ? "collection-chat" : "note-chat";
       // Flush the open editor's pending autosave so the agent edits on top of
       // the user's newest text (and knows which version it is based on).
-      const baseUpdatedAt = noteId && !collectionId ? await flushNoteSave(noteId) : null;
+      const flushed =
+        noteId && !collectionId
+          ? await flushNoteSave(noteId)
+          : { updatedAt: null, content: null };
       const invokeBody = collectionId
         ? {
             collection_id: collectionId,
@@ -251,7 +254,9 @@ export function GlobalAIChatFAB() {
           }
         : {
             note_id: noteId || undefined,
-            base_updated_at: baseUpdatedAt,
+            base_updated_at: flushed.updatedAt,
+            base_content_hash:
+              flushed.content !== null ? hashNoteContent(flushed.content) : undefined,
             person_id: personId || undefined,
             messages: apiMessages,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
