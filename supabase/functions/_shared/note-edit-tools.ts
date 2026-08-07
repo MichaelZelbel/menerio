@@ -17,6 +17,8 @@ export interface NoteEditSession {
   noteId: string;
   /** `updated_at` (ms) the client editor last persisted; 0 = unknown. */
   baseUpdatedAt: number;
+  /** Hash of the content the client editor was showing at turn start. */
+  baseContentHash: string | null;
   /** Content before the first successful write of this turn. */
   originalContent: string | null;
   /** Content after the last successful write of this turn. */
@@ -27,9 +29,25 @@ export interface NoteEditSession {
   didWrite: boolean;
 }
 
+/**
+ * Stable, dependency-free content hash (FNV-1a, hex). The client uses the same
+ * algorithm so we can tell "the text actually changed" apart from "some
+ * background job bumped updated_at".
+ */
+export function hashNoteContent(content: string | null | undefined): string {
+  const s = content ?? "";
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(16)}:${s.length}`;
+}
+
 export function createNoteEditSession(
   noteId: string,
   baseUpdatedAt?: string | number | null,
+  baseContentHash?: string | null,
 ): NoteEditSession {
   const base =
     typeof baseUpdatedAt === "number"
@@ -40,6 +58,7 @@ export function createNoteEditSession(
   return {
     noteId,
     baseUpdatedAt: Number.isFinite(base) ? base : 0,
+    baseContentHash: baseContentHash || null,
     originalContent: null,
     finalContent: null,
     finalUpdatedAt: null,
@@ -217,13 +236,20 @@ export async function executeNoteEditTool(
   const current = await loadNote(db, userId, noteId);
   if (!current) return JSON.stringify({ error: "Note not found" });
 
-  // ---- Optimistic concurrency (only for the first write of the turn) -----
+  // ---- Optimistic concurrency ------------------------------------------
+  // Only destructive-capable writes are guarded. Appends and unanchored
+  // inserts can never remove text, so they always proceed on top of the
+  // freshly loaded content. For the guarded tools we compare CONTENT, not the
+  // row timestamp: background jobs (metadata extraction, smart titles,
+  // embeddings, lexicon sync) bump `updated_at` without touching the text.
   const currentTs = new Date(current.updated_at).getTime();
-  if (
-    !session.didWrite &&
-    session.baseUpdatedAt > 0 &&
-    currentTs > session.baseUpdatedAt + 1000
-  ) {
+  const isDestructiveCapable =
+    name === "replace_in_note" ||
+    (name === "insert_into_note" && typeof args.after_text === "string" && !!args.after_text);
+  const contentMoved = session.baseContentHash
+    ? hashNoteContent(current.content) !== session.baseContentHash
+    : session.baseUpdatedAt > 0 && currentTs > session.baseUpdatedAt + 1000;
+  if (!session.didWrite && isDestructiveCapable && contentMoved) {
     const result = {
       error: "stale",
       message:
