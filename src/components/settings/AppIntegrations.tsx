@@ -74,6 +74,38 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Only allow public HTTPS webhook targets. Prevents storing internal/loopback/
+ * link-local addresses that the server would later fetch (SSRF).
+ */
+function isSafeWebhookUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.username || parsed.password) return false;
+  const h = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h) return false;
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return false;
+  if (h === "metadata.google.internal" || h === "instance-data") return false;
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 10 || a === 127 || a === 0) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+  }
+  if (h.includes(":")) return false; // no literal IPv6 targets
+  return true;
+}
+
+
 export function AppIntegrations() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -105,6 +137,9 @@ export function AppIntegrations() {
       const apiKey = generateApiKey();
       const keyPrefix = apiKey.slice(0, 12);
       const webhookUrl = `${known.supabaseUrl}${known.webhookPath}`;
+      if (!isSafeWebhookUrl(webhookUrl)) {
+        throw new Error("This app's webhook URL is not allowed (public HTTPS addresses only).");
+      }
       const { error } = await supabase.from("connected_apps" as any).insert({
         user_id: user!.id,
         app_name: known.id,

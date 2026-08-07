@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isSafeOutboundUrl, safeWebhookPost } from "../_shared/ssrf-guard.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -83,6 +84,12 @@ Deno.serve(async (req: Request) => {
     if (!app.webhook_url) {
       return json({ error: "App unterstützt keine Patch-Requests (keine webhook_url konfiguriert)" }, 400);
     }
+    if (!isSafeOutboundUrl(app.webhook_url)) {
+      return json(
+        { error: "Die konfigurierte webhook_url ist nicht erlaubt (nur öffentliche HTTPS-Adressen)." },
+        400,
+      );
+    }
 
     // --- Set sync_status to pending ---
     await supabaseAdmin
@@ -103,19 +110,14 @@ Deno.serve(async (req: Request) => {
 
     let webhookOk = false;
     try {
-      const res = await fetch(app.webhook_url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(patchPayload),
-      });
-      webhookOk = res.ok;
+      const res = await safeWebhookPost(app.webhook_url, JSON.stringify(patchPayload));
+      webhookOk = !!res?.ok;
       // Consume body to prevent resource leak
-      await res.text();
+      if (res) await res.text();
     } catch {
       webhookOk = false;
     }
+
 
     if (!webhookOk) {
       // Owner app unreachable — mark rejected
