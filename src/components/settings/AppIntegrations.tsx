@@ -137,6 +137,9 @@ export function AppIntegrations() {
       const apiKey = generateApiKey();
       const keyPrefix = apiKey.slice(0, 12);
       const webhookUrl = `${known.supabaseUrl}${known.webhookPath}`;
+      if (!isSafeWebhookUrl(webhookUrl)) {
+        throw new Error("This app's webhook URL is not allowed (public HTTPS addresses only).");
+      }
       const { error } = await supabase.from("connected_apps" as any).insert({
         user_id: user!.id,
         app_name: known.id,
