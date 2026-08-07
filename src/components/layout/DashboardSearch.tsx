@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, FileText, Loader2, Sparkles, Image } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIlikeSearch, useSemanticSearch, type SemanticSearchResult } from "@/hooks/useNotes";
 
 /**
@@ -35,11 +36,14 @@ function mergeStable(
 
 const MAX_RESULTS = 8;
 
+type SearchStatus = "idle" | "pending" | "running" | "done";
+
 export function DashboardSearch() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<SemanticSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [status, setStatus] = useState<SearchStatus>("idle");
+  const isSearching = status === "pending" || status === "running";
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -91,15 +95,16 @@ export function DashboardSearch() {
     if (!query.trim()) {
       requestIdRef.current += 1;
       setVisible([]);
-      setIsSearching(false);
+      setStatus("idle");
       return;
     }
+
+    setStatus("pending");
 
     const timer = setTimeout(async () => {
       const reqId = ++requestIdRef.current;
       setVisible([]);
-      setIsSearching(true);
-
+      setStatus("running");
 
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
@@ -113,8 +118,8 @@ export function DashboardSearch() {
         commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
       } catch { /* ignore */ }
 
-      if (requestIdRef.current === reqId) setIsSearching(false);
-    }, 250);
+      if (requestIdRef.current === reqId) setStatus("done");
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [query, commit, setVisible]);
@@ -169,11 +174,21 @@ export function DashboardSearch() {
           onMouseEnter={() => { isHoveringRef.current = true; }}
           onMouseLeave={flushPending}
         >
-          {results.length === 0 && !isSearching && (
+          {results.length === 0 && status === "done" && (
             <p className="text-sm text-muted-foreground text-center py-6">No results found</p>
           )}
           {results.length === 0 && isSearching && (
-            <p className="text-sm text-muted-foreground text-center py-6">Searching…</p>
+            <div className="py-2">
+              <p className="flex items-center justify-center gap-2 px-3 pb-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Searching your notes…
+              </p>
+              <div className="space-y-2 px-3 pb-2">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-4" style={{ width: `${80 - i * 15}%` }} />
+                ))}
+              </div>
+            </div>
           )}
           {results.length > 0 && (
             <div className="max-h-[320px] overflow-y-auto">
