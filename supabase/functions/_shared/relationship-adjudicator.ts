@@ -80,6 +80,8 @@ export async function adjudicateRelationship(args: {
   db: any;
   userId: string;
   candidate: RelationshipCandidate;
+  /** Called when the LLM judge itself could not be reached (credit limit, network, 5xx). */
+  onJudgeUnavailable?: (error: unknown) => void;
 }): Promise<RelationshipAdjudication> {
   const deterministic = deterministicRejection(args.candidate);
   if (deterministic) return deterministic;
