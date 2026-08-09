@@ -312,6 +312,10 @@ export default function ReviewQueue() {
         return relationshipPairKey(user!.id, ra, rb, r.label) === pairKey;
       });
 
+      // The person is explicitly confirming this item, so it is exempt from
+      // the evidence gate — but when the suggestion carried a source quote we
+      // keep it, so the row can always be traced back to a note.
+      const confirmedQuote = String((item.payload as any)?.evidence_quote || "").trim();
       let insertedId: string | null = dup?.id ?? null;
       if (!dup) {
         const { data: inserted, error } = await supabase
@@ -324,6 +328,9 @@ export default function ReviewQueue() {
             target_id: target_id || null,
             label: canonical,
             custom_label: custom_label || null,
+            origin: confirmedQuote.length >= 10 ? "review_queue" : "user_manual",
+            evidence_quote: confirmedQuote || null,
+            evidence_note_id: (item.payload as any)?.note_id || item.source_note_id || null,
           })
           .select("id")
           .single();
