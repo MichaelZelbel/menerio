@@ -16,6 +16,8 @@ import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
 import { ConversationTab } from "@/components/people/ConversationTab";
+import { ProfileHealthChip } from "@/components/people/ProfileHealthChip";
+
 import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
 import { PersonGroupsTab } from "@/components/people/PersonGroupsTab";
