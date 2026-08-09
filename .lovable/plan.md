@@ -1,47 +1,51 @@
-# Why your profile shows people you have no relationship with
+# A profile correctness system for every person in Menerio
 
-## What I actually checked this time
+Not a cleanup of one account. A permanent mechanism that governs every profile — every user, every contact, every relationship row — so that only accurate, evidenced, sensible entries can exist and stay.
 
-I read your 18 stored relationship rows and the table definition before writing this. Three concrete facts:
+## The structural defect that lets junk into any profile
 
-1. **Every one of your 18 relationship rows has no evidence attached, and every one claims `origin = 'user'`.** The reason is a single line in the table definition: `origin` has the default value `'user'`. The evidence gate only demands a source quote when `origin` is *not* `'user'` — so any AI writer that simply does not set the column is silently recorded as "the user typed this by hand" and skips the gate entirely. That is why `friend: Shoko` and `manager: Gunther Reinhard` are on your profile: nothing wrote them with your consent, and nothing can now tell them apart from rows you really did enter.
+Verified in the schema before writing this: `contact_relationships.origin` has the column default `'user'`, and the evidence trigger only demands a source quote when `origin` is not `'user'`. Any writer — AI extractor, importer, lexicon enricher, review-queue applier — that omits the column is recorded as "a human typed this" and skips the gate. That is not a bug in one account; it is a hole every profile in the system falls through. A second defect: bond collapse keys invert gendered kin terms to neutral ones (`stepfather` → `stepchild`, `stepson` → `stepparent`), so the two stored halves of a single bond never match and every mirrored bond renders twice, for everyone.
 
-2. **The duplicate pairs are a key-matching bug, not a data bug.** You have `Jürgen -> stepfather -> me` and `me -> stepson -> Jürgen`. The collapse key inverts `stepfather` to `stepchild` and `stepson` to `stepparent` — two different strings — so the two halves of one bond never match and both render. Same for `me -> son -> Brigitte` / `Brigitte -> mother -> me`, which is why you see both `mother: Brigitte` and `parent: Brigitte`.
+## The mechanism
 
-3. **`manager: Gunther Reinhard` is classified professional and still rendered in the same list** as your mother and your wife, with no separation, so a work reporting line reads as a personal relationship.
+### 1. Provenance is mandatory, system-wide
+- Remove the `'user'` default. A row with no declared origin is rejected by the database.
+- Exactly one origin is gate-exempt: `user_manual`, writable only by an authenticated end-user action through the profile UI.
+- Every machine origin (`ai_note`, `ai_moment`, `ai_lexicon`, `import`, `review_queue`, `mcp`, `api`) must carry a source quote and a source id, enforced by trigger. No code path can opt out, now or later.
+- The same rule is extended to `profile_entries`: machine-written facts carry provenance or are rejected.
 
-## Why my previous "done" claims were worthless
+### 2. One admission gate every writer must pass
+A single adjudicator module decides whether any profile fact or relationship may exist. It enforces, for all profiles:
+- **Closed vocabulary** — a role must resolve to a known family, social, or professional term. Unknown labels are refused, not stored and cleaned later.
+- **Evidence** — machine claims need a verbatim span from a real note or moment, with a minimum length and a check that the span actually contains both the subject and the claim.
+- **Sanity** — no self-edges, no placeholder values, no label-as-value, no cross-language duplicates of an existing fact.
+Every writer (`process-note`, moment extraction, lexicon enrichment, review-queue apply, imports, MCP, Hub API, the UI hook) routes through it. A mirror test fails the build if any writer bypasses it or if the frontend and edge copies of the gate drift apart.
 
-I verified against the database and unit tests, never against the rendered rows, and the database looked fine because bad rows were wearing an `origin = 'user'` badge. I also never asked the obvious human question — *does this person belong on this list at all* — which is the only question that mattered. Fixed below by making the check operate on your real 18 rows and print them.
+### 3. Correct rendering as a system property
+- Kin roles normalise to a neutral bond key on both sides before collapse, so one bond is always one row on any profile.
+- Rows render from the viewing profile's perspective, using the other person's gender facts only, never a guess from a name.
+- Professional roles render under their own subheading, never mixed into family and friends, on every profile.
 
-## What gets built
+### 4. Continuous reconciliation across all accounts
+A scheduled reconciler sweeps every profile in the system, not one account:
+- Auto-repairs what is mechanically decidable: duplicate rows, mirrored duplicates, unknown-vocabulary rows with no evidence, orphan edges pointing at merged or deleted contacts, contact records that duplicate the account owner.
+- Sends what needs a human to that user's Review Queue as a single batched pass — Keep / Remove / Correct — with the source note shown when one exists.
+- Runs in the background per user so it cannot time out, and records what it changed.
 
-### 1. Kill the provenance loophole
-- Drop the `'user'` default on `origin`. Every writer must state who it is; a row with no stated origin is rejected outright.
-- The profile UI form stamps `origin = 'user_manual'`. Everything else (`ai_note`, `ai_moment`, `ai_lexicon`, `import`, `review_queue`) is required by the trigger to carry a source quote and a note id.
-- Backfill: all 18 existing rows become `origin = 'unverified'`, because none of them can honestly claim you entered them.
+### 5. Legacy rows cannot masquerade as user-entered
+Every existing relationship and machine-written fact across all accounts is re-stamped `unverified`, because none of them can honestly claim a human entered them. Unverified rows render dimmed and marked, and each user gets one **Review relationships** pass to confirm, correct, or drop them. Nothing silently disappears; nothing unverified silently stays.
 
-### 2. Confirm-or-drop pass over the existing 18
-Unverified rows do not silently disappear and do not silently stay. The Relationships card shows them dimmed with an "Unconfirmed" marker and a single **Review relationships** action that walks you through all of them in one pass — Keep / Remove / Fix the label — and for each one shows the note it most likely came from, if any can be found. After the pass, unconfirmed rows are gone from the profile; only confirmed ones remain.
+### 6. Health surfacing
+Each profile shows an outstanding-violations chip linking into the review pass, and admins get a system-wide violation count by type, so the health of the whole corpus is visible rather than assumed.
 
-### 3. Fix the collapse so one bond is one row
-Pair keys normalise family roles to a neutral family term on both sides (`stepfather`/`stepson`/`stepparent`/`stepchild` all key to one step-parent bond; `son`/`mother`/`parent`/`child` to one parent bond) before comparing. Result on your profile: Jürgen once, Brigitte once, rendered from your point of view (`Stepfather: Jürgen Skoppek`, `Mother: Brigitte`).
-
-### 4. Separate professional from personal
-Work roles (`manager`, `colleague`, `client`, `advisor`) render under their own **Work & professional** subheading inside the card, never mixed into family and friends, and are excluded from the relationship-status summary.
-
-### 5. Duplicate contacts that pollute both sides
-`Xihui -> spouse -> michael` and `Yumei -> partner -> michael` point at a contact record named `michael` that is you. Those get re-pointed to `self` and de-duplicated against the rows you already have, so your wife's profile stops listing a stranger who is you.
-
-### 6. The check I run before saying anything is done
-A render test that feeds the component your **actual 18 production rows** and prints the resulting lines. It fails if any line is unevidenced-and-unconfirmed, any person appears twice, any professional role sits in the personal list, or any line reads in the inverse direction. I paste the printed lines in my reply. If a line looks wrong to a human, it is not done.
-
-Note on live verification: this project is on an external Supabase, so the preview sign-in cannot inject a session for me — I cannot log into your account myself. The render test above uses your real rows, which is the closest honest substitute. If you would rather I drive the real UI, a throwaway test account with the same fixtures works and I will screenshot it.
+### 7. What "done" means here
+An acceptance suite that runs against real rows drawn from multiple accounts and fails on: any displayed row without evidence or user confirmation, any person rendered twice on one profile, any professional role inside the personal list, any inverse-direction line, any unknown-vocabulary label, any writer that can insert without passing the gate. The suite output is pasted in the completion message. A failing line means not done.
 
 ## Technical notes
 
-- Migration: `ALTER TABLE contact_relationships ALTER COLUMN origin DROP DEFAULT`; update `relationship_require_evidence()` to accept only `user_manual` as gate-exempt and to reject `NULL`/unknown origins; backfill existing rows to `unverified`.
-- `src/lib/relationship-canonical.ts`: add `familyBondKey()` used by `relationshipPairKey` so gendered and neutral kin terms share one key; `inverseLabel` stays as-is for display.
-- `src/components/people/RelationshipsSection.tsx`: professional subheading, unconfirmed styling, review-pass entry point.
-- `src/hooks/useContactRelationships.ts`: stamp `origin: 'user_manual'` on manual writes.
-- New `src/components/people/__tests__/relationship-render.test.tsx` holding the 18-row fixture snapshot, plus `scripts/audit-relationships.ts` extended with the confirmed/professional/duplicate assertions.
+- Migration: drop `origin` default; rewrite `relationship_require_evidence()` to reject NULL/unknown origins and exempt only `user_manual`; equivalent provenance trigger on `profile_entries`; backfill all machine rows to `unverified`.
+- `supabase/functions/_shared/relationship-adjudicator.ts` becomes the sole write path; `_shared/profile-integrity.ts` and `src/lib/profile-integrity.ts` keep their marker-delimited shared core with a mirror test.
+- `relationship-canonical.ts` (both copies): add `familyBondKey()` used by `relationshipPairKey`.
+- `RelationshipsSection.tsx`: professional subheading, unverified styling, review-pass entry.
+- `profile-lint` gains all-users scope, auto-repair vs needs-review classification, `EdgeRuntime.waitUntil` execution, and a nightly `pg_cron` schedule.
+- Rollout order: gate + provenance triggers → writer re-routing → render fix → backfill/re-stamp → reconciler + cron → review pass UI → acceptance suite.
