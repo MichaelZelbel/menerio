@@ -85,7 +85,7 @@ describe("CompactCategorySection — empty custom category affordance (regressio
     renderSection({ entries: [entry()] });
     expect(screen.queryByText("No facts yet — add one")).not.toBeInTheDocument();
     expect(
-      screen.getByText((_, el) => /^favorite color:$/i.test(el?.textContent?.trim() ?? "") && el?.tagName === "SPAN"),
+      screen.getByText((_, el) => /^favorite colors?:$/i.test(el?.textContent?.trim() ?? "") && el?.tagName === "SPAN"),
     ).toBeInTheDocument();
   });
 });
