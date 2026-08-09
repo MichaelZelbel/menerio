@@ -147,9 +147,14 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       label: formLabel,
     });
     if (!decision.ok) {
-      showToast.error("This relationship cannot be saved");
+      showToast.error(
+        decision.reason === "unrecognized_relationship_label"
+          ? "That is not a relationship — pick a family, social or professional role"
+          : "This relationship cannot be saved",
+      );
       return;
     }
+
 
     upsertRelationship.mutate(
       {
