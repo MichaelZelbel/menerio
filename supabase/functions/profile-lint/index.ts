@@ -37,12 +37,17 @@ function json(body: unknown, status = 200) {
 }
 
 async function authenticate(req: Request): Promise<{ userId: string | null; isService: boolean }> {
+  // Nightly cron authenticates with a dedicated shared key, never the service role key.
+  const cronKey = Deno.env.get("PROFILE_LINT_CRON_KEY") || "";
+  const presented = req.headers.get("x-cron-key") || "";
+  if (cronKey && presented && presented === cronKey) return { userId: null, isService: true };
   const auth = req.headers.get("Authorization");
   if (!auth) return { userId: null, isService: false };
   const token = auth.replace(/^Bearer\s+/i, "");
   if (serviceRoleKey && token === serviceRoleKey) return { userId: null, isService: true };
   const { data } = await admin.auth.getUser(token);
   return { userId: data.user?.id ?? null, isService: false };
+
 }
 
 const ROMANTIC = new Set(["wife", "husband", "spouse", "partner", "lover"]);
