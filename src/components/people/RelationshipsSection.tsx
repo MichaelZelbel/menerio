@@ -374,48 +374,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       )}
 
 
-      {/* Professional and service roles are real, but they are not family or
-          friends — they never mix into the personal list. */}
-      {expanded && professionalRows.length > 0 && (
-        <div className="border-t border-border">
-          <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            Professional &amp; service contacts
-          </div>
-          {professionalRows.map(({ rel, description, otherContactId, otherIsSelf }) => (
-            <ProfileRow
-              key={rel.id}
-              label={description.role}
-              actions={
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => handleDelete(rel.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              }
-            >
-              {otherIsSelf ? (
-                <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
-                  {description.otherName}
-                </Link>
-              ) : otherContactId ? (
-                <Link to={`/dashboard/people/${otherContactId}`} className="text-sm hover:underline break-words">
-                  {description.otherName}
-                </Link>
-              ) : (
-                <span className="text-sm break-words">{description.otherName}</span>
-              )}
-            </ProfileRow>
-          ))}
-        </div>
-      )}
-
-
-      {expanded && rows.length === 0 && professionalRows.length === 0 && !adding && (
+      {expanded && rows.length === 0 && !adding && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
           <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
