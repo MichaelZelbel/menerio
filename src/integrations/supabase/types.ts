@@ -3728,6 +3728,7 @@ export type Database = {
         Args: { subset: string; superset: string }
         Returns: boolean
       }
+      relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
       relationship_inverse_label: { Args: { p: string }; Returns: string }
       relationship_is_bond: { Args: { p: string }; Returns: boolean }
