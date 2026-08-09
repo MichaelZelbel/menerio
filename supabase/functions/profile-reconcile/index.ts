@@ -264,8 +264,10 @@ async function reconcileUser(db: any, userId: string) {
   const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
   for (const rel of candidates) {
-    const alreadyVerified = rel.origin === "user_manual" || (rel.origin !== "unverified" && !!rel.evidence_quote);
-    if (alreadyVerified) {
+    // Manual rows and legacy rows are the user's own history. They are shown
+    // as-is and are never deleted or re-judged by a sweep; the user confirms or
+    // removes them in the UI.
+    if (TRUSTED_ORIGINS.has(String(rel.origin || "")) || !!rel.evidence_quote) {
       verified.push(rel);
       continue;
     }
@@ -274,12 +276,11 @@ async function reconcileUser(db: any, userId: string) {
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
 
-    // Relationship rows are evidence-backed at write time. Legacy rows without
-    // a source note cannot be rehabilitated by searching arbitrary mentions:
-    // proximity is not evidence. Remove them deterministically.
+    // A newly written automated row must carry its source. Without one there is
+    // nothing to judge, so it is quarantined as legacy rather than deleted.
     if (!rel.evidence_note_id || !rel.evidence_quote) {
-      await drop([rel.id]);
-      stats.relationships_deleted_unevidenced += 1;
+      await db.from("contact_relationships").update({ origin: "unverified" }).eq("id", rel.id);
+      verified.push({ ...rel, origin: "unverified" });
       continue;
     }
 
@@ -290,10 +291,11 @@ async function reconcileUser(db: any, userId: string) {
       .eq("user_id", userId)
       .maybeSingle();
     if (!sourceNote || !exactQuoteExists(String(sourceNote.content || ""), rel.evidence_quote)) {
-      await drop([rel.id]);
-      stats.relationships_deleted_unevidenced += 1;
+      await db.from("contact_relationships").update({ origin: "unverified" }).eq("id", rel.id);
+      verified.push({ ...rel, origin: "unverified" });
       continue;
     }
+
 
     if (llmBudget <= 0) break;
     llmBudget -= 1;
