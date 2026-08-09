@@ -87,7 +87,7 @@ export async function adjudicateRelationship(args: {
       db: args.db,
       userId: args.userId,
       callSite: "relationship.adjudication",
-      defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 1200 },
+      defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 2000 },
       messages: [{ role: "user", content: JSON.stringify(args.candidate) }],
       callOptions: { response_format: { type: "json_object" } },
       // Reconciliation is a platform integrity task, like moderation. It must
@@ -157,7 +157,7 @@ export async function recoverRelationshipEvidence(args: {
         provider: "openrouter",
         model: "deepseek/deepseek-v4-flash",
         temperature: 0,
-        maxTokens: 500,
+        maxTokens: 2000,
         systemPrompt: RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT,
       },
       messages: [{
