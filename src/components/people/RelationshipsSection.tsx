@@ -205,9 +205,10 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
-  // Keep each relationship to a distinct person. Only exact duplicate role rows
-  // collapse; multiple romantic relationships remain visible independently.
-  const rows = useMemo(() => {
+  // One row per (person, bond). Both stored directions of the same bond
+  // ("Jürgen is my stepfather" + "I am Jürgen's stepson") collapse into the
+  // single row that reads correctly from the viewed person's perspective.
+  const { personalRows, professionalRows } = useMemo(() => {
     const described = relationships.map((rel) => {
       const otherIsSelf =
         contactId === null
@@ -240,18 +241,37 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         otherGender: genderOf(otherKey),
       });
 
-      return { rel, description, otherKey, otherContactId, otherIsSelf };
+      const bondKey = rel.custom_label?.trim()
+        ? `${otherKey}|custom|${rel.custom_label.trim().toLowerCase()}`
+        : relationshipPairKey(
+            user?.id || "",
+            { type: rel.source_type as "contact" | "self", id: rel.source_id },
+            { type: rel.target_type as "contact" | "self", id: rel.target_id },
+            rel.label,
+          );
+
+      return { rel, description, otherKey, otherContactId, otherIsSelf, bondKey };
     });
 
-    const seen = new Set<string>();
-    return described.filter((row) => {
-      const role = (row.rel.custom_label || row.rel.label || row.description.role).trim().toLowerCase();
-      const dedupKey = `${row.otherKey}|${role}`;
-      if (seen.has(dedupKey)) return false;
-      seen.add(dedupKey);
-      return true;
-    });
-  }, [relationships, contactId, myName, genderByPerson]);
+    // Prefer the stored direction where the viewed person is the TARGET: its
+    // label already names the other person's role, so no inversion is needed.
+    const byBond = new Map<string, (typeof described)[number]>();
+    for (const row of described) {
+      const existing = byBond.get(row.bondKey);
+      if (!existing || (existing.description.viewingIsSource && !row.description.viewingIsSource)) {
+        byBond.set(row.bondKey, row);
+      }
+    }
+
+    const all = Array.from(byBond.values()).filter((r) => r.description.kind !== "other");
+    return {
+      personalRows: all.filter((r) => r.description.kind === "personal"),
+      professionalRows: all.filter((r) => r.description.kind === "professional"),
+    };
+  }, [relationships, contactId, myName, genderByPerson, user?.id]);
+
+  const rows = personalRows;
+
 
   if (isLoading) return null;
 
