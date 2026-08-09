@@ -151,3 +151,6 @@ verify_jwt = false
 
 [functions.profile-lint]
 verify_jwt = false
+
+[functions.normalize-profile]
+verify_jwt = false
