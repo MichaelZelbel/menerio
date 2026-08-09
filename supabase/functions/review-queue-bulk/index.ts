@@ -9,6 +9,7 @@
 // the client polls every couple of seconds.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { isBlockedRelationshipLabel } from "../_shared/profile-integrity.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "npm:zod@3.23.8";
 
@@ -371,16 +372,21 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       return;
     }
     case "add_relationship": {
+      const label = String(p.label || "").trim();
+      if (isBlockedRelationshipLabel(label)) {
+        await markKept();
+        return;
+      }
       const { data: inserted, error } = await db.from("contact_relationships").insert({
         user_id: userId,
         source_type: p.source_type,
         source_id: p.source_id || null,
         target_type: p.target_type,
         target_id: p.target_id || null,
-        label: String(p.label || "").trim().toLowerCase(),
+        label,
         custom_label: p.custom_label || null,
       }).select("id").single();
-      if (error && !String(error.message || "").includes("uq_contact_relationship")) throw error;
+      if (error) throw error;
       await markKept(inserted?.id ? { target_entity_type: "relationship", target_entity_id: inserted.id, applied_at: now } : undefined);
       return;
     }

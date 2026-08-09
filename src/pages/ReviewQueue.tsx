@@ -21,6 +21,7 @@ import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
 import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
+import { relationshipWriteDecision } from "@/lib/profile-integrity";
 import {
   UserPlus,
   Link2,
@@ -276,7 +277,20 @@ export default function ReviewQueue() {
     const { source_type, source_id, target_type, target_id, label, custom_label, inverse_label, inverse_source_type, inverse_source_id, inverse_target_type, inverse_target_id, contact_name_a, contact_name_b } = item.payload as any;
 
     try {
-      const canonical = canonicalLabel(label) || String(label || "").trim().toLowerCase();
+      const decision = relationshipWriteDecision({
+        userId: user!.id,
+        sourceType: source_type,
+        sourceId: source_id || null,
+        targetType: target_type,
+        targetId: target_id || null,
+        label: String(label || ""),
+      });
+      if (decision.ok === false) {
+        showToast.info("This relationship was rejected as invalid");
+        updateStatus.mutate({ id: item.id, status: "removed" });
+        return;
+      }
+      const canonical = decision.label;
       const aRef: EntityRef = { type: source_type, id: source_id || null };
       const bRef: EntityRef = { type: target_type, id: target_id || null };
       const pairKey = relationshipPairKey(user!.id, aRef, bRef, canonical);

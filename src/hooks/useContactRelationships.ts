@@ -110,7 +110,7 @@ export function useContactRelationships(contactId: string | null) {
          targetId: data.target_id,
          label: data.label,
        });
-       if (!decision.ok) throw new Error(decision.reason);
+       if (decision.ok === false) throw new Error(decision.reason);
        const canonical = decision.label;
        const aRef: EntityRef = { type: data.source_type as "contact" | "self", id: data.source_id };
        const bRef: EntityRef = { type: data.target_type as "contact" | "self", id: data.target_id };
