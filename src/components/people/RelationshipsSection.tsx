@@ -5,7 +5,7 @@ import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+
 import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
 import { ALL_RELATIONSHIP_LABELS, getInverseLabel, impliedGenderFromLabel } from "@/lib/relationship-labels";
 import {
@@ -322,13 +322,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   const rows = personalRows;
   if (isLoading) return null;
 
-  // Neutral summary: never infer exclusivity or monogamy from stored edges.
-  const derivedStatus = (() => {
-    const labels = relationships.map((r) => canonicalLabel(r.custom_label || r.label));
-    if (labels.some((l) => l === "spouse" || l === "husband" || l === "wife")) return "Married";
-    if (labels.some((l) => l === "partner" || l === "lover")) return "Romantic relationships";
-    return null;
-  })();
+
+
 
   return (
     <>
@@ -346,12 +341,10 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </button>
         <Users className="h-4 w-4 text-muted-foreground shrink-0" />
         <span className="font-medium text-sm flex-1 truncate">Relationships</span>
-        {derivedStatus && (
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-            {derivedStatus}
-          </Badge>
-        )}
-        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
+        <span className="text-xs text-muted-foreground shrink-0">
+          {rows.length === 1 ? "1 person" : `${rows.length} people`}
+        </span>
+
         {!adding && (
           <Button
             variant="ghost"
