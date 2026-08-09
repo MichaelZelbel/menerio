@@ -276,7 +276,10 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                 setMergeOpen(true);
               }}
             />
+
+            <ProfileHealthChip contactId={person.id} />
           </div>
+
 
           <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
             <TabsList className="flex flex-wrap h-auto">
