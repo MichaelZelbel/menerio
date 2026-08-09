@@ -654,9 +654,11 @@ async function run(userId: string, contactId: string) {
           label: String(p.label || ""),
         });
         if (relationshipDecision.ok === false) { prepared.push({ ...s, status: "removed" }); continue; }
+        const relEvidenceQuote = String((p as any).evidence_quote || "").trim();
+        if (relEvidenceQuote.length < 10) { prepared.push({ ...s, status: "pending_review" }); continue; }
         const { data, error } = await supabase
           .from("contact_relationships")
-          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: relationshipDecision.label })
+          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: relationshipDecision.label, origin: "ai", evidence_quote: relEvidenceQuote, evidence_note_id: (p as any).note_id || null })
           .select("id")
           .single();
         if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }

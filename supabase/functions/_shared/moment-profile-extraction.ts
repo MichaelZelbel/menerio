@@ -287,6 +287,8 @@ async function prepareForInsert(
         label: p.label,
       });
       if (relationshipDecision.ok === false) return { ...s, status: "removed" };
+      const evidenceQuote = String(p.evidence_quote || "").trim();
+      if (evidenceQuote.length < 10) return { ...s, status: "pending_review" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({
@@ -297,6 +299,9 @@ async function prepareForInsert(
           target_id: p.target_id || null,
           label: relationshipDecision.label,
           custom_label: p.custom_label || null,
+          origin: "ai",
+          evidence_quote: evidenceQuote,
+          evidence_note_id: p.note_id || null,
         })
         .select("id")
         .single();
