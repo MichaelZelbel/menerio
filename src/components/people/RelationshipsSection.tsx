@@ -292,6 +292,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   }, [relationships, contactId, myName, genderByPerson, user?.id]);
 
   const rows = personalRows;
+  const unverifiedCount = [...personalRows, ...professionalRows].filter((r) => isUnverified(r.rel)).length;
 
 
   if (isLoading) return null;
@@ -321,6 +322,11 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         {derivedStatus && (
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
             {derivedStatus}
+          </Badge>
+        )}
+        {unverifiedCount > 0 && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground">
+            {unverifiedCount} to review
           </Badge>
         )}
         <span className="text-xs text-muted-foreground shrink-0">{rows.length + professionalRows.length}</span>
