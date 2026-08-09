@@ -86,12 +86,10 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 }
 
 /**
- * Contact-only replacement for CategorySection: rendered for categories
- * that have entries, plus empty custom (non-taxonomy) categories — see
- * `isCategorySectionVisible` in the caller — default-expanded, with a
- * compact one-line-per-entry list instead of always-visible add forms. An
- * empty section shows a "no facts yet" hint with its own Add affordance so
- * a newly created custom category is never a dead end.
+ * The single profile section renderer, used by both contact profiles and the
+ * user's own profile: default-expanded, one compact `Label: value` row per
+ * entry. An empty section shows a "no facts yet" hint with its own Add
+ * affordance so a newly created custom category is never a dead end.
  */
 export function CompactCategorySection({
   category,
@@ -103,6 +101,8 @@ export function CompactCategorySection({
   onTogglePin,
   onUpdateCategory,
   onDeleteCategory,
+  allowPin = true,
+  showScope = false,
 }: CompactCategorySectionProps) {
   const [expanded, setExpanded] = useState(true);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
