@@ -46,7 +46,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
-const MAX_LLM_ROWS_PER_USER = 2;
+const MAX_LLM_ROWS_PER_USER = 4;
 /** Candidate notes inspected per relationship before it is declared unevidenced. */
 const MAX_NOTES_PER_ROW = 4;
 
