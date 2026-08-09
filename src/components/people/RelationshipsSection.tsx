@@ -229,7 +229,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // One row per (person, bond). Both stored directions of the same bond
   // ("Jürgen is my stepfather" + "I am Jürgen's stepson") collapse into the
   // single row that reads correctly from the viewed person's perspective.
-  const { personalRows, professionalRows } = useMemo(() => {
+  const { personalRows, professionalRows, unconfirmedRows } = useMemo(() => {
     const described = relationships.map((rel) => {
       const otherIsSelf =
         contactId === null
