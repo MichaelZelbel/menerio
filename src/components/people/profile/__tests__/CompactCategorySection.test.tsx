@@ -22,8 +22,6 @@ const category = (over: Partial<ProfileCategory> = {}): ProfileCategory => ({
   visibility_scope: "all",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-  origin: "user_manual",
-  evidence_quote: null,
   ...over,
 });
 
@@ -38,6 +36,8 @@ const entry = (over: Partial<ContactProfileEntry> = {}): ContactProfileEntry => 
   sort_order: 0,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  origin: "user_manual",
+  evidence_quote: null,
   ...over,
 });
 
