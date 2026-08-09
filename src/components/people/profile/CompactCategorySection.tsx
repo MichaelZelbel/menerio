@@ -213,6 +213,24 @@ export function CompactCategorySection({
             >
               <Pencil className="h-3.5 w-3.5 mr-2" /> Rename category
             </DropdownMenuItem>
+            {showScope && (
+              <>
+                <DropdownMenuSeparator />
+                {SCOPE_OPTIONS.map((o) => (
+                  <DropdownMenuItem
+                    key={o.value}
+                    onSelect={() => onUpdateCategory({ id: category.id, visibility_scope: o.value })}
+                  >
+                    {category.visibility_scope === o.value ? (
+                      <Check className="h-3.5 w-3.5 mr-2" />
+                    ) : (
+                      <span className="w-3.5 mr-2" />
+                    )}
+                    Visible to {o.label}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
