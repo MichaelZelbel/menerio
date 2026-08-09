@@ -92,8 +92,10 @@ export class ErrorBoundary extends Component<Props, State> {
             it to us.
           </p>
           {this.state.error && (
-            <pre className="mt-4 max-w-lg overflow-auto rounded-lg bg-muted p-3 text-left text-xs text-muted-foreground">
+            <pre className="mt-4 max-h-64 max-w-lg overflow-auto rounded-lg bg-muted p-3 text-left text-xs text-muted-foreground">
               {this.state.error.message}
+              {this.state.error.stack ? `\n\n${this.state.error.stack}` : ""}
+              {this.state.componentStack ? `\n\nComponent stack:${this.state.componentStack}` : ""}
             </pre>
           )}
           <div className="mt-6 flex gap-2">
