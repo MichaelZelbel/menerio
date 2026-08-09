@@ -402,12 +402,86 @@ export default function ReviewQueue() {
     }
   };
 
+  // Merge duplicate people: keep one record, fold the others into it via the
+  // existing merge-contacts path (notes, facts and relationships move over).
+  const handleAcceptMergeDuplicate = async (item: ReviewItem) => {
+    const payload = item.payload as any;
+    const keepId: string | undefined = payload?.keep_contact_id;
+    const mergeIds: string[] = Array.isArray(payload?.merge_contact_ids) ? payload.merge_contact_ids : [];
+    if (!keepId || mergeIds.length === 0) {
+      showToast.error("Incomplete duplicate suggestion");
+      return;
+    }
+    try {
+      for (const sourceId of mergeIds) {
+        const { data, error } = await supabase.functions.invoke("merge-contacts", {
+          body: { source_contact_id: sourceId, target_contact_id: keepId },
+        });
+        if (error || (data && data.error)) {
+          throw new Error(error?.message || data?.error || "Merge failed");
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      invalidateProfileQueries();
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "contact", target_entity_id: keepId, applied_at: new Date().toISOString() },
+      });
+      showToast.success(`Merged ${mergeIds.length + 1} records into one`);
+    } catch (err: any) {
+      showToast.error("Could not merge: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
+  // Relationship conflict: keep exactly one of the recorded roles for a pair.
+  const handleResolveConflict = async (item: ReviewItem, keepRelationshipId: string) => {
+    const payload = item.payload as any;
+    const options: Array<{ id: string }> = Array.isArray(payload?.options) ? payload.options : [];
+    const dropIds = options.map((o) => o.id).filter((id) => id && id !== keepRelationshipId);
+    try {
+      if (dropIds.length) {
+        const { error } = await supabase.from("contact_relationships").delete().in("id", dropIds);
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "relationship", target_entity_id: keepRelationshipId, applied_at: new Date().toISOString() },
+      });
+      showToast.success("Relationship conflict resolved");
+    } catch (err: any) {
+      showToast.error("Could not resolve conflict: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
     if (type === "normalize_profile_entry") {
       return handleAcceptNormalize(item);
     }
+
+    if (type === "merge_duplicate_person") {
+      return handleAcceptMergeDuplicate(item);
+    }
+
+    if (type === "resolve_relationship_conflict") {
+      const options: Array<{ id: string; label: string }> = Array.isArray((item.payload as any)?.options)
+        ? (item.payload as any).options
+        : [];
+      if (options.length === 0) {
+        showToast.error("Incomplete conflict suggestion");
+        return;
+      }
+      return handleResolveConflict(item, options[0].id);
+    }
+
+
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
