@@ -34,6 +34,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileIcon } from "@/components/profile/ProfileIcon";
+import { ProfileRow } from "@/components/profile/ProfileRow";
+import { ScopeBadge, SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
+
 import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
@@ -58,6 +61,10 @@ interface CompactCategorySectionProps {
   onTogglePin: (entry: ContactProfileEntry) => void;
   onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
   onDeleteCategory: (id: string) => void;
+  /** Pinned highlights only exist on contact profiles. */
+  allowPin?: boolean;
+  /** The user's own profile exposes icon + visibility scope editing. */
+  showScope?: boolean;
 }
 
 function Highlighted({ text, query }: { text: string; query: string }) {
@@ -79,12 +86,10 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 }
 
 /**
- * Contact-only replacement for CategorySection: rendered for categories
- * that have entries, plus empty custom (non-taxonomy) categories — see
- * `isCategorySectionVisible` in the caller — default-expanded, with a
- * compact one-line-per-entry list instead of always-visible add forms. An
- * empty section shows a "no facts yet" hint with its own Add affordance so
- * a newly created custom category is never a dead end.
+ * The single profile section renderer, used by both contact profiles and the
+ * user's own profile: default-expanded, one compact `Label: value` row per
+ * entry. An empty section shows a "no facts yet" hint with its own Add
+ * affordance so a newly created custom category is never a dead end.
  */
 export function CompactCategorySection({
   category,
@@ -96,6 +101,8 @@ export function CompactCategorySection({
   onTogglePin,
   onUpdateCategory,
   onDeleteCategory,
+  allowPin = true,
+  showScope = false,
 }: CompactCategorySectionProps) {
   const [expanded, setExpanded] = useState(true);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -176,6 +183,7 @@ export function CompactCategorySection({
           <span className="font-medium text-sm flex-1 truncate">{category.name}</span>
         )}
 
+        {showScope && <ScopeBadge scope={category.visibility_scope} />}
         <span className="text-xs text-muted-foreground shrink-0">{entries.length}</span>
 
         <DropdownMenu>
@@ -205,6 +213,24 @@ export function CompactCategorySection({
             >
               <Pencil className="h-3.5 w-3.5 mr-2" /> Rename category
             </DropdownMenuItem>
+            {showScope && (
+              <>
+                <DropdownMenuSeparator />
+                {SCOPE_OPTIONS.map((o) => (
+                  <DropdownMenuItem
+                    key={o.value}
+                    onSelect={() => onUpdateCategory({ id: category.id, visibility_scope: o.value })}
+                  >
+                    {category.visibility_scope === o.value ? (
+                      <Check className="h-3.5 w-3.5 mr-2" />
+                    ) : (
+                      <span className="w-3.5 mr-2" />
+                    )}
+                    Visible to {o.label}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
@@ -265,79 +291,78 @@ export function CompactCategorySection({
                 />
               </div>
             ) : (
-              <div
+              <ProfileRow
                 key={entry.id}
-                className="flex items-center gap-3 px-4 py-1.5 border-b border-border last:border-b-0 group/entry hover:bg-accent/20 transition-colors"
+                label={<Highlighted text={displayLabel(entry.label)} query={filterQuery} />}
+                actions={
+                  <>
+                    {entry.linked_note_id && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
+                          >
+                            <LinkIcon className="h-3.5 w-3.5 text-primary" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Open linked note</TooltipContent>
+                      </Tooltip>
+                    )}
+                    {allowPin && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => onTogglePin(entry)}
+                          >
+                            {entry.is_pinned ? (
+                              <PinOff className="h-3.5 w-3.5 text-primary" />
+                            ) : (
+                              <Pin className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => onDeleteEntry(entry.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                }
               >
-                <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    <Highlighted text={displayLabel(entry.label)} query={filterQuery} />
+                {shouldRenderAsList(entry.label, entry.value) ? (
+                  <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
+                    {splitListValue(entry.value).map((item, idx) => {
+                      const display = isCharacterLabel(entry.label)
+                        ? titleCaseCharacterName(item)
+                        : item;
+                      return (
+                        <li key={idx}>
+                          <Highlighted text={display} query={filterQuery} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <span className="text-sm break-words">
+                    <Highlighted text={entry.value} query={filterQuery} />
                   </span>
-                  {shouldRenderAsList(entry.label, entry.value) ? (
-                    <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
-                      {splitListValue(entry.value).map((item, idx) => {
-                        const display = isCharacterLabel(entry.label)
-                          ? titleCaseCharacterName(item)
-                          : item;
-                        return (
-                          <li key={idx}>
-                            <Highlighted text={display} query={filterQuery} />
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    <span className="text-sm break-words">
-                      <Highlighted text={entry.value} query={filterQuery} />
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/entry:opacity-100 transition-opacity">
-                  {entry.linked_note_id && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
-                        >
-                          <LinkIcon className="h-3.5 w-3.5 text-primary" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Open linked note</TooltipContent>
-                    </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => onTogglePin(entry)}
-                      >
-                        {entry.is_pinned ? (
-                          <PinOff className="h-3.5 w-3.5 text-primary" />
-                        ) : (
-                          <Pin className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
-                  </Tooltip>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => onDeleteEntry(entry.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+                )}
+              </ProfileRow>
             ),
           )}
         </div>
