@@ -32,7 +32,6 @@ import {
 import {
   adjudicateRelationship,
   exactQuoteExists,
-  recoverRelationshipEvidence,
   RELATIONSHIP_ADJUDICATION_VERSION,
 } from "../_shared/relationship-adjudicator.ts";
 
@@ -47,8 +46,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
 const MAX_LLM_ROWS_PER_USER = 4;
-/** Candidate notes inspected per relationship before it is declared unevidenced. */
-const MAX_NOTES_PER_ROW = 4;
 
 /** Bonds that are mutually exclusive at a point in time. */
 const PARTNER_BOND = new Set(["spouse", "wife", "husband", "partner", "lover"]);
@@ -81,11 +78,6 @@ function jsonResponse(body: unknown, status = 200) {
 
 function personKey(type: string, id: string | null) {
   return type === "self" ? "self" : `contact:${id}`;
-}
-
-/** Escape a name for a PostgREST ilike pattern. */
-function likeToken(name: string) {
-  return `%${name.replace(/[%_,()]/g, " ").trim()}%`;
 }
 
 async function reconcileUser(db: any, userId: string) {
@@ -235,80 +227,52 @@ async function reconcileUser(db: any, userId: string) {
       continue;
     }
 
-    const notes = [sourceNote];
-
-    let kept = false;
-    let completedSearch = true;
-    for (const note of (notes || []) as Array<{ id: string; title: string; content: string }>) {
-      if (llmBudget <= 0) {
-        completedSearch = false;
-        break;
-      }
-      llmBudget -= 1;
-      stats.llm_calls += 1;
-      const evidence = await recoverRelationshipEvidence({
-        db, userId, noteTitle: note.title || "", noteContent: note.content || "",
-        personA, personB, label: rel.label,
-        onJudgeUnavailable: judgeUnavailable,
-      });
-      if (judgeDown) break;
-      if (!evidence) continue;
-      if (llmBudget <= 0) {
-        completedSearch = false;
-        break;
-      }
-      llmBudget -= 1;
-      stats.llm_calls += 1;
-      const verdict = await adjudicateRelationship({
-        db,
-        userId,
-        candidate: {
-          personA, personB, label: rel.label,
-          sourceQuote: evidence.sourceQuote,
-          sourceContext: evidence.sourceContext,
-        },
-        onJudgeUnavailable: judgeUnavailable,
-      });
-      if (judgeDown) break;
-      if (verdict.outcome !== "keep") continue;
-
-      const finalLabel = verdict.canonicalLabel || rel.label;
-      await db.from("contact_relationships").update({
-        label: finalLabel,
-        origin: "ai_note",
-        evidence_quote: evidence.sourceQuote,
-        evidence_note_id: note.id,
-      }).eq("id", rel.id);
-      await db.from("relationship_evidence").insert({
-        user_id: userId,
-        relationship_id: rel.id,
-        source_note_id: note.id,
-        source_quote: evidence.sourceQuote,
-        source_context: evidence.sourceContext,
-        proposed_label: rel.label,
-        adjudicated_label: finalLabel,
-        outcome: "keep",
-        reason: verdict.reason,
-        real_person_a: verdict.personAKind === "real_person",
-        real_person_b: verdict.personBKind === "real_person",
-        personally_relevant: verdict.personallyRelevant,
-        relationship_supported: verdict.relationshipSupported,
-        incidental_or_transactional: verdict.incidentalOrTransactional,
-        fictional_or_roleplay: verdict.fictionalOrRoleplay,
-        confidence: verdict.confidence,
-        adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
-      });
-      verified.push({ ...rel, label: finalLabel, origin: "ai_note", evidence_quote: evidence.sourceQuote, evidence_note_id: note.id });
-      stats.relationships_verified += 1;
-      kept = true;
-      break;
-    }
+    if (llmBudget <= 0) break;
+    llmBudget -= 1;
+    stats.llm_calls += 1;
+    const verdict = await adjudicateRelationship({
+      db,
+      userId,
+      candidate: {
+        personA,
+        personB,
+        label: rel.label,
+        sourceQuote: rel.evidence_quote,
+        sourceContext: rel.evidence_quote,
+      },
+      onJudgeUnavailable: judgeUnavailable,
+    });
 
     if (judgeDown) break;
-    if (!kept && completedSearch) {
+    if (verdict.outcome !== "keep") {
       await drop([rel.id]);
       stats.relationships_deleted_unevidenced += 1;
+      continue;
     }
+
+    const finalLabel = verdict.canonicalLabel || rel.label;
+    await db.from("contact_relationships").update({ label: finalLabel, origin: "ai_note" }).eq("id", rel.id);
+    await db.from("relationship_evidence").insert({
+      user_id: userId,
+      relationship_id: rel.id,
+      source_note_id: sourceNote.id,
+      source_quote: rel.evidence_quote,
+      source_context: rel.evidence_quote,
+      proposed_label: rel.label,
+      adjudicated_label: finalLabel,
+      outcome: "keep",
+      reason: verdict.reason,
+      real_person_a: verdict.personAKind === "real_person",
+      real_person_b: verdict.personBKind === "real_person",
+      personally_relevant: verdict.personallyRelevant,
+      relationship_supported: verdict.relationshipSupported,
+      incidental_or_transactional: verdict.incidentalOrTransactional,
+      fictional_or_roleplay: verdict.fictionalOrRoleplay,
+      confidence: verdict.confidence,
+      adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
+    });
+    verified.push({ ...rel, label: finalLabel, origin: "ai_note" });
+    stats.relationships_verified += 1;
   }
 
   if (judgeDown) {
