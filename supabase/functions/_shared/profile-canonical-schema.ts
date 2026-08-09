@@ -62,6 +62,9 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
       { canonical: "Industry", single: true, aliases: ["sector", "field", "industry"] },
       { canonical: "Previous employer", single: false, aliases: ["former company", "ex-employer", "previous employer", "former employer"] },
       { canonical: "Skill", single: false, aliases: ["skill", "skills", "expertise", "specialty", "competency"] },
+      { canonical: "Tool / platform", single: false, aliases: ["tool", "tools", "platform", "platforms", "software used", "tech stack", "tool / platform"] },
+      { canonical: "Topic of interest", single: false, aliases: ["topic", "topics", "topic of interest", "focus area", "focus areas", "domain"] },
+
       { canonical: "Years of experience", single: true, aliases: ["years of experience"] },
       { canonical: "Professional summary", single: true, aliases: ["bio", "headline", "about", "professional summary"] },
     ],
