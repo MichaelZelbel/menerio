@@ -84,6 +84,6 @@ describe("CompactCategorySection — empty custom category affordance (regressio
   it("does not show the empty-state hint once the category has an entry", () => {
     renderSection({ entries: [entry()] });
     expect(screen.queryByText("No facts yet — add one")).not.toBeInTheDocument();
-    expect(screen.getByText("Favorite color")).toBeInTheDocument();
+    expect(screen.getByText("Favorite color:")).toBeInTheDocument();
   });
 });
