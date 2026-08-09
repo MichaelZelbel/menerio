@@ -779,7 +779,7 @@ export type Database = {
           id?: string
           inverse_id?: string | null
           label: string
-          origin?: string
+          origin: string
           pair_key?: string | null
           source_id?: string | null
           source_type: string
@@ -2388,10 +2388,12 @@ export type Database = {
           category_id: string
           contact_id: string | null
           created_at: string | null
+          evidence_quote: string | null
           id: string
           is_pinned: boolean
           label: string
           linked_note_id: string | null
+          origin: string
           sort_order: number | null
           updated_at: string | null
           user_id: string
@@ -2401,10 +2403,12 @@ export type Database = {
           category_id: string
           contact_id?: string | null
           created_at?: string | null
+          evidence_quote?: string | null
           id?: string
           is_pinned?: boolean
           label: string
           linked_note_id?: string | null
+          origin?: string
           sort_order?: number | null
           updated_at?: string | null
           user_id: string
@@ -2414,10 +2418,12 @@ export type Database = {
           category_id?: string
           contact_id?: string | null
           created_at?: string | null
+          evidence_quote?: string | null
           id?: string
           is_pinned?: boolean
           label?: string
           linked_note_id?: string | null
+          origin?: string
           sort_order?: number | null
           updated_at?: string | null
           user_id?: string
