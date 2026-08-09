@@ -37,6 +37,8 @@ import {
   RotateCcw,
   Users2,
   Sparkles,
+  Merge,
+  AlertTriangle,
 } from "lucide-react";
 
 const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
@@ -48,6 +50,9 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
   normalize_profile_entry: { icon: Sparkles, label: "Profile cleanup", color: "text-fuchsia-500" },
+  merge_duplicate_person: { icon: Merge, label: "Duplicate person", color: "text-orange-500" },
+  resolve_relationship_conflict: { icon: AlertTriangle, label: "Relationship conflict", color: "text-yellow-500" },
+
 };
 
 const truncateText = (text: string | null | undefined, length = 200) => {
