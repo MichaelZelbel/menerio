@@ -134,29 +134,22 @@ export default function Profile() {
               noteCount={noteCount}
               onAccept={(data) => upsertEntry.mutate(data)}
             />
-            {(() => {
-              // Find the "neediest" category (fewest entries, lowest sort_order as tiebreaker)
-              const neediestId = [...categories]
-                .sort((a, b) => {
-                  const aCount = entries.filter((e) => e.category_id === a.id).length;
-                  const bCount = entries.filter((e) => e.category_id === b.id).length;
-                  if (aCount !== bCount) return aCount - bCount;
-                  return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-                })[0]?.id;
-
-              return categories.map((cat) => (
-                <CategorySection
-                  key={cat.id}
-                  category={cat}
-                  entries={entries.filter((e) => e.category_id === cat.id)}
-                  defaultExpanded={cat.id === neediestId}
-                  onSaveEntry={(data) => upsertEntry.mutate(data)}
-                  onDeleteEntry={(id) => deleteEntry.mutate(id)}
-                  onUpdateCategory={(data) => upsertCategory.mutate(data)}
-                  onDeleteCategory={(id) => deleteCategory.mutate(id)}
-                />
-              ));
-            })()}
+            {categories.map((cat) => (
+              <CompactCategorySection
+                key={cat.id}
+                category={cat}
+                entries={entries.filter((e) => e.category_id === cat.id) as never}
+                filterQuery=""
+                matches={new Map()}
+                allowPin={false}
+                showScope
+                onSaveEntry={(data) => upsertEntry.mutate(data)}
+                onDeleteEntry={(id) => deleteEntry.mutate(id)}
+                onTogglePin={() => {}}
+                onUpdateCategory={(data) => upsertCategory.mutate(data)}
+                onDeleteCategory={(id) => deleteCategory.mutate(id)}
+              />
+            ))}
 
             {addingCategory ? (
               <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
