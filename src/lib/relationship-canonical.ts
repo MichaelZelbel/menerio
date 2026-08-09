@@ -633,7 +633,7 @@ export type DescribeRelationshipInput = {
 };
 
 export type RelationshipDescription = {
-  /** The other person's name. */
+  /** The other person's name, cleaned of role annotations. */
   otherName: string;
   /** The role the OTHER person holds toward the viewed person, e.g. "Husband". */
   role: string;
@@ -641,6 +641,8 @@ export type RelationshipDescription = {
   display: string;
   /** Whether the viewed person is the stored edge's source. */
   viewingIsSource: boolean;
+  /** personal / professional / other, based on the role shown. */
+  kind: RelationshipKind;
 };
 
 /**
@@ -663,7 +665,8 @@ export function describeRelationship(input: DescribeRelationshipInput): Relation
     (viewingContactId === null && sourceType === "self") ||
     (viewingContactId !== null && sourceType === "contact" && sourceId === viewingContactId);
 
-  const otherName = viewingIsSource ? targetName : sourceName;
+  const otherName = cleanPersonName(viewingIsSource ? targetName : sourceName) ||
+    (viewingIsSource ? targetName : sourceName);
   void targetId;
 
   // A user-authored custom label is verbatim and never inverted or gendered.
@@ -674,6 +677,7 @@ export function describeRelationship(input: DescribeRelationshipInput): Relation
       role: titleCaseRole(role),
       display: `${titleCaseRole(role)}: ${otherName}`,
       viewingIsSource,
+      kind: relationshipKind(role),
     };
   }
 
@@ -686,6 +690,8 @@ export function describeRelationship(input: DescribeRelationshipInput): Relation
     role,
     display: role ? `${role}: ${otherName}` : otherName,
     viewingIsSource,
+    kind: relationshipKind(otherRole),
+
   };
 }
 // --- END SHARED CORE ---
