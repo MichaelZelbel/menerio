@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { canonicalLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
+import { relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
+import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 export interface ContactRelationship {
   id: string;
@@ -99,12 +100,21 @@ export function useContactRelationships(contactId: string | null) {
       label: string;
       custom_label?: string | null;
     }) => {
-      if (!user) throw new Error("Not authenticated");
+       if (!user) throw new Error("Not authenticated");
 
-      const canonical = canonicalLabel(data.label) || data.label;
-      const aRef: EntityRef = { type: data.source_type as "contact" | "self", id: data.source_id };
-      const bRef: EntityRef = { type: data.target_type as "contact" | "self", id: data.target_id };
-      const pairKey = relationshipPairKey(user.id, aRef, bRef, canonical);
+       const decision = relationshipWriteDecision({
+         userId: user.id,
+         sourceType: data.source_type as "contact" | "self",
+         sourceId: data.source_id,
+         targetType: data.target_type as "contact" | "self",
+         targetId: data.target_id,
+         label: data.label,
+       });
+       if (decision.ok === false) throw new Error(decision.reason);
+       const canonical = decision.label;
+       const aRef: EntityRef = { type: data.source_type as "contact" | "self", id: data.source_id };
+       const bRef: EntityRef = { type: data.target_type as "contact" | "self", id: data.target_id };
+       const pairKey = relationshipPairKey(user.id, aRef, bRef, canonical);
 
       // Symmetric dedup against existing rows (skip on update of same row).
       const { data: existing } = await supabase
@@ -117,7 +127,7 @@ export function useContactRelationships(contactId: string | null) {
         const rb: EntityRef = { type: r.target_type, id: r.target_id };
         return relationshipPairKey(user.id, ra, rb, r.label) === pairKey;
       });
-      if (dup) throw new Error("uq_contact_relationship: equivalent relationship already exists");
+      if (dup) throw new Error("pair_key: equivalent relationship already exists");
 
       const row = { ...data, label: canonical, user_id: user.id };
 

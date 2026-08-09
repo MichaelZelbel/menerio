@@ -11,10 +11,9 @@ import {
   canonicalLabel,
   describeRelationship,
   genderFromFacts,
-  isRomanticSocialBond,
-  relationshipStrength,
   type Gender,
 } from "@/lib/relationship-canonical";
+import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
@@ -128,6 +127,18 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     // Source is the entity whose profile we're viewing
     const sourceType = contactId ? "contact" : "self";
     const sourceId = contactId || null;
+    const decision = relationshipWriteDecision({
+      userId: user?.id || "",
+      sourceType,
+      sourceId,
+      targetType: formTargetType,
+      targetId: formTargetType === "contact" ? formTargetId : null,
+      label: formLabel,
+    });
+    if (!decision.ok) {
+      showToast.error("This relationship cannot be saved");
+      return;
+    }
 
     upsertRelationship.mutate(
       {
@@ -185,9 +196,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
-  // One tile per distinct bond. Competing romantic/social labels between the
-  // SAME two people (spouse + partner + lover + friend) collapse to the
-  // strongest one; unrelated edges (employer, sibling…) are all kept.
+  // Keep each relationship to a distinct person. Only exact duplicate role rows
+  // collapse; multiple romantic relationships remain visible independently.
   const rows = useMemo(() => {
     const described = relationships.map((rel) => {
       const otherIsSelf =
@@ -224,39 +234,23 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       return { rel, description, otherKey, otherContactId, otherIsSelf };
     });
 
-    const kept: typeof described = [];
-    const bondByPerson = new Map<string, number>();
     const seen = new Set<string>();
-
-    for (const row of described) {
-      const label = row.rel.custom_label || row.rel.label;
-      if (isRomanticSocialBond(label) && !row.rel.custom_label) {
-        const best = bondByPerson.get(row.otherKey) ?? -1;
-        const strength = relationshipStrength(label);
-        if (strength <= best) continue;
-        bondByPerson.set(row.otherKey, strength);
-        // Drop the weaker bond tile previously kept for this person.
-        const idx = kept.findIndex(
-          (k) => k.otherKey === row.otherKey && !k.rel.custom_label && isRomanticSocialBond(k.rel.label),
-        );
-        if (idx >= 0) kept.splice(idx, 1);
-      }
-      const dedupKey = `${row.otherKey}|${row.description.role.toLowerCase()}`;
-      if (seen.has(dedupKey)) continue;
+    return described.filter((row) => {
+      const role = (row.rel.custom_label || row.rel.label || row.description.role).trim().toLowerCase();
+      const dedupKey = `${row.otherKey}|${role}`;
+      if (seen.has(dedupKey)) return false;
       seen.add(dedupKey);
-      kept.push(row);
-    }
-
-    return kept;
+      return true;
+    });
   }, [relationships, contactId, myName, genderByPerson]);
 
   if (isLoading) return null;
 
-  // Derived relationship status — never a stored, LLM-authored string.
+  // Neutral summary: never infer exclusivity or monogamy from stored edges.
   const derivedStatus = (() => {
     const labels = relationships.map((r) => canonicalLabel(r.custom_label || r.label));
     if (labels.some((l) => l === "spouse" || l === "husband" || l === "wife")) return "Married";
-    if (labels.some((l) => l === "partner")) return "In a relationship";
+    if (labels.some((l) => l === "partner" || l === "lover")) return "Romantic relationships";
     return null;
   })();
 

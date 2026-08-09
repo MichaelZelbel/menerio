@@ -30,6 +30,7 @@ import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
 } from "../_shared/profile-dedup.ts";
+import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -569,9 +570,11 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       if (!categoryId) return { ...suggestion, status: "pending_review" };
 
+      const factDecision = profileValueDecision(categorySlug, label, value);
+      if (!factDecision.ok) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0 })
         .select("id")
         .single();
       if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
@@ -582,9 +585,18 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
     if (suggestion.suggestion_type === "add_relationship") {
       const { source_type, source_id, target_type, target_id, label, custom_label } = suggestion.payload as Record<string, string | null>;
       if (!source_type || !target_type || !label) return { ...suggestion, status: "pending_review" };
+      const relationshipDecision = relationshipWriteDecision({
+        userId: suggestion.user_id,
+        sourceType: source_type as "contact" | "self",
+        sourceId: source_id || null,
+        targetType: target_type as "contact" | "self",
+        targetId: target_id || null,
+        label,
+      });
+      if (relationshipDecision.ok === false) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("contact_relationships")
-        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label, custom_label: custom_label || null })
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null })
         .select("id")
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };

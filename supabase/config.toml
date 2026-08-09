@@ -149,7 +149,5 @@ verify_jwt = false
 [functions.backfill-moment-profile-extraction]
 verify_jwt = false
 
-
-
-
-
+[functions.profile-lint]
+verify_jwt = false
