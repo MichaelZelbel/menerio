@@ -934,6 +934,47 @@ export default function ReviewQueue() {
                     </CardContent>
                   );
                 })()}
+                {item.suggestion_type === "merge_duplicate_person" && (
+                  <CardContent className="space-y-2">
+                    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">These records will become one</p>
+                      <ul className="space-y-1">
+                        {(Array.isArray(payload?.contact_ids) ? payload.contact_ids : []).map((id: string) => (
+                          <li key={id} className="text-xs">
+                            <Link to={`/dashboard/people/${id}`} className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+                              {payload?.name || "Unnamed"} · {id.slice(0, 8)}
+                            </Link>
+                            {id === payload?.keep_contact_id && (
+                              <Badge variant="secondary" className="ml-2 text-[10px]">kept</Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </CardContent>
+                )}
+                {item.suggestion_type === "resolve_relationship_conflict" && (
+                  <CardContent className="space-y-2">
+                    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Which role is right for {payload?.person_a} & {payload?.person_b}?
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {(Array.isArray(payload?.options) ? payload.options : []).map((option: any) => (
+                          <Button
+                            key={option.id}
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleResolveConflict(item, option.id)}
+                            disabled={updateStatus.isPending}
+                          >
+                            Keep “{option.custom_label || option.label}”
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                )}
                 <CardContent>
 
                   <div className="flex items-center justify-between">
