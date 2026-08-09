@@ -83,7 +83,10 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Gender / pronoun facts for everyone, so a role can be rendered in the
   // other person's own gender ("Husband: Michael"). Keyed by contact id;
   // the "self" key holds the owner's own facts. Never guessed from a name.
-  const { data: genderByPerson = new Map<string, Gender>() } = useQuery({
+  // Stored as a plain record, NOT a Map: the query cache is persisted, and a
+  // Map does not survive that round-trip (it rehydrates as a bare object,
+  // which used to blow up on `.get`).
+  const { data: genderByPerson } = useQuery({
     queryKey: ["relationship-genders", user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -92,19 +95,23 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         .select("contact_id, label, value")
         .eq("user_id", user!.id)
         .in("label", ["Gender", "Pronouns"]);
-      const raw = new Map<string, { gender?: string; pronouns?: string }>();
+      const raw: Record<string, { gender?: string; pronouns?: string }> = {};
       for (const row of (data || []) as Array<{ contact_id: string | null; label: string; value: string }>) {
         const key = row.contact_id ?? "self";
-        const bucket = raw.get(key) ?? {};
+        const bucket = raw[key] ?? {};
         if (row.label === "Gender") bucket.gender = row.value;
         else bucket.pronouns = row.value;
-        raw.set(key, bucket);
+        raw[key] = bucket;
       }
-      const out = new Map<string, Gender>();
-      for (const [key, v] of raw) out.set(key, genderFromFacts(v.gender, v.pronouns));
+      const out: Record<string, Gender> = {};
+      for (const [key, v] of Object.entries(raw)) out[key] = genderFromFacts(v.gender, v.pronouns);
       return out;
     },
   });
+
+  /** Safe lookup that tolerates both a fresh object and a rehydrated one. */
+  const genderOf = (key: string): Gender | null =>
+    (genderByPerson as Record<string, Gender> | undefined)?.[key] ?? null;
 
 
   const resetForm = () => {
