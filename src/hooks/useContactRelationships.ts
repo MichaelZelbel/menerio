@@ -176,10 +176,29 @@ export function useContactRelationships(contactId: string | null) {
     },
   });
 
+  /**
+   * A person looked at an unverified legacy row and vouched for it. That turns
+   * it into a manual fact, which is the only origin allowed without evidence.
+   */
+  const confirmRelationship = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("contact_relationships")
+        .update({ origin: "user_manual" })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+    },
+  });
+
   return {
     relationships,
     isLoading,
     upsertRelationship,
     deleteRelationship,
+    confirmRelationship,
   };
 }
+
