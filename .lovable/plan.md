@@ -49,14 +49,14 @@ One shared `assertRelationshipWrite` / `assertProfileEntryWrite` used by *all* w
 A `profile-lint` routine (runnable per person, and nightly for all) that scans and classifies every violation:
 
 - **Auto-repaired, no confirmation** (provably safe and reversible): mirrored duplicate edges, generic-vs-specific collapse, junk labels, self-edges, value==label junk, synonym-label duplicates.
-- **Queued to Review Queue** (needs your judgement): singleton conflicts (Xihui vs Yumei), suspected duplicate people (Brigitte/Mum, the three Xihuis) with a one-click merge, and facts that look wrong but might be right.
+- **Queued to Review Queue** (needs your judgement): unresolved evidence conflicts, suspected duplicate people (Brigitte/Mum, the three Xihuis) with a one-click merge, and facts that look wrong but might be right. A second partner on a different person is not a violation and is not queued merely because another partner or spouse exists.
 - **LLM used only as an auditor**, never as a writer: it may propose `delete` / `relabel` / `merge` with a reason and gets rate-limited and credit-gated; every proposal still passes Layer 2 before it can land.
 
 Every auto-repair writes an entry that can be rolled back, reusing the existing normalization rollback path.
 
 ### Layer 4 — Read side cannot display a mess
 
-`RelationshipsSection` renders **one tile per person per role family**, perspective-correct and gendered ("Wife: Xihui" on your page, "Husband: Michael" on hers). Even if bad rows somehow exist, the UI collapses them. The "Married / In a relationship" badge is derived from the winning marriage edge only, and a detected contradiction shows an inline "Resolve" chip instead of silently picking one.
+`RelationshipsSection` renders **one tile per person per semantic relationship**, perspective-correct and gendered ("Wife: Xihui" on your page, "Husband: Michael" on hers). It keeps valid relationships with multiple people visible. The status summary must not silently turn "spouse + partner" into a monogamous conclusion: it should reflect the stored evidence neutrally, and any explicit exclusivity contradiction gets an inline "Resolve" chip.
 
 A small **profile health indicator** on each person shows outstanding violations and links to the queue, so quality is visible rather than assumed.
 
