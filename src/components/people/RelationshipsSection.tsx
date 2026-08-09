@@ -15,6 +15,7 @@ import {
   relationshipStrength,
   type Gender,
 } from "@/lib/relationship-canonical";
+import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
@@ -128,6 +129,18 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     // Source is the entity whose profile we're viewing
     const sourceType = contactId ? "contact" : "self";
     const sourceId = contactId || null;
+    const decision = relationshipWriteDecision({
+      userId: user?.id || "",
+      sourceType,
+      sourceId,
+      targetType: formTargetType,
+      targetId: formTargetType === "contact" ? formTargetId : null,
+      label: formLabel,
+    });
+    if (!decision.ok) {
+      showToast.error("This relationship cannot be saved");
+      return;
+    }
 
     upsertRelationship.mutate(
       {
@@ -252,11 +265,11 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
 
   if (isLoading) return null;
 
-  // Derived relationship status — never a stored, LLM-authored string.
+  // Neutral summary: never infer exclusivity or monogamy from stored edges.
   const derivedStatus = (() => {
     const labels = relationships.map((r) => canonicalLabel(r.custom_label || r.label));
     if (labels.some((l) => l === "spouse" || l === "husband" || l === "wife")) return "Married";
-    if (labels.some((l) => l === "partner")) return "In a relationship";
+    if (labels.some((l) => l === "partner" || l === "lover")) return "Romantic relationships";
     return null;
   })();
 

@@ -12,16 +12,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
-import {
-  canonicalLabel,
-  inverseLabel,
-  isSymmetricLabel,
-  relationshipPairKey,
-  buildSelfAliases,
-  isSelfName,
-  type EntityRef,
-} from "../_shared/relationship-canonical.ts";
-import {
+import { 
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
