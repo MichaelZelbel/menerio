@@ -322,13 +322,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   const rows = personalRows;
   if (isLoading) return null;
 
-  // Neutral summary: never infer exclusivity or monogamy from stored edges.
-  const derivedStatus = (() => {
-    const labels = relationships.map((r) => canonicalLabel(r.custom_label || r.label));
-    if (labels.some((l) => l === "spouse" || l === "husband" || l === "wife")) return "Married";
-    if (labels.some((l) => l === "partner" || l === "lover")) return "Romantic relationships";
-    return null;
-  })();
+
+
 
   return (
     <>
