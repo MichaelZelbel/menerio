@@ -184,6 +184,10 @@ async function reconcileUser(db: any, userId: string) {
   const verified: Rel[] = [];
   const unevidenced: string[] = [];
   let llmBudget = MAX_LLM_ROWS_PER_USER;
+  // If the judge itself is unreachable (credit limit, network, 5xx) we must NOT
+  // read that as "no evidence" — nothing gets deleted and the run is retried.
+  let judgeDown: unknown = null;
+  const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
   for (const rel of candidates) {
     const alreadyVerified = rel.origin === "human" || (rel.origin === "machine_verified" && !!rel.evidence_quote);
@@ -191,6 +195,7 @@ async function reconcileUser(db: any, userId: string) {
       verified.push(rel);
       continue;
     }
+    if (judgeDown) break;
     if (llmBudget <= 0) {
       // Not judged this run: leave untouched and quarantined, pick it up next sweep.
       continue;
@@ -218,7 +223,9 @@ async function reconcileUser(db: any, userId: string) {
       const evidence = await recoverRelationshipEvidence({
         db, userId, noteTitle: note.title || "", noteContent: note.content || "",
         personA, personB, label: rel.label,
+        onJudgeUnavailable: judgeUnavailable,
       });
+      if (judgeDown) break;
       if (!evidence) continue;
       stats.llm_calls += 1;
       const verdict = await adjudicateRelationship({
@@ -229,7 +236,9 @@ async function reconcileUser(db: any, userId: string) {
           sourceQuote: evidence.sourceQuote,
           sourceContext: evidence.sourceContext,
         },
+        onJudgeUnavailable: judgeUnavailable,
       });
+      if (judgeDown) break;
       if (verdict.outcome !== "keep") continue;
 
       const finalLabel = verdict.canonicalLabel || rel.label;
@@ -264,7 +273,13 @@ async function reconcileUser(db: any, userId: string) {
       break;
     }
 
+    if (judgeDown) break;
     if (!kept) unevidenced.push(rel.id);
+  }
+
+  if (judgeDown) {
+    // Deleting here would destroy real data because of an outage. Stop the run.
+    throw new Error(`judge unavailable — reconciliation aborted without deletions: ${String((judgeDown as Error)?.message || judgeDown)}`);
   }
 
   if (unevidenced.length) {
