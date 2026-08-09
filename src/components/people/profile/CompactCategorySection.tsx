@@ -265,79 +265,78 @@ export function CompactCategorySection({
                 />
               </div>
             ) : (
-              <div
+              <ProfileRow
                 key={entry.id}
-                className="flex items-center gap-3 px-4 py-1.5 border-b border-border last:border-b-0 group/entry hover:bg-accent/20 transition-colors"
+                label={<Highlighted text={displayLabel(entry.label)} query={filterQuery} />}
+                actions={
+                  <>
+                    {entry.linked_note_id && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
+                          >
+                            <LinkIcon className="h-3.5 w-3.5 text-primary" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Open linked note</TooltipContent>
+                      </Tooltip>
+                    )}
+                    {allowPin && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => onTogglePin(entry)}
+                          >
+                            {entry.is_pinned ? (
+                              <PinOff className="h-3.5 w-3.5 text-primary" />
+                            ) : (
+                              <Pin className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => onDeleteEntry(entry.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                }
               >
-                <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    <Highlighted text={displayLabel(entry.label)} query={filterQuery} />
+                {shouldRenderAsList(entry.label, entry.value) ? (
+                  <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
+                    {splitListValue(entry.value).map((item, idx) => {
+                      const display = isCharacterLabel(entry.label)
+                        ? titleCaseCharacterName(item)
+                        : item;
+                      return (
+                        <li key={idx}>
+                          <Highlighted text={display} query={filterQuery} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <span className="text-sm break-words">
+                    <Highlighted text={entry.value} query={filterQuery} />
                   </span>
-                  {shouldRenderAsList(entry.label, entry.value) ? (
-                    <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
-                      {splitListValue(entry.value).map((item, idx) => {
-                        const display = isCharacterLabel(entry.label)
-                          ? titleCaseCharacterName(item)
-                          : item;
-                        return (
-                          <li key={idx}>
-                            <Highlighted text={display} query={filterQuery} />
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    <span className="text-sm break-words">
-                      <Highlighted text={entry.value} query={filterQuery} />
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/entry:opacity-100 transition-opacity">
-                  {entry.linked_note_id && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
-                        >
-                          <LinkIcon className="h-3.5 w-3.5 text-primary" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Open linked note</TooltipContent>
-                    </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => onTogglePin(entry)}
-                      >
-                        {entry.is_pinned ? (
-                          <PinOff className="h-3.5 w-3.5 text-primary" />
-                        ) : (
-                          <Pin className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
-                  </Tooltip>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => onDeleteEntry(entry.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+                )}
+              </ProfileRow>
             ),
           )}
         </div>
