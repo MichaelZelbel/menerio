@@ -409,34 +409,27 @@ async function reconcileUser(db: any, userId: string) {
     }
     if (label !== entry.label) patch.label = label;
 
-    // Provenance: manual entries are the user's own word and are trusted.
-    if (!entry.linked_note_id) {
-      if (entry.origin !== "user_manual") {
-        entriesToDelete.push(entry.id);
-        stats.entries_deleted_unevidenced += 1;
-        continue;
-      }
-    } else if (entry.origin === "user_manual" || (entry.origin !== "unverified" && !!entry.evidence_quote)) {
-      // already vouched for
+    // Provenance: manual and legacy entries are the user's own history and are
+    // kept. Only a NEW automated entry has to prove itself against its note.
+    const trustedEntry = entry.origin === "user_manual" || entry.origin === "unverified";
+    if (trustedEntry || !!entry.evidence_quote) {
+      // kept as-is
+    } else if (!entry.linked_note_id) {
+      patch.origin = "unverified";
     } else {
       const content = await loadNote(entry.linked_note_id);
-      // A missing source row is not proof that the fact is false. Leave it
-      // quarantined rather than deleting it during a transient or sync gap.
+      // A missing source row is not proof that the fact is false.
       if (content === null) continue;
-      const quote = entry.evidence_quote && exactQuoteExists(content, entry.evidence_quote)
-        ? entry.evidence_quote
-        : exactQuoteExists(content, entry.value)
-          ? entry.value
-          : null;
+      const quote = exactQuoteExists(content, entry.value) ? entry.value : null;
       if (!quote) {
-        entriesToDelete.push(entry.id);
-        stats.entries_deleted_unevidenced += 1;
-        continue;
+        patch.origin = "unverified";
+      } else {
+        patch.origin = "ai_note";
+        patch.evidence_quote = quote;
+        stats.entries_verified += 1;
       }
-      patch.origin = "ai_note";
-      patch.evidence_quote = quote;
-      stats.entries_verified += 1;
     }
+
 
     if (Object.keys(patch).length) {
       await db.from("profile_entries").update(patch).eq("id", entry.id);
