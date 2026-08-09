@@ -69,7 +69,7 @@ A small **profile health indicator** on each person shows outstanding violations
 
 ## One-time cleanup of existing data
 
-A migration + backfill run that: collapses mirrored edges, deletes blocked/self edges, folds generic roles, merges synonym facts, deletes junk values, and files the remaining ambiguous items (spouse conflict, duplicate people) into the Review Queue. Expected result on your profile: **23 items → about 12**, each one a distinct person with one sensible role.
+A migration + backfill run that: collapses mirrored edges, deletes blocked/self edges, folds generic roles, merges synonym facts, deletes junk values, and files only genuine evidence conflicts and duplicate-person candidates into the Review Queue. It will not remove or downgrade Xihui/Yumei merely because both are romantic relationships. The expected count is therefore not hard-coded; it will be reported after deterministic cleanup, with every removal explained and reversible.
 
 ## Technical notes
 
