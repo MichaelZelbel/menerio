@@ -46,7 +46,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
-const MAX_LLM_ROWS_PER_USER = 1;
+const MAX_LLM_ROWS_PER_USER = 2;
 /** Candidate notes inspected per relationship before it is declared unevidenced. */
 const MAX_NOTES_PER_ROW = 4;
 
@@ -218,6 +218,7 @@ async function reconcileUser(db: any, userId: string) {
 
     let kept = false;
     for (const note of (notes || []) as Array<{ id: string; title: string; content: string }>) {
+      if (llmBudget <= 0) break;
       llmBudget -= 1;
       stats.llm_calls += 1;
       const evidence = await recoverRelationshipEvidence({
@@ -274,7 +275,7 @@ async function reconcileUser(db: any, userId: string) {
     }
 
     if (judgeDown) break;
-    if (!kept) unevidenced.push(rel.id);
+    if (!kept && llmBudget > 0) unevidenced.push(rel.id);
   }
 
   if (judgeDown) {
