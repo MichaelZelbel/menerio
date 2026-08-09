@@ -1,47 +1,48 @@
-# Unified "Role: Name" profile rendering + a stricter relationship cleanup
+# One consistent row layout across every profile section
 
-Two connected pieces: make the user's own profile read exactly like a person profile, and make the cleanup smart enough to remove the garbage that the example exposes.
+## What is inconsistent today
 
-## Part 1 — One rendering language for every profile
+Three different renderings exist for what is conceptually the same thing — a field and its value:
 
-Today a person profile renders each relationship as `Role: Name` (Partner: Michael), while the user's own profile shows loose pills. From a pill alone you cannot tell whether the user *is* the tagged thing or whether the tagged person holds that role toward the user.
+- **People profiles** (Identity, Basics, …): one row per entry, small muted label on the baseline, value next to it, separated by row borders. No colon.
+- **The user's own profile**: the same data stacked instead — label on its own line, value on the line below. Different spacing, no colon, and an always-visible add form at the bottom of every section.
+- **Relationships** (both profile types): its own card style — no row borders, rounded hover pills, a bold role, and a colon. This is the one place a colon already appears.
 
-Fix: the user's own profile uses the same rendering path as a person profile.
+So a colon shows up in exactly one section, and the user's profile does not even match the people profiles it is supposed to mirror.
 
-- Every relationship on the user's profile reads `Role: Name`, from the user's point of view: `Friend: Maria`, `Wife: Xihui`. The role is always the role *the other person* holds toward the user — the same rule person profiles already follow.
-- Facts keep the existing label/value line format, so a fact row and a relationship row are visually consistent instead of two different idioms.
-- No pill-only relationship rendering remains anywhere.
+## What it becomes
 
-## Part 2 — Cleanup that actually removes the garbage
-
-The Yumei example is a catalogue of the failure modes. Each gets a specific rule.
-
-**Junk pseudo-roles get deleted, not displayed.** `Subject of notes`, `Self`, `Protector`, `Roleplay character`, `Admirer`, `Mentioned with` are not things a person would say about another person. They are removed from every profile and permanently refused at write time.
-
-**`Owner` is removed as a person-to-person role.** `Owner: Naoko` and `Owner: Shoko` are VRChat avatars, not people who own Yumei. Avatar/character names captured from notes must never become relationship edges. They are deleted, and where the name is a recognisable non-person entity it is dropped rather than converted into another role.
-
-**`Self: Yumei` on Yumei's profile is a self-edge** and is deleted — a person is never related to themselves. The self-recognition mechanism, not the relationship list, is where "this person is me" belongs.
-
-**Unevidenced relationships are removed.** `Friend: Starry` exists because a model inferred a friendship from co-occurrence. The rule becomes: a relationship needs a note, moment or explicit user action stating the relationship. Mere co-mention is never sufficient. Edges with no traceable source are removed; edges whose only evidence is co-occurrence go to the Review Queue rather than being silently kept.
-
-**Case and duplicate collapse.** `Partner: michael` and `Partner: Michael` are one edge. `Ex-partner` plus `Partner` for the same person is a genuine contradiction and goes to the Review Queue for your judgement — it is never auto-resolved. Multiple partners with different people remain untouched and are never treated as a conflict.
-
-## What you will see afterwards
-
-Yumei's Relationships section reduces from eleven rows to what is actually supported:
+One row style, used everywhere:
 
 ```text
-Ex-partner: Alucard Metall     (kept — explicitly stated)
-Friend: Maria                  (kept — evidenced)
-Partner: Michael               (kept, case-merged)
+┌──────────────────────────────────────────┐
+│ ▾  Identity                          4   │
+├──────────────────────────────────────────┤
+│ Full name:   Michael Fischer             │
+│ Nickname:    Micha                       │
+├──────────────────────────────────────────┤
+│ ▾  Relationships                     3   │
+├──────────────────────────────────────────┤
+│ Wife:        Xihui                       │
+│ Friend:      Maria                       │
+└──────────────────────────────────────────┘
 ```
 
-with `Ex-partner`/`Partner` for the same person surfacing as one conflict item to resolve, and everything else gone.
+1. **Relationships renders as a normal section.** Same card header (chevron, icon, name, count), same bordered one-row-per-entry list, same hover-revealed edit/delete actions as Identity and Basics. Names stay clickable links to that person. The add form and the relational-facts (Wedding date, Anniversary) rows move into the same row style, so the card stops looking like a foreign widget.
+
+2. **A colon after every field name.** `Full name:` `Nickname:` `Wife:` — one rule, every section, both profile types. The label keeps its smaller, muted treatment; the value stays larger and brighter. The relationships role loses its extra bold so it matches the other labels rather than shouting.
+
+3. **The user's profile uses the people-profile section component.** Stacked label-over-value goes away; the user's profile gets the same compact rows, the same collapse behaviour, the same hover actions. Category settings (icon, visibility scope, rename, delete) that only exist on the user's profile are preserved in the section header menu — nothing is lost, it just moves into the shared component.
+
+Bulleted list values (Favorite Characters and similar) keep rendering as bullets under the label, unchanged.
+
+## Also fixed along the way
+
+The relationships card currently throws `genderByPerson.get is not a function` on load: the gender lookup is a `Map`, and a `Map` does not survive the persisted query cache round-trip, coming back as a plain object. Stored as a plain object with a small accessor so it survives persistence, which also stops the section from blanking out after a reload.
 
 ## Technical notes
 
-- `RelationshipsSection` becomes the single relationship surface for both `contactId` and the self profile; the self profile stops rendering relationship entries through `CategorySection`.
-- The blocklist in the shared `profile-integrity` core gains `owner` as a person-role and keeps refusing the existing junk set; both the frontend and edge copies stay byte-identical, enforced by the existing mirror test.
-- Extraction prompts gain an explicit evidence requirement plus an avatar/handle guard, so VRChat avatar names and co-mentions stop producing edges at the source.
-- `profile-lint` gains the unevidenced-edge and case-duplicate rules, classifying role contradictions as `resolve_relationship_conflict` review items.
-- One full-account repair run afterwards, reporting what was removed and why.
+- `CompactCategorySection` becomes the single section renderer, used by both `ContactProfileTab` and `Profile.tsx`; `CategorySection` is retired once its category-settings panel (scope/icon/rename) is folded into the compact header's dropdown.
+- `RelationshipsSection` is restructured to reuse the same header and row markup — a shared `ProfileRow` primitive holds the `label:` + value layout so all three call sites cannot drift again.
+- The colon is added at render time only; no stored label text changes.
+- `relationship-genders` query returns a serialisable record; lookups go through a helper rather than `Map.get`.
