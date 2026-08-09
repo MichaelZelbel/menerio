@@ -75,6 +75,10 @@ const ProfileEntryInputSchema = z.object({
   sort_order: z.coerce.number().int().min(0).max(10_000).optional(),
   linked_note_id: z.string().uuid().nullable().optional(),
   is_pinned: z.boolean().optional(),
+  // Provenance is mandatory downstream; a request that does not say otherwise
+  // is a human editing their own profile through the UI.
+  origin: z.enum(["user_manual","ai_note","ai_moment","ai_lexicon","review_queue","import","mcp","api","normalizer"]).optional(),
+  evidence_quote: z.string().trim().max(2000).optional(),
 });
 
 const BulkProfileReviewSchema = z.object({
@@ -299,6 +303,8 @@ async function writeProfileEntrySafely(args: {
       label: fact.label,
       value: dedup.value,
       sort_order: input.sort_order ?? 0,
+      origin: input.origin ?? "user_manual",
+      evidence_quote: input.evidence_quote ?? null,
       linked_note_id: input.linked_note_id ?? null,
       is_pinned: input.is_pinned ?? false,
     } as any)

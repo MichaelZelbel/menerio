@@ -385,9 +385,12 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         await markKept();
         return;
       }
-      // The evidence gate also applies to bulk approval: no quote, no write.
+      // A bulk "keep" is a human confirmation, so it is exempt from the
+      // evidence gate — but it may NEVER masquerade as something it is not:
+      // with a quote it is recorded as review_queue, without one as the
+      // manual user action it actually is.
       const relEvidenceQuote = String(p.evidence_quote || "").trim();
-      const relOrigin = relEvidenceQuote.length >= 10 ? "ai" : "user";
+      const relOrigin = relEvidenceQuote.length >= 10 ? "review_queue" : "user_manual";
       const { data: inserted, error } = await db.from("contact_relationships").insert({
         user_id: userId,
         source_type: p.source_type,

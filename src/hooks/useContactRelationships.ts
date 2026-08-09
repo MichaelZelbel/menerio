@@ -14,6 +14,10 @@ export interface ContactRelationship {
   label: string;
   custom_label: string | null;
   inverse_id: string | null;
+  /** Where this row came from. "unverified" = legacy, nobody vouched for it. */
+  origin: string;
+  evidence_quote: string | null;
+  evidence_note_id: string | null;
   created_at: string;
   updated_at: string;
   // Joined names for display
@@ -129,7 +133,9 @@ export function useContactRelationships(contactId: string | null) {
       });
       if (dup) throw new Error("pair_key: equivalent relationship already exists");
 
-      const row = { ...data, label: canonical, user_id: user.id };
+      // A person is sitting in front of this form: that is the only origin
+      // exempt from the evidence gate.
+      const row = { ...data, label: canonical, user_id: user.id, origin: "user_manual" };
 
       if (data.id) {
         const { error } = await supabase
@@ -170,10 +176,29 @@ export function useContactRelationships(contactId: string | null) {
     },
   });
 
+  /**
+   * A person looked at an unverified legacy row and vouched for it. That turns
+   * it into a manual fact, which is the only origin allowed without evidence.
+   */
+  const confirmRelationship = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("contact_relationships")
+        .update({ origin: "user_manual" })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+    },
+  });
+
   return {
     relationships,
     isLoading,
     upsertRelationship,
     deleteRelationship,
+    confirmRelationship,
   };
 }
+
