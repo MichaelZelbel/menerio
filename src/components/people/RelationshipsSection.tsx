@@ -341,12 +341,10 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </button>
         <Users className="h-4 w-4 text-muted-foreground shrink-0" />
         <span className="font-medium text-sm flex-1 truncate">Relationships</span>
-        {derivedStatus && (
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-            {derivedStatus}
-          </Badge>
-        )}
-        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
+        <span className="text-xs text-muted-foreground shrink-0">
+          {rows.length === 1 ? "1 person" : `${rows.length} people`}
+        </span>
+
         {!adding && (
           <Button
             variant="ghost"
