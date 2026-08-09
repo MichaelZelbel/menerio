@@ -3425,6 +3425,20 @@ export type Database = {
       profile_fact_label_key: { Args: { t: string }; Returns: string }
       profile_fact_text_key: { Args: { t: string }; Returns: string }
       profile_fact_token_key: { Args: { t: string }; Returns: string }
+      profile_integrity_blocked_relationship_label: {
+        Args: { p_label: string }
+        Returns: boolean
+      }
+      profile_integrity_relationship_pair: {
+        Args: {
+          p_source_id: string
+          p_source_type: string
+          p_target_id: string
+          p_target_type: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
       profile_is_accumulator_label: {
         Args: { p_canonical: string }
         Returns: boolean
