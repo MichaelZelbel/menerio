@@ -205,6 +205,35 @@ const LABEL_CANONICAL: Record<string, string> = {
   student: "student",
   client: "client",
   provider: "provider",
+  // Professional service roles — real, but NOT personal relationships. They
+  // render in their own section, never mixed into family/friends.
+  "financial advisor": "financial advisor",
+  advisor: "advisor",
+  adviser: "advisor",
+  consultant: "advisor",
+  "tax accountant": "tax accountant",
+  accountant: "tax accountant",
+  "tax advisor": "tax accountant",
+  steuerberater: "tax accountant",
+  lawyer: "lawyer",
+  attorney: "lawyer",
+  anwalt: "lawyer",
+  doctor: "doctor",
+  physician: "doctor",
+  arzt: "doctor",
+  dentist: "dentist",
+  therapist: "therapist",
+  coach: "coach",
+  trainer: "coach",
+  landlord: "landlord",
+  tenant: "tenant",
+  contractor: "contractor",
+  "service provider": "provider",
+  customer: "client",
+  "business partner": "business partner",
+  "co-founder": "co-founder",
+  cofounder: "co-founder",
+  founder: "co-founder",
 };
 
 // Labels that mean the same thing in both directions. A spouse B ⇔ B spouse A.
@@ -214,9 +243,17 @@ const SYMMETRIC_LABELS = new Set<string>([
   "lover",
   "friend",
   "sibling",
+  "stepsibling",
+  "sibling-in-law",
+  "brother-in-law",
+  "sister-in-law",
+  "cousin",
+  "relative",
   "co-worker",
   "neighbor",
   "roommate",
+  "business partner",
+  "co-founder",
 ]);
 
 // When the model returns an asymmetric pair, we use this to find the inverse.
@@ -231,6 +268,38 @@ const INVERSE_LABEL: Record<string, string> = {
   daughter: "parent",
   brother: "sibling",
   sister: "sibling",
+  grandmother: "grandchild",
+  grandfather: "grandchild",
+  grandparent: "grandchild",
+  grandchild: "grandparent",
+  grandson: "grandparent",
+  granddaughter: "grandparent",
+  aunt: "nibling",
+  uncle: "nibling",
+  pibling: "nibling",
+  nibling: "pibling",
+  niece: "pibling",
+  nephew: "pibling",
+  stepfather: "stepchild",
+  stepmother: "stepchild",
+  stepparent: "stepchild",
+  stepchild: "stepparent",
+  stepson: "stepparent",
+  stepdaughter: "stepparent",
+  "father-in-law": "child-in-law",
+  "mother-in-law": "child-in-law",
+  "parent-in-law": "child-in-law",
+  "child-in-law": "parent-in-law",
+  "son-in-law": "parent-in-law",
+  "daughter-in-law": "parent-in-law",
+  godfather: "godchild",
+  godmother: "godchild",
+  godparent: "godchild",
+  godchild: "godparent",
+  godson: "godparent",
+  goddaughter: "godparent",
+  guardian: "ward",
+  ward: "guardian",
   employer: "employee",
   employee: "employer",
   manager: "report",
@@ -241,6 +310,19 @@ const INVERSE_LABEL: Record<string, string> = {
   student: "teacher",
   client: "provider",
   provider: "client",
+  "financial advisor": "client",
+  "tax accountant": "client",
+  advisor: "client",
+  lawyer: "client",
+  doctor: "patient",
+  dentist: "patient",
+  therapist: "patient",
+  patient: "doctor",
+  coach: "trainee",
+  trainee: "coach",
+  landlord: "tenant",
+  tenant: "landlord",
+  contractor: "client",
 };
 
 export function canonicalLabel(label: string | null | undefined): string {
@@ -267,6 +349,71 @@ export function canonicalLabel(label: string | null | undefined): string {
   return key;
 }
 
+// ---------------------------------------------------------------------------
+// Closed vocabulary: what may be stored as a relationship at all
+// ---------------------------------------------------------------------------
+
+/** Personal bonds: family, romance, chosen family, household, friendship. */
+const PERSONAL_LABELS = new Set<string>([
+  "spouse", "husband", "wife", "partner", "lover",
+  "mother", "father", "parent", "child", "son", "daughter",
+  "brother", "sister", "sibling",
+  "grandmother", "grandfather", "grandparent",
+  "grandchild", "grandson", "granddaughter",
+  "aunt", "uncle", "pibling", "niece", "nephew", "nibling",
+  "cousin", "relative",
+  "stepfather", "stepmother", "stepparent",
+  "stepson", "stepdaughter", "stepchild",
+  "stepbrother", "stepsister", "stepsibling",
+  "father-in-law", "mother-in-law", "parent-in-law",
+  "son-in-law", "daughter-in-law", "child-in-law",
+  "brother-in-law", "sister-in-law", "sibling-in-law",
+  "godfather", "godmother", "godparent",
+  "godson", "goddaughter", "godchild",
+  "guardian", "ward",
+  "friend", "neighbor", "roommate",
+]);
+
+/** Real but non-personal roles. Stored, yet rendered in their own section. */
+const PROFESSIONAL_LABELS = new Set<string>([
+  "co-worker", "manager", "report", "employer", "employee",
+  "mentor", "mentee", "teacher", "student", "trainee", "coach",
+  "client", "provider", "patient",
+  "financial advisor", "advisor", "tax accountant", "lawyer",
+  "doctor", "dentist", "therapist", "landlord", "tenant",
+  "contractor", "business partner", "co-founder",
+]);
+
+export type RelationshipKind = "personal" | "professional" | "other";
+
+/**
+ * Classify a label. Anything outside the two closed lists is "other" — junk
+ * like "author", "admirer" or "subject of notes" that must never be stored
+ * as a relationship.
+ */
+export function relationshipKind(label: string | null | undefined): RelationshipKind {
+  const c = canonicalLabel(label).replace(/^ex-/, "");
+  if (!c) return "other";
+  if (PERSONAL_LABELS.has(c)) return "personal";
+  if (PROFESSIONAL_LABELS.has(c)) return "professional";
+  return "other";
+}
+
+export function isPersonalRelationship(label: string | null | undefined): boolean {
+  return relationshipKind(label) === "personal";
+}
+
+/**
+ * Strip role annotations and duplicated descriptors from a stored person name
+ * so a profile never shows "Jürgen Skoppek (Stiefvater)".
+ */
+export function cleanPersonName(name: string | null | undefined): string {
+  return String(name || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[,–—-]\s*(mein|meine|my)\s+\w+\s*$/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 export function isSymmetricLabel(label: string): boolean {
   return SYMMETRIC_LABELS.has(canonicalLabel(label));
@@ -278,14 +425,32 @@ export function inverseLabel(label: string): string {
   return INVERSE_LABEL[c] || c;
 }
 
-// spouse / husband / wife describe the SAME marriage edge. Collapse them for
-// dedup so a gendered label never creates a second row next to a legacy
-// "spouse" row.
-const MARRIAGE_EQUIVALENT = new Set<string>(["spouse", "husband", "wife"]);
+// Labels that describe the SAME edge from the same side collapse onto one key,
+// so a gendered label never creates a second row next to its neutral twin
+// (spouse/husband/wife, father/mother/parent, son/daughter/child, …).
+const EQUIVALENCE_GROUP: Record<string, string> = {
+  spouse: "spouse", husband: "spouse", wife: "spouse",
+  parent: "parent", father: "parent", mother: "parent",
+  child: "child", son: "child", daughter: "child",
+  sibling: "sibling", brother: "sibling", sister: "sibling",
+  grandparent: "grandparent", grandfather: "grandparent", grandmother: "grandparent",
+  grandchild: "grandchild", grandson: "grandchild", granddaughter: "grandchild",
+  pibling: "pibling", aunt: "pibling", uncle: "pibling",
+  nibling: "nibling", niece: "nibling", nephew: "nibling",
+  stepparent: "stepparent", stepfather: "stepparent", stepmother: "stepparent",
+  stepchild: "stepchild", stepson: "stepchild", stepdaughter: "stepchild",
+  stepsibling: "stepsibling", stepbrother: "stepsibling", stepsister: "stepsibling",
+  "parent-in-law": "parent-in-law", "father-in-law": "parent-in-law", "mother-in-law": "parent-in-law",
+  "child-in-law": "child-in-law", "son-in-law": "child-in-law", "daughter-in-law": "child-in-law",
+  "sibling-in-law": "sibling-in-law", "brother-in-law": "sibling-in-law", "sister-in-law": "sibling-in-law",
+  godparent: "godparent", godfather: "godparent", godmother: "godparent",
+  godchild: "godchild", godson: "godchild", goddaughter: "godchild",
+};
 
 function pairKeyLabel(canonical: string): string {
-  return MARRIAGE_EQUIVALENT.has(canonical) ? "spouse" : canonical;
+  return EQUIVALENCE_GROUP[canonical] || canonical;
 }
+
 
 function refKey(ref: EntityRef): string {
   return `${ref.type}:${ref.id || "self"}`;
