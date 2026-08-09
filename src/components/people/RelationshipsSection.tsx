@@ -223,6 +223,27 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     });
   };
 
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const handleBulkUnconfirmed = async (action: "confirm" | "discard") => {
+    const ids = unconfirmedRows.map((r) => r.rel.id);
+    if (ids.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        if (action === "confirm") await confirmRelationship.mutateAsync(id);
+        else await deleteRelationship.mutateAsync(id);
+      } catch {
+        failed += 1;
+      }
+    }
+    setBulkBusy(false);
+    if (failed > 0) showToast.error(`${ids.length - failed} of ${ids.length} processed — ${failed} failed`);
+    else showToast.success(action === "confirm" ? `${ids.length} confirmed` : `${ids.length} discarded`);
+  };
+
+
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
