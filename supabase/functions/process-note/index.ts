@@ -22,6 +22,8 @@ import {
   isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
+import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
+
 import {
   applyNormalization,
   createNormalizationSuggestions,
@@ -1542,6 +1544,49 @@ async function generateProfileSuggestions(
         f.category_slug = correctedSlug;
       }
       f.label = canonicalProfileLabel(f.category_slug, f.label);
+
+      // Skill guard: a person's name, a product, a language or a bare topic is
+      // not a skill. Route each list member to where it belongs (or drop it)
+      // before the fact is ever written.
+      if (isSkillLabel(f.label) && !(f as any)._skillChecked) {
+        (f as any)._skillChecked = true;
+        const routes = routeSkillValue(f.value, {
+          personNames: [...nameToTarget.keys()],
+          productNames: [],
+        });
+        const buckets = new Map<string, { label: string; slug: string; members: string[] }>();
+        for (const r of routes) {
+          if (r.action === "drop") {
+            console.log(`[profile-extract] Skill guard dropped "${r.member}" (${r.reason})`);
+            continue;
+          }
+          const label = r.action === "keep" ? "Skill" : r.label;
+          const slug = r.action === "keep" ? f.category_slug : r.categorySlug;
+          if (r.action === "rehome") {
+            console.log(`[profile-extract] Skill guard rehomed "${r.member}" → ${label} (${r.reason})`);
+          }
+          const k = `${slug}|${label}`;
+          if (!buckets.has(k)) buckets.set(k, { label, slug, members: [] });
+          buckets.get(k)!.members.push(r.member);
+        }
+        const groups = [...buckets.values()];
+        if (groups.length === 0) continue;
+        const [first, ...rest] = groups;
+        f.label = first.label;
+        f.category_slug = first.slug;
+        f.value = first.members.join(", ");
+        for (const g of rest) {
+          extractedFacts.push({
+            ...f,
+            label: g.label,
+            category_slug: g.slug,
+            value: g.members.join(", "),
+            _skillChecked: true,
+          } as any);
+        }
+      }
+
+
 
       // Blocked labels never become profile entries. Relationship edges are
       // re-routed into the relationship graph; everything else is dropped.

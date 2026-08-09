@@ -37,6 +37,8 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
       { canonical: "Hair color", single: true, aliases: ["hair color", "hair colour", "haarfarbe"] },
       { canonical: "Blood type", single: true, aliases: ["blood type", "blood group", "blutgruppe"] },
       { canonical: "Pronunciation", single: true, aliases: ["pronunciation", "name pronunciation", "pronounced"] },
+      { canonical: "Language", single: false, aliases: ["language", "languages", "speaks", "spoken languages"] },
+
     ],
   },
   location: {
@@ -60,6 +62,9 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
       { canonical: "Industry", single: true, aliases: ["sector", "field", "industry"] },
       { canonical: "Previous employer", single: false, aliases: ["former company", "ex-employer", "previous employer", "former employer"] },
       { canonical: "Skill", single: false, aliases: ["skill", "skills", "expertise", "specialty", "competency"] },
+      { canonical: "Tool / platform", single: false, aliases: ["tool", "tools", "platform", "platforms", "software used", "tech stack", "tool / platform"] },
+      { canonical: "Topic of interest", single: false, aliases: ["topic", "topics", "topic of interest", "focus area", "focus areas", "domain"] },
+
       { canonical: "Years of experience", single: true, aliases: ["years of experience"] },
       { canonical: "Professional summary", single: true, aliases: ["bio", "headline", "about", "professional summary"] },
     ],
@@ -361,6 +366,10 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Favorite places",
     "Love language",
     "Skill",
+    "Tool / platform",
+    "Topic of interest",
+    "Language",
+
     "Hobby",
     "Interest",
     "Allergies",

@@ -15,6 +15,8 @@ import {
   isBlockedProfileLabel,
   isListValuedLabel,
 } from "../_shared/profile-canonical-schema.ts";
+import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
+
 import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
@@ -214,6 +216,18 @@ async function writeProfileEntrySafely(args: {
   if (isBlockedProfileLabel(fact.label)) {
     return { ok: false, outcome: "rejected_duplicate", reason: "blocked_label" };
   }
+
+  // Skill guard (last line of defence): strip members that are person names,
+  // products, languages or bare topics before anything lands under "Skill".
+  if (isSkillLabel(fact.label)) {
+    const routes = routeSkillValue(fact.value);
+    const kept = routes.filter((r) => r.action === "keep").map((r) => r.member);
+    if (kept.length === 0) {
+      return { ok: false, outcome: "rejected_duplicate", reason: "not_a_skill" };
+    }
+    fact.value = kept.join(", ");
+  }
+
 
   const category = await resolveCategoryForWrite(db, userId, contactId, input, fact.categorySlug);
   if (!category?.id) return { ok: false, outcome: "rejected_duplicate", reason: "category_unresolved" };
