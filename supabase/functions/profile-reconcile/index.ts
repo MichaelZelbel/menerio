@@ -137,6 +137,21 @@ async function reconcileUser(db: any, userId: string) {
   const invalid: string[] = [];
   const surviving: Rel[] = [];
   for (const rel of relationships) {
+    // A relationship explicitly entered by the user is authoritative. Automated
+    // reconciliation may normalize or deduplicate it, but never delete it.
+    if (rel.origin === "user_manual") {
+      const label = canonicalLabel(rel.label);
+      const decision = relationshipWriteDecision({
+        userId,
+        sourceType: rel.source_type as "contact" | "self",
+        sourceId: rel.source_id,
+        targetType: rel.target_type as "contact" | "self",
+        targetId: rel.target_id,
+        label,
+      });
+      surviving.push({ ...rel, label, pair_key: decision.ok ? decision.pairKey : rel.pair_key });
+      continue;
+    }
     const label = canonicalLabel(rel.label);
     const decision = relationshipWriteDecision({
       userId,
@@ -162,7 +177,7 @@ async function reconcileUser(db: any, userId: string) {
   const byPair = new Map<string, Rel>();
   const duplicates: string[] = [];
   for (const rel of surviving) {
-    const key = rel.pair_key!;
+    const key = rel.pair_key || `manual:${rel.id}`;
     const existing = byPair.get(key);
     if (!existing) {
       byPair.set(key, rel);
