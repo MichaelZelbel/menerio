@@ -129,7 +129,9 @@ export function useContactRelationships(contactId: string | null) {
       });
       if (dup) throw new Error("pair_key: equivalent relationship already exists");
 
-      const row = { ...data, label: canonical, user_id: user.id };
+      // A person is sitting in front of this form: that is the only origin
+      // exempt from the evidence gate.
+      const row = { ...data, label: canonical, user_id: user.id, origin: "user_manual" };
 
       if (data.id) {
         const { error } = await supabase
