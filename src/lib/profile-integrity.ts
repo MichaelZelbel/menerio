@@ -1,10 +1,17 @@
+// Frontend mirror of supabase/functions/_shared/profile-integrity.ts.
+//
+// The region between the BEGIN/END SHARED CORE markers is byte-identical with
+// that file and is asserted by src/lib/__tests__/profile-integrity.test.ts.
+// Edit both, or neither.
 import {
   canonicalLabel,
   inverseLabel,
   isSymmetricLabel,
   type EntityRef,
 } from "@/lib/relationship-canonical";
+import { canonicalProfileLabel, isBlockedProfileLabel } from "@/lib/profile-canonical-schema";
 
+// --- BEGIN SHARED CORE ---
 const BLOCKED_RELATIONSHIP_LABELS = new Set([
   "subject of notes",
   "protector",
@@ -58,13 +65,15 @@ export function relationshipWriteDecision(input: RelationshipWriteInput): Relati
 }
 
 export function profileValueDecision(categorySlug: string, label: string, value: string) {
-  const canonical = String(label || "").trim();
+  const canonical = canonicalProfileLabel(categorySlug, label);
   const normalizedValue = String(value || "").trim();
   const valueKey = normalizedValue.toLowerCase();
   if (!canonical || !normalizedValue) return { ok: false as const, reason: "empty" };
-  if (!canonical || canonical.toLowerCase() === valueKey) return { ok: false as const, reason: "placeholder_or_label_value" };
-  if (PLACEHOLDER_VALUES.has(valueKey)) return { ok: false as const, reason: "placeholder_or_label_value" };
+  if (isBlockedProfileLabel(canonical)) return { ok: false as const, reason: "blocked_profile_label" };
+  if (PLACEHOLDER_VALUES.has(valueKey) || valueKey === canonical.toLowerCase()) {
+    return { ok: false as const, reason: "placeholder_or_label_value" };
+  }
   if (normalizedValue.length < 2) return { ok: false as const, reason: "value_too_short" };
-  void categorySlug;
   return { ok: true as const, label: canonical, value: normalizedValue };
 }
+// --- END SHARED CORE ---

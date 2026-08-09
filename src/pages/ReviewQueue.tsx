@@ -37,6 +37,8 @@ import {
   RotateCcw,
   Users2,
   Sparkles,
+  Merge,
+  AlertTriangle,
 } from "lucide-react";
 
 const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
@@ -48,6 +50,9 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   add_moment: { icon: Calendar, label: "Timeline Moment", color: "text-rose-500" },
   group_member_suggestion: { icon: Users2, label: "Group Member", color: "text-primary" },
   normalize_profile_entry: { icon: Sparkles, label: "Profile cleanup", color: "text-fuchsia-500" },
+  merge_duplicate_person: { icon: Merge, label: "Duplicate person", color: "text-orange-500" },
+  resolve_relationship_conflict: { icon: AlertTriangle, label: "Relationship conflict", color: "text-yellow-500" },
+
 };
 
 const truncateText = (text: string | null | undefined, length = 200) => {
@@ -397,12 +402,86 @@ export default function ReviewQueue() {
     }
   };
 
+  // Merge duplicate people: keep one record, fold the others into it via the
+  // existing merge-contacts path (notes, facts and relationships move over).
+  const handleAcceptMergeDuplicate = async (item: ReviewItem) => {
+    const payload = item.payload as any;
+    const keepId: string | undefined = payload?.keep_contact_id;
+    const mergeIds: string[] = Array.isArray(payload?.merge_contact_ids) ? payload.merge_contact_ids : [];
+    if (!keepId || mergeIds.length === 0) {
+      showToast.error("Incomplete duplicate suggestion");
+      return;
+    }
+    try {
+      for (const sourceId of mergeIds) {
+        const { data, error } = await supabase.functions.invoke("merge-contacts", {
+          body: { source_contact_id: sourceId, target_contact_id: keepId },
+        });
+        if (error || (data && data.error)) {
+          throw new Error(error?.message || data?.error || "Merge failed");
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      invalidateProfileQueries();
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "contact", target_entity_id: keepId, applied_at: new Date().toISOString() },
+      });
+      showToast.success(`Merged ${mergeIds.length + 1} records into one`);
+    } catch (err: any) {
+      showToast.error("Could not merge: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
+  // Relationship conflict: keep exactly one of the recorded roles for a pair.
+  const handleResolveConflict = async (item: ReviewItem, keepRelationshipId: string) => {
+    const payload = item.payload as any;
+    const options: Array<{ id: string }> = Array.isArray(payload?.options) ? payload.options : [];
+    const dropIds = options.map((o) => o.id).filter((id) => id && id !== keepRelationshipId);
+    try {
+      if (dropIds.length) {
+        const { error } = await supabase.from("contact_relationships").delete().in("id", dropIds);
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "relationship", target_entity_id: keepRelationshipId, applied_at: new Date().toISOString() },
+      });
+      showToast.success("Relationship conflict resolved");
+    } catch (err: any) {
+      showToast.error("Could not resolve conflict: " + (err.message || "Unknown error"));
+      refreshReviewQueues();
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
     if (type === "normalize_profile_entry") {
       return handleAcceptNormalize(item);
     }
+
+    if (type === "merge_duplicate_person") {
+      return handleAcceptMergeDuplicate(item);
+    }
+
+    if (type === "resolve_relationship_conflict") {
+      const options: Array<{ id: string; label: string }> = Array.isArray((item.payload as any)?.options)
+        ? (item.payload as any).options
+        : [];
+      if (options.length === 0) {
+        showToast.error("Incomplete conflict suggestion");
+        return;
+      }
+      return handleResolveConflict(item, options[0].id);
+    }
+
+
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
@@ -855,6 +934,47 @@ export default function ReviewQueue() {
                     </CardContent>
                   );
                 })()}
+                {item.suggestion_type === "merge_duplicate_person" && (
+                  <CardContent className="space-y-2">
+                    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">These records will become one</p>
+                      <ul className="space-y-1">
+                        {(Array.isArray(payload?.contact_ids) ? payload.contact_ids : []).map((id: string) => (
+                          <li key={id} className="text-xs">
+                            <Link to={`/dashboard/people/${id}`} className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+                              {payload?.name || "Unnamed"} · {id.slice(0, 8)}
+                            </Link>
+                            {id === payload?.keep_contact_id && (
+                              <Badge variant="secondary" className="ml-2 text-[10px]">kept</Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </CardContent>
+                )}
+                {item.suggestion_type === "resolve_relationship_conflict" && (
+                  <CardContent className="space-y-2">
+                    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Which role is right for {payload?.person_a} & {payload?.person_b}?
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {(Array.isArray(payload?.options) ? payload.options : []).map((option: any) => (
+                          <Button
+                            key={option.id}
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleResolveConflict(item, option.id)}
+                            disabled={updateStatus.isPending}
+                          >
+                            Keep “{option.custom_label || option.label}”
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                )}
                 <CardContent>
 
                   <div className="flex items-center justify-between">

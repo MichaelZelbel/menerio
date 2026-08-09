@@ -1,6 +1,7 @@
 import { canonicalLabel, inverseLabel, isSymmetricLabel, type EntityRef } from "./relationship-canonical.ts";
 import { canonicalProfileLabel, isBlockedProfileLabel } from "./profile-canonical-schema.ts";
 
+// --- BEGIN SHARED CORE ---
 const BLOCKED_RELATIONSHIP_LABELS = new Set([
   "subject of notes",
   "protector",
@@ -65,3 +66,4 @@ export function profileValueDecision(categorySlug: string, label: string, value:
   if (normalizedValue.length < 2) return { ok: false as const, reason: "value_too_short" };
   return { ok: true as const, label: canonical, value: normalizedValue };
 }
+// --- END SHARED CORE ---
