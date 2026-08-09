@@ -24,7 +24,7 @@ Previous attempts failed because they were **LLM-first and single-layer**: one c
 A single source of truth defining, for every role and every fact label:
 - canonical name, synonyms (incl. German), and **role family** (`marriage`, `romance`, `parent-child`, `sibling`, `work-hierarchy`, `work-peer`, `professional-service`, `social`);
 - which side of a family is the "source" side, so an edge has exactly **one** storage form;
-- singleton flag (`mother`, `father`, `spouse` — at most one per person);
+- cardinality and evidence rules per semantic role. These are not moral or monogamy rules: romantic relationships with different people are valid and must be preserved unless the user explicitly records exclusivity or the evidence contains a direct contradiction;
 - a **blocklist** of non-relationships (`subject of notes`, `owner`, `protector`, `protectee`, `roleplay character`, `admirer`, `mentioned with`, …) and non-facts.
 
 Same file mirrored to frontend and edge functions, byte-identical, asserted by the existing mirror test pattern.
@@ -37,25 +37,26 @@ One shared `assertRelationshipWrite` / `assertProfileEntryWrite` used by *all* w
 - edge whose other end is you (matched against `user_self_aliases` + your own name) → rejected;
 - an edge already present in the **other direction** within the same role family → rejected (this alone kills 8 of your 23 items);
 - generic role when a specific one exists for the same pair (`parent` vs `mother`) → collapses to the specific;
-- a second singleton role (second "mother of self", second spouse) → **not written**; queued as a conflict instead;
+- a second edge for the **same person and same semantic role** → not written as a duplicate;
+- multiple partner/romantic edges to different people → preserved by default. They are only flagged as a conflict when there is explicit exclusivity evidence (for example, a direct statement that a relationship is exclusive/monogamous) or two facts cannot both be true. No relationship status is inferred from cultural, moral, marital, or gender assumptions;
 - fact value gate: rejects `value == label`, `none/n-a/unknown/-`, values under 2 chars, a bare date under a non-date label, and the person's own name as a value;
 - fact synonym folding: `Topics of interest` → `Interests`, and if the same normalized value already exists on that person under any label in the same family, the write is skipped.
 
-**Backstop:** the same rules re-implemented as Postgres triggers/constraints (extending today's `relationship_dedup_guard`), so a path that forgets the helper — or a raw SQL/MCP write — still cannot create the row. A `pair_key` that is family-based and direction-independent gets a unique index, making duplicates structurally impossible.
+**Backstop:** the same rules re-implemented as Postgres triggers/constraints (extending today's `relationship_dedup_guard`), so a path that forgets the helper — or a raw SQL/MCP write — still cannot create the row. A `pair_key` that is family-based and direction-independent gets a unique index, making duplicates structurally impossible without imposing one-person-only romantic cardinality.
 
 ### Layer 3 — Continuous reconciler + human review for the ambiguous cases
 
 A `profile-lint` routine (runnable per person, and nightly for all) that scans and classifies every violation:
 
 - **Auto-repaired, no confirmation** (provably safe and reversible): mirrored duplicate edges, generic-vs-specific collapse, junk labels, self-edges, value==label junk, synonym-label duplicates.
-- **Queued to Review Queue** (needs your judgement): singleton conflicts (Xihui vs Yumei), suspected duplicate people (Brigitte/Mum, the three Xihuis) with a one-click merge, and facts that look wrong but might be right.
+- **Queued to Review Queue** (needs your judgement): unresolved evidence conflicts, suspected duplicate people (Brigitte/Mum, the three Xihuis) with a one-click merge, and facts that look wrong but might be right. A second partner on a different person is not a violation and is not queued merely because another partner or spouse exists.
 - **LLM used only as an auditor**, never as a writer: it may propose `delete` / `relabel` / `merge` with a reason and gets rate-limited and credit-gated; every proposal still passes Layer 2 before it can land.
 
 Every auto-repair writes an entry that can be rolled back, reusing the existing normalization rollback path.
 
 ### Layer 4 — Read side cannot display a mess
 
-`RelationshipsSection` renders **one tile per person per role family**, perspective-correct and gendered ("Wife: Xihui" on your page, "Husband: Michael" on hers). Even if bad rows somehow exist, the UI collapses them. The "Married / In a relationship" badge is derived from the winning marriage edge only, and a detected contradiction shows an inline "Resolve" chip instead of silently picking one.
+`RelationshipsSection` renders **one tile per person per semantic relationship**, perspective-correct and gendered ("Wife: Xihui" on your page, "Husband: Michael" on hers). It keeps valid relationships with multiple people visible. The status summary must not silently turn "spouse + partner" into a monogamous conclusion: it should reflect the stored evidence neutrally, and any explicit exclusivity contradiction gets an inline "Resolve" chip.
 
 A small **profile health indicator** on each person shows outstanding violations and links to the queue, so quality is visible rather than assumed.
 
@@ -68,7 +69,7 @@ A small **profile health indicator** on each person shows outstanding violations
 
 ## One-time cleanup of existing data
 
-A migration + backfill run that: collapses mirrored edges, deletes blocked/self edges, folds generic roles, merges synonym facts, deletes junk values, and files the remaining ambiguous items (spouse conflict, duplicate people) into the Review Queue. Expected result on your profile: **23 items → about 12**, each one a distinct person with one sensible role.
+A migration + backfill run that: collapses mirrored edges, deletes blocked/self edges, folds generic roles, merges synonym facts, deletes junk values, and files only genuine evidence conflicts and duplicate-person candidates into the Review Queue. It will not remove or downgrade Xihui/Yumei merely because both are romantic relationships. The expected count is therefore not hard-coded; it will be reported after deterministic cleanup, with every removal explained and reversible.
 
 ## Technical notes
 
