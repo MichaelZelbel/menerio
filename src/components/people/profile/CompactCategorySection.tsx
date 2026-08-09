@@ -183,6 +183,7 @@ export function CompactCategorySection({
           <span className="font-medium text-sm flex-1 truncate">{category.name}</span>
         )}
 
+        {showScope && <ScopeBadge scope={category.visibility_scope} />}
         <span className="text-xs text-muted-foreground shrink-0">{entries.length}</span>
 
         <DropdownMenu>
