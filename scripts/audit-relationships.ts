@@ -40,8 +40,15 @@ const SQL = `
   ) t;
 `;
 
-const raw = execFileSync("psql", ["-At", "-c", SQL], { encoding: "utf8" }).trim();
+// `--file rows.json` lets the same checks run against an exported snapshot
+// when direct Postgres access is not available in the environment.
+const fileArg = process.argv.indexOf("--file");
+const raw =
+  fileArg > -1
+    ? require("node:fs").readFileSync(process.argv[fileArg + 1], "utf8").trim()
+    : execFileSync("psql", ["-At", "-c", SQL], { encoding: "utf8" }).trim();
 const rows: Row[] = raw && raw !== "" ? JSON.parse(raw) : [];
+
 
 const failures: string[] = [];
 const seen = new Map<string, string>();
