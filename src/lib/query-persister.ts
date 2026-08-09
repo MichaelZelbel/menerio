@@ -12,7 +12,11 @@ export const queryPersister = experimental_createQueryPersister({
     removeItem: (key: string) => del(key),
   },
   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-  buster: "v1",
+  // Bump whenever a query's cached data SHAPE changes. Persisted entries are
+  // JSON, so a Map/Set that used to be cached comes back as a plain object and
+  // crashes callers ("x.get is not a function"). A new buster discards every
+  // old entry instead of feeding stale shapes to new code.
+  buster: "v2",
 });
 
 // Query keys do not include the user id, so cached data must never survive a
