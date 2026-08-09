@@ -154,3 +154,6 @@ verify_jwt = false
 
 [functions.normalize-profile]
 verify_jwt = false
+
+[functions.profile-reconcile]
+verify_jwt = false
