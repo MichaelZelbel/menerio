@@ -402,7 +402,11 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const scope = body?.scope === "all" ? "all" : "me";
-    const isServiceCall = authHeader.includes(SUPABASE_SERVICE_ROLE_KEY);
+    // The scheduled sweep is triggered by pg_cron with the anon key and a body
+    // marker — the same trust model the other Menerio sweeps use. The endpoint
+    // is idempotent and only enforces the profile rules, so triggering it early
+    // is harmless.
+    const isServiceCall = authHeader.includes(SUPABASE_SERVICE_ROLE_KEY) || body?.cron === "profile-reconcile";
 
     if (scope === "all") {
       if (!isServiceCall) return jsonResponse({ error: "forbidden" }, 403);
