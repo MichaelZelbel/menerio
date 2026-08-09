@@ -24,7 +24,7 @@ import {
   createNormalizationSuggestions,
   type NormalizationPayload,
 } from "../_shared/profile-normalization.ts";
-import { isBlockedRelationshipLabel, profileValueDecision } from "../_shared/profile-integrity.ts";
+import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -645,7 +645,15 @@ async function run(userId: string, contactId: string) {
         autoApplied++;
       } else if (s.suggestion_type === "add_relationship") {
         const p = s.payload;
-        if (isBlockedRelationshipLabel(String(p.label || ""))) { prepared.push({ ...s, status: "removed" }); continue; }
+        const relationshipDecision = relationshipWriteDecision({
+          userId,
+          sourceType: p.source_type as "contact" | "self",
+          sourceId: p.source_id || null,
+          targetType: p.target_type as "contact" | "self",
+          targetId: p.target_id || null,
+          label: String(p.label || ""),
+        });
+        if (relationshipDecision.ok === false) { prepared.push({ ...s, status: "removed" }); continue; }
         const { data, error } = await supabase
           .from("contact_relationships")
           .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: p.label })
