@@ -196,15 +196,9 @@ async function reconcileUser(db: any, userId: string) {
       continue;
     }
     if (judgeDown) break;
-    if (llmBudget <= 0) {
-      // Not judged this run: leave untouched and quarantined, pick it up next sweep.
-      continue;
-    }
 
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
-
-    if (llmBudget < 2) continue;
 
     // Candidate notes: must literally mention both endpoints (owner counts as
     // implicit in their own notes).
@@ -221,11 +215,11 @@ async function reconcileUser(db: any, userId: string) {
     let kept = false;
     let completedSearch = true;
     for (const note of (notes || []) as Array<{ id: string; title: string; content: string }>) {
-      if (llmBudget < 2) {
+      if (llmBudget <= 0) {
         completedSearch = false;
         break;
       }
-      llmBudget -= 2;
+      llmBudget -= 1;
       stats.llm_calls += 1;
       const evidence = await recoverRelationshipEvidence({
         db, userId, noteTitle: note.title || "", noteContent: note.content || "",
@@ -234,6 +228,11 @@ async function reconcileUser(db: any, userId: string) {
       });
       if (judgeDown) break;
       if (!evidence) continue;
+      if (llmBudget <= 0) {
+        completedSearch = false;
+        break;
+      }
+      llmBudget -= 1;
       stats.llm_calls += 1;
       const verdict = await adjudicateRelationship({
         db,
@@ -451,19 +450,7 @@ serve(async (req) => {
           .select("id", { count: "exact", head: true })
           .eq("user_id", targetUserId)
           .eq("origin", "unverified");
-        if ((remaining || 0) > 0) {
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/profile-reconcile`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ scope: "me", userId: targetUserId }),
-          });
-          if (!response.ok) {
-            console.error("[profile-reconcile] continuation failed", targetUserId, response.status);
-          }
-        }
+        if ((remaining || 0) > 0) console.log("[profile-reconcile] pending quarantined rows", targetUserId, remaining);
       } catch (error) {
         console.error("[profile-reconcile] user failed", targetUserId, error);
         if (runRow?.id) {
