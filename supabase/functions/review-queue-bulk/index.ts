@@ -10,6 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
+import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "npm:zod@3.23.8";
 
@@ -390,7 +391,25 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       // with a quote it is recorded as review_queue, without one as the
       // manual user action it actually is.
       const relEvidenceQuote = String(p.evidence_quote || "").trim();
-      const relOrigin = relEvidenceQuote.length >= 10 ? "review_queue" : "user_manual";
+      if (relEvidenceQuote.length < 10) {
+        throw new Error("Relationship suggestions require a verbatim evidence quote");
+      }
+      const verdict = await adjudicateRelationship({
+        db,
+        userId,
+        candidate: {
+          personA: String(p.contact_name_a || p.person_a || ""),
+          personB: String(p.contact_name_b || p.person_b || ""),
+          label: relationshipDecision.label,
+          inverseLabel: p.inverse_label || null,
+          sourceQuote: relEvidenceQuote,
+          sourceContext: String(p.source_context || relEvidenceQuote),
+        },
+      });
+      if (verdict.outcome !== "keep") {
+        await markKept();
+        return;
+      }
       const { data: inserted, error } = await db.from("contact_relationships").insert({
         user_id: userId,
         source_type: p.source_type,
@@ -399,7 +418,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         target_id: p.target_id || null,
         label: relationshipDecision.label,
         custom_label: p.custom_label || null,
-        origin: relOrigin,
+        origin: "review_queue",
         evidence_quote: relEvidenceQuote || null,
         evidence_note_id: p.note_id || null,
       }).select("id").single();
