@@ -12,7 +12,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
-import { 
+import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
   correctProfileCategory,
@@ -24,6 +24,7 @@ import {
   createNormalizationSuggestions,
   type NormalizationPayload,
 } from "../_shared/profile-normalization.ts";
+import { isBlockedRelationshipLabel, profileValueDecision } from "../_shared/profile-integrity.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -631,9 +632,11 @@ async function run(userId: string, contactId: string) {
     try {
       if (s.suggestion_type === "add_profile_entry") {
         if (!s.payload.category_id) { prepared.push({ ...s, status: "pending_review" }); continue; }
+        const fact = profileValueDecision(String(s.payload.category_slug || ""), String(s.payload.label || ""), String(s.payload.value || ""));
+        if (!fact.ok) { prepared.push({ ...s, status: "removed" }); continue; }
         const { data, error } = await supabase
           .from("profile_entries")
-          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: s.payload.label, value: s.payload.value, sort_order: 0 })
+          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0 })
           .select("id")
           .single();
         if (error && (error as any).code === "23505") { prepared.push({ ...s, status: "removed" }); continue; }
@@ -642,6 +645,7 @@ async function run(userId: string, contactId: string) {
         autoApplied++;
       } else if (s.suggestion_type === "add_relationship") {
         const p = s.payload;
+        if (isBlockedRelationshipLabel(String(p.label || ""))) { prepared.push({ ...s, status: "removed" }); continue; }
         const { data, error } = await supabase
           .from("contact_relationships")
           .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: p.label })

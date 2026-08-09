@@ -17,6 +17,7 @@ import {
   isSelfName,
   type EntityRef,
 } from "./relationship-canonical.ts";
+import { isBlockedRelationshipLabel, profileValueDecision } from "./profile-integrity.ts";
 
 import { buildProfileTokenIndex, dedupIncomingProfileValue } from "./profile-dedup.ts";
 
@@ -263,18 +264,21 @@ async function prepareForInsert(
       const label = String(s.payload.label || "").trim();
       const value = String(s.payload.value || "").trim();
       if (!contactId || !categoryId || !label || !value) return { ...s, status: "pending_review" };
+      const fact = profileValueDecision(String(s.payload.category_slug || ""), label, value);
+      if (!fact.ok) return { ...s, status: "removed" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label, value, sort_order: 0 })
+        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0 })
         .select("id")
         .single();
-      if (error && (error as any).code === "23505") return { ...s, status: "removed" };
+        if (error && (error as any).code === "23505") return { ...s, status: "removed" };
       if (error || !data) return { ...s, status: "pending_review" };
       return { ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() };
     }
     if (s.suggestion_type === "add_relationship") {
       const p = s.payload as Record<string, string | null>;
       if (!p.source_type || !p.target_type || !p.label) return { ...s, status: "pending_review" };
+      if (isBlockedRelationshipLabel(p.label)) return { ...s, status: "removed" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({

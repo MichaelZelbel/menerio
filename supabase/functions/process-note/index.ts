@@ -585,16 +585,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
     if (suggestion.suggestion_type === "add_relationship") {
       const { source_type, source_id, target_type, target_id, label, custom_label } = suggestion.payload as Record<string, string | null>;
       if (!source_type || !target_type || !label) return { ...suggestion, status: "pending_review" };
-      const relationship = {
-        userId: suggestion.user_id,
-        sourceType: source_type as "contact" | "self",
-        sourceId: source_id || null,
-        targetType: target_type as "contact" | "self",
-        targetId: target_id || null,
-        label,
-      };
-      const decision = isBlockedRelationshipLabel(label) ? { ok: false as const, reason: "blocked_relationship_label" } : { ok: true as const, label };
-      if (!decision.ok) return { ...suggestion, status: "removed" };
+      if (isBlockedRelationshipLabel(label)) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label, custom_label: custom_label || null })
