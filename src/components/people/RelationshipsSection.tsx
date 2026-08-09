@@ -456,5 +456,65 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </div>
       )}
     </div>
+
+    {/* Professional and service roles are real, but they are NOT relationships.
+        They live in their own, separately collapsible card. */}
+    {professionalRows.length > 0 && (
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex items-center gap-2 px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setProExpanded((v) => !v)}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={proExpanded ? "Collapse section" : "Expand section"}
+          >
+            {proExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+          <Briefcase className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="font-medium text-sm flex-1 truncate">Professional &amp; service contacts</span>
+          <span className="text-xs text-muted-foreground shrink-0">{professionalRows.length}</span>
+        </div>
+
+        {proExpanded && (
+          <div className="border-t border-border">
+            {professionalRows.map(({ rel, description, otherContactId, otherIsSelf }) => (
+              <ProfileRow
+                key={rel.id}
+                label={description.role}
+                actions={
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => handleDelete(rel.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                }
+              >
+                {otherIsSelf ? (
+                  <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
+                    {description.otherName}
+                  </Link>
+                ) : otherContactId ? (
+                  <Link to={`/dashboard/people/${otherContactId}`} className="text-sm hover:underline break-words">
+                    {description.otherName}
+                  </Link>
+                ) : (
+                  <span className="text-sm break-words">{description.otherName}</span>
+                )}
+              </ProfileRow>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+    </>
   );
 }
+
