@@ -156,6 +156,7 @@ Return a JSON object with two keys:
    - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
    - "label": MUST be one of the allowed labels listed below for the chosen category. Pick the closest match. If none fits, skip the fact.
    - "value": the actual value (e.g. "Lisbon", "Head of Design at Notion", "1990-05-12")
+    - "source_quote": the shortest exact verbatim quote from the moment title or description that proves this fact
 
 Allowed labels per category (lowercase, use exactly these strings):
 ${Object.entries(ALLOWED_PROFILE_LABELS).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n")}
@@ -266,9 +267,11 @@ async function prepareForInsert(
       if (!contactId || !categoryId || !label || !value) return { ...s, status: "pending_review" };
       const fact = profileValueDecision(String(s.payload.category_slug || ""), label, value);
       if (!fact.ok) return { ...s, status: "removed" };
+      const evidenceQuote = String(s.payload.evidence_quote || "").trim();
+      if (evidenceQuote.length < 10) return { ...s, status: "pending_review" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_moment" })
+        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_moment", evidence_quote: evidenceQuote })
         .select("id")
         .single();
         if (error && (error as any).code === "23505") return { ...s, status: "removed" };
@@ -506,7 +509,9 @@ export async function extractProfileFromMoment(
     const categorySlug = String(rawFact?.category_slug || "").trim().toLowerCase();
     const label = String(rawFact?.label || "").trim();
     const value = String(rawFact?.value || "").trim();
+    const evidenceQuote = String(rawFact?.source_quote || "").trim();
     if (!contactName || !categorySlug || !label || !value) continue;
+    if (evidenceQuote.length < 10) continue;
     if (!PROFILE_CATEGORY_SLUGS.includes(categorySlug)) continue;
     const contact = nameToContact.get(contactName.toLowerCase());
     if (!contact) continue;
@@ -547,6 +552,7 @@ export async function extractProfileFromMoment(
       category_id: catRow?.id || null,
       label,
       value: effectiveValue,
+      evidence_quote: evidenceQuote,
       source: `moment:${momentId}`,
       moment_id: momentId,
       moment_title: (moment as any).title,
