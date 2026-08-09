@@ -157,8 +157,32 @@ export function useContactRelationships(contactId: string | null) {
 
   const deleteRelationship = useMutation({
     mutationFn: async (id: string) => {
-      // Also delete the inverse if it exists
       const rel = relationships.find((r) => r.id === id);
+
+      // A manual removal is a statement of fact: "this relationship is wrong".
+      // Record it so no automated pipeline can ever re-create it. Only a manual
+      // re-add clears the rejection (handled by the DB guard).
+      if (rel && user) {
+        const pairKey = relationshipPairKey(
+          user.id,
+          { type: rel.source_type as EntityRef["type"], id: rel.source_id },
+          { type: rel.target_type as EntityRef["type"], id: rel.target_id },
+          rel.custom_label || rel.label,
+        );
+        await supabase
+          .from("relationship_rejections")
+          .upsert(
+            {
+              user_id: user.id,
+              pair_key: pairKey,
+              rejected_label: rel.custom_label || rel.label,
+              reason: "Removed by the user from the profile UI",
+            },
+            { onConflict: "user_id,pair_key" },
+          );
+      }
+
+      // Also delete the inverse if it exists
       if (rel?.inverse_id) {
         await supabase
           .from("contact_relationships")
@@ -171,6 +195,7 @@ export function useContactRelationships(contactId: string | null) {
         .eq("id", id);
       if (error) throw error;
     },
+
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
     },

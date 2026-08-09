@@ -2751,6 +2751,33 @@ export type Database = {
           },
         ]
       }
+      relationship_rejections: {
+        Row: {
+          created_at: string
+          id: string
+          pair_key: string
+          reason: string | null
+          rejected_label: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          pair_key: string
+          reason?: string | null
+          rejected_label?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          pair_key?: string
+          reason?: string | null
+          rejected_label?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       relationship_repair_items: {
         Row: {
           confidence: number | null
