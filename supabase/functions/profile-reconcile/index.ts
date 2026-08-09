@@ -350,34 +350,10 @@ async function reconcileUser(db: any, userId: string) {
     throw new Error(`judge unavailable — reconciliation aborted without deletions: ${String((judgeDown as Error)?.message || judgeDown)}`);
   }
 
-  // ---- 4. exclusivity ---------------------------------------------------
-  // A person may hold at most one active partner-type bond. When two survive,
-  // the stronger/more recently evidenced one wins and the loser is removed —
-  // "married to seven people" is never a valid state.
-  const bondsByPerson = new Map<string, Rel[]>();
-  for (const rel of verified) {
-    if (!PARTNER_BOND.has(rel.label) || EX_BOND.has(rel.label)) continue;
-    for (const key of [personKey(rel.source_type, rel.source_id), personKey(rel.target_type, rel.target_id)]) {
-      bondsByPerson.set(key, [...(bondsByPerson.get(key) || []), rel]);
-    }
-  }
-  const conflicting = new Set<string>();
-  for (const rows of bondsByPerson.values()) {
-    if (rows.length < 2) continue;
-    const ranked = [...rows].sort((a, b) => {
-      const strength = relationshipStrength(b.label) - relationshipStrength(a.label);
-      if (strength !== 0) return strength;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-    for (const loser of ranked.slice(1)) {
-      if (loser.origin === "user_manual") continue; // never overrule a person
-      conflicting.add(loser.id);
-    }
-  }
-  if (conflicting.size) {
-    await drop([...conflicting]);
-    stats.relationships_deleted_conflicting = conflicting.size;
-  }
+  // Concurrent bonds (a spouse and a partner at the same time) are valid data.
+  // The reconciler deliberately holds no opinion about relationship structure.
+
+
 
   // ---- 5 + 6. profile entries ------------------------------------------
   const { data: categoryRows } = await db
