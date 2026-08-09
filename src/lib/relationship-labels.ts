@@ -12,17 +12,37 @@ import {
   type RelationshipDescription,
 } from "@/lib/relationship-canonical";
 
-/** Labels offered in the add/edit picker. Canonical, neutral forms only. */
+/**
+ * Labels offered in the add/edit picker. The picker asks "who is this person
+ * to the profile on screen?", so gendered wordings ("girlfriend", "wife",
+ * "mother") are offered alongside the neutral ones. Storage still collapses a
+ * gendered romantic label into `partner` (see `canonicalLabel`); the gendered
+ * reading is preserved by recording the other person's gender fact.
+ */
 export const ALL_RELATIONSHIP_LABELS = [
   // Personal
   "spouse",
+  "wife",
+  "husband",
   "partner",
+  "girlfriend",
+  "boyfriend",
   "lover",
   "parent",
+  "mother",
+  "father",
   "child",
+  "daughter",
+  "son",
   "sibling",
+  "sister",
+  "brother",
   "grandparent",
+  "grandmother",
+  "grandfather",
   "grandchild",
+  "granddaughter",
+  "grandson",
   "aunt",
   "uncle",
   "niece",
@@ -30,7 +50,11 @@ export const ALL_RELATIONSHIP_LABELS = [
   "cousin",
   "relative",
   "stepparent",
+  "stepmother",
+  "stepfather",
   "stepchild",
+  "stepdaughter",
+  "stepson",
   "stepsibling",
   "parent-in-law",
   "child-in-law",
@@ -82,4 +106,28 @@ export function getRelationshipDisplay(
 ): RelationshipDescription & { displayLabel: string } {
   const described = describeRelationship(params);
   return { ...described, displayLabel: described.role };
+}
+
+/**
+ * Gender implied by an explicitly gendered label choice ("girlfriend" →
+ * female). Neutral labels imply nothing. Used to persist the other person's
+ * gender fact so the display keeps rendering the gendered wording, even
+ * though storage canonicalizes e.g. "girlfriend" to "partner".
+ */
+const LABEL_IMPLIED_GENDER: Record<string, "male" | "female"> = {
+  wife: "female", husband: "male",
+  girlfriend: "female", boyfriend: "male",
+  mother: "female", father: "male",
+  daughter: "female", son: "male",
+  sister: "female", brother: "male",
+  grandmother: "female", grandfather: "male",
+  granddaughter: "female", grandson: "male",
+  aunt: "female", uncle: "male",
+  niece: "female", nephew: "male",
+  stepmother: "female", stepfather: "male",
+  stepdaughter: "female", stepson: "male",
+};
+
+export function impliedGenderFromLabel(label: string): "male" | "female" | null {
+  return LABEL_IMPLIED_GENDER[String(label || "").trim().toLowerCase()] ?? null;
 }

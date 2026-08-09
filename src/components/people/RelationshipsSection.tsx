@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
-import { ALL_RELATIONSHIP_LABELS } from "@/lib/relationship-labels";
+import { ALL_RELATIONSHIP_LABELS, getInverseLabel, impliedGenderFromLabel } from "@/lib/relationship-labels";
 import {
   canonicalLabel,
   describeRelationship,
@@ -19,7 +19,7 @@ import {
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 
@@ -42,6 +42,7 @@ interface RelationshipsSectionProps {
 
 export function RelationshipsSection({ contactId, contactName, milestones = [] }: RelationshipsSectionProps) {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const { relationships, isLoading, upsertRelationship, deleteRelationship } =
     useContactRelationships(contactId);
 
@@ -127,6 +128,35 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     setEditingId(null);
   };
 
+  /**
+   * Record the other person's gender when the user picked an explicitly
+   * gendered label ("girlfriend"). Storage canonicalizes the label itself
+   * (girlfriend → partner), so without this fact the row would render as the
+   * neutral "Partner". Never overwrites a gender that is already known.
+   */
+  const persistImpliedGender = async (pickedLabel: string, otherKey: string) => {
+    const gender = impliedGenderFromLabel(pickedLabel);
+    if (!gender) return;
+    if (genderOf(otherKey)) return;
+    try {
+      await supabase.functions.invoke("normalize-profile", {
+        body: {
+          action: "write_profile_entry",
+          entry: {
+            contact_id: otherKey === "self" ? null : otherKey,
+            category_slug: "identity",
+            label: "Gender",
+            value: gender === "male" ? "Male" : "Female",
+            origin: "user_manual",
+          },
+        },
+      });
+    } catch {
+      // A missing gender fact only degrades wording, never correctness.
+    }
+    qc.invalidateQueries({ queryKey: ["relationship-genders", user?.id] });
+  };
+
   const handleSave = () => {
     if (!formLabel) {
       showToast.error("Please select a relationship label");
@@ -140,13 +170,17 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     // Source is the entity whose profile we're viewing
     const sourceType = contactId ? "contact" : "self";
     const sourceId = contactId || null;
+    // The picker asks for the OTHER person's role ("Xihui is my wife"), while
+    // storage is "source is <label> of target". The viewed person is always
+    // the source here, so the stored label is the inverse of the pick.
+    const storedLabel = getInverseLabel(formLabel);
     const decision = relationshipWriteDecision({
       userId: user?.id || "",
       sourceType,
       sourceId,
       targetType: formTargetType,
       targetId: formTargetType === "contact" ? formTargetId : null,
-      label: formLabel,
+      label: storedLabel,
     });
     if (!decision.ok) {
       const reason = "reason" in decision ? decision.reason : "";
@@ -158,7 +192,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       return;
     }
 
-
+    const pickedLabel = formLabel;
+    const otherKey = formTargetType === "contact" ? formTargetId : "self";
 
     upsertRelationship.mutate(
       {
@@ -167,11 +202,12 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         source_id: sourceId,
         target_type: formTargetType,
         target_id: formTargetType === "contact" ? formTargetId : null,
-        label: formLabel,
+        label: storedLabel,
         custom_label: formCustomLabel.trim() || null,
       },
       {
         onSuccess: () => {
+          void persistImpliedGender(pickedLabel, otherKey);
           showToast.success("Relationship saved");
           resetForm();
         },
@@ -188,13 +224,15 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
 
   const startEdit = (rel: ContactRelationship) => {
     setEditingId(rel.id);
-    setFormLabel(rel.label);
     setFormCustomLabel(rel.custom_label || "");
 
     // Determine the "other" side of the relationship from the viewed profile's perspective
     const viewingIsSource =
       (contactId === null && rel.source_type === "self") ||
       (contactId !== null && rel.source_type === "contact" && rel.source_id === contactId);
+
+    // The picker holds the other person's role, matching what the row shows.
+    setFormLabel(viewingIsSource ? getInverseLabel(rel.label) : rel.label);
 
     if (viewingIsSource) {
       setFormTargetType(rel.target_type as "contact" | "self");
