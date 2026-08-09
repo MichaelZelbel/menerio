@@ -7,6 +7,7 @@ import {
   displayRole,
   genderFromFacts,
   relationshipPairKey,
+  relationshipKind,
 } from "@/lib/relationship-canonical";
 
 function sharedCore(path: string): string {
