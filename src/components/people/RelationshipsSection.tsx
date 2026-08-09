@@ -482,7 +482,72 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </div>
       )}
 
-      {expanded && rows.length === 0 && professionalRows.length === 0 && !adding && (
+
+      {/* Quarantine: machine claims with no evidence and no human vouch. These
+          are NOT part of the profile — they are pending review, and stay out of
+          the lists above until someone confirms them. */}
+      {expanded && unconfirmedRows.length > 0 && (
+        <div className="border-t border-border bg-muted/30">
+          <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground flex-1">
+              Unconfirmed claims ({unconfirmedRows.length}) — not shown on the profile
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs"
+              disabled={bulkBusy}
+              onClick={() => handleBulkUnconfirmed("confirm")}
+            >
+              Confirm all
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs text-destructive"
+              disabled={bulkBusy}
+              onClick={() => handleBulkUnconfirmed("discard")}
+            >
+              Discard all
+            </Button>
+          </div>
+          {unconfirmedRows.map(({ rel, description }) => (
+            <ProfileRow
+              key={rel.id}
+              label={description.role}
+              className="opacity-70"
+              actions={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-primary"
+                    aria-label="Confirm relationship"
+                    title="Confirm — this is correct"
+                    onClick={() => handleConfirm(rel.id)}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    aria-label="Discard relationship"
+                    title="Discard — this is wrong"
+                    onClick={() => handleDelete(rel.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              }
+            >
+              <span className="text-sm break-words">{description.otherName}</span>
+            </ProfileRow>
+          ))}
+        </div>
+      )}
+
+      {expanded && rows.length === 0 && professionalRows.length === 0 && unconfirmedRows.length === 0 && !adding && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
           <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
@@ -490,6 +555,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
           </Button>
         </div>
       )}
+
 
 
       {/* Non-edge relational facts live in this same card — one surface. */}
