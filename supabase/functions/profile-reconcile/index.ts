@@ -408,21 +408,41 @@ serve(async (req) => {
     // is harmless.
     const isServiceCall = authHeader.includes(SUPABASE_SERVICE_ROLE_KEY) || body?.cron === "profile-reconcile";
 
+    /** Run one user in the background and record the outcome. */
+    const runTracked = async (targetUserId: string) => {
+      const { data: runRow } = await service
+        .from("profile_reconcile_runs")
+        .insert({ user_id: targetUserId, status: "running" })
+        .select("id")
+        .maybeSingle();
+      try {
+        const stats = await reconcileUser(service, targetUserId);
+        console.log("[profile-reconcile]", targetUserId, JSON.stringify(stats));
+        if (runRow?.id) {
+          await service.from("profile_reconcile_runs")
+            .update({ status: "completed", stats, finished_at: new Date().toISOString() })
+            .eq("id", runRow.id);
+        }
+      } catch (error) {
+        console.error("[profile-reconcile] user failed", targetUserId, error);
+        if (runRow?.id) {
+          await service.from("profile_reconcile_runs")
+            .update({ status: "failed", error: String((error as Error).message || error), finished_at: new Date().toISOString() })
+            .eq("id", runRow.id);
+        }
+      }
+    };
+
+    // deno-lint-ignore no-explicit-any
+    const background = (task: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(task);
+
     if (scope === "all") {
       if (!isServiceCall) return jsonResponse({ error: "forbidden" }, 403);
       const { data: users } = await service.from("profiles").select("id").limit(500);
       const run = async () => {
-        for (const user of (users || []) as Array<{ id: string }>) {
-          try {
-            const stats = await reconcileUser(service, user.id);
-            console.log("[profile-reconcile]", user.id, JSON.stringify(stats));
-          } catch (error) {
-            console.error("[profile-reconcile] user failed", user.id, error);
-          }
-        }
+        for (const user of (users || []) as Array<{ id: string }>) await runTracked(user.id);
       };
-      // deno-lint-ignore no-explicit-any
-      (globalThis as any).EdgeRuntime?.waitUntil?.(run()) ?? await run();
+      background(run());
       return jsonResponse({ started: true, users: users?.length || 0 });
     }
 
@@ -439,8 +459,8 @@ serve(async (req) => {
     }
     if (!userId) return jsonResponse({ error: "unauthorized" }, 401);
 
-    const stats = await reconcileUser(service, userId);
-    return jsonResponse({ ok: true, stats });
+    background(runTracked(userId));
+    return jsonResponse({ started: true });
   } catch (error) {
     console.error("[profile-reconcile] failed", error);
     return jsonResponse({ error: String((error as Error).message || error) }, 500);
