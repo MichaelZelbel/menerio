@@ -43,6 +43,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   const { relationships, isLoading, upsertRelationship, deleteRelationship } = useContactRelationships(contactId);
 
   const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formLabel, setFormLabel] = useState("");
   const [formCustomLabel, setFormCustomLabel] = useState("");
