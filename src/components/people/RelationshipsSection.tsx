@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Pencil, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Users } from "lucide-react";
+import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
