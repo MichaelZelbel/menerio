@@ -130,3 +130,32 @@ describe("gender resolution", () => {
     expect(displayRole("friend", "male")).toBe("Friend");
   });
 });
+
+describe("closed vocabulary and perspective collapse", () => {
+  it("rejects non-relationships", () => {
+    expect(relationshipKind("author")).toBe("other");
+    expect(relationshipKind("platform")).toBe("other");
+    expect(relationshipKind("financial advisor")).toBe("professional");
+    expect(relationshipKind("stepfather")).toBe("personal");
+  });
+
+  it("collapses both stored directions of one bond onto one key", () => {
+    const u = "u1";
+    const me = { type: "self" as const, id: null };
+    const j = { type: "contact" as const, id: "j" };
+    expect(relationshipPairKey(u, j, me, "stepfather")).toBe(relationshipPairKey(u, me, j, "stepson"));
+    expect(relationshipPairKey(u, j, me, "father")).toBe(relationshipPairKey(u, me, j, "son"));
+  });
+
+  it("renders the other person's role from the viewer's perspective, name cleaned", () => {
+    const d = describeRelationship({
+      sourceType: "self", sourceId: null,
+      targetType: "contact", targetId: "j",
+      label: "stepson", customLabel: null,
+      viewingContactId: null,
+      sourceName: "Me", targetName: "Jürgen Skoppek (Stiefvater)",
+      otherGender: "male",
+    });
+    expect(d.display).toBe("Stepfather: Jürgen Skoppek");
+  });
+});
