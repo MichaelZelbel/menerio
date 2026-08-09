@@ -197,7 +197,6 @@ async function reconcileUser(db: any, userId: string) {
   // ---- 3. evidence pass -------------------------------------------------
   const candidates = [...byPair.values()];
   const verified: Rel[] = [];
-  const unevidenced: string[] = [];
   let llmBudget = MAX_LLM_ROWS_PER_USER;
   // If the judge itself is unreachable (credit limit, network, 5xx) we must NOT
   // read that as "no evidence" — nothing gets deleted and the run is retried.
@@ -215,17 +214,28 @@ async function reconcileUser(db: any, userId: string) {
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
 
-    // Candidate notes: must literally mention both endpoints (owner counts as
-    // implicit in their own notes).
-    let query = db
+    // Relationship rows are evidence-backed at write time. Legacy rows without
+    // a source note cannot be rehabilitated by searching arbitrary mentions:
+    // proximity is not evidence. Remove them deterministically.
+    if (!rel.evidence_note_id || !rel.evidence_quote) {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+      continue;
+    }
+
+    const { data: sourceNote } = await db
       .from("notes")
       .select("id, title, content")
+      .eq("id", rel.evidence_note_id)
       .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(MAX_NOTES_PER_ROW);
-    const searchNames = [rel.source_type === "self" ? null : personA, rel.target_type === "self" ? null : personB].filter(Boolean) as string[];
-    for (const name of searchNames) query = query.ilike("content", likeToken(name));
-    const { data: notes } = await query;
+      .maybeSingle();
+    if (!sourceNote || !exactQuoteExists(String(sourceNote.content || ""), rel.evidence_quote)) {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+      continue;
+    }
+
+    const notes = [sourceNote];
 
     let kept = false;
     let completedSearch = true;
@@ -295,17 +305,15 @@ async function reconcileUser(db: any, userId: string) {
     }
 
     if (judgeDown) break;
-    if (!kept && completedSearch) unevidenced.push(rel.id);
+    if (!kept && completedSearch) {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+    }
   }
 
   if (judgeDown) {
     // Deleting here would destroy real data because of an outage. Stop the run.
     throw new Error(`judge unavailable — reconciliation aborted without deletions: ${String((judgeDown as Error)?.message || judgeDown)}`);
-  }
-
-  if (unevidenced.length) {
-    await drop(unevidenced);
-    stats.relationships_deleted_unevidenced = unevidenced.length;
   }
 
   // ---- 4. exclusivity ---------------------------------------------------
