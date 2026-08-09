@@ -37,6 +37,8 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
       { canonical: "Hair color", single: true, aliases: ["hair color", "hair colour", "haarfarbe"] },
       { canonical: "Blood type", single: true, aliases: ["blood type", "blood group", "blutgruppe"] },
       { canonical: "Pronunciation", single: true, aliases: ["pronunciation", "name pronunciation", "pronounced"] },
+      { canonical: "Language", single: false, aliases: ["language", "languages", "speaks", "spoken languages"] },
+
     ],
   },
   location: {
