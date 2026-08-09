@@ -293,7 +293,9 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   })();
 
   return (
+    <>
     <div className="rounded-lg border border-border bg-card">
+
       {/* Header — same shape as every other profile section. */}
       <div className="flex items-center gap-2 px-4 py-2.5 group">
         <button
