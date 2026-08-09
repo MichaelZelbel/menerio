@@ -32,7 +32,6 @@ import {
 import {
   adjudicateRelationship,
   exactQuoteExists,
-  recoverRelationshipEvidence,
   RELATIONSHIP_ADJUDICATION_VERSION,
 } from "../_shared/relationship-adjudicator.ts";
 
@@ -46,9 +45,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
-const MAX_LLM_ROWS_PER_USER = 80;
-/** Candidate notes inspected per relationship before it is declared unevidenced. */
-const MAX_NOTES_PER_ROW = 4;
+const MAX_LLM_ROWS_PER_USER = 4;
 
 /** Bonds that are mutually exclusive at a point in time. */
 const PARTNER_BOND = new Set(["spouse", "wife", "husband", "partner", "lover"]);
@@ -81,11 +78,6 @@ function jsonResponse(body: unknown, status = 200) {
 
 function personKey(type: string, id: string | null) {
   return type === "self" ? "self" : `contact:${id}`;
-}
-
-/** Escape a name for a PostgREST ilike pattern. */
-function likeToken(name: string) {
-  return `%${name.replace(/[%_,()]/g, " ").trim()}%`;
 }
 
 async function reconcileUser(db: any, userId: string) {
@@ -137,6 +129,21 @@ async function reconcileUser(db: any, userId: string) {
   const invalid: string[] = [];
   const surviving: Rel[] = [];
   for (const rel of relationships) {
+    // A relationship explicitly entered by the user is authoritative. Automated
+    // reconciliation may normalize or deduplicate it, but never delete it.
+    if (rel.origin === "user_manual") {
+      const label = canonicalLabel(rel.label);
+      const decision = relationshipWriteDecision({
+        userId,
+        sourceType: rel.source_type as "contact" | "self",
+        sourceId: rel.source_id,
+        targetType: rel.target_type as "contact" | "self",
+        targetId: rel.target_id,
+        label,
+      });
+      surviving.push({ ...rel, label, pair_key: decision.ok ? decision.pairKey : rel.pair_key });
+      continue;
+    }
     const label = canonicalLabel(rel.label);
     const decision = relationshipWriteDecision({
       userId,
@@ -162,7 +169,7 @@ async function reconcileUser(db: any, userId: string) {
   const byPair = new Map<string, Rel>();
   const duplicates: string[] = [];
   for (const rel of surviving) {
-    const key = rel.pair_key!;
+    const key = rel.pair_key || `manual:${rel.id}`;
     const existing = byPair.get(key);
     if (!existing) {
       byPair.set(key, rel);
@@ -182,7 +189,6 @@ async function reconcileUser(db: any, userId: string) {
   // ---- 3. evidence pass -------------------------------------------------
   const candidates = [...byPair.values()];
   const verified: Rel[] = [];
-  const unevidenced: string[] = [];
   let llmBudget = MAX_LLM_ROWS_PER_USER;
   // If the judge itself is unreachable (credit limit, network, 5xx) we must NOT
   // read that as "no evidence" — nothing gets deleted and the run is retried.
@@ -190,101 +196,88 @@ async function reconcileUser(db: any, userId: string) {
   const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
   for (const rel of candidates) {
-    const alreadyVerified = rel.origin === "human" || (rel.origin === "machine_verified" && !!rel.evidence_quote);
+    const alreadyVerified = rel.origin === "user_manual" || (rel.origin !== "unverified" && !!rel.evidence_quote);
     if (alreadyVerified) {
       verified.push(rel);
       continue;
     }
     if (judgeDown) break;
-    if (llmBudget <= 0) {
-      // Not judged this run: leave untouched and quarantined, pick it up next sweep.
-      continue;
-    }
 
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
 
-    // Candidate notes: must literally mention both endpoints (owner counts as
-    // implicit in their own notes).
-    let query = db
-      .from("notes")
-      .select("id, title, content")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(MAX_NOTES_PER_ROW);
-    const searchNames = [rel.source_type === "self" ? null : personA, rel.target_type === "self" ? null : personB].filter(Boolean) as string[];
-    for (const name of searchNames) query = query.ilike("content", likeToken(name));
-    const { data: notes } = await query;
-
-    let kept = false;
-    for (const note of (notes || []) as Array<{ id: string; title: string; content: string }>) {
-      llmBudget -= 1;
-      stats.llm_calls += 1;
-      const evidence = await recoverRelationshipEvidence({
-        db, userId, noteTitle: note.title || "", noteContent: note.content || "",
-        personA, personB, label: rel.label,
-        onJudgeUnavailable: judgeUnavailable,
-      });
-      if (judgeDown) break;
-      if (!evidence) continue;
-      stats.llm_calls += 1;
-      const verdict = await adjudicateRelationship({
-        db,
-        userId,
-        candidate: {
-          personA, personB, label: rel.label,
-          sourceQuote: evidence.sourceQuote,
-          sourceContext: evidence.sourceContext,
-        },
-        onJudgeUnavailable: judgeUnavailable,
-      });
-      if (judgeDown) break;
-      if (verdict.outcome !== "keep") continue;
-
-      const finalLabel = verdict.canonicalLabel || rel.label;
-      await db.from("contact_relationships").update({
-        label: finalLabel,
-        origin: "machine_verified",
-        evidence_quote: evidence.sourceQuote,
-        evidence_note_id: note.id,
-      }).eq("id", rel.id);
-      await db.from("relationship_evidence").insert({
-        user_id: userId,
-        relationship_id: rel.id,
-        source_note_id: note.id,
-        source_quote: evidence.sourceQuote,
-        source_context: evidence.sourceContext,
-        proposed_label: rel.label,
-        adjudicated_label: finalLabel,
-        outcome: "keep",
-        reason: verdict.reason,
-        real_person_a: verdict.personAKind === "real_person",
-        real_person_b: verdict.personBKind === "real_person",
-        personally_relevant: verdict.personallyRelevant,
-        relationship_supported: verdict.relationshipSupported,
-        incidental_or_transactional: verdict.incidentalOrTransactional,
-        fictional_or_roleplay: verdict.fictionalOrRoleplay,
-        confidence: verdict.confidence,
-        adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
-      });
-      verified.push({ ...rel, label: finalLabel, origin: "machine_verified", evidence_quote: evidence.sourceQuote, evidence_note_id: note.id });
-      stats.relationships_verified += 1;
-      kept = true;
-      break;
+    // Relationship rows are evidence-backed at write time. Legacy rows without
+    // a source note cannot be rehabilitated by searching arbitrary mentions:
+    // proximity is not evidence. Remove them deterministically.
+    if (!rel.evidence_note_id || !rel.evidence_quote) {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+      continue;
     }
 
+    const { data: sourceNote } = await db
+      .from("notes")
+      .select("id, title, content")
+      .eq("id", rel.evidence_note_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!sourceNote || !exactQuoteExists(String(sourceNote.content || ""), rel.evidence_quote)) {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+      continue;
+    }
+
+    if (llmBudget <= 0) break;
+    llmBudget -= 1;
+    stats.llm_calls += 1;
+    const verdict = await adjudicateRelationship({
+      db,
+      userId,
+      candidate: {
+        personA,
+        personB,
+        label: rel.label,
+        sourceQuote: rel.evidence_quote,
+        sourceContext: rel.evidence_quote,
+      },
+      onJudgeUnavailable: judgeUnavailable,
+    });
+
     if (judgeDown) break;
-    if (!kept) unevidenced.push(rel.id);
+    if (verdict.outcome !== "keep") {
+      await drop([rel.id]);
+      stats.relationships_deleted_unevidenced += 1;
+      continue;
+    }
+
+    const finalLabel = verdict.canonicalLabel || rel.label;
+    await db.from("contact_relationships").update({ label: finalLabel, origin: "ai_note" }).eq("id", rel.id);
+    await db.from("relationship_evidence").insert({
+      user_id: userId,
+      relationship_id: rel.id,
+      source_note_id: sourceNote.id,
+      source_quote: rel.evidence_quote,
+      source_context: rel.evidence_quote,
+      proposed_label: rel.label,
+      adjudicated_label: finalLabel,
+      outcome: "keep",
+      reason: verdict.reason,
+      real_person_a: verdict.personAKind === "real_person",
+      real_person_b: verdict.personBKind === "real_person",
+      personally_relevant: verdict.personallyRelevant,
+      relationship_supported: verdict.relationshipSupported,
+      incidental_or_transactional: verdict.incidentalOrTransactional,
+      fictional_or_roleplay: verdict.fictionalOrRoleplay,
+      confidence: verdict.confidence,
+      adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
+    });
+    verified.push({ ...rel, label: finalLabel, origin: "ai_note" });
+    stats.relationships_verified += 1;
   }
 
   if (judgeDown) {
     // Deleting here would destroy real data because of an outage. Stop the run.
     throw new Error(`judge unavailable — reconciliation aborted without deletions: ${String((judgeDown as Error)?.message || judgeDown)}`);
-  }
-
-  if (unevidenced.length) {
-    await drop(unevidenced);
-    stats.relationships_deleted_unevidenced = unevidenced.length;
   }
 
   // ---- 4. exclusivity ---------------------------------------------------
@@ -307,7 +300,7 @@ async function reconcileUser(db: any, userId: string) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     for (const loser of ranked.slice(1)) {
-      if (loser.origin === "human") continue; // never overrule a person
+      if (loser.origin === "user_manual") continue; // never overrule a person
       conflicting.add(loser.id);
     }
   }
@@ -336,11 +329,12 @@ async function reconcileUser(db: any, userId: string) {
     origin: string | null; evidence_quote: string | null; linked_note_id: string | null;
   }>;
 
-  const noteCache = new Map<string, string>();
-  const loadNote = async (noteId: string): Promise<string> => {
+  const noteCache = new Map<string, string | null>();
+  const loadNote = async (noteId: string): Promise<string | null> => {
     if (noteCache.has(noteId)) return noteCache.get(noteId)!;
-    const { data } = await db.from("notes").select("content").eq("id", noteId).maybeSingle();
-    const content = String(data?.content || "");
+    const { data, error } = await db.from("notes").select("content").eq("id", noteId).eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`Could not verify profile-entry evidence: ${error.message}`);
+    const content = data ? String(data.content || "") : null;
     noteCache.set(noteId, content);
     return content;
   };
@@ -371,14 +365,18 @@ async function reconcileUser(db: any, userId: string) {
 
     // Provenance: manual entries are the user's own word and are trusted.
     if (!entry.linked_note_id) {
-      if (entry.origin !== "human") {
-        patch.origin = "human";
-        stats.entries_marked_human += 1;
+      if (entry.origin !== "user_manual") {
+        entriesToDelete.push(entry.id);
+        stats.entries_deleted_unevidenced += 1;
+        continue;
       }
-    } else if (entry.origin === "human" || entry.origin === "machine_verified") {
+    } else if (entry.origin === "user_manual" || (entry.origin !== "unverified" && !!entry.evidence_quote)) {
       // already vouched for
     } else {
       const content = await loadNote(entry.linked_note_id);
+      // A missing source row is not proof that the fact is false. Leave it
+      // quarantined rather than deleting it during a transient or sync gap.
+      if (content === null) continue;
       const quote = entry.evidence_quote && exactQuoteExists(content, entry.evidence_quote)
         ? entry.evidence_quote
         : exactQuoteExists(content, entry.value)
@@ -389,7 +387,7 @@ async function reconcileUser(db: any, userId: string) {
         stats.entries_deleted_unevidenced += 1;
         continue;
       }
-      patch.origin = "machine_verified";
+      patch.origin = "ai_note";
       patch.evidence_quote = quote;
       stats.entries_verified += 1;
     }
@@ -438,6 +436,12 @@ serve(async (req) => {
             .update({ status: "completed", stats, finished_at: new Date().toISOString() })
             .eq("id", runRow.id);
         }
+        const { count: remaining } = await service
+          .from("contact_relationships")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", targetUserId)
+          .eq("origin", "unverified");
+        if ((remaining || 0) > 0) console.log("[profile-reconcile] pending quarantined rows", targetUserId, remaining);
       } catch (error) {
         console.error("[profile-reconcile] user failed", targetUserId, error);
         if (runRow?.id) {

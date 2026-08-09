@@ -104,6 +104,19 @@ VIOLATION CATEGORIES:
 
 If the content is safe, return is_violation=false. If it violates a category, return is_violation=true with the category, a confidence score (0-1), and a brief reason.`;
 
+export const RELATIONSHIP_ADJUDICATION_PROMPT = `You are the independent relationship evidence judge for a private personal knowledge base.
+Evaluate only the supplied exact quote and context. Never infer a relationship from a name appearing nearby.
+A record may be kept only when BOTH endpoints are real people (the account owner counts), the quote supports the proposed personal role, and the relationship is meaningful to the profile owner.
+Reject organizations, products, brands, software, projects, bots, fictional characters, avatars, role-play identities, handles without a confirmed person, authors/bylines, celebrities merely discussed, and incidental or one-off transactional mentions.
+Professional roles may be kept only when the quote explicitly establishes the durable role between the named people. Do not turn praise, admiration, resemblance, ownership, note authorship, or being the subject of a note into a relationship.
+When evidence is ambiguous, choose review rather than keep. Do not assume monogamy or exclusivity; distinct evidenced relationships to distinct real people are valid.
+Return strict JSON only with: outcome (keep|reject|review), reason, canonical_label, inverse_label, person_a_kind, person_b_kind, personally_relevant, relationship_supported, incidental_or_transactional, fictional_or_roleplay, confidence (0..1).`;
+
+export const RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT = `Locate evidence for one proposed person-to-person relationship in a source note. Return exactly two tagged fields and nothing else:
+<SOURCE_QUOTE>shortest exact quote</SOURCE_QUOTE>
+<SOURCE_CONTEXT>larger exact excerpt</SOURCE_CONTEXT>
+SOURCE_QUOTE must be the shortest exact, verbatim, contiguous quote that explicitly supports the named relationship. SOURCE_CONTEXT may be a larger exact contiguous excerpt. Never paraphrase, repair spelling, combine separate passages, infer from proximity, or use metadata/bylines. If the note does not explicitly support the relationship, leave both tags empty.`;
+
 export const DRAFT_EVENT_PROMPT = `You are an assistant that helps structure life moments for a personal timeline app called Menerio.
 
 The user will describe something that happened (or will happen). Your job is to extract a structured moment from their description.
@@ -654,6 +667,22 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     model: "deepseek/deepseek-v4-flash",
     system_prompt: QUICK_CAPTURE_METADATA_PROMPT,
     temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+    call_site: "relationship.adjudication",
+    description: "Independently verifies whether an exact source quote supports a real person-to-person relationship.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: RELATIONSHIP_ADJUDICATION_PROMPT,
+    temperature: 0, max_tokens: 2000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
+  },
+  {
+    call_site: "relationship.evidence_recovery",
+    description: "Finds the shortest verbatim source quote supporting a proposed relationship.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT,
+    temperature: 0, max_tokens: 2000, extra_options: { reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     call_site: "suggest-connections.main",
