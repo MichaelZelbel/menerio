@@ -55,10 +55,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
 const MAX_LLM_ROWS_PER_USER = 4;
 
-/** Bonds that are mutually exclusive at a point in time. */
-const PARTNER_BOND = new Set(["spouse", "wife", "husband", "partner", "lover"]);
-/** Labels that describe an ended bond — they never conflict with an active one. */
-const EX_BOND = new Set(["ex-partner", "ex-spouse", "ex-wife", "ex-husband"]);
+/** Origins that a sweep must never delete or re-judge. */
+const TRUSTED_ORIGINS = new Set(["user_manual", "unverified"]);
+
+
 
 type Rel = {
   id: string;
