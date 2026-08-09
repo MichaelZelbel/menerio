@@ -256,88 +256,102 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
 
   return (
     <div className="rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between p-3 pb-2">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-sm font-medium">Relationships</h3>
-          {rows.length > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              {rows.length}
-            </Badge>
-          )}
-          {derivedStatus && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-              {derivedStatus}
-            </Badge>
-          )}
-        </div>
+      {/* Header — same shape as every other profile section. */}
+      <div className="flex items-center gap-2 px-4 py-2.5 group">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label={expanded ? "Collapse section" : "Expand section"}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+        <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="font-medium text-sm flex-1 truncate">Relationships</span>
+        {derivedStatus && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+            {derivedStatus}
+          </Badge>
+        )}
+        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
         {!adding && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setAdding(true)}>
-            <Plus className="h-3 w-3 mr-1" /> Add
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            aria-label="Add relationship"
+            onClick={() => {
+              setAdding(true);
+              setExpanded(true);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
 
       {/* Existing relationships — always "Role: Name", where Role is the role
           the OTHER person holds toward {contactName}. */}
-      {rows.length > 0 && (
-        <div className="px-3 pb-2 space-y-1">
+      {expanded && rows.length > 0 && (
+        <div className="border-t border-border">
           {rows.map(({ rel, description, otherContactId, otherIsSelf }) => (
-            <div
+            <ProfileRow
               key={rel.id}
-              className="flex items-center justify-between group py-1 px-2 rounded hover:bg-muted/50 text-sm"
-            >
-              <div className="flex items-baseline gap-1.5 min-w-0">
-                <span className="font-medium shrink-0">{description.role}:</span>
-                {otherIsSelf ? (
-                  <Link to="/dashboard/profile" className="text-foreground hover:underline truncate">
-                    {description.otherName}
-                  </Link>
-                ) : otherContactId ? (
-                  <Link
-                    to={`/dashboard/people/${otherContactId}`}
-                    className="text-foreground hover:underline truncate"
+              label={description.role}
+              actions={
+                <>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    onClick={() => handleDelete(rel.id)}
                   >
-                    {description.otherName}
-                  </Link>
-                ) : (
-                  <span className="truncate">{description.otherName}</span>
-                )}
-              </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEdit(rel)}>
-                  <Pencil className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 text-destructive"
-                  onClick={() => handleDelete(rel.id)}
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              }
+            >
+              {otherIsSelf ? (
+                <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
+                  {description.otherName}
+                </Link>
+              ) : otherContactId ? (
+                <Link
+                  to={`/dashboard/people/${otherContactId}`}
+                  className="text-sm hover:underline break-words"
                 >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
+                  {description.otherName}
+                </Link>
+              ) : (
+                <span className="text-sm break-words">{description.otherName}</span>
+              )}
+            </ProfileRow>
           ))}
         </div>
       )}
 
-      {rows.length === 0 && !adding && (
-        <p className="px-3 pb-3 text-xs text-muted-foreground">
-          No relationships yet. Add one to track how people are connected.
-        </p>
+      {expanded && rows.length === 0 && !adding && (
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+          <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
+            <Plus className="h-3.5 w-3.5" /> Add
+          </Button>
+        </div>
       )}
 
       {/* Non-edge relational facts live in this same card — one surface. */}
-      {milestones.length > 0 && (
-        <div className="px-3 pb-3 pt-1 border-t border-border/60 space-y-1">
+      {expanded && milestones.length > 0 && (
+        <div className="border-t border-border">
           {milestones.map((m) => (
-            <div key={m.id} className="flex items-baseline gap-1.5 text-sm px-2">
-              <span className="text-muted-foreground shrink-0">{m.label}:</span>
-              <span className="truncate">{m.value}</span>
-            </div>
+            <ProfileRow key={m.id} label={m.label}>
+              <span className="text-sm break-words">{m.value}</span>
+            </ProfileRow>
           ))}
         </div>
+
       )}
 
 
