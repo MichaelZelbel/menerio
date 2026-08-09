@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SEOHead } from "@/components/SEOHead";
 import { useProfile } from "@/hooks/useProfile";
-import { CategorySection } from "@/components/profile/CategorySection";
+import { CompactCategorySection } from "@/components/people/profile/CompactCategorySection";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
 import { ProfileSuggestions } from "@/components/profile/ProfileSuggestions";
