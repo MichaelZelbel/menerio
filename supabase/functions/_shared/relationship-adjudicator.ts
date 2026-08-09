@@ -119,6 +119,7 @@ export async function adjudicateRelationship(args: {
     };
   } catch (error) {
     console.error("[relationship-adjudicator] failed closed", error);
+    args.onJudgeUnavailable?.(error);
     return {
       outcome: "review", reason: "Automated evidence review was unavailable", canonicalLabel: canonicalLabel(args.candidate.label) || null,
       inverseLabel: null, personAKind: "unclear", personBKind: "unclear", personallyRelevant: false,
