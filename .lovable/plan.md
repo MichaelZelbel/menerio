@@ -37,11 +37,12 @@ One shared `assertRelationshipWrite` / `assertProfileEntryWrite` used by *all* w
 - edge whose other end is you (matched against `user_self_aliases` + your own name) → rejected;
 - an edge already present in the **other direction** within the same role family → rejected (this alone kills 8 of your 23 items);
 - generic role when a specific one exists for the same pair (`parent` vs `mother`) → collapses to the specific;
-- a second singleton role (second "mother of self", second spouse) → **not written**; queued as a conflict instead;
+- a second edge for the **same person and same semantic role** → not written as a duplicate;
+- multiple partner/romantic edges to different people → preserved by default. They are only flagged as a conflict when there is explicit exclusivity evidence (for example, a direct statement that a relationship is exclusive/monogamous) or two facts cannot both be true. No relationship status is inferred from cultural, moral, marital, or gender assumptions;
 - fact value gate: rejects `value == label`, `none/n-a/unknown/-`, values under 2 chars, a bare date under a non-date label, and the person's own name as a value;
 - fact synonym folding: `Topics of interest` → `Interests`, and if the same normalized value already exists on that person under any label in the same family, the write is skipped.
 
-**Backstop:** the same rules re-implemented as Postgres triggers/constraints (extending today's `relationship_dedup_guard`), so a path that forgets the helper — or a raw SQL/MCP write — still cannot create the row. A `pair_key` that is family-based and direction-independent gets a unique index, making duplicates structurally impossible.
+**Backstop:** the same rules re-implemented as Postgres triggers/constraints (extending today's `relationship_dedup_guard`), so a path that forgets the helper — or a raw SQL/MCP write — still cannot create the row. A `pair_key` that is family-based and direction-independent gets a unique index, making duplicates structurally impossible without imposing one-person-only romantic cardinality.
 
 ### Layer 3 — Continuous reconciler + human review for the ambiguous cases
 
