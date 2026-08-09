@@ -304,7 +304,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
             {derivedStatus}
           </Badge>
         )}
-        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{rows.length + professionalRows.length}</span>
         {!adding && (
           <Button
             variant="ghost"
