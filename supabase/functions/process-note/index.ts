@@ -31,6 +31,12 @@ import {
   dedupIncomingProfileValue,
 } from "../_shared/profile-dedup.ts";
 import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
+import {
+  RELATIONSHIP_ADJUDICATION_VERSION,
+  adjudicateRelationship,
+  exactQuoteExists,
+  noteContentHash,
+} from "../_shared/relationship-adjudicator.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -802,6 +808,8 @@ Return a JSON object with two keys:
    - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
    - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor", "spouse")
    - "label_b_to_a": what person_b is to person_a
+    - "source_quote": the shortest exact verbatim quote from the note that proves this relationship
+    - "source_context": one or two surrounding sentences, copied verbatim when useful
 
 OWNER-FACT GUIDANCE:
 - The note author / profile owner is the user. Extract facts about THEM into the OWNER profile by setting contact_name = "me".
@@ -819,6 +827,8 @@ Rules:
 - Do NOT invent or assume — if unsure, skip
 - Return empty arrays if nothing qualifies
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+- Every relationship MUST include an exact source_quote. If no exact quote proves the relationship, do not emit it.
+- Do not emit relationships for organizations, products, brands, software, projects, fictional characters, avatars, role-play identities, authors/bylines, celebrities merely discussed, admiration, resemblance, ownership, or incidental transactions.
 
 DERIVED FACTS — compute the canonical underlying fact when possible:
 - If the note states an age AND a reference date, compute date of birth: label = "Date of birth", value = "YYYY-MM-DD" (year = referenceYear - age).
@@ -1389,6 +1399,8 @@ async function generateProfileSuggestions(
       person_b: string;
       label_a_to_b: string;
       label_b_to_a: string;
+      source_quote: string;
+      source_context: string;
     }> = [];
 
     try {
@@ -1442,6 +1454,8 @@ async function generateProfileSuggestions(
             person_b: (r.person_b || "").trim(),
             label_a_to_b: (r.label_a_to_b || "").trim().toLowerCase(),
             label_b_to_a: (r.label_b_to_a || r.label_a_to_b || "").trim().toLowerCase(),
+             source_quote: (r.source_quote || "").trim(),
+             source_context: (r.source_context || "").trim(),
           }));
         }
       } else {
@@ -1531,6 +1545,8 @@ async function generateProfileSuggestions(
             person_b: f.value,
             label_a_to_b: relLabel,
             label_b_to_a: inverseLabel(relLabel),
+             source_quote: "",
+             source_context: "",
           });
           console.log(`[profile-extract] Rerouted blocked label "${f.label}" → relationship ${relLabel}`);
         } else {
@@ -1731,6 +1747,10 @@ async function generateProfileSuggestions(
 
       const selfCtxRel = await loadSelfContext(userId);
       for (const rel of extractedRelationships) {
+        if (!exactQuoteExists(cleanContent, rel.source_quote)) {
+          console.log(`[relationships] Rejected candidate without a verifiable exact quote: ${rel.person_a} / ${rel.person_b}`);
+          continue;
+        }
         const isSelfA = /^(me|myself|i|my|mine)$/i.test(rel.person_a) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_a, selfCtxRel.aliases));
         const isSelfB = /^(me|myself|i|my|mine)$/i.test(rel.person_b) || (selfCtxRel.enabled && nameMatchesAlias(rel.person_b, selfCtxRel.aliases));
 
@@ -1785,6 +1805,62 @@ async function generateProfileSuggestions(
 
         const nameA = isSelfA ? "Me" : contactA!.name;
         const nameB = isSelfB ? "Me" : contactB!.name;
+        const adjudication = await adjudicateRelationship({
+          db: supabase,
+          userId,
+          candidate: {
+            personA: nameA,
+            personB: nameB,
+            label: canonical,
+            inverseLabel: inverse,
+            sourceQuote: rel.source_quote,
+            sourceContext: rel.source_context,
+          },
+        });
+        const adjudicatedLabel = adjudication.canonicalLabel || canonical;
+
+        const { data: evidenceRow, error: evidenceError } = await supabase
+          .from("relationship_evidence")
+          .upsert({
+            user_id: userId,
+            source_note_id: noteId,
+            source_quote: rel.source_quote,
+            source_context: rel.source_context || null,
+            proposed_label: canonical,
+            adjudicated_label: adjudicatedLabel,
+            outcome: adjudication.outcome,
+            reason: adjudication.reason,
+            real_person_a: ["real_person", "public_person"].includes(adjudication.personAKind),
+            real_person_b: ["real_person", "public_person"].includes(adjudication.personBKind),
+            personally_relevant: adjudication.personallyRelevant,
+            relationship_supported: adjudication.relationshipSupported,
+            incidental_or_transactional: adjudication.incidentalOrTransactional,
+            fictional_or_roleplay: adjudication.fictionalOrRoleplay,
+            confidence: adjudication.confidence,
+            adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
+            note_content_hash: noteContentHash(cleanContent),
+          }, { onConflict: "user_id,source_note_id,proposed_label,note_content_hash,source_quote" })
+          .select("id")
+          .single();
+        if (evidenceError) console.error("[relationships] Evidence write failed", evidenceError);
+
+        const contactClassifications = [
+          contactA ? { id: contactA.id, kind: adjudication.personAKind } : null,
+          contactB ? { id: contactB.id, kind: adjudication.personBKind } : null,
+        ].filter((value): value is { id: string; kind: typeof adjudication.personAKind } => value !== null);
+        for (const classification of contactClassifications) {
+          await supabase.from("contacts").update({
+            entity_kind: classification.kind,
+            entity_confidence: adjudication.confidence,
+            entity_reason: adjudication.reason,
+            entity_classified_at: new Date().toISOString(),
+          }).eq("id", classification.id).eq("user_id", userId);
+        }
+
+        if (adjudication.outcome === "reject") {
+          console.log(`[relationships] Adjudicator rejected ${nameA} / ${nameB}: ${adjudication.reason}`);
+          continue;
+        }
         const title = `Add relationship: ${nameA} → ${nameB} (${canonical})`;
 
         relSuggestions.push({
@@ -1798,7 +1874,7 @@ async function generateProfileSuggestions(
             source_id: aRef.id,
             target_type: bRef.type,
             target_id: bRef.id,
-            label: canonical,
+            label: adjudicatedLabel,
             // Only suggest a mirror for asymmetric labels
             inverse_label: isSymmetricLabel(canonical) ? null : inverse,
             inverse_source_type: isSelfB ? "self" : "contact",
@@ -1807,12 +1883,18 @@ async function generateProfileSuggestions(
             inverse_target_id: isSelfA ? null : contactA!.id,
             contact_name_a: nameA,
             contact_name_b: nameB,
+            evidence_id: evidenceRow?.id || null,
+            evidence_quote: rel.source_quote,
+            evidence_context: rel.source_context || null,
+            adjudication_reason: adjudication.reason,
+            adjudication_outcome: adjudication.outcome,
+            adjudication_confidence: adjudication.confidence,
           },
           status: "pending_review",
           target_entity_type: "relationship",
           source_title: noteTitle,
           extracted_value: `${nameA} ${canonical} ${nameB}`,
-          confidence_score: DEFAULT_CONFIDENCE.add_relationship,
+          confidence_score: adjudication.confidence,
           is_sensitive: isSensitiveSuggestion("add_relationship", { ...rel, nameA, nameB }, noteContent),
           suppression_key: buildSuppressionKey("add_relationship", "relationship", null, pairKey),
         });

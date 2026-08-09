@@ -52,6 +52,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   normalize_profile_entry: { icon: Sparkles, label: "Profile cleanup", color: "text-fuchsia-500" },
   merge_duplicate_person: { icon: Merge, label: "Duplicate person", color: "text-orange-500" },
   resolve_relationship_conflict: { icon: AlertTriangle, label: "Relationship conflict", color: "text-yellow-500" },
+  adjudicate_relationship: { icon: Eye, label: "Relationship evidence", color: "text-primary" },
 
 };
 
@@ -363,6 +364,14 @@ export default function ReviewQueue() {
         });
       }
 
+      if (insertedId && item.payload?.evidence_id) {
+        await supabase
+          .from("relationship_evidence" as any)
+          .update({ relationship_id: insertedId } as any)
+          .eq("id", item.payload.evidence_id)
+          .eq("user_id", user!.id);
+      }
+
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
       updateStatus.mutate({
         id: item.id,
@@ -479,6 +488,11 @@ export default function ReviewQueue() {
         return;
       }
       return handleResolveConflict(item, options[0].id);
+    }
+
+    if (type === "adjudicate_relationship") {
+      updateStatus.mutate({ id: item.id, status: "kept", extra: { applied_at: new Date().toISOString() } });
+      return;
     }
 
 
@@ -972,6 +986,19 @@ export default function ReviewQueue() {
                           </Button>
                         ))}
                       </div>
+                    </div>
+                  </CardContent>
+                )}
+                {(item.suggestion_type === "add_relationship" || item.suggestion_type === "adjudicate_relationship") && payload?.evidence_quote && (
+                  <CardContent className="space-y-2">
+                    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Source evidence</p>
+                      <blockquote className="text-sm text-foreground border-l-2 border-primary pl-3">
+                        “{payload.evidence_quote}”
+                      </blockquote>
+                      {payload?.adjudication_reason && (
+                        <p className="text-xs text-muted-foreground">{payload.adjudication_reason}</p>
+                      )}
                     </div>
                   </CardContent>
                 )}

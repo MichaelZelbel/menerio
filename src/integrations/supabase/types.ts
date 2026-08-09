@@ -834,6 +834,10 @@ export type Database = {
           conversation_updated_at: string | null
           created_at: string | null
           email: string | null
+          entity_classified_at: string | null
+          entity_confidence: number | null
+          entity_kind: string | null
+          entity_reason: string | null
           id: string
           is_favorite: boolean
           is_sensitive: boolean
@@ -864,6 +868,10 @@ export type Database = {
           conversation_updated_at?: string | null
           created_at?: string | null
           email?: string | null
+          entity_classified_at?: string | null
+          entity_confidence?: number | null
+          entity_kind?: string | null
+          entity_reason?: string | null
           id?: string
           is_favorite?: boolean
           is_sensitive?: boolean
@@ -894,6 +902,10 @@ export type Database = {
           conversation_updated_at?: string | null
           created_at?: string | null
           email?: string | null
+          entity_classified_at?: string | null
+          entity_confidence?: number | null
+          entity_kind?: string | null
+          entity_reason?: string | null
           id?: string
           is_favorite?: boolean
           is_sensitive?: boolean
@@ -2581,6 +2593,238 @@ export type Database = {
           self_matching_enabled?: boolean
           updated_at?: string
           website?: string | null
+        }
+        Relationships: []
+      }
+      relationship_evidence: {
+        Row: {
+          adjudicated_label: string | null
+          adjudication_version: string
+          confidence: number
+          created_at: string
+          fictional_or_roleplay: boolean | null
+          id: string
+          incidental_or_transactional: boolean | null
+          note_content_hash: string
+          outcome: string
+          personally_relevant: boolean | null
+          proposed_label: string
+          real_person_a: boolean | null
+          real_person_b: boolean | null
+          reason: string
+          relationship_id: string | null
+          relationship_supported: boolean | null
+          same_as_relationship_id: string | null
+          source_context: string | null
+          source_note_id: string | null
+          source_quote: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          adjudicated_label?: string | null
+          adjudication_version: string
+          confidence?: number
+          created_at?: string
+          fictional_or_roleplay?: boolean | null
+          id?: string
+          incidental_or_transactional?: boolean | null
+          note_content_hash: string
+          outcome: string
+          personally_relevant?: boolean | null
+          proposed_label: string
+          real_person_a?: boolean | null
+          real_person_b?: boolean | null
+          reason: string
+          relationship_id?: string | null
+          relationship_supported?: boolean | null
+          same_as_relationship_id?: string | null
+          source_context?: string | null
+          source_note_id?: string | null
+          source_quote: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          adjudicated_label?: string | null
+          adjudication_version?: string
+          confidence?: number
+          created_at?: string
+          fictional_or_roleplay?: boolean | null
+          id?: string
+          incidental_or_transactional?: boolean | null
+          note_content_hash?: string
+          outcome?: string
+          personally_relevant?: boolean | null
+          proposed_label?: string
+          real_person_a?: boolean | null
+          real_person_b?: boolean | null
+          reason?: string
+          relationship_id?: string | null
+          relationship_supported?: boolean | null
+          same_as_relationship_id?: string | null
+          source_context?: string | null
+          source_note_id?: string | null
+          source_quote?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relationship_evidence_relationship_id_fkey"
+            columns: ["relationship_id"]
+            isOneToOne: false
+            referencedRelation: "contact_relationships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relationship_evidence_same_as_relationship_id_fkey"
+            columns: ["same_as_relationship_id"]
+            isOneToOne: false
+            referencedRelation: "contact_relationships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relationship_evidence_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relationship_repair_items: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          error: string | null
+          evidence_quote: string | null
+          id: string
+          new_label: string | null
+          old_label: string
+          outcome: string
+          person_a: string
+          person_b: string
+          reason: string
+          relationship_id: string | null
+          run_id: string
+          snapshot: Json
+          source_note_id: string | null
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          error?: string | null
+          evidence_quote?: string | null
+          id?: string
+          new_label?: string | null
+          old_label: string
+          outcome: string
+          person_a: string
+          person_b: string
+          reason: string
+          relationship_id?: string | null
+          run_id: string
+          snapshot?: Json
+          source_note_id?: string | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          error?: string | null
+          evidence_quote?: string | null
+          id?: string
+          new_label?: string | null
+          old_label?: string
+          outcome?: string
+          person_a?: string
+          person_b?: string
+          reason?: string
+          relationship_id?: string | null
+          run_id?: string
+          snapshot?: Json
+          source_note_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relationship_repair_items_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "relationship_repair_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relationship_repair_items_source_note_id_fkey"
+            columns: ["source_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relationship_repair_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          cursor_created_at: string | null
+          cursor_id: string | null
+          failed_count: number
+          id: string
+          kept_count: number
+          merged_count: number
+          processed_relationships: number
+          queued_count: number
+          relabeled_count: number
+          removed_count: number
+          started_at: string | null
+          status: string
+          summary: Json
+          total_relationships: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          cursor_created_at?: string | null
+          cursor_id?: string | null
+          failed_count?: number
+          id?: string
+          kept_count?: number
+          merged_count?: number
+          processed_relationships?: number
+          queued_count?: number
+          relabeled_count?: number
+          removed_count?: number
+          started_at?: string | null
+          status?: string
+          summary?: Json
+          total_relationships?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          cursor_created_at?: string | null
+          cursor_id?: string | null
+          failed_count?: number
+          id?: string
+          kept_count?: number
+          merged_count?: number
+          processed_relationships?: number
+          queued_count?: number
+          relabeled_count?: number
+          removed_count?: number
+          started_at?: string | null
+          status?: string
+          summary?: Json
+          total_relationships?: number
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
