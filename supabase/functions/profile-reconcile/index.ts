@@ -7,15 +7,23 @@
 //
 // Relationships:
 //   1. deterministic drop  — unusable label, missing/merged endpoint, self-edge
-//   2. duplicate collapse  — one row per pair_key
-//   3. evidence pass       — a row survives only when a real note quote supports
-//                            it (verbatim quote + independent adjudication)
-//   4. exclusivity         — one active marriage/partner bond per person
+//   2. self-duplicate fold — a contact that is really the account owner is
+//                            rewritten to "self" so a person never shows up
+//                            as their own acquaintance
+//   3. duplicate collapse  — one row per pair_key
+//   4. evidence pass       — NEW automated rows need a verbatim note quote.
+//                            Legacy rows (origin "unverified") and manual rows
+//                            are kept and shown; they are never deleted for
+//                            lacking evidence.
+//
+// The reconciler holds no opinion about which relationships a person may have
+// at the same time. Concurrent bonds are valid data, not a conflict.
 //
 // Profile entries:
 //   5. canonical placement — label + category corrected, blocked labels dropped
 //   6. evidence pass       — AI-authored entries need a verbatim quote in their
-//                            source note; manual entries are trusted and kept
+//                            source note; manual and legacy entries are kept
+
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
