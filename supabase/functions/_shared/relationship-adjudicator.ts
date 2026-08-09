@@ -177,6 +177,7 @@ SOURCE_QUOTE must be the shortest exact, verbatim, contiguous quote that explici
     };
   } catch (error) {
     console.error("[relationship-evidence-recovery] failed closed", error);
+    args.onJudgeUnavailable?.(error);
     return null;
   }
 }
