@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Users } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Plus, Pencil, Trash2, Users } from "lucide-react";
 import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +42,8 @@ interface RelationshipsSectionProps {
 
 export function RelationshipsSection({ contactId, contactName, milestones = [] }: RelationshipsSectionProps) {
   const { user } = useAuth();
-  const { relationships, isLoading, upsertRelationship, deleteRelationship } = useContactRelationships(contactId);
+  const { relationships, isLoading, upsertRelationship, deleteRelationship, confirmRelationship } =
+    useContactRelationships(contactId);
 
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState(true);
@@ -211,6 +212,17 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     });
   };
 
+  // "unverified" rows are legacy machine claims nobody vouched for. They stay
+  // visible but dimmed, with a one-click way to keep or drop them.
+  const isUnverified = (rel: ContactRelationship) => rel.origin === "unverified";
+
+  const handleConfirm = (id: string) => {
+    confirmRelationship.mutate(id, {
+      onSuccess: () => showToast.success("Relationship confirmed"),
+      onError: (err: any) => showToast.error(err.message || "Failed to confirm"),
+    });
+  };
+
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
@@ -336,8 +348,21 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
             <ProfileRow
               key={rel.id}
               label={description.role}
+              className={isUnverified(rel) ? "opacity-60" : undefined}
               actions={
                 <>
+                  {isUnverified(rel) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-primary"
+                      aria-label="Confirm relationship"
+                      title="Confirm this relationship"
+                      onClick={() => handleConfirm(rel.id)}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -383,15 +408,30 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
             <ProfileRow
               key={rel.id}
               label={description.role}
+              className={isUnverified(rel) ? "opacity-60" : undefined}
               actions={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-destructive"
-                  onClick={() => handleDelete(rel.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                <>
+                  {isUnverified(rel) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-primary"
+                      aria-label="Confirm relationship"
+                      title="Confirm this relationship"
+                      onClick={() => handleConfirm(rel.id)}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    onClick={() => handleDelete(rel.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </>
               }
             >
               {otherIsSelf ? (
