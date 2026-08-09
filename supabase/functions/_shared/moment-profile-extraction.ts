@@ -17,7 +17,7 @@ import {
   isSelfName,
   type EntityRef,
 } from "./relationship-canonical.ts";
-import { isBlockedRelationshipLabel, profileValueDecision } from "./profile-integrity.ts";
+import { profileValueDecision, relationshipWriteDecision } from "./profile-integrity.ts";
 
 import { buildProfileTokenIndex, dedupIncomingProfileValue } from "./profile-dedup.ts";
 
@@ -278,7 +278,15 @@ async function prepareForInsert(
     if (s.suggestion_type === "add_relationship") {
       const p = s.payload as Record<string, string | null>;
       if (!p.source_type || !p.target_type || !p.label) return { ...s, status: "pending_review" };
-      if (isBlockedRelationshipLabel(p.label)) return { ...s, status: "removed" };
+      const relationshipDecision = relationshipWriteDecision({
+        userId: s.user_id,
+        sourceType: p.source_type as "contact" | "self",
+        sourceId: p.source_id || null,
+        targetType: p.target_type as "contact" | "self",
+        targetId: p.target_id || null,
+        label: p.label,
+      });
+      if (relationshipDecision.ok === false) return { ...s, status: "removed" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({
@@ -287,7 +295,7 @@ async function prepareForInsert(
           source_id: p.source_id || null,
           target_type: p.target_type,
           target_id: p.target_id || null,
-          label: p.label,
+          label: relationshipDecision.label,
           custom_label: p.custom_label || null,
         })
         .select("id")

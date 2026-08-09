@@ -323,7 +323,7 @@ export default function ReviewQueue() {
           .single();
 
         if (error) {
-          if (error.message?.includes("uq_contact_relationship")) {
+          if (error.message?.includes("pair_key") || error.message?.includes("uq_contact_relationship")) {
             showToast.info("This relationship already exists");
             updateStatus.mutate({ id: item.id, status: "kept" });
             return;
