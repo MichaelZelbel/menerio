@@ -7,6 +7,8 @@ import {
   canonicalLabel,
   inverseLabel,
   isSymmetricLabel,
+  relationshipKind,
+  type RelationshipKind,
   type EntityRef,
 } from "@/lib/relationship-canonical";
 import { canonicalProfileLabel, isBlockedProfileLabel } from "@/lib/profile-canonical-schema";
@@ -39,7 +41,7 @@ export type RelationshipWriteInput = {
 };
 
 export type RelationshipWriteDecision =
-  | { ok: true; label: string; pairKey: string }
+  | { ok: true; label: string; pairKey: string; kind: RelationshipKind }
   | { ok: false; reason: string };
 
 export function isBlockedRelationshipLabel(label: string | null | undefined): boolean {
@@ -50,6 +52,10 @@ export function isBlockedRelationshipLabel(label: string | null | undefined): bo
 export function relationshipWriteDecision(input: RelationshipWriteInput): RelationshipWriteDecision {
   const label = canonicalLabel(input.label);
   if (isBlockedRelationshipLabel(label)) return { ok: false, reason: "blocked_relationship_label" };
+  // Closed vocabulary: only real personal or professional roles may be stored.
+  // "author", "admirer", "platform", "creator" and friends are not relationships.
+  const kind = relationshipKind(label);
+  if (kind === "other") return { ok: false, reason: "unrecognized_relationship_label" };
   if (input.sourceType === input.targetType && input.sourceId && input.sourceId === input.targetId) {
     return { ok: false, reason: "self_relationship" };
   }
@@ -61,7 +67,7 @@ export function relationshipWriteDecision(input: RelationshipWriteInput): Relati
   const pairKey = isSymmetricLabel(label)
     ? `${input.userId}|sym|${label}|${[`${source.type}:${source.id || "self"}`, `${target.type}:${target.id || "self"}`].sort().join("|")}`
     : `${input.userId}|asym|${[`${source.type}:${source.id || "self"}:${label}`, `${target.type}:${target.id || "self"}:${inverseLabel(label)}`].sort().join("|")}`;
-  return { ok: true, label, pairKey };
+  return { ok: true, label, pairKey, kind };
 }
 
 export function profileValueDecision(categorySlug: string, label: string, value: string) {

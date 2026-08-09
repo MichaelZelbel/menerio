@@ -600,9 +600,13 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         label,
       });
       if (relationshipDecision.ok === false) return { ...suggestion, status: "removed" };
+      // Hard evidence gate: an automated relationship without a verbatim quote
+      // from a note is never written — it waits for human review instead.
+      const relEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
+      if (relEvidenceQuote.length < 10) return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("contact_relationships")
-        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null })
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null, origin: "ai", evidence_quote: relEvidenceQuote, evidence_note_id: (suggestion.payload as any)?.note_id || (suggestion as any).source_note_id || null })
         .select("id")
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };

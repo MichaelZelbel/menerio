@@ -385,6 +385,9 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         await markKept();
         return;
       }
+      // The evidence gate also applies to bulk approval: no quote, no write.
+      const relEvidenceQuote = String(p.evidence_quote || "").trim();
+      const relOrigin = relEvidenceQuote.length >= 10 ? "ai" : "user";
       const { data: inserted, error } = await db.from("contact_relationships").insert({
         user_id: userId,
         source_type: p.source_type,
@@ -393,6 +396,9 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         target_id: p.target_id || null,
         label: relationshipDecision.label,
         custom_label: p.custom_label || null,
+        origin: relOrigin,
+        evidence_quote: relEvidenceQuote || null,
+        evidence_note_id: p.note_id || null,
       }).select("id").single();
       if (error) throw error;
       await markKept(inserted?.id ? { target_entity_type: "relationship", target_entity_id: inserted.id, applied_at: now } : undefined);

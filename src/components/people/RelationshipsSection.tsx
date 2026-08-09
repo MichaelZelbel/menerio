@@ -12,8 +12,10 @@ import {
   canonicalLabel,
   describeRelationship,
   genderFromFacts,
+  relationshipPairKey,
   type Gender,
 } from "@/lib/relationship-canonical";
+
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -145,9 +147,16 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       label: formLabel,
     });
     if (!decision.ok) {
-      showToast.error("This relationship cannot be saved");
+      const reason = "reason" in decision ? decision.reason : "";
+      showToast.error(
+        reason === "unrecognized_relationship_label"
+          ? "That is not a relationship — pick a family, social or professional role"
+          : "This relationship cannot be saved",
+      );
       return;
     }
+
+
 
     upsertRelationship.mutate(
       {
@@ -205,9 +214,10 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
-  // Keep each relationship to a distinct person. Only exact duplicate role rows
-  // collapse; multiple romantic relationships remain visible independently.
-  const rows = useMemo(() => {
+  // One row per (person, bond). Both stored directions of the same bond
+  // ("Jürgen is my stepfather" + "I am Jürgen's stepson") collapse into the
+  // single row that reads correctly from the viewed person's perspective.
+  const { personalRows, professionalRows } = useMemo(() => {
     const described = relationships.map((rel) => {
       const otherIsSelf =
         contactId === null
@@ -240,18 +250,37 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         otherGender: genderOf(otherKey),
       });
 
-      return { rel, description, otherKey, otherContactId, otherIsSelf };
+      const bondKey = rel.custom_label?.trim()
+        ? `${otherKey}|custom|${rel.custom_label.trim().toLowerCase()}`
+        : relationshipPairKey(
+            user?.id || "",
+            { type: rel.source_type as "contact" | "self", id: rel.source_id },
+            { type: rel.target_type as "contact" | "self", id: rel.target_id },
+            rel.label,
+          );
+
+      return { rel, description, otherKey, otherContactId, otherIsSelf, bondKey };
     });
 
-    const seen = new Set<string>();
-    return described.filter((row) => {
-      const role = (row.rel.custom_label || row.rel.label || row.description.role).trim().toLowerCase();
-      const dedupKey = `${row.otherKey}|${role}`;
-      if (seen.has(dedupKey)) return false;
-      seen.add(dedupKey);
-      return true;
-    });
-  }, [relationships, contactId, myName, genderByPerson]);
+    // Prefer the stored direction where the viewed person is the TARGET: its
+    // label already names the other person's role, so no inversion is needed.
+    const byBond = new Map<string, (typeof described)[number]>();
+    for (const row of described) {
+      const existing = byBond.get(row.bondKey);
+      if (!existing || (existing.description.viewingIsSource && !row.description.viewingIsSource)) {
+        byBond.set(row.bondKey, row);
+      }
+    }
+
+    const all = Array.from(byBond.values()).filter((r) => r.description.kind !== "other");
+    return {
+      personalRows: all.filter((r) => r.description.kind === "personal"),
+      professionalRows: all.filter((r) => r.description.kind === "professional"),
+    };
+  }, [relationships, contactId, myName, genderByPerson, user?.id]);
+
+  const rows = personalRows;
+
 
   if (isLoading) return null;
 
@@ -282,7 +311,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
             {derivedStatus}
           </Badge>
         )}
-        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{rows.length + professionalRows.length}</span>
         {!adding && (
           <Button
             variant="ghost"
@@ -342,7 +371,46 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </div>
       )}
 
-      {expanded && rows.length === 0 && !adding && (
+
+      {/* Professional and service roles are real, but they are not family or
+          friends — they never mix into the personal list. */}
+      {expanded && professionalRows.length > 0 && (
+        <div className="border-t border-border">
+          <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+            Professional &amp; service contacts
+          </div>
+          {professionalRows.map(({ rel, description, otherContactId, otherIsSelf }) => (
+            <ProfileRow
+              key={rel.id}
+              label={description.role}
+              actions={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive"
+                  onClick={() => handleDelete(rel.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              }
+            >
+              {otherIsSelf ? (
+                <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
+                  {description.otherName}
+                </Link>
+              ) : otherContactId ? (
+                <Link to={`/dashboard/people/${otherContactId}`} className="text-sm hover:underline break-words">
+                  {description.otherName}
+                </Link>
+              ) : (
+                <span className="text-sm break-words">{description.otherName}</span>
+              )}
+            </ProfileRow>
+          ))}
+        </div>
+      )}
+
+      {expanded && rows.length === 0 && professionalRows.length === 0 && !adding && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
           <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
@@ -350,6 +418,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
           </Button>
         </div>
       )}
+
 
       {/* Non-edge relational facts live in this same card — one surface. */}
       {expanded && milestones.length > 0 && (
