@@ -5,7 +5,7 @@ import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+
 import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
 import { ALL_RELATIONSHIP_LABELS, getInverseLabel, impliedGenderFromLabel } from "@/lib/relationship-labels";
 import {
