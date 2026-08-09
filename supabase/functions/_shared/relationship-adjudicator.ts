@@ -80,6 +80,8 @@ export async function adjudicateRelationship(args: {
   db: any;
   userId: string;
   candidate: RelationshipCandidate;
+  /** Called when the LLM judge itself could not be reached (credit limit, network, 5xx). */
+  onJudgeUnavailable?: (error: unknown) => void;
 }): Promise<RelationshipAdjudication> {
   const deterministic = deterministicRejection(args.candidate);
   if (deterministic) return deterministic;
@@ -117,6 +119,7 @@ export async function adjudicateRelationship(args: {
     };
   } catch (error) {
     console.error("[relationship-adjudicator] failed closed", error);
+    args.onJudgeUnavailable?.(error);
     return {
       outcome: "review", reason: "Automated evidence review was unavailable", canonicalLabel: canonicalLabel(args.candidate.label) || null,
       inverseLabel: null, personAKind: "unclear", personBKind: "unclear", personallyRelevant: false,
@@ -139,6 +142,8 @@ export async function recoverRelationshipEvidence(args: {
   personA: string;
   personB: string;
   label: string;
+  /** Called when the LLM itself could not be reached — "unavailable" is not "no evidence". */
+  onJudgeUnavailable?: (error: unknown) => void;
 }): Promise<{ sourceQuote: string; sourceContext: string } | null> {
   const content = args.noteContent.slice(0, 60_000);
   try {
@@ -172,6 +177,7 @@ SOURCE_QUOTE must be the shortest exact, verbatim, contiguous quote that explici
     };
   } catch (error) {
     console.error("[relationship-evidence-recovery] failed closed", error);
+    args.onJudgeUnavailable?.(error);
     return null;
   }
 }
