@@ -29,8 +29,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   canonicalLabel,
   inverseLabel,
-  relationshipStrength,
 } from "../_shared/relationship-canonical.ts";
+
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import {
   canonicalProfileLabel,
