@@ -46,7 +46,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
-const MAX_LLM_ROWS_PER_USER = 80;
+const MAX_LLM_ROWS_PER_USER = 1;
 /** Candidate notes inspected per relationship before it is declared unevidenced. */
 const MAX_NOTES_PER_ROW = 4;
 
@@ -190,7 +190,7 @@ async function reconcileUser(db: any, userId: string) {
   const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
   for (const rel of candidates) {
-    const alreadyVerified = rel.origin === "human" || (rel.origin === "machine_verified" && !!rel.evidence_quote);
+    const alreadyVerified = rel.origin === "user_manual" || (rel.origin !== "unverified" && !!rel.evidence_quote);
     if (alreadyVerified) {
       verified.push(rel);
       continue;
@@ -244,7 +244,7 @@ async function reconcileUser(db: any, userId: string) {
       const finalLabel = verdict.canonicalLabel || rel.label;
       await db.from("contact_relationships").update({
         label: finalLabel,
-        origin: "machine_verified",
+        origin: "ai_note",
         evidence_quote: evidence.sourceQuote,
         evidence_note_id: note.id,
       }).eq("id", rel.id);
@@ -267,7 +267,7 @@ async function reconcileUser(db: any, userId: string) {
         confidence: verdict.confidence,
         adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
       });
-      verified.push({ ...rel, label: finalLabel, origin: "machine_verified", evidence_quote: evidence.sourceQuote, evidence_note_id: note.id });
+      verified.push({ ...rel, label: finalLabel, origin: "ai_note", evidence_quote: evidence.sourceQuote, evidence_note_id: note.id });
       stats.relationships_verified += 1;
       kept = true;
       break;
@@ -307,7 +307,7 @@ async function reconcileUser(db: any, userId: string) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     for (const loser of ranked.slice(1)) {
-      if (loser.origin === "human") continue; // never overrule a person
+      if (loser.origin === "user_manual") continue; // never overrule a person
       conflicting.add(loser.id);
     }
   }
@@ -371,11 +371,12 @@ async function reconcileUser(db: any, userId: string) {
 
     // Provenance: manual entries are the user's own word and are trusted.
     if (!entry.linked_note_id) {
-      if (entry.origin !== "human") {
-        patch.origin = "human";
-        stats.entries_marked_human += 1;
+      if (entry.origin !== "user_manual") {
+        entriesToDelete.push(entry.id);
+        stats.entries_deleted_unevidenced += 1;
+        continue;
       }
-    } else if (entry.origin === "human" || entry.origin === "machine_verified") {
+    } else if (entry.origin === "user_manual" || (entry.origin !== "unverified" && !!entry.evidence_quote)) {
       // already vouched for
     } else {
       const content = await loadNote(entry.linked_note_id);
@@ -389,7 +390,7 @@ async function reconcileUser(db: any, userId: string) {
         stats.entries_deleted_unevidenced += 1;
         continue;
       }
-      patch.origin = "machine_verified";
+      patch.origin = "ai_note";
       patch.evidence_quote = quote;
       stats.entries_verified += 1;
     }
@@ -437,6 +438,24 @@ serve(async (req) => {
           await service.from("profile_reconcile_runs")
             .update({ status: "completed", stats, finished_at: new Date().toISOString() })
             .eq("id", runRow.id);
+        }
+        const { count: remaining } = await service
+          .from("contact_relationships")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", targetUserId)
+          .eq("origin", "unverified");
+        if ((remaining || 0) > 0) {
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/profile-reconcile`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ scope: "me", userId: targetUserId }),
+          });
+          if (!response.ok) {
+            console.error("[profile-reconcile] continuation failed", targetUserId, response.status);
+          }
         }
       } catch (error) {
         console.error("[profile-reconcile] user failed", targetUserId, error);
