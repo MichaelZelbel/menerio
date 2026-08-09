@@ -7,22 +7,30 @@
 //
 // Relationships:
 //   1. deterministic drop  — unusable label, missing/merged endpoint, self-edge
-//   2. duplicate collapse  — one row per pair_key
-//   3. evidence pass       — a row survives only when a real note quote supports
-//                            it (verbatim quote + independent adjudication)
-//   4. exclusivity         — one active marriage/partner bond per person
+//   2. self-duplicate fold — a contact that is really the account owner is
+//                            rewritten to "self" so a person never shows up
+//                            as their own acquaintance
+//   3. duplicate collapse  — one row per pair_key
+//   4. evidence pass       — NEW automated rows need a verbatim note quote.
+//                            Legacy rows (origin "unverified") and manual rows
+//                            are kept and shown; they are never deleted for
+//                            lacking evidence.
+//
+// The reconciler holds no opinion about which relationships a person may have
+// at the same time. Concurrent bonds are valid data, not a conflict.
 //
 // Profile entries:
 //   5. canonical placement — label + category corrected, blocked labels dropped
 //   6. evidence pass       — AI-authored entries need a verbatim quote in their
-//                            source note; manual entries are trusted and kept
+//                            source note; manual and legacy entries are kept
+
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   canonicalLabel,
   inverseLabel,
-  relationshipStrength,
 } from "../_shared/relationship-canonical.ts";
+
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import {
   canonicalProfileLabel,
@@ -47,10 +55,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 /** Rows adjudicated by the LLM per user per run. Keeps a sweep bounded. */
 const MAX_LLM_ROWS_PER_USER = 4;
 
-/** Bonds that are mutually exclusive at a point in time. */
-const PARTNER_BOND = new Set(["spouse", "wife", "husband", "partner", "lover"]);
-/** Labels that describe an ended bond — they never conflict with an active one. */
-const EX_BOND = new Set(["ex-partner", "ex-spouse", "ex-wife", "ex-husband"]);
+/** Origins that a sweep must never delete or re-judge. */
+const TRUSTED_ORIGINS = new Set(["user_manual", "unverified"]);
+
+
 
 type Rel = {
   id: string;
@@ -82,11 +90,11 @@ function personKey(type: string, id: string | null) {
 
 async function reconcileUser(db: any, userId: string) {
   const stats = {
+    self_duplicates_folded: 0,
     relationships_checked: 0,
     relationships_deleted_invalid: 0,
     relationships_deleted_duplicate: 0,
     relationships_deleted_unevidenced: 0,
-    relationships_deleted_conflicting: 0,
     relationships_verified: 0,
     entries_recategorized: 0,
     entries_deleted_blocked: 0,
@@ -96,17 +104,76 @@ async function reconcileUser(db: any, userId: string) {
     llm_calls: 0,
   };
 
-  const [{ data: contactRows }, { data: profileRow }] = await Promise.all([
+
+  const [{ data: contactRows }, { data: profileRow }, { data: aliasRows }] = await Promise.all([
     db.from("contacts").select("id, name, merged_into").eq("user_id", userId),
     db.from("profiles").select("display_name").eq("id", userId).maybeSingle(),
+    db.from("user_self_aliases").select("alias").eq("user_id", userId),
   ]);
   const contacts = new Map<string, Contact>((contactRows || []).map((c: Contact) => [c.id, c]));
   const selfName = String(profileRow?.display_name || "").trim();
 
+  // ---- 0. self-duplicate contacts ---------------------------------------
+  // A contact record that is really the account owner turns every fact about
+  // the owner into a fact about a stranger ("Yumei — partner of michael").
+  // Fold those records into "self" before anything else looks at the graph.
+  const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
+  const selfNames = new Set<string>();
+  if (selfName) selfNames.add(normalizeName(selfName));
+  for (const row of (aliasRows || []) as Array<{ alias: string }>) {
+    const normalized = normalizeName(String(row.alias || ""));
+    // Single-word pronoun aliases ("I", "me") are not person names.
+    if (normalized.length >= 4) selfNames.add(normalized);
+  }
+  const selfDuplicateIds = new Set<string>();
+  for (const contact of contacts.values()) {
+    if (selfNames.has(normalizeName(contact.name || ""))) selfDuplicateIds.add(contact.id);
+  }
+  if (selfDuplicateIds.size) {
+    const ids = [...selfDuplicateIds];
+    const { data: dupRels } = await db
+      .from("contact_relationships")
+      .select("id, source_type, source_id, target_type, target_id")
+      .eq("user_id", userId)
+      .or(`source_id.in.(${ids.join(",")}),target_id.in.(${ids.join(",")})`);
+    for (const rel of (dupRels || []) as Rel[]) {
+      const sourceIsSelf = rel.source_type === "contact" && rel.source_id && selfDuplicateIds.has(rel.source_id);
+      const targetIsSelf = rel.target_type === "contact" && rel.target_id && selfDuplicateIds.has(rel.target_id);
+      if (sourceIsSelf && targetIsSelf) {
+        await db.from("contact_relationships").delete().eq("id", rel.id);
+        continue;
+      }
+      // The other endpoint is already "self" — this row says "me → me".
+      if ((sourceIsSelf && rel.target_type === "self") || (targetIsSelf && rel.source_type === "self")) {
+        await db.from("contact_relationships").delete().eq("id", rel.id);
+        continue;
+      }
+      const patch = sourceIsSelf
+        ? { source_type: "self", source_id: null }
+        : { target_type: "self", target_id: null };
+      const { error } = await db.from("contact_relationships").update(patch).eq("id", rel.id);
+      // A unique pair collision means the correct row already exists.
+      if (error) await db.from("contact_relationships").delete().eq("id", rel.id);
+    }
+    // Facts recorded against the duplicate belong on the owner's own profile.
+    const { data: dupEntries } = await db
+      .from("profile_entries")
+      .select("id, label, value")
+      .eq("user_id", userId)
+      .in("contact_id", ids);
+    for (const entry of (dupEntries || []) as Array<{ id: string; label: string; value: string }>) {
+      const { error } = await db.from("profile_entries").update({ contact_id: null }).eq("id", entry.id);
+      if (error) await db.from("profile_entries").delete().eq("id", entry.id);
+    }
+    await db.from("contacts").delete().in("id", ids);
+    for (const id of ids) contacts.delete(id);
+    stats.self_duplicates_folded = ids.length;
+  }
+
   const nameOf = (type: string, id: string | null): string | null => {
     if (type === "self") return selfName || "the account owner";
     const contact = id ? contacts.get(id) : null;
-    if (!contact || contact.merged_into) return null;
+    if (!contact || (contact.merged_into && contact.merged_into !== contact.id)) return null;
     return contact.name;
   };
 
@@ -124,6 +191,7 @@ async function reconcileUser(db: any, userId: string) {
       await db.from("contact_relationships").delete().in("id", ids.slice(i, i + 100));
     }
   };
+
 
   // ---- 1. deterministic drop -------------------------------------------
   const invalid: string[] = [];
@@ -196,8 +264,10 @@ async function reconcileUser(db: any, userId: string) {
   const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
   for (const rel of candidates) {
-    const alreadyVerified = rel.origin === "user_manual" || (rel.origin !== "unverified" && !!rel.evidence_quote);
-    if (alreadyVerified) {
+    // Manual rows and legacy rows are the user's own history. They are shown
+    // as-is and are never deleted or re-judged by a sweep; the user confirms or
+    // removes them in the UI.
+    if (TRUSTED_ORIGINS.has(String(rel.origin || "")) || !!rel.evidence_quote) {
       verified.push(rel);
       continue;
     }
@@ -206,12 +276,11 @@ async function reconcileUser(db: any, userId: string) {
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
 
-    // Relationship rows are evidence-backed at write time. Legacy rows without
-    // a source note cannot be rehabilitated by searching arbitrary mentions:
-    // proximity is not evidence. Remove them deterministically.
+    // A newly written automated row must carry its source. Without one there is
+    // nothing to judge, so it is quarantined as legacy rather than deleted.
     if (!rel.evidence_note_id || !rel.evidence_quote) {
-      await drop([rel.id]);
-      stats.relationships_deleted_unevidenced += 1;
+      await db.from("contact_relationships").update({ origin: "unverified" }).eq("id", rel.id);
+      verified.push({ ...rel, origin: "unverified" });
       continue;
     }
 
@@ -222,10 +291,11 @@ async function reconcileUser(db: any, userId: string) {
       .eq("user_id", userId)
       .maybeSingle();
     if (!sourceNote || !exactQuoteExists(String(sourceNote.content || ""), rel.evidence_quote)) {
-      await drop([rel.id]);
-      stats.relationships_deleted_unevidenced += 1;
+      await db.from("contact_relationships").update({ origin: "unverified" }).eq("id", rel.id);
+      verified.push({ ...rel, origin: "unverified" });
       continue;
     }
+
 
     if (llmBudget <= 0) break;
     llmBudget -= 1;
@@ -280,34 +350,10 @@ async function reconcileUser(db: any, userId: string) {
     throw new Error(`judge unavailable — reconciliation aborted without deletions: ${String((judgeDown as Error)?.message || judgeDown)}`);
   }
 
-  // ---- 4. exclusivity ---------------------------------------------------
-  // A person may hold at most one active partner-type bond. When two survive,
-  // the stronger/more recently evidenced one wins and the loser is removed —
-  // "married to seven people" is never a valid state.
-  const bondsByPerson = new Map<string, Rel[]>();
-  for (const rel of verified) {
-    if (!PARTNER_BOND.has(rel.label) || EX_BOND.has(rel.label)) continue;
-    for (const key of [personKey(rel.source_type, rel.source_id), personKey(rel.target_type, rel.target_id)]) {
-      bondsByPerson.set(key, [...(bondsByPerson.get(key) || []), rel]);
-    }
-  }
-  const conflicting = new Set<string>();
-  for (const rows of bondsByPerson.values()) {
-    if (rows.length < 2) continue;
-    const ranked = [...rows].sort((a, b) => {
-      const strength = relationshipStrength(b.label) - relationshipStrength(a.label);
-      if (strength !== 0) return strength;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-    for (const loser of ranked.slice(1)) {
-      if (loser.origin === "user_manual") continue; // never overrule a person
-      conflicting.add(loser.id);
-    }
-  }
-  if (conflicting.size) {
-    await drop([...conflicting]);
-    stats.relationships_deleted_conflicting = conflicting.size;
-  }
+  // Concurrent bonds (a spouse and a partner at the same time) are valid data.
+  // The reconciler deliberately holds no opinion about relationship structure.
+
+
 
   // ---- 5 + 6. profile entries ------------------------------------------
   const { data: categoryRows } = await db
@@ -363,34 +409,27 @@ async function reconcileUser(db: any, userId: string) {
     }
     if (label !== entry.label) patch.label = label;
 
-    // Provenance: manual entries are the user's own word and are trusted.
-    if (!entry.linked_note_id) {
-      if (entry.origin !== "user_manual") {
-        entriesToDelete.push(entry.id);
-        stats.entries_deleted_unevidenced += 1;
-        continue;
-      }
-    } else if (entry.origin === "user_manual" || (entry.origin !== "unverified" && !!entry.evidence_quote)) {
-      // already vouched for
+    // Provenance: manual and legacy entries are the user's own history and are
+    // kept. Only a NEW automated entry has to prove itself against its note.
+    const trustedEntry = entry.origin === "user_manual" || entry.origin === "unverified";
+    if (trustedEntry || !!entry.evidence_quote) {
+      // kept as-is
+    } else if (!entry.linked_note_id) {
+      patch.origin = "unverified";
     } else {
       const content = await loadNote(entry.linked_note_id);
-      // A missing source row is not proof that the fact is false. Leave it
-      // quarantined rather than deleting it during a transient or sync gap.
+      // A missing source row is not proof that the fact is false.
       if (content === null) continue;
-      const quote = entry.evidence_quote && exactQuoteExists(content, entry.evidence_quote)
-        ? entry.evidence_quote
-        : exactQuoteExists(content, entry.value)
-          ? entry.value
-          : null;
+      const quote = exactQuoteExists(content, entry.value) ? entry.value : null;
       if (!quote) {
-        entriesToDelete.push(entry.id);
-        stats.entries_deleted_unevidenced += 1;
-        continue;
+        patch.origin = "unverified";
+      } else {
+        patch.origin = "ai_note";
+        patch.evidence_quote = quote;
+        stats.entries_verified += 1;
       }
-      patch.origin = "ai_note";
-      patch.evidence_quote = quote;
-      stats.entries_verified += 1;
     }
+
 
     if (Object.keys(patch).length) {
       await db.from("profile_entries").update(patch).eq("id", entry.id);
