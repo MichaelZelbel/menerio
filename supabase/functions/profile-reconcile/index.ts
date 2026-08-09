@@ -90,11 +90,11 @@ function personKey(type: string, id: string | null) {
 
 async function reconcileUser(db: any, userId: string) {
   const stats = {
+    self_duplicates_folded: 0,
     relationships_checked: 0,
     relationships_deleted_invalid: 0,
     relationships_deleted_duplicate: 0,
     relationships_deleted_unevidenced: 0,
-    relationships_deleted_conflicting: 0,
     relationships_verified: 0,
     entries_recategorized: 0,
     entries_deleted_blocked: 0,
@@ -103,6 +103,7 @@ async function reconcileUser(db: any, userId: string) {
     entries_verified: 0,
     llm_calls: 0,
   };
+
 
   const [{ data: contactRows }, { data: profileRow }, { data: aliasRows }] = await Promise.all([
     db.from("contacts").select("id, name, merged_into").eq("user_id", userId),
