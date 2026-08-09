@@ -142,6 +142,8 @@ export async function recoverRelationshipEvidence(args: {
   personA: string;
   personB: string;
   label: string;
+  /** Called when the LLM itself could not be reached — "unavailable" is not "no evidence". */
+  onJudgeUnavailable?: (error: unknown) => void;
 }): Promise<{ sourceQuote: string; sourceContext: string } | null> {
   const content = args.noteContent.slice(0, 60_000);
   try {
