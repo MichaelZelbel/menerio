@@ -553,6 +553,24 @@ const GENDERED_ROLE: Record<string, [string, string]> = {
   parent: ["father", "mother"],
   child: ["son", "daughter"],
   sibling: ["brother", "sister"],
+  grandparent: ["grandfather", "grandmother"],
+  grandchild: ["grandson", "granddaughter"],
+  pibling: ["uncle", "aunt"],
+  nibling: ["nephew", "niece"],
+  stepparent: ["stepfather", "stepmother"],
+  stepchild: ["stepson", "stepdaughter"],
+  stepsibling: ["stepbrother", "stepsister"],
+  "parent-in-law": ["father-in-law", "mother-in-law"],
+  "child-in-law": ["son-in-law", "daughter-in-law"],
+  "sibling-in-law": ["brother-in-law", "sister-in-law"],
+  godparent: ["godfather", "godmother"],
+  godchild: ["godson", "goddaughter"],
+};
+
+/** Neutral wording for roles whose bare canonical form reads like jargon. */
+const NEUTRAL_ROLE_TEXT: Record<string, string> = {
+  pibling: "aunt or uncle",
+  nibling: "niece or nephew",
 };
 
 /** Roles that already carry a gender — no lookup needed. */
@@ -561,6 +579,18 @@ const INHERENTLY_GENDERED: Record<string, Gender> = {
   father: "male", mother: "female",
   son: "male", daughter: "female",
   brother: "male", sister: "female",
+  grandfather: "male", grandmother: "female",
+  grandson: "male", granddaughter: "female",
+  uncle: "male", aunt: "female",
+  nephew: "male", niece: "female",
+  stepfather: "male", stepmother: "female",
+  stepson: "male", stepdaughter: "female",
+  stepbrother: "male", stepsister: "female",
+  "father-in-law": "male", "mother-in-law": "female",
+  "son-in-law": "male", "daughter-in-law": "female",
+  "brother-in-law": "male", "sister-in-law": "female",
+  godfather: "male", godmother: "female",
+  godson: "male", goddaughter: "female",
 };
 
 function titleCaseRole(role: string): string {
@@ -574,11 +604,17 @@ function titleCaseRole(role: string): string {
 export function displayRole(role: string, gender: Gender): string {
   const c = canonicalLabel(role);
   if (!c) return "";
-  if (c in INHERENTLY_GENDERED) return titleCaseRole(c);
-  const forms = GENDERED_ROLE[c];
-  if (forms && gender) return titleCaseRole(gender === "male" ? forms[0] : forms[1]);
-  return titleCaseRole(c);
+  const isEx = c.startsWith("ex-");
+  const base = isEx ? c.slice(3) : c;
+  const rendered = (() => {
+    if (base in INHERENTLY_GENDERED) return base;
+    const forms = GENDERED_ROLE[base];
+    if (forms && gender) return gender === "male" ? forms[0] : forms[1];
+    return NEUTRAL_ROLE_TEXT[base] || base;
+  })();
+  return titleCaseRole(isEx ? `ex-${rendered}` : rendered);
 }
+
 
 export type DescribeRelationshipInput = {
   /** Stored edge: "source is <label> of target". */
