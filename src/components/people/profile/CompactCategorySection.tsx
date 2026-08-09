@@ -34,6 +34,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileIcon } from "@/components/profile/ProfileIcon";
+import { ProfileRow } from "@/components/profile/ProfileRow";
+import { ScopeBadge, SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
@@ -58,6 +61,10 @@ interface CompactCategorySectionProps {
   onTogglePin: (entry: ContactProfileEntry) => void;
   onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
   onDeleteCategory: (id: string) => void;
+  /** Pinned highlights only exist on contact profiles. */
+  allowPin?: boolean;
+  /** The user's own profile exposes icon + visibility scope editing. */
+  showScope?: boolean;
 }
 
 function Highlighted({ text, query }: { text: string; query: string }) {
