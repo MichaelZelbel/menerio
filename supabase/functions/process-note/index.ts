@@ -580,7 +580,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       if (!factDecision.ok) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0 })
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note" })
         .select("id")
         .single();
       if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
@@ -606,7 +606,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       if (relEvidenceQuote.length < 10) return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("contact_relationships")
-        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null, origin: "ai", evidence_quote: relEvidenceQuote, evidence_note_id: (suggestion.payload as any)?.note_id || (suggestion as any).source_note_id || null })
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null, origin: "ai_note", evidence_quote: relEvidenceQuote, evidence_note_id: (suggestion.payload as any)?.note_id || (suggestion as any).source_note_id || null })
         .select("id")
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };

@@ -636,7 +636,7 @@ async function run(userId: string, contactId: string) {
         if (!fact.ok) { prepared.push({ ...s, status: "removed" }); continue; }
         const { data, error } = await supabase
           .from("profile_entries")
-          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0 })
+          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_lexicon" })
           .select("id")
           .single();
         if (error && (error as any).code === "23505") { prepared.push({ ...s, status: "removed" }); continue; }
@@ -658,7 +658,7 @@ async function run(userId: string, contactId: string) {
         if (relEvidenceQuote.length < 10) { prepared.push({ ...s, status: "pending_review" }); continue; }
         const { data, error } = await supabase
           .from("contact_relationships")
-          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: relationshipDecision.label, origin: "ai", evidence_quote: relEvidenceQuote, evidence_note_id: (p as any).note_id || null })
+          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: relationshipDecision.label, origin: "ai_lexicon", evidence_quote: relEvidenceQuote, evidence_note_id: (p as any).note_id || null })
           .select("id")
           .single();
         if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }

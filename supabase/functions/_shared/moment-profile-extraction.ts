@@ -268,7 +268,7 @@ async function prepareForInsert(
       if (!fact.ok) return { ...s, status: "removed" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0 })
+        .insert({ user_id: s.user_id, contact_id: categoryId ? contactId : contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_moment" })
         .select("id")
         .single();
         if (error && (error as any).code === "23505") return { ...s, status: "removed" };
@@ -299,7 +299,7 @@ async function prepareForInsert(
           target_id: p.target_id || null,
           label: relationshipDecision.label,
           custom_label: p.custom_label || null,
-          origin: "ai",
+          origin: "ai_moment",
           evidence_quote: evidenceQuote,
           evidence_note_id: p.note_id || null,
         })
