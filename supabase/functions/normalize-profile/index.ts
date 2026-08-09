@@ -15,6 +15,8 @@ import {
   isBlockedProfileLabel,
   isListValuedLabel,
 } from "../_shared/profile-canonical-schema.ts";
+import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
+
 import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
