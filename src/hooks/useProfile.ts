@@ -85,7 +85,6 @@ export function useProfile() {
         .select("*")
         .eq("user_id", userId!)
         .is("contact_id", null)
-        .neq("origin", "unverified")
         .order("sort_order");
       if (error) throw error;
       return data as ProfileCategory[];
@@ -101,6 +100,7 @@ export function useProfile() {
         .select("*")
         .eq("user_id", userId!)
         .is("contact_id", null)
+        .neq("origin", "unverified")
         .order("sort_order");
       if (error) throw error;
       return data as ProfileEntry[];

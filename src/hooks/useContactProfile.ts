@@ -34,7 +34,6 @@ export function useContactProfile(contactId: string | null) {
         .select("*")
         .eq("user_id", userId!)
         .eq("contact_id", contactId!)
-        .neq("origin", "unverified")
         .order("sort_order");
       if (error) throw error;
       return data as ProfileCategory[];
@@ -53,6 +52,7 @@ export function useContactProfile(contactId: string | null) {
         .select("*")
         .eq("user_id", userId!)
         .eq("contact_id", contactId!)
+        .neq("origin", "unverified")
         .order("sort_order");
       if (error) throw error;
       return ((data ?? []) as any[]).map((d) => ({
