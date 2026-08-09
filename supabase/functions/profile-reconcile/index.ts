@@ -104,17 +104,75 @@ async function reconcileUser(db: any, userId: string) {
     llm_calls: 0,
   };
 
-  const [{ data: contactRows }, { data: profileRow }] = await Promise.all([
+  const [{ data: contactRows }, { data: profileRow }, { data: aliasRows }] = await Promise.all([
     db.from("contacts").select("id, name, merged_into").eq("user_id", userId),
     db.from("profiles").select("display_name").eq("id", userId).maybeSingle(),
+    db.from("user_self_aliases").select("alias").eq("user_id", userId),
   ]);
   const contacts = new Map<string, Contact>((contactRows || []).map((c: Contact) => [c.id, c]));
   const selfName = String(profileRow?.display_name || "").trim();
 
+  // ---- 0. self-duplicate contacts ---------------------------------------
+  // A contact record that is really the account owner turns every fact about
+  // the owner into a fact about a stranger ("Yumei — partner of michael").
+  // Fold those records into "self" before anything else looks at the graph.
+  const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
+  const selfNames = new Set<string>();
+  if (selfName) selfNames.add(normalizeName(selfName));
+  for (const row of (aliasRows || []) as Array<{ alias: string }>) {
+    const normalized = normalizeName(String(row.alias || ""));
+    // Single-word pronoun aliases ("I", "me") are not person names.
+    if (normalized.length >= 4) selfNames.add(normalized);
+  }
+  const selfDuplicateIds = new Set<string>();
+  for (const contact of contacts.values()) {
+    if (selfNames.has(normalizeName(contact.name || ""))) selfDuplicateIds.add(contact.id);
+  }
+  if (selfDuplicateIds.size) {
+    const ids = [...selfDuplicateIds];
+    const { data: dupRels } = await db
+      .from("contact_relationships")
+      .select("id, source_type, source_id, target_type, target_id")
+      .eq("user_id", userId)
+      .or(`source_id.in.(${ids.join(",")}),target_id.in.(${ids.join(",")})`);
+    for (const rel of (dupRels || []) as Rel[]) {
+      const sourceIsSelf = rel.source_type === "contact" && rel.source_id && selfDuplicateIds.has(rel.source_id);
+      const targetIsSelf = rel.target_type === "contact" && rel.target_id && selfDuplicateIds.has(rel.target_id);
+      if (sourceIsSelf && targetIsSelf) {
+        await db.from("contact_relationships").delete().eq("id", rel.id);
+        continue;
+      }
+      // The other endpoint is already "self" — this row says "me → me".
+      if ((sourceIsSelf && rel.target_type === "self") || (targetIsSelf && rel.source_type === "self")) {
+        await db.from("contact_relationships").delete().eq("id", rel.id);
+        continue;
+      }
+      const patch = sourceIsSelf
+        ? { source_type: "self", source_id: null }
+        : { target_type: "self", target_id: null };
+      const { error } = await db.from("contact_relationships").update(patch).eq("id", rel.id);
+      // A unique pair collision means the correct row already exists.
+      if (error) await db.from("contact_relationships").delete().eq("id", rel.id);
+    }
+    // Facts recorded against the duplicate belong on the owner's own profile.
+    const { data: dupEntries } = await db
+      .from("profile_entries")
+      .select("id, label, value")
+      .eq("user_id", userId)
+      .in("contact_id", ids);
+    for (const entry of (dupEntries || []) as Array<{ id: string; label: string; value: string }>) {
+      const { error } = await db.from("profile_entries").update({ contact_id: null }).eq("id", entry.id);
+      if (error) await db.from("profile_entries").delete().eq("id", entry.id);
+    }
+    await db.from("contacts").delete().in("id", ids);
+    for (const id of ids) contacts.delete(id);
+    stats.self_duplicates_folded = ids.length;
+  }
+
   const nameOf = (type: string, id: string | null): string | null => {
     if (type === "self") return selfName || "the account owner";
     const contact = id ? contacts.get(id) : null;
-    if (!contact || contact.merged_into) return null;
+    if (!contact || (contact.merged_into && contact.merged_into !== contact.id)) return null;
     return contact.name;
   };
 
@@ -132,6 +190,7 @@ async function reconcileUser(db: any, userId: string) {
       await db.from("contact_relationships").delete().in("id", ids.slice(i, i + 100));
     }
   };
+
 
   // ---- 1. deterministic drop -------------------------------------------
   const invalid: string[] = [];
