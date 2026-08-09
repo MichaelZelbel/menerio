@@ -285,14 +285,19 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     }
 
     const all = Array.from(byBond.values()).filter((r) => r.description.kind !== "other");
+    // Nothing machine-written and unvouched-for is ever presented as a fact.
+    // Unconfirmed claims are quarantined into their own review block.
+    const verified = all.filter((r) => r.rel.origin !== "unverified");
     return {
-      personalRows: all.filter((r) => r.description.kind === "personal"),
-      professionalRows: all.filter((r) => r.description.kind === "professional"),
+      personalRows: verified.filter((r) => r.description.kind === "personal"),
+      professionalRows: verified.filter((r) => r.description.kind === "professional"),
+      unconfirmedRows: all.filter((r) => r.rel.origin === "unverified"),
     };
   }, [relationships, contactId, myName, genderByPerson, user?.id]);
 
   const rows = personalRows;
-  const unverifiedCount = [...personalRows, ...professionalRows].filter((r) => isUnverified(r.rel)).length;
+  const unverifiedCount = unconfirmedRows.length;
+
 
 
   if (isLoading) return null;
