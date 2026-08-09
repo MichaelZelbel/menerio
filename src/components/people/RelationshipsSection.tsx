@@ -198,9 +198,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   // Filter out current contact from the picker
   const availableContacts = allContacts.filter((c) => c.id !== contactId);
 
-  // One tile per distinct bond. Competing romantic/social labels between the
-  // SAME two people (spouse + partner + lover + friend) collapse to the
-  // strongest one; unrelated edges (employer, sibling…) are all kept.
+  // Keep each relationship to a distinct person. Only exact duplicate role rows
+  // collapse; multiple romantic relationships remain visible independently.
   const rows = useMemo(() => {
     const described = relationships.map((rel) => {
       const otherIsSelf =
@@ -237,30 +236,14 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       return { rel, description, otherKey, otherContactId, otherIsSelf };
     });
 
-    const kept: typeof described = [];
-    const bondByPerson = new Map<string, number>();
     const seen = new Set<string>();
-
-    for (const row of described) {
-      const label = row.rel.custom_label || row.rel.label;
-      if (isRomanticSocialBond(label) && !row.rel.custom_label) {
-        const best = bondByPerson.get(row.otherKey) ?? -1;
-        const strength = relationshipStrength(label);
-        if (strength <= best) continue;
-        bondByPerson.set(row.otherKey, strength);
-        // Drop the weaker bond tile previously kept for this person.
-        const idx = kept.findIndex(
-          (k) => k.otherKey === row.otherKey && !k.rel.custom_label && isRomanticSocialBond(k.rel.label),
-        );
-        if (idx >= 0) kept.splice(idx, 1);
-      }
-      const dedupKey = `${row.otherKey}|${row.description.role.toLowerCase()}`;
-      if (seen.has(dedupKey)) continue;
+    return described.filter((row) => {
+      const role = (row.rel.custom_label || row.rel.label || row.description.role).trim().toLowerCase();
+      const dedupKey = `${row.otherKey}|${role}`;
+      if (seen.has(dedupKey)) return false;
       seen.add(dedupKey);
-      kept.push(row);
-    }
-
-    return kept;
+      return true;
+    });
   }, [relationships, contactId, myName, genderByPerson]);
 
   if (isLoading) return null;

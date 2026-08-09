@@ -596,7 +596,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       if (relationshipDecision.ok === false) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("contact_relationships")
-        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label, custom_label: custom_label || null })
+        .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null })
         .select("id")
         .single();
       if (error || !data) return { ...suggestion, status: "pending_review" };
