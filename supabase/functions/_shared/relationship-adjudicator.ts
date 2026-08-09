@@ -87,13 +87,16 @@ export async function adjudicateRelationship(args: {
       db: args.db,
       userId: args.userId,
       callSite: "relationship.adjudication",
-      defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 500 },
+      defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 1200 },
       messages: [{ role: "user", content: JSON.stringify(args.candidate) }],
       callOptions: { response_format: { type: "json_object" } },
       // Reconciliation is a platform integrity task, like moderation. It must
       // not consume or be gated by the profile owner's interactive AI allowance.
       skipDeduct: true,
     });
+    if (!result.content.trim()) {
+      throw new Error("Relationship adjudication returned empty content");
+    }
     const parsed = JSON.parse(result.content);
     const aKind = kind(parsed.person_a_kind);
     const bKind = kind(parsed.person_b_kind);
@@ -164,6 +167,9 @@ export async function recoverRelationshipEvidence(args: {
       // This is maintenance of canonical profile data, not a user AI feature.
       skipDeduct: true,
     });
+    if (!result.content.trim()) {
+      throw new Error("Relationship evidence recovery returned empty content");
+    }
     const quoteMatch = result.content.match(/<SOURCE_QUOTE>([\s\S]*?)<\/SOURCE_QUOTE>/i);
     const contextMatch = result.content.match(/<SOURCE_CONTEXT>([\s\S]*?)<\/SOURCE_CONTEXT>/i);
     const sourceQuote = String(quoteMatch?.[1] || "").trim();

@@ -674,7 +674,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: RELATIONSHIP_ADJUDICATION_PROMPT,
-    temperature: 0, max_tokens: 500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "relationship.evidence_recovery",
