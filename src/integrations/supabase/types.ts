@@ -757,9 +757,12 @@ export type Database = {
         Row: {
           created_at: string
           custom_label: string | null
+          evidence_note_id: string | null
+          evidence_quote: string | null
           id: string
           inverse_id: string | null
           label: string
+          origin: string
           pair_key: string | null
           source_id: string | null
           source_type: string
@@ -771,9 +774,12 @@ export type Database = {
         Insert: {
           created_at?: string
           custom_label?: string | null
+          evidence_note_id?: string | null
+          evidence_quote?: string | null
           id?: string
           inverse_id?: string | null
           label: string
+          origin?: string
           pair_key?: string | null
           source_id?: string | null
           source_type: string
@@ -785,9 +791,12 @@ export type Database = {
         Update: {
           created_at?: string
           custom_label?: string | null
+          evidence_note_id?: string | null
+          evidence_quote?: string | null
           id?: string
           inverse_id?: string | null
           label?: string
+          origin?: string
           pair_key?: string | null
           source_id?: string | null
           source_type?: string
@@ -797,6 +806,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "contact_relationships_evidence_note_id_fkey"
+            columns: ["evidence_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contact_relationships_inverse_id_fkey"
             columns: ["inverse_id"]
