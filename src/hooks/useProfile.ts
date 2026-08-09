@@ -27,6 +27,8 @@ export interface ProfileEntry {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  origin: string;
+  evidence_quote: string | null;
 }
 
 export interface AgentInstruction {
@@ -98,6 +100,7 @@ export function useProfile() {
         .select("*")
         .eq("user_id", userId!)
         .is("contact_id", null)
+        .neq("origin", "unverified")
         .order("sort_order");
       if (error) throw error;
       return data as ProfileEntry[];

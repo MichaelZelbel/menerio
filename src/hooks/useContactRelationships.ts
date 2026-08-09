@@ -47,6 +47,7 @@ export function useContactRelationships(contactId: string | null) {
         .from("contact_relationships")
         .select("*")
         .eq("user_id", user.id)
+        .neq("origin", "unverified")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

@@ -580,7 +580,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       if (!factDecision.ok) return { ...suggestion, status: "removed" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note" })
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: String((suggestion.payload as any)?.evidence_quote || "").trim(), linked_note_id: (suggestion as any).source_note_id || null })
         .select("id")
         .single();
       if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
@@ -806,6 +806,7 @@ Return a JSON object with two keys:
    - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
    - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title", "Wedding date", "Spouse")
    - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer", "2006-01-23", "Xihui")
+    - "source_quote": the shortest exact verbatim quote from the note that proves this fact
 
 2. "relationships": an array of relationship objects, each with:
    - "person_a": name of the first person
@@ -830,6 +831,7 @@ Rules:
 - Extract facts/relationships clearly stated or strongly implied about the person themselves
 - Do NOT invent or assume — if unsure, skip
 - Return empty arrays if nothing qualifies
+- Every fact MUST include an exact source_quote. If no exact quote proves the fact, do not emit it.
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
 - Every relationship MUST include an exact source_quote. If no exact quote proves the relationship, do not emit it.
 - Do not emit relationships for organizations, products, brands, software, projects, fictional characters, avatars, role-play identities, authors/bylines, celebrities merely discussed, admiration, resemblance, ownership, or incidental transactions.
@@ -1397,6 +1399,7 @@ async function generateProfileSuggestions(
       category_slug: string;
       label: string;
       value: string;
+      source_quote: string;
     }> = [];
     let extractedRelationships: Array<{
       person_a: string;
@@ -1473,6 +1476,7 @@ async function generateProfileSuggestions(
         category_slug: (f.category_slug || "").trim().toLowerCase(),
         label: (f.label || "").trim(),
         value: (f.value || "").trim(),
+        source_quote: (f.source_quote || "").trim(),
       }));
 
       // Deterministic post-pass: derive Date of birth / Anniversary from age + ref date,
@@ -1666,6 +1670,8 @@ async function generateProfileSuggestions(
       // Use the (possibly narrowed) value returned by the guard — for a
       // list label with partial overlap this drops the tokens already known.
       const effectiveValue = dd.value;
+      const factSourceQuote = String(fact.source_quote || "").trim();
+      if (!exactQuoteExists(cleanContent, factSourceQuote)) continue;
 
       const count = perTargetCount.get(tKey) || 0;
       if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) continue;
@@ -1691,6 +1697,7 @@ async function generateProfileSuggestions(
           category_id: catRow?.id || null,
           label: fact.label,
           value: effectiveValue,
+          evidence_quote: factSourceQuote,
         },
         status: "pending_review",
         target_entity_type: "profile_entry",

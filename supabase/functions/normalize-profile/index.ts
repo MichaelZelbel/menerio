@@ -337,6 +337,8 @@ async function acceptProfileEntryReview(db: any, userId: string, reviewId: strin
     label: payload.label,
     value: payload.value,
     linked_note_id: row.source_note_id ?? null,
+    origin: "review_queue",
+    evidence_quote: String(payload.evidence_quote || "").trim() || undefined,
   });
   if (!parsed.success) return { ok: false, outcome: "rejected_duplicate", reason: "invalid_payload" };
 

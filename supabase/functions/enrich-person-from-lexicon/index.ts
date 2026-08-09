@@ -53,7 +53,7 @@ const PROFILE_CATEGORY_SLUGS = [
 const PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, notes, and attachment OCR text).
 
 Return a JSON object with two keys:
-1. "facts": array of { contact_name, category_slug (one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}), label, value }
+1. "facts": array of { contact_name, category_slug (one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}), label, value, source_quote }
 2. "relationships": array of { person_a, person_b, label_a_to_b, label_b_to_a }
 
 Reasoning rules — apply common sense across ALL evidence, not just one source:
@@ -63,6 +63,7 @@ Reasoning rules — apply common sense across ALL evidence, not just one source:
 - If multiple sources independently support a relationship, you should still emit it once.
 - Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
 - Do NOT invent facts. If unsure, skip.
+- Every fact must include the shortest exact verbatim source_quote from the supplied evidence. If no exact quote proves it, do not emit it.
 - "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
 - Emit each distinct fact ONCE, even when several sources state it.
 - Return empty arrays if nothing qualifies.
@@ -472,7 +473,8 @@ async function run(userId: string, contactId: string) {
     let slug = String(f?.category_slug || "").trim().toLowerCase();
     let label = String(f?.label || "").trim();
     const value = String(f?.value || "").trim();
-    if (!name || !slug || !label || !value) continue;
+    const sourceQuote = String(f?.source_quote || "").trim();
+    if (!name || !slug || !label || !value || sourceQuote.length < 10) continue;
     if (!PROFILE_CATEGORY_SLUGS.includes(slug)) continue;
     // Only accept facts about THIS person (alias-aware)
     if (!aliasLowerSet.has(name) && name !== targetNameLower) continue;
@@ -503,6 +505,7 @@ async function run(userId: string, contactId: string) {
         category_id: catRow?.id || null,
         label,
         value,
+        evidence_quote: sourceQuote,
         source: "lexicon_enrichment",
       },
       status: "pending_review",
@@ -634,9 +637,11 @@ async function run(userId: string, contactId: string) {
         if (!s.payload.category_id) { prepared.push({ ...s, status: "pending_review" }); continue; }
         const fact = profileValueDecision(String(s.payload.category_slug || ""), String(s.payload.label || ""), String(s.payload.value || ""));
         if (!fact.ok) { prepared.push({ ...s, status: "removed" }); continue; }
+        const factEvidenceQuote = String((s.payload as any).evidence_quote || "").trim();
+        if (factEvidenceQuote.length < 10) { prepared.push({ ...s, status: "pending_review" }); continue; }
         const { data, error } = await supabase
           .from("profile_entries")
-          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_lexicon" })
+          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_lexicon", evidence_quote: factEvidenceQuote })
           .select("id")
           .single();
         if (error && (error as any).code === "23505") { prepared.push({ ...s, status: "removed" }); continue; }
