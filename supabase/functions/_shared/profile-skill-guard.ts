@@ -126,6 +126,15 @@ export function routeSkillMember(member: string, ctx: SkillGuardContext = {}): S
     return { action: "rehome", member: raw, label: "Topic of interest", categorySlug: "professional", reason: "subject area, not a skill" };
   }
 
+  // 5. Fallback: a skill must read as a capability. Anything else is a proper
+  // noun (product/system) or a subject area — both belong elsewhere.
+  if (!hasSkillHead(lower)) {
+    if (/^\p{Lu}/u.test(raw) && raw.split(/\s+/).length <= 3) {
+      return { action: "rehome", member: raw, label: "Tool / platform", categorySlug: "professional", reason: "proper noun, not a stated capability" };
+    }
+    return { action: "rehome", member: raw, label: "Topic of interest", categorySlug: "professional", reason: "subject area, not a stated capability" };
+  }
+
   return { action: "keep", member: raw };
 }
 
