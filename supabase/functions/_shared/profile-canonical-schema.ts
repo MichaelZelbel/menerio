@@ -366,6 +366,10 @@ export const LIST_VALUED_LABELS: Set<string> = new Set(
     "Favorite places",
     "Love language",
     "Skill",
+    "Tool / platform",
+    "Topic of interest",
+    "Language",
+
     "Hobby",
     "Interest",
     "Allergies",
