@@ -24,7 +24,7 @@ Previous attempts failed because they were **LLM-first and single-layer**: one c
 A single source of truth defining, for every role and every fact label:
 - canonical name, synonyms (incl. German), and **role family** (`marriage`, `romance`, `parent-child`, `sibling`, `work-hierarchy`, `work-peer`, `professional-service`, `social`);
 - which side of a family is the "source" side, so an edge has exactly **one** storage form;
-- singleton flag (`mother`, `father`, `spouse` — at most one per person);
+- cardinality and evidence rules per semantic role. These are not moral or monogamy rules: romantic relationships with different people are valid and must be preserved unless the user explicitly records exclusivity or the evidence contains a direct contradiction;
 - a **blocklist** of non-relationships (`subject of notes`, `owner`, `protector`, `protectee`, `roleplay character`, `admirer`, `mentioned with`, …) and non-facts.
 
 Same file mirrored to frontend and edge functions, byte-identical, asserted by the existing mirror test pattern.
