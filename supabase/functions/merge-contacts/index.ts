@@ -280,6 +280,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
               label: "Also known as",
               value: alias,
               sort_order: 99,
+              origin: "user_manual",
             });
             if (aliasInsertError && (aliasInsertError as any).code !== "23505") throw aliasInsertError;
           }
