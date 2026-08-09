@@ -329,11 +329,12 @@ async function reconcileUser(db: any, userId: string) {
     origin: string | null; evidence_quote: string | null; linked_note_id: string | null;
   }>;
 
-  const noteCache = new Map<string, string>();
-  const loadNote = async (noteId: string): Promise<string> => {
+  const noteCache = new Map<string, string | null>();
+  const loadNote = async (noteId: string): Promise<string | null> => {
     if (noteCache.has(noteId)) return noteCache.get(noteId)!;
-    const { data } = await db.from("notes").select("content").eq("id", noteId).maybeSingle();
-    const content = String(data?.content || "");
+    const { data, error } = await db.from("notes").select("content").eq("id", noteId).eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`Could not verify profile-entry evidence: ${error.message}`);
+    const content = data ? String(data.content || "") : null;
     noteCache.set(noteId, content);
     return content;
   };
@@ -373,6 +374,9 @@ async function reconcileUser(db: any, userId: string) {
       // already vouched for
     } else {
       const content = await loadNote(entry.linked_note_id);
+      // A missing source row is not proof that the fact is false. Leave it
+      // quarantined rather than deleting it during a transient or sync gap.
+      if (content === null) continue;
       const quote = entry.evidence_quote && exactQuoteExists(content, entry.evidence_quote)
         ? entry.evidence_quote
         : exactQuoteExists(content, entry.value)
