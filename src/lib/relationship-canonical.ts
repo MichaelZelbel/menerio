@@ -473,7 +473,7 @@ export function relationshipPairKey(
   }
   // Asymmetric: "a is L of b" ⇔ "b is inverseL of a". Build a direction-
   // independent key from the unordered set { (a, L), (b, inverseL) }.
-  const inv = inverseLabel(c);
+  const inv = pairKeyLabel(inverseLabel(c));
   const aSide = `${refKey(a)}:${c}`;
   const bSide = `${refKey(b)}:${inv}`;
   const [x, y] = [aSide, bSide].sort();
