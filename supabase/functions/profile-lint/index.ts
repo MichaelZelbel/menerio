@@ -453,9 +453,16 @@ serve(async (req) => {
     }
 
     if (action === "continue_relationship_repair") {
-      if (!userId || !repairRunId) return json({ error: "repair_run_id and a user session are required" }, 400);
-      const run = await processRelationshipRepairBatch(userId, repairRunId, batchSize);
-      if (run?.status !== "completed") EdgeRuntime.waitUntil(processRelationshipRepairBatch(userId, repairRunId, batchSize).catch((error) => console.error("[profile-lint] next repair batch failed", error)));
+      if (!repairRunId || (!userId && !isService)) return json({ error: "repair_run_id and authorization are required" }, 400);
+      let repairUserId = userId;
+      if (!repairUserId && isService) {
+        const { data: runOwner, error: ownerError } = await admin.from("relationship_repair_runs").select("user_id").eq("id", repairRunId).single();
+        if (ownerError || !runOwner) throw ownerError || new Error("Repair run not found");
+        repairUserId = runOwner.user_id;
+      }
+      if (!repairUserId) return json({ error: "Repair owner unavailable" }, 400);
+      const run = await processRelationshipRepairBatch(repairUserId, repairRunId, batchSize);
+      if (run?.status !== "completed") EdgeRuntime.waitUntil(runRelationshipRepairToCompletion(repairUserId, repairRunId, batchSize).catch((error) => console.error("[profile-lint] continued repair failed", error)));
       return json({ ok: true, run });
     }
 
