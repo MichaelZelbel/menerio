@@ -204,6 +204,8 @@ async function reconcileUser(db: any, userId: string) {
     const personA = nameOf(rel.source_type, rel.source_id)!;
     const personB = nameOf(rel.target_type, rel.target_id)!;
 
+    if (llmBudget < 2) continue;
+
     // Candidate notes: must literally mention both endpoints (owner counts as
     // implicit in their own notes).
     let query = db
@@ -217,9 +219,13 @@ async function reconcileUser(db: any, userId: string) {
     const { data: notes } = await query;
 
     let kept = false;
+    let completedSearch = true;
     for (const note of (notes || []) as Array<{ id: string; title: string; content: string }>) {
-      if (llmBudget <= 0) break;
-      llmBudget -= 1;
+      if (llmBudget < 2) {
+        completedSearch = false;
+        break;
+      }
+      llmBudget -= 2;
       stats.llm_calls += 1;
       const evidence = await recoverRelationshipEvidence({
         db, userId, noteTitle: note.title || "", noteContent: note.content || "",
@@ -275,7 +281,7 @@ async function reconcileUser(db: any, userId: string) {
     }
 
     if (judgeDown) break;
-    if (!kept && llmBudget > 0) unevidenced.push(rel.id);
+    if (!kept && completedSearch) unevidenced.push(rel.id);
   }
 
   if (judgeDown) {
