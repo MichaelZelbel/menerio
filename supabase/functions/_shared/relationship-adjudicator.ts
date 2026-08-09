@@ -1,5 +1,9 @@
 import { runChat } from "./llm-router.ts";
 import { canonicalLabel } from "./relationship-canonical.ts";
+import {
+  RELATIONSHIP_ADJUDICATION_PROMPT,
+  RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT,
+} from "./llm-defaults.ts";
 
 export const RELATIONSHIP_ADJUDICATION_VERSION = "2026-08-09.1";
 
@@ -68,14 +72,6 @@ function rejected(reason: string, label: string): RelationshipAdjudication {
   };
 }
 
-const SYSTEM_PROMPT = `You are the independent relationship evidence judge for a private personal knowledge base.
-Evaluate only the supplied exact quote and context. Never infer a relationship from a name appearing nearby.
-A record may be kept only when BOTH endpoints are real people (the account owner counts), the quote supports the proposed personal role, and the relationship is meaningful to the profile owner.
-Reject organizations, products, brands, software, projects, bots, fictional characters, avatars, role-play identities, handles without a confirmed person, authors/bylines, celebrities merely discussed, and incidental or one-off transactional mentions.
-Professional roles may be kept only when the quote explicitly establishes the durable role between the named people. Do not turn praise, admiration, resemblance, ownership, note authorship, or being the subject of a note into a relationship.
-When evidence is ambiguous, choose review rather than keep. Do not assume monogamy or exclusivity; distinct evidenced relationships to distinct real people are valid.
-Return strict JSON only with: outcome (keep|reject|review), reason, canonical_label, inverse_label, person_a_kind, person_b_kind, personally_relevant, relationship_supported, incidental_or_transactional, fictional_or_roleplay, confidence (0..1).`;
-
 export async function adjudicateRelationship(args: {
   db: any;
   userId: string;
@@ -91,9 +87,12 @@ export async function adjudicateRelationship(args: {
       db: args.db,
       userId: args.userId,
       callSite: "relationship.adjudication",
-      defaults: { provider: "lovable", model: "google/gemini-3.6-flash", systemPrompt: SYSTEM_PROMPT, temperature: 0, maxTokens: 500 },
+      defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 500 },
       messages: [{ role: "user", content: JSON.stringify(args.candidate) }],
       callOptions: { response_format: { type: "json_object" } },
+      // Reconciliation is a platform integrity task, like moderation. It must
+      // not consume or be gated by the profile owner's interactive AI allowance.
+      skipDeduct: true,
     });
     const parsed = JSON.parse(result.content);
     const aKind = kind(parsed.person_a_kind);
@@ -152,19 +151,18 @@ export async function recoverRelationshipEvidence(args: {
       userId: args.userId,
       callSite: "relationship.evidence_recovery",
       defaults: {
-        provider: "lovable",
-        model: "google/gemini-3.6-flash",
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4-flash",
         temperature: 0,
         maxTokens: 500,
-        systemPrompt: `Locate evidence for one proposed person-to-person relationship in a source note. Return exactly two tagged fields and nothing else:
-<SOURCE_QUOTE>shortest exact quote</SOURCE_QUOTE>
-<SOURCE_CONTEXT>larger exact excerpt</SOURCE_CONTEXT>
-SOURCE_QUOTE must be the shortest exact, verbatim, contiguous quote that explicitly supports the named relationship. SOURCE_CONTEXT may be a larger exact contiguous excerpt. Never paraphrase, repair spelling, combine separate passages, infer from proximity, or use metadata/bylines. If the note does not explicitly support the relationship, leave both tags empty.`,
+        systemPrompt: RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT,
       },
       messages: [{
         role: "user",
         content: `Note title: ${args.noteTitle}\nProposed relationship: ${args.personA} is ${args.label} of ${args.personB}\n\nSource note:\n${content}`,
       }],
+      // This is maintenance of canonical profile data, not a user AI feature.
+      skipDeduct: true,
     });
     const quoteMatch = result.content.match(/<SOURCE_QUOTE>([\s\S]*?)<\/SOURCE_QUOTE>/i);
     const contextMatch = result.content.match(/<SOURCE_CONTEXT>([\s\S]*?)<\/SOURCE_CONTEXT>/i);
