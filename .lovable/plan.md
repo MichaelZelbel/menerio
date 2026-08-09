@@ -1,44 +1,47 @@
-# Stop guessing: give me eyes on the app, then fix what the screen shows
+# Why your profile shows people you have no relationship with
 
-## Why the last attempts failed
+## What I actually checked this time
 
-I checked your live data and the shipped code before writing this, and the mismatch is the whole story:
+I read your 18 stored relationship rows and the table definition before writing this. Three concrete facts:
 
-- Your own profile now has 9 relationship rows in the database — Jürgen (stepfather), Brigitte (mother), Xihui, Lena, Yumei, Shoko, Gunther (manager). The junk rows (`author: Nate Jones`, `financial advisor`) are gone from the table.
-- I ran those exact rows through the shipped rendering code. It outputs, correctly collapsed and from your point of view: `Stepfather: Jürgen Skoppek`, `Mother: Brigitte`, `Wife: Xihui`, `Girlfriend: Lena`, `Girlfriend: Yumei`, `Friend: Shoko`, and `Manager: Gunther` in a separate professional block.
+1. **Every one of your 18 relationship rows has no evidence attached, and every one claims `origin = 'user'`.** The reason is a single line in the table definition: `origin` has the default value `'user'`. The evidence gate only demands a source quote when `origin` is *not* `'user'` — so any AI writer that simply does not set the column is silently recorded as "the user typed this by hand" and skips the gate entirely. That is why `friend: Shoko` and `manager: Gunther Reinhard` are on your profile: nothing wrote them with your consent, and nothing can now tell them apart from rows you really did enter.
 
-So my checks pass while your screen is wrong. That gap has one cause: **I have never once seen this app rendered.** This project runs on an external Supabase, so the platform cannot inject a preview session for me — my browser tooling lands on the login wall and stops. Every "done" I gave you was a database query or a unit test, never the page. That is the bug in my process, and it is the first thing this plan fixes.
+2. **The duplicate pairs are a key-matching bug, not a data bug.** You have `Jürgen -> stepfather -> me` and `me -> stepson -> Jürgen`. The collapse key inverts `stepfather` to `stepchild` and `stepson` to `stepparent` — two different strings — so the two halves of one bond never match and both render. Same for `me -> son -> Brigitte` / `Brigitte -> mother -> me`, which is why you see both `mother: Brigitte` and `parent: Brigitte`.
 
-I also found one concrete defect that a screenshot would have caught immediately and my DB checks structurally could not: on **your** profile page the relationships are rendered **twice** — once by the new Relationships section, and again as a plain `Relationships & Family` category further down (`Online girlfriend: Yumei`, `Wedding date`). Contact profiles filter that category out; your own profile does not. That alone makes the page read as the old, ambiguous, duplicated mess.
+3. **`manager: Gunther Reinhard` is classified professional and still rendered in the same list** as your mother and your wife, with no separation, so a work reporting line reads as a personal relationship.
 
-## Step 1 — Build the eyes (before touching any relationship code)
+## Why my previous "done" claims were worthless
 
-1. A dedicated, admin-only edge function that provisions a **seeded test account** in your Supabase: confirmed email, throwaway address, and a fixture set of people and relationships that reproduces the exact ugliness you reported (bidirectional pairs, parenthetical names like `Jürgen Skoppek (Stiefvater)`, junk roles, duplicate contacts). Credentials go into project secrets, never into chat or code.
-2. A Playwright script, `scripts/verify-profile-render.ts`, that logs into the preview as that account, navigates to `/dashboard/profile` and to two contact profiles, and captures screenshots plus the literal text of every rendered relationship line.
-3. From this point on, **no report of success without the screenshot attached.** If I cannot produce the image, the answer is "not done".
+I verified against the database and unit tests, never against the rendered rows, and the database looked fine because bad rows were wearing an `origin = 'user'` badge. I also never asked the obvious human question — *does this person belong on this list at all* — which is the only question that mattered. Fixed below by making the check operate on your real 18 rows and print them.
 
-## Step 2 — Fix what the screenshots show
+## What gets built
 
-Known already, and fixed in this step:
+### 1. Kill the provenance loophole
+- Drop the `'user'` default on `origin`. Every writer must state who it is; a row with no stated origin is rejected outright.
+- The profile UI form stamps `origin = 'user_manual'`. Everything else (`ai_note`, `ai_moment`, `ai_lexicon`, `import`, `review_queue`) is required by the trigger to carry a source quote and a note id.
+- Backfill: all 18 existing rows become `origin = 'unverified'`, because none of them can honestly claim you entered them.
 
-- Remove the duplicated relationship surface from your own profile: the `Relationships & Family` category is folded into the Relationships section (as milestones) exactly the way contact profiles already do it, so a profile has one relationship surface, never two.
-- Migrate the leftover relationship-shaped facts in that category (`Online girlfriend: Yumei`) into real relationship rows, and delete the fact copies so nothing is stated twice.
-- Drop the gender guess: `partner` currently renders as `Girlfriend` even when gender is unknown. Unknown gender renders the neutral term (`Partner`).
+### 2. Confirm-or-drop pass over the existing 18
+Unverified rows do not silently disappear and do not silently stay. The Relationships card shows them dimmed with an "Unconfirmed" marker and a single **Review relationships** action that walks you through all of them in one pass — Keep / Remove / Fix the label — and for each one shows the note it most likely came from, if any can be found. After the pass, unconfirmed rows are gone from the profile; only confirmed ones remain.
 
-Everything else in this step is driven by what the screenshots actually show, not by what I assume.
+### 3. Fix the collapse so one bond is one row
+Pair keys normalise family roles to a neutral family term on both sides (`stepfather`/`stepson`/`stepparent`/`stepchild` all key to one step-parent bond; `son`/`mother`/`parent`/`child` to one parent bond) before comparing. Result on your profile: Jürgen once, Brigitte once, rendered from your point of view (`Stepfather: Jürgen Skoppek`, `Mother: Brigitte`).
 
-## Step 3 — Re-run the same verification and show you the result
+### 4. Separate professional from personal
+Work roles (`manager`, `colleague`, `client`, `advisor`) render under their own **Work & professional** subheading inside the card, never mixed into family and friends, and are excluded from the relationship-status summary.
 
-I re-run `verify-profile-render.ts` and paste the captured lines and the screenshot. The check fails loudly if any rendered line: is duplicated for the same person, contains a parenthetical role in a name, uses a role outside the closed vocabulary, or reads in the inverse direction. Only a clean run is reported as done.
+### 5. Duplicate contacts that pollute both sides
+`Xihui -> spouse -> michael` and `Yumei -> partner -> michael` point at a contact record named `michael` that is you. Those get re-pointed to `self` and de-duplicated against the rows you already have, so your wife's profile stops listing a stranger who is you.
 
-## What I need from you: nothing
+### 6. The check I run before saying anything is done
+A render test that feeds the component your **actual 18 production rows** and prints the resulting lines. It fails if any line is unevidenced-and-unconfirmed, any person appears twice, any professional role sits in the personal list, or any line reads in the inverse direction. I paste the printed lines in my reply. If a line looks wrong to a human, it is not done.
 
-No screenshots, no pasting, no telling me where the bug is. If provisioning the test account hits a wall in your Supabase (email confirmation policy, for example), I will say so plainly in one line and tell you the single setting that unblocks it — I will not hand the debugging back to you.
+Note on live verification: this project is on an external Supabase, so the preview sign-in cannot inject a session for me — I cannot log into your account myself. The render test above uses your real rows, which is the closest honest substitute. If you would rather I drive the real UI, a throwaway test account with the same fixtures works and I will screenshot it.
 
 ## Technical notes
 
-- Test-account provisioning: new `supabase/functions/admin-seed-test-user`, service-role `auth.admin.createUser` with `email_confirm: true`, guarded by an admin role check; fixtures written under that user's id only.
-- Verification harness: Playwright against `http://localhost:8080`, credentials read from env, screenshots to `/tmp/browser/`; assertions on the rendered text nodes of the relationships section.
-- Duplicate surface: `src/pages/Profile.tsx` must apply the same `relationships` category filter and `milestones` pass-through that `src/components/people/ContactProfileTab.tsx` already does.
-- Neutral gender: `displayRole` in `src/lib/relationship-canonical.ts` returns the neutral term when gender is `unknown` instead of defaulting to the gendered one.
-- Data move: one-off migration converting `relationships`-category profile entries that name a person into `contact_relationships` rows with `origin: 'user'`, then deleting the fact rows.
+- Migration: `ALTER TABLE contact_relationships ALTER COLUMN origin DROP DEFAULT`; update `relationship_require_evidence()` to accept only `user_manual` as gate-exempt and to reject `NULL`/unknown origins; backfill existing rows to `unverified`.
+- `src/lib/relationship-canonical.ts`: add `familyBondKey()` used by `relationshipPairKey` so gendered and neutral kin terms share one key; `inverseLabel` stays as-is for display.
+- `src/components/people/RelationshipsSection.tsx`: professional subheading, unconfirmed styling, review-pass entry point.
+- `src/hooks/useContactRelationships.ts`: stamp `origin: 'user_manual'` on manual writes.
+- New `src/components/people/__tests__/relationship-render.test.tsx` holding the 18-row fixture snapshot, plus `scripts/audit-relationships.ts` extended with the confirmed/professional/duplicate assertions.
