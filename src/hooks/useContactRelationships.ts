@@ -127,7 +127,7 @@ export function useContactRelationships(contactId: string | null) {
         const rb: EntityRef = { type: r.target_type, id: r.target_id };
         return relationshipPairKey(user.id, ra, rb, r.label) === pairKey;
       });
-      if (dup) throw new Error("uq_contact_relationship: equivalent relationship already exists");
+      if (dup) throw new Error("pair_key: equivalent relationship already exists");
 
       const row = { ...data, label: canonical, user_id: user.id };
 

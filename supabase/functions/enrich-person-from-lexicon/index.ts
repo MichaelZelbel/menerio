@@ -656,7 +656,7 @@ async function run(userId: string, contactId: string) {
         if (relationshipDecision.ok === false) { prepared.push({ ...s, status: "removed" }); continue; }
         const { data, error } = await supabase
           .from("contact_relationships")
-          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: p.label })
+          .insert({ user_id: userId, source_type: p.source_type, source_id: p.source_id, target_type: p.target_type, target_id: p.target_id, label: relationshipDecision.label })
           .select("id")
           .single();
         if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }

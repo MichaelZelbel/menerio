@@ -30,7 +30,7 @@ import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
 } from "../_shared/profile-dedup.ts";
-import { isBlockedRelationshipLabel, profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
+import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
