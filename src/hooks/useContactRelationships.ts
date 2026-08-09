@@ -14,6 +14,10 @@ export interface ContactRelationship {
   label: string;
   custom_label: string | null;
   inverse_id: string | null;
+  /** Where this row came from. "unverified" = legacy, nobody vouched for it. */
+  origin: string;
+  evidence_quote: string | null;
+  evidence_note_id: string | null;
   created_at: string;
   updated_at: string;
   // Joined names for display
