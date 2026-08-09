@@ -151,17 +151,20 @@ export async function recoverRelationshipEvidence(args: {
         model: "google/gemini-3.6-flash",
         temperature: 0,
         maxTokens: 500,
-        systemPrompt: `Locate evidence for one proposed person-to-person relationship in a source note. Return strict JSON only: {"source_quote":"...","source_context":"..."}. source_quote must be the shortest exact, verbatim, contiguous quote that explicitly supports the named relationship. source_context may be a larger exact contiguous excerpt. Never paraphrase, repair spelling, combine separate passages, infer from proximity, or use metadata/bylines. If the note does not explicitly support the relationship, return empty strings.`,
+        systemPrompt: `Locate evidence for one proposed person-to-person relationship in a source note. Return exactly two tagged fields and nothing else:
+<SOURCE_QUOTE>shortest exact quote</SOURCE_QUOTE>
+<SOURCE_CONTEXT>larger exact excerpt</SOURCE_CONTEXT>
+SOURCE_QUOTE must be the shortest exact, verbatim, contiguous quote that explicitly supports the named relationship. SOURCE_CONTEXT may be a larger exact contiguous excerpt. Never paraphrase, repair spelling, combine separate passages, infer from proximity, or use metadata/bylines. If the note does not explicitly support the relationship, leave both tags empty.`,
       },
       messages: [{
         role: "user",
         content: `Note title: ${args.noteTitle}\nProposed relationship: ${args.personA} is ${args.label} of ${args.personB}\n\nSource note:\n${content}`,
       }],
-      callOptions: { response_format: { type: "json_object" } },
     });
-    const parsed = JSON.parse(result.content);
-    const sourceQuote = String(parsed.source_quote || "").trim();
-    const sourceContext = String(parsed.source_context || "").trim();
+    const quoteMatch = result.content.match(/<SOURCE_QUOTE>([\s\S]*?)<\/SOURCE_QUOTE>/i);
+    const contextMatch = result.content.match(/<SOURCE_CONTEXT>([\s\S]*?)<\/SOURCE_CONTEXT>/i);
+    const sourceQuote = String(quoteMatch?.[1] || "").trim();
+    const sourceContext = String(contextMatch?.[1] || "").trim();
     if (!exactQuoteExists(content, sourceQuote)) return null;
     return {
       sourceQuote,
