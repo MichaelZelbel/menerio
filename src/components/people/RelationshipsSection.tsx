@@ -12,8 +12,10 @@ import {
   canonicalLabel,
   describeRelationship,
   genderFromFacts,
+  relationshipPairKey,
   type Gender,
 } from "@/lib/relationship-canonical";
+
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
 
 import { useAuth } from "@/contexts/AuthContext";
