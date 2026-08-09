@@ -237,7 +237,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         viewingContactId: contactId,
         sourceName: rel.source_type === "self" ? myName : rel.source_contact?.name || "Unknown",
         targetName: rel.target_type === "self" ? myName : rel.target_contact?.name || "Unknown",
-        otherGender: genderByPerson.get(otherKey) ?? null,
+        otherGender: genderOf(otherKey),
       });
 
       return { rel, description, otherKey, otherContactId, otherIsSelf };
