@@ -11,8 +11,6 @@ import {
   canonicalLabel,
   describeRelationship,
   genderFromFacts,
-  isRomanticSocialBond,
-  relationshipStrength,
   type Gender,
 } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
