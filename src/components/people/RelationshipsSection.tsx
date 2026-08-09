@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Users, Briefcase } from "lucide-react";
 import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
 
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState(true);
+  const [proExpanded, setProExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formLabel, setFormLabel] = useState("");
   const [formCustomLabel, setFormCustomLabel] = useState("");
@@ -292,7 +293,9 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   })();
 
   return (
+    <>
     <div className="rounded-lg border border-border bg-card">
+
       {/* Header — same shape as every other profile section. */}
       <div className="flex items-center gap-2 px-4 py-2.5 group">
         <button
@@ -310,7 +313,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
             {derivedStatus}
           </Badge>
         )}
-        <span className="text-xs text-muted-foreground shrink-0">{rows.length + professionalRows.length}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{rows.length}</span>
         {!adding && (
           <Button
             variant="ghost"
@@ -371,48 +374,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       )}
 
 
-      {/* Professional and service roles are real, but they are not family or
-          friends — they never mix into the personal list. */}
-      {expanded && professionalRows.length > 0 && (
-        <div className="border-t border-border">
-          <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            Professional &amp; service contacts
-          </div>
-          {professionalRows.map(({ rel, description, otherContactId, otherIsSelf }) => (
-            <ProfileRow
-              key={rel.id}
-              label={description.role}
-              actions={
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => handleDelete(rel.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              }
-            >
-              {otherIsSelf ? (
-                <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
-                  {description.otherName}
-                </Link>
-              ) : otherContactId ? (
-                <Link to={`/dashboard/people/${otherContactId}`} className="text-sm hover:underline break-words">
-                  {description.otherName}
-                </Link>
-              ) : (
-                <span className="text-sm break-words">{description.otherName}</span>
-              )}
-            </ProfileRow>
-          ))}
-        </div>
-      )}
-
-
-      {expanded && rows.length === 0 && professionalRows.length === 0 && !adding && (
+      {expanded && rows.length === 0 && !adding && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
           <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
@@ -494,5 +456,65 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         </div>
       )}
     </div>
+
+    {/* Professional and service roles are real, but they are NOT relationships.
+        They live in their own, separately collapsible card. */}
+    {professionalRows.length > 0 && (
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex items-center gap-2 px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setProExpanded((v) => !v)}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={proExpanded ? "Collapse section" : "Expand section"}
+          >
+            {proExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+          <Briefcase className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="font-medium text-sm flex-1 truncate">Professional &amp; service contacts</span>
+          <span className="text-xs text-muted-foreground shrink-0">{professionalRows.length}</span>
+        </div>
+
+        {proExpanded && (
+          <div className="border-t border-border">
+            {professionalRows.map(({ rel, description, otherContactId, otherIsSelf }) => (
+              <ProfileRow
+                key={rel.id}
+                label={description.role}
+                actions={
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => handleDelete(rel.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                }
+              >
+                {otherIsSelf ? (
+                  <Link to="/dashboard/profile" className="text-sm hover:underline break-words">
+                    {description.otherName}
+                  </Link>
+                ) : otherContactId ? (
+                  <Link to={`/dashboard/people/${otherContactId}`} className="text-sm hover:underline break-words">
+                    {description.otherName}
+                  </Link>
+                ) : (
+                  <span className="text-sm break-words">{description.otherName}</span>
+                )}
+              </ProfileRow>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+    </>
   );
 }
+
