@@ -898,7 +898,42 @@ async function resolveCategoryId(
   return raced?.id || null;
 }
 
+// Mirror of the DB-side fact keys (profile_fact_label_key / profile_fact_text_key)
+// in the simplest possible form: lowercase, alphanumeric only.
+function factKey(t: string): string {
+  return String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Find the entry that the duplicate-prevention trigger deduplicated a write
+ * against — an entry with the same label whose value equals or contains the
+ * canonical value.
+ */
+async function findAbsorbingEntry(
+  supabase: any,
+  p: { userId: string; contactId: string | null; label: string; value: string; excludeIds: string[] },
+): Promise<string | null> {
+  const q = supabase
+    .from("profile_entries")
+    .select("id, label, value")
+    .eq("user_id", p.userId);
+  const { data } = p.contactId ? await q.eq("contact_id", p.contactId) : await q.is("contact_id", null);
+  const rows = (data || []) as Array<{ id: string; label: string; value: string }>;
+  const wantLabel = factKey(p.label);
+  const wantValue = factKey(p.value);
+  if (!wantLabel || !wantValue) return null;
+  const excluded = new Set(p.excludeIds);
+  const candidates = rows.filter(
+    (r) => !excluded.has(r.id) && factKey(r.label) === wantLabel && factKey(r.value).includes(wantValue),
+  );
+  if (candidates.length === 0) return null;
+  // Prefer the broadest value (the row the trigger would have kept).
+  candidates.sort((a, b) => factKey(b.value).length - factKey(a.value).length);
+  return candidates[0].id;
+}
+
 export async function applyNormalization(
+
   supabase: any,
   payload: NormalizationPayload,
 ): Promise<{ ok: boolean; entryId?: string; reason?: string }> {
