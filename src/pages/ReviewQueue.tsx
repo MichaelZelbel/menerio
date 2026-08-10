@@ -695,10 +695,16 @@ export default function ReviewQueue() {
       showToast.error(`Bulk action failed: ${j.last_error || "Unknown error"}`);
     } else {
       const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
-      if (Number(j.failed) === 0) showToast.success(`${Number(j.done).toLocaleString()} changes ${verb}`);
-      else showToast.error(
-        `${Number(j.done).toLocaleString()} ${verb}, ${Number(j.failed).toLocaleString()} could not be applied${j.last_error ? ` — ${j.last_error}` : ""}. They are still in the queue.`,
-      );
+      const okCount = Math.max(0, Number(j.done) || 0);
+      const failCount = Math.max(0, Number(j.failed) || 0);
+      if (failCount === 0) showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
+      else if (okCount === 0)
+        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue`);
+      else
+        showToast.error(
+          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue`,
+        );
+
     }
     setBulkJobId(null);
   }, [bulkJob]);
