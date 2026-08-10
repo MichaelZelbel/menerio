@@ -928,7 +928,9 @@ export async function applyNormalization(
     );
     if (!categoryId) return { ok: false, reason: "category_unresolved" };
 
-    let entryId: string;
+    let entryId: string | null = null;
+    let absorbed = false;
+
     if (payload.survivor_entry_id) {
       const { data, error } = await supabase
         .from("profile_entries")
@@ -940,10 +942,12 @@ export async function applyNormalization(
         .eq("id", payload.survivor_entry_id)
         .eq("user_id", payload.user_id)
         .select("id")
-        .single();
-      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
-      if (error || !data) return { ok: false, reason: "update_failed" };
-      entryId = data.id;
+        .maybeSingle();
+      if (data?.id) entryId = data.id;
+      else if (error && (error as any).code && (error as any).code !== "23505" && (error as any).code !== "PGRST116") {
+        console.error("[normalize-profile] survivor update failed:", error);
+        return { ok: false, reason: "update_failed" };
+      }
     } else {
       const { data, error } = await supabase
         .from("profile_entries")
@@ -956,15 +960,36 @@ export async function applyNormalization(
           sort_order: 0,
         } as any)
         .select("id")
-        .single();
-      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
-      if (error || !data) return { ok: false, reason: "insert_failed" };
-      entryId = data.id;
+        .maybeSingle();
+      if (data?.id) entryId = data.id;
+      else if (error && (error as any).code && (error as any).code !== "23505" && (error as any).code !== "PGRST116") {
+        console.error("[normalize-profile] canonical insert failed:", error);
+        return { ok: false, reason: "insert_failed" };
+      }
     }
 
-    const deleteIds = payload.survivor_entry_id
-      ? payload.delete_entry_ids
-      : payload.before.map((r) => r.id);
+    if (!entryId) {
+      // The database duplicate-prevention trigger swallowed the write because an
+      // equivalent (or broader) entry already exists. That is not a failure: the
+      // user's intent — one clean entry instead of several — is already satisfied.
+      // Adopt the existing entry as the survivor and clean up the superseded rows.
+      const existingId = await findAbsorbingEntry(supabase, {
+        userId: payload.user_id,
+        contactId: payload.contact_id,
+        label: payload.canonical_label,
+        value: payload.canonical_value,
+        excludeIds: payload.before.map((r) => r.id),
+      });
+      if (!existingId) return { ok: false, reason: "absorbed_unresolved" };
+      entryId = existingId;
+      absorbed = true;
+    }
+
+    const deleteIds = (
+      payload.survivor_entry_id
+        ? [...payload.delete_entry_ids, ...(absorbed ? [payload.survivor_entry_id] : [])]
+        : payload.before.map((r) => r.id)
+    ).filter((id) => id && id !== entryId);
     if (deleteIds.length > 0) {
       const { error: delErr } = await supabase
         .from("profile_entries")
@@ -974,7 +999,8 @@ export async function applyNormalization(
       if (delErr) console.error("[normalize-profile] delete failed:", delErr);
     }
 
-    return { ok: true, entryId };
+    return { ok: true, entryId, ...(absorbed ? { reason: "absorbed" } : {}) };
+
   } catch (err) {
     console.error("[normalize-profile] applyNormalization error:", err);
     return { ok: false, reason: "exception" };
