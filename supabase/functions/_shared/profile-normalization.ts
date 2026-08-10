@@ -1008,14 +1008,25 @@ export async function applyNormalization(
       // equivalent (or broader) entry already exists. That is not a failure: the
       // user's intent — one clean entry instead of several — is already satisfied.
       // Adopt the existing entry as the survivor and clean up the superseded rows.
-      const existingId = await findAbsorbingEntry(supabase, {
-        userId: payload.user_id,
-        contactId: payload.contact_id,
-        label: payload.canonical_label,
-        value: payload.canonical_value,
-        excludeIds: payload.before.map((r) => r.id),
-      });
+      const existingId =
+        (await findAbsorbingEntry(supabase, {
+          userId: payload.user_id,
+          contactId: payload.contact_id,
+          label: payload.canonical_label,
+          value: payload.canonical_value,
+          excludeIds: payload.before.map((r) => r.id),
+        })) ??
+        // No outside entry absorbed it — the canonical form already matches one
+        // of the source rows, so keep that row and drop only the redundant ones.
+        (await findAbsorbingEntry(supabase, {
+          userId: payload.user_id,
+          contactId: payload.contact_id,
+          label: payload.canonical_label,
+          value: payload.canonical_value,
+          excludeIds: [],
+        }));
       if (!existingId) return { ok: false, reason: "absorbed_unresolved" };
+
       entryId = existingId;
       absorbed = true;
     }
