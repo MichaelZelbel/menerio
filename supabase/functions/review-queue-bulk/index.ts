@@ -283,27 +283,41 @@ async function runKeep(
     await flush();
   }
 
-  // Verification pass: "done" must mean the row actually left the queue.
-  // Anything still pending is reclassified from done → failed so the progress
-  // counter can never claim success while items remain in the user's queue.
-  const allIds = rows.map((r) => r.id);
-  let stillPending = 0;
-  for (let i = 0; i < allIds.length; i += PAGE) {
-    const chunk = allIds.slice(i, i + PAGE);
+  await flush(true);
+}
+
+/**
+ * Authoritative reconciliation: "done" must mean the row actually left the
+ * queue. Counts what is still outstanding instead of adding to the in-loop
+ * counters (which used to double-count failures and produce negative "done").
+ */
+async function countOutstanding(
+  db: SupabaseClient,
+  reviewIds: string[],
+  wikiIds: string[],
+): Promise<number> {
+  let outstanding = 0;
+  for (let i = 0; i < reviewIds.length; i += PAGE) {
+    const chunk = reviewIds.slice(i, i + PAGE);
     const { data, error } = await db.from("review_queue")
       .select("id")
       .in("id", chunk)
       .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
     if (error) continue;
-    stillPending += data?.length || 0;
+    outstanding += data?.length || 0;
   }
-  if (stillPending > 0) {
-    bump(-stillPending, stillPending);
-    note(`${stillPending} item(s) could not be applied and remain in the queue`);
+  for (let i = 0; i < wikiIds.length; i += PAGE) {
+    const chunk = wikiIds.slice(i, i + PAGE);
+    const { data, error } = await db.from("wiki_revisions")
+      .select("id")
+      .in("id", chunk)
+      .eq("status", "applied");
+    if (error) continue;
+    outstanding += data?.length || 0;
   }
-
-  await flush(true);
+  return outstanding;
 }
+
 
 
 async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
