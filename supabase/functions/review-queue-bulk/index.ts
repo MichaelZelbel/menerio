@@ -185,6 +185,19 @@ async function runJob(
       await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ true);
     }
   } finally {
+    // Reconcile against reality: whatever is still outstanding failed, the
+    // rest succeeded. Never additive, never negative.
+    try {
+      const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id), wikiIds);
+      failed = Math.min(total, outstanding);
+      done = Math.max(0, total - failed);
+      if (failed > 0 && !lastError) {
+        lastError = `${failed} item(s) could not be applied and remain in the queue`;
+      }
+      if (failed === 0) lastError = null;
+    } catch (e) {
+      console.warn("review-queue-bulk reconcile failed", e);
+    }
     await db.from("review_queue_bulk_jobs").update({
       status: "done",
       done,
@@ -194,6 +207,7 @@ async function runJob(
     }).eq("id", jobId);
   }
 }
+
 
 // ---------------- KEEP ----------------
 
