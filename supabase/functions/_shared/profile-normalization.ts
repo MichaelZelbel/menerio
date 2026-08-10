@@ -898,7 +898,42 @@ async function resolveCategoryId(
   return raced?.id || null;
 }
 
+// Mirror of the DB-side fact keys (profile_fact_label_key / profile_fact_text_key)
+// in the simplest possible form: lowercase, alphanumeric only.
+function factKey(t: string): string {
+  return String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Find the entry that the duplicate-prevention trigger deduplicated a write
+ * against — an entry with the same label whose value equals or contains the
+ * canonical value.
+ */
+async function findAbsorbingEntry(
+  supabase: any,
+  p: { userId: string; contactId: string | null; label: string; value: string; excludeIds: string[] },
+): Promise<string | null> {
+  const q = supabase
+    .from("profile_entries")
+    .select("id, label, value")
+    .eq("user_id", p.userId);
+  const { data } = p.contactId ? await q.eq("contact_id", p.contactId) : await q.is("contact_id", null);
+  const rows = (data || []) as Array<{ id: string; label: string; value: string }>;
+  const wantLabel = factKey(p.label);
+  const wantValue = factKey(p.value);
+  if (!wantLabel || !wantValue) return null;
+  const excluded = new Set(p.excludeIds);
+  const candidates = rows.filter(
+    (r) => !excluded.has(r.id) && factKey(r.label) === wantLabel && factKey(r.value).includes(wantValue),
+  );
+  if (candidates.length === 0) return null;
+  // Prefer the broadest value (the row the trigger would have kept).
+  candidates.sort((a, b) => factKey(b.value).length - factKey(a.value).length);
+  return candidates[0].id;
+}
+
 export async function applyNormalization(
+
   supabase: any,
   payload: NormalizationPayload,
 ): Promise<{ ok: boolean; entryId?: string; reason?: string }> {
@@ -928,7 +963,9 @@ export async function applyNormalization(
     );
     if (!categoryId) return { ok: false, reason: "category_unresolved" };
 
-    let entryId: string;
+    let entryId: string | null = null;
+    let absorbed = false;
+
     if (payload.survivor_entry_id) {
       const { data, error } = await supabase
         .from("profile_entries")
@@ -940,10 +977,12 @@ export async function applyNormalization(
         .eq("id", payload.survivor_entry_id)
         .eq("user_id", payload.user_id)
         .select("id")
-        .single();
-      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
-      if (error || !data) return { ok: false, reason: "update_failed" };
-      entryId = data.id;
+        .maybeSingle();
+      if (data?.id) entryId = data.id;
+      else if (error && (error as any).code && (error as any).code !== "23505" && (error as any).code !== "PGRST116") {
+        console.error("[normalize-profile] survivor update failed:", error);
+        return { ok: false, reason: "update_failed" };
+      }
     } else {
       const { data, error } = await supabase
         .from("profile_entries")
@@ -956,15 +995,47 @@ export async function applyNormalization(
           sort_order: 0,
         } as any)
         .select("id")
-        .single();
-      if (error && (error as any).code === "23505") return { ok: false, reason: "already_exists" };
-      if (error || !data) return { ok: false, reason: "insert_failed" };
-      entryId = data.id;
+        .maybeSingle();
+      if (data?.id) entryId = data.id;
+      else if (error && (error as any).code && (error as any).code !== "23505" && (error as any).code !== "PGRST116") {
+        console.error("[normalize-profile] canonical insert failed:", error);
+        return { ok: false, reason: "insert_failed" };
+      }
     }
 
-    const deleteIds = payload.survivor_entry_id
-      ? payload.delete_entry_ids
-      : payload.before.map((r) => r.id);
+    if (!entryId) {
+      // The database duplicate-prevention trigger swallowed the write because an
+      // equivalent (or broader) entry already exists. That is not a failure: the
+      // user's intent — one clean entry instead of several — is already satisfied.
+      // Adopt the existing entry as the survivor and clean up the superseded rows.
+      const existingId =
+        (await findAbsorbingEntry(supabase, {
+          userId: payload.user_id,
+          contactId: payload.contact_id,
+          label: payload.canonical_label,
+          value: payload.canonical_value,
+          excludeIds: payload.before.map((r) => r.id),
+        })) ??
+        // No outside entry absorbed it — the canonical form already matches one
+        // of the source rows, so keep that row and drop only the redundant ones.
+        (await findAbsorbingEntry(supabase, {
+          userId: payload.user_id,
+          contactId: payload.contact_id,
+          label: payload.canonical_label,
+          value: payload.canonical_value,
+          excludeIds: [],
+        }));
+      if (!existingId) return { ok: false, reason: "absorbed_unresolved" };
+
+      entryId = existingId;
+      absorbed = true;
+    }
+
+    const deleteIds = (
+      payload.survivor_entry_id
+        ? [...payload.delete_entry_ids, ...(absorbed ? [payload.survivor_entry_id] : [])]
+        : payload.before.map((r) => r.id)
+    ).filter((id) => id && id !== entryId);
     if (deleteIds.length > 0) {
       const { error: delErr } = await supabase
         .from("profile_entries")
@@ -974,7 +1045,8 @@ export async function applyNormalization(
       if (delErr) console.error("[normalize-profile] delete failed:", delErr);
     }
 
-    return { ok: true, entryId };
+    return { ok: true, entryId, ...(absorbed ? { reason: "absorbed" } : {}) };
+
   } catch (err) {
     console.error("[normalize-profile] applyNormalization error:", err);
     return { ok: false, reason: "exception" };

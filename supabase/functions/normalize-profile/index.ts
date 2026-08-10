@@ -750,7 +750,7 @@ serve(async (req) => {
         // The suggestion can no longer be applied (source entries were edited
         // or deleted, or the target category vanished). Resolve the queue row
         // so it stops re-appearing in the user's Review Queue forever.
-        if (["stale", "empty", "category_unresolved"].includes(result.reason || "")) {
+        if (["stale", "empty", "category_unresolved", "already_exists", "absorbed_unresolved"].includes(result.reason || "")) {
           await db
             .from("review_queue")
             .update({ status: "removed", reviewed_at: new Date().toISOString() })
