@@ -1761,8 +1761,17 @@ async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
     const { error: participantError } = await supabase.from("moment_participants").insert(participantIds.map((person_id) => ({ moment_id: moment.id, person_id })));
     if (participantError) throw new Error(participantError.message);
   }
-  return { ...moment, primary_person: primary || null, participants: contacts, documents: [], field_parity: { available_moment_fields: MOMENT_FIELD_NAMES, response_fields: MOMENT_RESPONSE_FIELDS } };
+  // Non-person things the moment happened at/with (places, orgs, projects, pets…).
+  const entities = await resolveOrCreateEntitiesByName(input.entity_names ?? []);
+  if (entities.length) {
+    const { error: entityError } = await supabase
+      .from("moment_entities")
+      .insert(entities.map((e) => ({ moment_id: moment.id, entity_id: e.id, user_id: getCurrentUserId() })));
+    if (entityError) throw new Error(entityError.message);
+  }
+  return { ...moment, primary_person: primary || null, participants: contacts, entities, documents: [], field_parity: { available_moment_fields: MOMENT_FIELD_NAMES, response_fields: MOMENT_RESPONSE_FIELDS } };
 }
+
 
 const rawMomentSchema = {
   title: z.string().describe("Moment title/headline"),
