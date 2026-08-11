@@ -280,6 +280,57 @@ export type Database = {
         }
         Relationships: []
       }
+      claims: {
+        Row: {
+          attribute: string
+          confidence: string
+          created_at: string
+          id: string
+          source_id: string | null
+          source_type: string | null
+          subject_id: string | null
+          subject_type: string
+          updated_at: string
+          user_id: string
+          valid_from: string | null
+          valid_to: string | null
+          value: string
+          value_json: Json | null
+        }
+        Insert: {
+          attribute: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          source_id?: string | null
+          source_type?: string | null
+          subject_id?: string | null
+          subject_type: string
+          updated_at?: string
+          user_id?: string
+          valid_from?: string | null
+          valid_to?: string | null
+          value: string
+          value_json?: Json | null
+        }
+        Update: {
+          attribute?: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          source_id?: string | null
+          source_type?: string | null
+          subject_id?: string | null
+          subject_type?: string
+          updated_at?: string
+          user_id?: string
+          valid_from?: string | null
+          valid_to?: string | null
+          value?: string
+          value_json?: Json | null
+        }
+        Relationships: []
+      }
       collection_item_folders: {
         Row: {
           collection_id: string
@@ -332,8 +383,10 @@ export type Database = {
         Row: {
           ai_visibility: string
           collection_id: string
+          contact_id: string | null
           created_at: string
           data: Json
+          entity_id: string | null
           folder_id: string | null
           id: string
           indexable_date_1: string | null
@@ -351,8 +404,10 @@ export type Database = {
         Insert: {
           ai_visibility?: string
           collection_id: string
+          contact_id?: string | null
           created_at?: string
           data?: Json
+          entity_id?: string | null
           folder_id?: string | null
           id?: string
           indexable_date_1?: string | null
@@ -370,8 +425,10 @@ export type Database = {
         Update: {
           ai_visibility?: string
           collection_id?: string
+          contact_id?: string | null
           created_at?: string
           data?: Json
+          entity_id?: string | null
           folder_id?: string | null
           id?: string
           indexable_date_1?: string | null
@@ -392,6 +449,20 @@ export type Database = {
             columns: ["collection_id"]
             isOneToOne: false
             referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
             referencedColumns: ["id"]
           },
           {
@@ -770,6 +841,8 @@ export type Database = {
           target_type: string
           updated_at: string
           user_id: string
+          valid_from: string | null
+          valid_to: string | null
         }
         Insert: {
           created_at?: string
@@ -787,6 +860,8 @@ export type Database = {
           target_type: string
           updated_at?: string
           user_id?: string
+          valid_from?: string | null
+          valid_to?: string | null
         }
         Update: {
           created_at?: string
@@ -804,6 +879,8 @@ export type Database = {
           target_type?: string
           updated_at?: string
           user_id?: string
+          valid_from?: string | null
+          valid_to?: string | null
         }
         Relationships: [
           {
@@ -1053,6 +1130,51 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      entities: {
+        Row: {
+          ai_visibility: string
+          aliases: string[]
+          created_at: string
+          description: string | null
+          entity_type: string
+          id: string
+          is_sensitive: boolean
+          metadata: Json
+          name: string
+          tags: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_visibility?: string
+          aliases?: string[]
+          created_at?: string
+          description?: string | null
+          entity_type?: string
+          id?: string
+          is_sensitive?: boolean
+          metadata?: Json
+          name: string
+          tags?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          ai_visibility?: string
+          aliases?: string[]
+          created_at?: string
+          description?: string | null
+          entity_type?: string
+          id?: string
+          is_sensitive?: boolean
+          metadata?: Json
+          name?: string
+          tags?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       gdrive_connections: {
         Row: {
@@ -1771,6 +1893,45 @@ export type Database = {
           word?: string
         }
         Relationships: []
+      }
+      moment_entities: {
+        Row: {
+          created_at: string
+          entity_id: string
+          moment_id: string
+          role: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id: string
+          moment_id: string
+          role?: string | null
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string
+          moment_id?: string
+          role?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moment_entities_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moment_entities_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "moments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       moment_participants: {
         Row: {

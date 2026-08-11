@@ -58,6 +58,7 @@ const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const WeeklyReview = lazy(() => import("./pages/WeeklyReview"));
 const Actions = lazy(() => import("./pages/Actions"));
 const People = lazy(() => import("./pages/People"));
+const World = lazy(() => import("./pages/World"));
 const Groups = lazy(() => import("./pages/Groups"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const Collections = lazy(() => import("./pages/Collections"));
@@ -169,6 +170,8 @@ const App = () => (
                     <Route path="timeline" element={<TimelinePage />} />
                     <Route path="people" element={<People />} />
                     <Route path="people/:id" element={<People />} />
+                    <Route path="world" element={<World />} />
+                    <Route path="world/:id" element={<World />} />
                     <Route path="groups" element={<Groups />} />
                     <Route path="groups/:slug" element={<GroupDetail />} />
 

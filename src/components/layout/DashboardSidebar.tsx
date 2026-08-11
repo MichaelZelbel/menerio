@@ -22,6 +22,7 @@ import {
   Layers,
   LayoutGrid,
   LogOut,
+  Globe,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { BRAND } from "@/lib/brand";
@@ -81,6 +82,7 @@ export function DashboardSidebar() {
     people: {
       items: [
         { title: "People", url: "/dashboard/people", icon: UserCircle },
+        { title: "World", url: "/dashboard/world", icon: Globe },
         { title: "Groups", url: "/dashboard/groups", icon: Layers },
         { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
       ],
