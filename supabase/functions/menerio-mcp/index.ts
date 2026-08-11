@@ -1786,6 +1786,7 @@ const rawMomentSchema = {
   person_name: z.string().optional().describe("Primary person to link or create"),
   participant_names: z.array(z.string()).optional().describe("Additional people to link or create"),
   document_ids: z.array(z.string()).optional().describe("Reserved for provenance links when documents are available"),
+  entity_names: z.array(z.string()).optional().describe("Non-person things involved: places, organizations, projects, pets. Created in World if unknown."),
 };
 
 async function draftMomentFromDescription(description: string, params: any) {
@@ -1804,11 +1805,11 @@ async function draftMomentFromDescription(description: string, params: any) {
   return { draft: JSON.parse(toolCall.function.arguments), credits };
 }
 
-server.registerTool("create_moment_with_ai", { title: "Create Moment with AI", description: "Preferred default. Create a Moment from a natural-language description; AI fills in the structured fields and saves it automatically.", inputSchema: { description: z.string(), happened_at: z.string().optional(), person_name: z.string().optional(), participant_names: z.array(z.string()).optional(), title_hint: z.string().optional(), category_hint: z.string().optional(), status_hint: z.enum(ALLOWED_MOMENT_STATUSES).optional(), impact_level_hint: z.number().optional(), confidence_date_hint: z.number().optional(), confidence_truth_hint: z.number().optional(), document_ids: z.array(z.string()).optional() } }, async (params) => {
+server.registerTool("create_moment_with_ai", { title: "Create Moment with AI", description: "Preferred default. Create a Moment from a natural-language description; AI fills in the structured fields and saves it automatically.", inputSchema: { description: z.string(), happened_at: z.string().optional(), person_name: z.string().optional(), participant_names: z.array(z.string()).optional(), title_hint: z.string().optional(), category_hint: z.string().optional(), status_hint: z.enum(ALLOWED_MOMENT_STATUSES).optional(), impact_level_hint: z.number().optional(), confidence_date_hint: z.number().optional(), confidence_truth_hint: z.number().optional(), document_ids: z.array(z.string()).optional(), entity_names: z.array(z.string()).optional() } }, async (params) => {
   try {
     const { draft, credits } = await draftMomentFromDescription(params.description, params);
     const names = uniqueStrings([params.person_name, ...(params.participant_names ?? []), ...(draft.participants ?? [])]);
-    const moment = await createMomentWithLinks({ ...draft, description: params.description, title: params.title_hint ?? draft.title, happened_at: params.happened_at ?? draft.happened_at, category: params.category_hint ?? draft.category, status: params.status_hint ?? draft.status, impact_level: params.impact_level_hint ?? draft.impact_level, confidence_date: params.confidence_date_hint ?? draft.confidence_date, confidence_truth: params.confidence_truth_hint ?? draft.confidence_truth, person_name: params.person_name ?? names[0], participant_names: names, document_ids: params.document_ids ?? [] }, "mcp_ai");
+    const moment = await createMomentWithLinks({ ...draft, description: params.description, title: params.title_hint ?? draft.title, happened_at: params.happened_at ?? draft.happened_at, category: params.category_hint ?? draft.category, status: params.status_hint ?? draft.status, impact_level: params.impact_level_hint ?? draft.impact_level, confidence_date: params.confidence_date_hint ?? draft.confidence_date, confidence_truth: params.confidence_truth_hint ?? draft.confidence_truth, person_name: params.person_name ?? names[0], participant_names: names, document_ids: params.document_ids ?? [], entity_names: params.entity_names ?? [] }, "mcp_ai");
     return jsonTool({ tool: "create_moment_with_ai", approval_required: false, ai_enrichment_used: "draft-event", credits, moment });
   } catch (err: unknown) { return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" }); }
 });
