@@ -292,7 +292,9 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
               <TabsTrigger value="documents">Documents</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="profile" className="mt-0">
+            <TabsContent value="profile" className="mt-0 space-y-4">
+              <FactsPanel subjectType="contact" subjectId={person.id} subjectLabel={person.name} />
+
               <ContactProfileTab
                 contactId={person.id}
                 contactName={person.name}
@@ -302,6 +304,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                 relatedNotes={relatedNotes as Array<{ id: string; title: string | null }>}
               />
             </TabsContent>
+
 
             <TabsContent value="groups" className="mt-0">
               <PersonGroupsTab personId={person.id} />
