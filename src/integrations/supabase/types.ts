@@ -3985,6 +3985,10 @@ export type Database = {
         Args: { p_content: string; p_members_section: string }
         Returns: string
       }
+      review_queue_relationship_block_reason: {
+        Args: { p_payload: Json; p_user_id: string }
+        Returns: string
+      }
       slugify_collection_name: { Args: { p_name: string }; Returns: string }
       sync_group_wiki_members: {
         Args: { p_force?: boolean; p_group_id: string }
