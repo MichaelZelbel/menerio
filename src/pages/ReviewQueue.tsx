@@ -22,6 +22,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
 import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
+import { useAddClaim } from "@/hooks/useClaims";
+import { normalizeAttribute, isReservedAttribute } from "@/lib/claims";
 import {
   UserPlus,
   Link2,
@@ -39,6 +41,7 @@ import {
   Sparkles,
   Merge,
   AlertTriangle,
+  Globe,
 } from "lucide-react";
 
 const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
@@ -53,6 +56,8 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   merge_duplicate_person: { icon: Merge, label: "Duplicate person", color: "text-orange-500" },
   resolve_relationship_conflict: { icon: AlertTriangle, label: "Relationship conflict", color: "text-yellow-500" },
   adjudicate_relationship: { icon: Eye, label: "Relationship evidence", color: "text-primary" },
+  add_entity: { icon: Globe, label: "Add to World", color: "text-teal-500" },
+  add_claim: { icon: Calendar, label: "Dated fact", color: "text-sky-500" },
 
 };
 
@@ -475,6 +480,92 @@ export default function ReviewQueue() {
     }
   };
 
+  const addClaim = useAddClaim();
+
+  const handleAcceptEntity = async (item: ReviewItem) => {
+    const p = item.payload as any;
+    const name = String(p?.name || "").trim();
+    if (!name) {
+      showToast.error("Incomplete entity suggestion");
+      return;
+    }
+    try {
+      const db = supabase as any;
+      const { data: existing } = await db
+        .from("entities")
+        .select("id")
+        .eq("user_id", user!.id)
+        .ilike("name", name)
+        .maybeSingle();
+      let entityId = existing?.id as string | undefined;
+      if (!entityId) {
+        const { data, error } = await db
+          .from("entities")
+          .insert({
+            user_id: user!.id,
+            name,
+            entity_type: String(p?.entity_type || "other").toLowerCase(),
+            description: p?.description || null,
+          })
+          .select("id")
+          .single();
+        if (error || !data) {
+          showToast.error("Failed to add to World: " + (error?.message || "Unknown error"));
+          return;
+        }
+        entityId = data.id;
+      }
+      queryClient.invalidateQueries({ queryKey: ["entities"] });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "entity", target_entity_id: entityId, applied_at: new Date().toISOString() },
+      });
+      showToast.success("Added to World");
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleAcceptClaim = async (item: ReviewItem) => {
+    const p = item.payload as any;
+    const attribute = normalizeAttribute(String(p?.attribute || ""));
+    const value = String(p?.value || "").trim();
+    const subjectType = String(p?.subject_type || "") as "self" | "contact" | "entity";
+    if (!attribute || !value || !["self", "contact", "entity"].includes(subjectType)) {
+      showToast.error("Incomplete fact suggestion");
+      return;
+    }
+    if (isReservedAttribute(attribute)) {
+      showToast.error("Relationships are managed in the Relationships section, not as facts");
+      return;
+    }
+    let subjectId: string | null = subjectType === "self" ? null : (p?.subject_id || item.target_entity_id || null);
+    if (subjectType !== "self" && !subjectId) {
+      showToast.error("This fact has no person or entity to attach to");
+      return;
+    }
+    try {
+      const result = await addClaim.mutateAsync({
+        subject_type: subjectType,
+        subject_id: subjectId,
+        attribute,
+        value,
+        valid_from: p?.valid_from || null,
+        confidence: (p?.confidence as any) || "likely",
+        source_type: item.source_note_id ? "note" : "manual",
+        source_id: item.source_note_id || null,
+      });
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: { target_entity_type: "claim", target_entity_id: result.claim.id, applied_at: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
   const handleAccept = async (item: ReviewItem) => {
     const type = item.suggestion_type;
 
@@ -514,6 +605,14 @@ export default function ReviewQueue() {
 
     if (type === "add_moment") {
       return handleAcceptMoment(item);
+    }
+
+    if (type === "add_entity") {
+      return handleAcceptEntity(item);
+    }
+
+    if (type === "add_claim") {
+      return handleAcceptClaim(item);
     }
 
     if (type === "group_member_suggestion") {

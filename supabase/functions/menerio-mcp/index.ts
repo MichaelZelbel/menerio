@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
+import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import {
   applyVisibility,
   assertWritable,
@@ -1761,8 +1762,17 @@ async function createMomentWithLinks(input: any, source: "mcp" | "mcp_ai") {
     const { error: participantError } = await supabase.from("moment_participants").insert(participantIds.map((person_id) => ({ moment_id: moment.id, person_id })));
     if (participantError) throw new Error(participantError.message);
   }
-  return { ...moment, primary_person: primary || null, participants: contacts, documents: [], field_parity: { available_moment_fields: MOMENT_FIELD_NAMES, response_fields: MOMENT_RESPONSE_FIELDS } };
+  // Non-person things the moment happened at/with (places, orgs, projects, pets…).
+  const entities = await resolveOrCreateEntitiesByName(input.entity_names ?? []);
+  if (entities.length) {
+    const { error: entityError } = await supabase
+      .from("moment_entities")
+      .insert(entities.map((e) => ({ moment_id: moment.id, entity_id: e.id, user_id: getCurrentUserId() })));
+    if (entityError) throw new Error(entityError.message);
+  }
+  return { ...moment, primary_person: primary || null, participants: contacts, entities, documents: [], field_parity: { available_moment_fields: MOMENT_FIELD_NAMES, response_fields: MOMENT_RESPONSE_FIELDS } };
 }
+
 
 const rawMomentSchema = {
   title: z.string().describe("Moment title/headline"),
@@ -1777,6 +1787,7 @@ const rawMomentSchema = {
   person_name: z.string().optional().describe("Primary person to link or create"),
   participant_names: z.array(z.string()).optional().describe("Additional people to link or create"),
   document_ids: z.array(z.string()).optional().describe("Reserved for provenance links when documents are available"),
+  entity_names: z.array(z.string()).optional().describe("Non-person things involved: places, organizations, projects, pets. Created in World if unknown."),
 };
 
 async function draftMomentFromDescription(description: string, params: any) {
@@ -1795,11 +1806,11 @@ async function draftMomentFromDescription(description: string, params: any) {
   return { draft: JSON.parse(toolCall.function.arguments), credits };
 }
 
-server.registerTool("create_moment_with_ai", { title: "Create Moment with AI", description: "Preferred default. Create a Moment from a natural-language description; AI fills in the structured fields and saves it automatically.", inputSchema: { description: z.string(), happened_at: z.string().optional(), person_name: z.string().optional(), participant_names: z.array(z.string()).optional(), title_hint: z.string().optional(), category_hint: z.string().optional(), status_hint: z.enum(ALLOWED_MOMENT_STATUSES).optional(), impact_level_hint: z.number().optional(), confidence_date_hint: z.number().optional(), confidence_truth_hint: z.number().optional(), document_ids: z.array(z.string()).optional() } }, async (params) => {
+server.registerTool("create_moment_with_ai", { title: "Create Moment with AI", description: "Preferred default. Create a Moment from a natural-language description; AI fills in the structured fields and saves it automatically.", inputSchema: { description: z.string(), happened_at: z.string().optional(), person_name: z.string().optional(), participant_names: z.array(z.string()).optional(), title_hint: z.string().optional(), category_hint: z.string().optional(), status_hint: z.enum(ALLOWED_MOMENT_STATUSES).optional(), impact_level_hint: z.number().optional(), confidence_date_hint: z.number().optional(), confidence_truth_hint: z.number().optional(), document_ids: z.array(z.string()).optional(), entity_names: z.array(z.string()).optional() } }, async (params) => {
   try {
     const { draft, credits } = await draftMomentFromDescription(params.description, params);
     const names = uniqueStrings([params.person_name, ...(params.participant_names ?? []), ...(draft.participants ?? [])]);
-    const moment = await createMomentWithLinks({ ...draft, description: params.description, title: params.title_hint ?? draft.title, happened_at: params.happened_at ?? draft.happened_at, category: params.category_hint ?? draft.category, status: params.status_hint ?? draft.status, impact_level: params.impact_level_hint ?? draft.impact_level, confidence_date: params.confidence_date_hint ?? draft.confidence_date, confidence_truth: params.confidence_truth_hint ?? draft.confidence_truth, person_name: params.person_name ?? names[0], participant_names: names, document_ids: params.document_ids ?? [] }, "mcp_ai");
+    const moment = await createMomentWithLinks({ ...draft, description: params.description, title: params.title_hint ?? draft.title, happened_at: params.happened_at ?? draft.happened_at, category: params.category_hint ?? draft.category, status: params.status_hint ?? draft.status, impact_level: params.impact_level_hint ?? draft.impact_level, confidence_date: params.confidence_date_hint ?? draft.confidence_date, confidence_truth: params.confidence_truth_hint ?? draft.confidence_truth, person_name: params.person_name ?? names[0], participant_names: names, document_ids: params.document_ids ?? [], entity_names: params.entity_names ?? [] }, "mcp_ai");
     return jsonTool({ tool: "create_moment_with_ai", approval_required: false, ai_enrichment_used: "draft-event", credits, moment });
   } catch (err: unknown) { return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" }); }
 });
@@ -3274,6 +3285,302 @@ server.registerTool(
     inputSchema: { content: z.string() },
   },
   captureNoteHandler
+);
+
+
+// ============================================================
+// World: entities (non-person things) and dated claims (facts)
+// ============================================================
+
+const ENTITY_FIELDS = "id, name, aliases, entity_type, description, tags, metadata, ai_visibility, is_sensitive, created_at, updated_at";
+
+function visibleEntities(query: any) {
+  return query.eq("ai_visibility", "visible");
+}
+
+/** Resolve entities by name or alias, creating the missing ones. */
+async function resolveOrCreateEntitiesByName(names: string[]): Promise<any[]> {
+  const wanted = uniqueStrings(names || []);
+  if (!wanted.length) return [];
+  const userId = getCurrentUserId();
+  const { data: existing } = await supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId);
+  const rows = existing || [];
+  const out: any[] = [];
+  for (const name of wanted) {
+    const needle = name.trim().toLowerCase();
+    if (!needle) continue;
+    const hit = rows.find(
+      (e: any) =>
+        String(e.name).toLowerCase() === needle ||
+        (Array.isArray(e.aliases) && e.aliases.some((a: string) => String(a).toLowerCase() === needle)),
+    );
+    if (hit) {
+      out.push(hit);
+      continue;
+    }
+    const { data, error } = await supabase
+      .from("entities")
+      .insert({ user_id: userId, name: name.trim(), entity_type: "other" })
+      .select(ENTITY_FIELDS)
+      .single();
+    if (error) throw new Error(error.message);
+    rows.push(data);
+    out.push(data);
+  }
+  return out;
+}
+
+async function findEntity(idOrName: string): Promise<any | null> {
+  const userId = getCurrentUserId();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName)) {
+    const { data } = await supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId).eq("id", idOrName).maybeSingle();
+    if (data) return data;
+  }
+  const { data: rows } = await supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId);
+  const needle = idOrName.trim().toLowerCase();
+  return (
+    (rows || []).find(
+      (e: any) =>
+        String(e.name).toLowerCase() === needle ||
+        (Array.isArray(e.aliases) && e.aliases.some((a: string) => String(a).toLowerCase() === needle)),
+    ) ||
+    (rows || []).find((e: any) => String(e.name).toLowerCase().includes(needle)) ||
+    null
+  );
+}
+
+server.registerTool(
+  "create_entity",
+  {
+    title: "Create Entity",
+    description: "Create a non-person thing in the user's World: a place, organization, project, object or pet. People belong in People, not here.",
+    inputSchema: {
+      name: z.string(),
+      entity_type: z.string().optional().describe("place | organization | project | thing | pet | other (open vocabulary)"),
+      aliases: z.array(z.string()).optional(),
+      description: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+    },
+  },
+  async ({ name, entity_type, aliases, description, tags }) => {
+    const existing = await findEntity(name);
+    if (existing) return jsonTool({ tool: "create_entity", created: false, note: "An entity with that name or alias already exists.", entity: existing });
+    const { data, error } = await supabase
+      .from("entities")
+      .insert({
+        user_id: getCurrentUserId(),
+        name: name.trim(),
+        entity_type: (entity_type || "other").trim().toLowerCase(),
+        aliases: aliases || [],
+        description: description || null,
+        tags: tags || [],
+      })
+      .select(ENTITY_FIELDS)
+      .single();
+    if (error) return jsonTool({ error: error.message });
+    return jsonTool({ tool: "create_entity", created: true, entity: data });
+  },
+);
+
+server.registerTool(
+  "search_entities",
+  {
+    title: "Search Entities",
+    description: "Search the user's World of non-person entities by name, alias, description or type.",
+    inputSchema: { query: z.string().optional(), entity_type: z.string().optional(), limit: z.number().optional().default(25) },
+  },
+  async ({ query, entity_type, limit }) => {
+    let q = visibleEntities(supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", getCurrentUserId())).order("name").limit(limit);
+    if (entity_type) q = q.eq("entity_type", entity_type.trim().toLowerCase());
+    const { data, error } = await q;
+    if (error) return jsonTool({ error: error.message });
+    let rows = data || [];
+    if (query?.trim()) {
+      const needle = query.trim().toLowerCase();
+      rows = rows.filter(
+        (e: any) =>
+          String(e.name).toLowerCase().includes(needle) ||
+          String(e.description || "").toLowerCase().includes(needle) ||
+          (Array.isArray(e.aliases) && e.aliases.some((a: string) => String(a).toLowerCase().includes(needle))),
+      );
+    }
+    return jsonTool({ tool: "search_entities", count: rows.length, entities: rows });
+  },
+);
+
+server.registerTool(
+  "get_entity_context",
+  {
+    title: "Get Entity Context",
+    description: "Full context for one entity: the entity, its current facts (claims), recent moments it appears in, and notes mentioning it.",
+    inputSchema: { id_or_name: z.string(), include_history: z.boolean().optional().default(false) },
+  },
+  async ({ id_or_name, include_history }) => {
+    const entity = await findEntity(id_or_name);
+    if (!entity) return jsonTool({ error: `No entity found matching "${id_or_name}".` });
+    if (entity.ai_visibility === "hidden") return jsonTool({ error: "This entity is hidden from AI in Menerio." });
+    const userId = getCurrentUserId();
+    const today = todayISO();
+
+    const { data: claimRows } = await supabase
+      .from("claims")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("subject_type", "entity")
+      .eq("subject_id", entity.id)
+      .order("valid_from", { ascending: false, nullsFirst: false });
+    const claims = sortClaims((claimRows || []) as any);
+    const current = claims.filter((c: any) => isCurrentClaim(c, today));
+
+    const { data: links } = await supabase.from("moment_entities").select("moment_id").eq("entity_id", entity.id).limit(50);
+    let moments: any[] = [];
+    if (links?.length) {
+      let mq = supabase
+        .from("moments")
+        .select("id, title, description, happened_at, status, category")
+        .eq("user_id", userId)
+        .is("deleted_at", null)
+        .in("id", links.map((l: any) => l.moment_id))
+        .order("happened_at", { ascending: false })
+        .limit(20);
+      mq = await applyVisibility(mq, "moments", supabase, userId);
+      const { data } = await mq;
+      moments = data || [];
+    }
+
+    const needles = uniqueStrings([entity.name, ...(entity.aliases || [])]);
+    let notes: any[] = [];
+    if (needles.length) {
+      const escaped = needles.map((n) => n.replace(/[,()'"\\*%_]/g, " ").trim()).filter(Boolean);
+      let nq = supabase
+        .from("notes")
+        .select("id, title, created_at, ai_visibility, person_id, metadata")
+        .eq("user_id", userId)
+        .or(escaped.map((n) => `title.ilike.*${n}*,content.ilike.*${n}*`).join(","))
+        .order("created_at", { ascending: false })
+        .limit(10);
+      const { data } = await nq;
+      notes = await filterVisibleNotes(data || [], supabase, userId);
+      notes = notes.map((n: any) => ({ id: n.id, title: n.title, created_at: n.created_at }));
+    }
+
+    return jsonTool({
+      tool: "get_entity_context",
+      entity,
+      facts: current,
+      history: include_history ? claims.filter((c: any) => !isCurrentClaim(c, today)) : undefined,
+      moments,
+      notes,
+    });
+  },
+);
+
+server.registerTool(
+  "add_claim",
+  {
+    title: "Add Claim",
+    description: "Record a dated fact about the user, a person, or an entity (e.g. employer, lives-in, owner). Any overlapping earlier fact with the same attribute is closed with an end date — nothing is deleted. Relationships between people are NOT claims: use the relationship tools instead.",
+    inputSchema: {
+      subject_type: z.enum(["self", "contact", "entity"]),
+      subject_name: z.string().optional().describe("Person or entity name. Omit for subject_type 'self'."),
+      subject_id: z.string().optional().describe("Explicit contact or entity id, if known."),
+      attribute: z.string().describe("Open vocabulary, e.g. employer, role, lives-in, owner, status"),
+      value: z.string(),
+      valid_from: z.string().optional().describe("YYYY-MM-DD when this became true"),
+      valid_to: z.string().optional().describe("YYYY-MM-DD when this stopped being true"),
+      confidence: z.enum(["certain", "likely", "unsure"]).optional().default("likely"),
+      source_note_id: z.string().optional(),
+    },
+  },
+  async ({ subject_type, subject_name, subject_id, attribute, value, valid_from, valid_to, confidence, source_note_id }) => {
+    try {
+      if (isReservedAttribute(attribute)) {
+        return jsonTool({
+          error: "Relationships between people are not claims. Use the relationship path so canonical labels, inverses and the rejection ledger stay authoritative.",
+        });
+      }
+      const userId = getCurrentUserId();
+      let resolvedId: string | null = null;
+      if (subject_type === "contact") {
+        if (subject_id) resolvedId = subject_id;
+        else if (subject_name) {
+          const contacts = await resolveOrCreateContactsByName([subject_name]);
+          resolvedId = contacts[0]?.id ?? null;
+        }
+        if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for a contact claim." });
+        await assertWritable(supabase, userId, "contact", resolvedId);
+      } else if (subject_type === "entity") {
+        if (subject_id) resolvedId = subject_id;
+        else if (subject_name) {
+          const entities = await resolveOrCreateEntitiesByName([subject_name]);
+          resolvedId = entities[0]?.id ?? null;
+        }
+        if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for an entity claim." });
+      }
+
+      const { claim, superseded } = await addClaimWithSupersede(supabase, {
+        user_id: userId,
+        subject_type,
+        subject_id: resolvedId,
+        attribute,
+        value,
+        valid_from: valid_from ?? null,
+        valid_to: valid_to ?? null,
+        confidence,
+        source_type: source_note_id ? "note" : "ai",
+        source_id: source_note_id ?? null,
+      });
+      return jsonTool({ tool: "add_claim", claim, superseded_count: superseded.length, superseded });
+    } catch (err: unknown) {
+      return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+);
+
+server.registerTool(
+  "get_claims",
+  {
+    title: "Get Claims",
+    description: "Read dated facts. Mode 'current' returns what is true now, 'history' returns everything including ended facts, 'changed_since' returns facts that started or ended after a date.",
+    inputSchema: {
+      subject_type: z.enum(["self", "contact", "entity"]).optional(),
+      subject_name: z.string().optional(),
+      subject_id: z.string().optional(),
+      attribute: z.string().optional(),
+      mode: z.enum(["current", "history", "changed_since"]).optional().default("current"),
+      since: z.string().optional().describe("YYYY-MM-DD, required for mode 'changed_since'"),
+      limit: z.number().optional().default(100),
+    },
+  },
+  async ({ subject_type, subject_name, subject_id, attribute, mode, since, limit }) => {
+    const userId = getCurrentUserId();
+    let q = supabase.from("claims").select("*").eq("user_id", userId).order("valid_from", { ascending: false, nullsFirst: false }).limit(limit);
+    if (subject_type) q = q.eq("subject_type", subject_type);
+    if (attribute) q = q.eq("attribute", normalizeAttribute(attribute));
+
+    let resolvedId = subject_id ?? null;
+    if (!resolvedId && subject_name && subject_type && subject_type !== "self") {
+      if (subject_type === "entity") resolvedId = (await findEntity(subject_name))?.id ?? null;
+      else {
+        const { data } = await supabase.from("contacts").select("id").eq("user_id", userId).ilike("name", `%${subject_name}%`).is("merged_into", null).limit(1);
+        resolvedId = data?.[0]?.id ?? null;
+      }
+      if (!resolvedId) return jsonTool({ message: `No ${subject_type} found matching "${subject_name}".` });
+    }
+    if (subject_type === "self") q = q.is("subject_id", null);
+    else if (resolvedId) q = q.eq("subject_id", resolvedId);
+
+    const { data, error } = await q;
+    if (error) return jsonTool({ error: error.message });
+    let rows = sortClaims((data || []) as any);
+    const today = todayISO();
+    if (mode === "current") rows = rows.filter((c: any) => isCurrentClaim(c, today));
+    else if (mode === "changed_since") {
+      if (!since) return jsonTool({ error: "mode 'changed_since' requires a `since` date (YYYY-MM-DD)." });
+      rows = changedSince(rows as any, since);
+    }
+    return jsonTool({ tool: "get_claims", mode, count: rows.length, claims: rows });
+  },
 );
 
 const app = new Hono();
