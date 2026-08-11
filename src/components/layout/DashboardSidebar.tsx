@@ -81,6 +81,7 @@ export function DashboardSidebar() {
     people: {
       items: [
         { title: "People", url: "/dashboard/people", icon: UserCircle },
+        { title: "World", url: "/dashboard/world", icon: Globe },
         { title: "Groups", url: "/dashboard/groups", icon: Layers },
         { title: "Timeline", url: "/dashboard/timeline", icon: Calendar },
       ],

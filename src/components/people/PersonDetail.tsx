@@ -12,6 +12,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, X } from "lucide-react";
 
+import { FactsPanel } from "@/components/facts/FactsPanel";
 import { ContactProfileTab } from "@/components/people/ContactProfileTab";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
