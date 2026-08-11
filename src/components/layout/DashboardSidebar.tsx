@@ -22,6 +22,7 @@ import {
   Layers,
   LayoutGrid,
   LogOut,
+  Globe,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { BRAND } from "@/lib/brand";
