@@ -22,6 +22,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
 import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
+import { useAddClaim } from "@/hooks/useClaims";
+import { normalizeAttribute, isReservedAttribute } from "@/lib/claims";
 import {
   UserPlus,
   Link2,
@@ -477,6 +479,8 @@ export default function ReviewQueue() {
       refreshReviewQueues();
     }
   };
+
+  const addClaim = useAddClaim();
 
   const handleAcceptEntity = async (item: ReviewItem) => {
     const p = item.payload as any;
