@@ -89,7 +89,18 @@ export function ImportMigrate() {
 
   const runProfileBackfill = async () => {
     setProfileBackfillLoading(true);
+    setPeopleResult(null);
     try {
+      // People creation runs first and synchronously so the result can be
+      // reported precisely — it must never end in silence.
+      const people = await supabase.functions.invoke("enrich-people", { body: { limit: 500 } });
+      if (people.error) throw people.error;
+      const message: string = people.data?.message ?? "People step returned no result.";
+      setPeopleResult(message);
+      if ((people.data?.created ?? 0) > 0 || (people.data?.linked ?? 0) > 0) {
+        qc.invalidateQueries({ queryKey: ["contacts"] });
+      }
+
       const [notes, moments] = await Promise.all([
         supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200 } }),
         supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200 } }),
@@ -98,14 +109,17 @@ export function ImportMigrate() {
       if (moments.error) throw moments.error;
       toast({
         title: "Profile enrichment started",
-        description: "Re-analyzing your recent notes and timeline moments. New profile facts and suggestions will appear over the next few minutes.",
+        description: `${message} Profile facts from your recent notes and moments will keep arriving over the next few minutes.`,
       });
     } catch (err: any) {
-      toast({ title: "Enrichment failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+      const message = err?.message ?? "Unknown error";
+      setPeopleResult(`Enrichment failed: ${message}`);
+      toast({ title: "Enrichment failed", description: message, variant: "destructive" });
     } finally {
       setProfileBackfillLoading(false);
     }
   };
+
 
 
   // AI Memory import
