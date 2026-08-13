@@ -409,19 +409,24 @@ export function ImportMigrate() {
           Enrich people profiles from notes & timeline
         </CardTitle>
         <CardDescription>
-          Re-analyzes your most recent ~200 notes and timeline moments to
-          extract biographical facts about the people you've mentioned (job,
-          city, life events, relationships, etc.) and populate their profiles.
-          Existing entries are preserved — duplicates are skipped automatically.
+          Creates person records for the people named in your notes, links those
+          notes to them, and re-analyzes your most recent ~200 notes and timeline
+          moments to populate their profiles (job, city, life events,
+          relationships). Existing entries are preserved — duplicates are
+          skipped automatically.
         </CardDescription>
 
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
         <Button onClick={runProfileBackfill} disabled={profileBackfillLoading}>
           {profileBackfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Enrich profiles now
         </Button>
+        {peopleResult && (
+          <p className="text-sm text-muted-foreground" role="status">{peopleResult}</p>
+        )}
       </CardContent>
+
     </Card>
     </div>
   );
