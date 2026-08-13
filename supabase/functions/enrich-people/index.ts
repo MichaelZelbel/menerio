@@ -135,7 +135,7 @@ Deno.serve(async (req: Request) => {
     if (createdNames.length > 0) {
       await supabase
         .from("review_queue")
-        .update({ status: "kept", applied_at: new Date().toISOString() })
+        .update({ status: "kept", reviewed_at: new Date().toISOString() })
         .eq("user_id", user.id)
         .eq("suggestion_type", "add_contact")
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
