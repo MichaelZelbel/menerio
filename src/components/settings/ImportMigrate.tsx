@@ -65,6 +65,9 @@ function splitByParagraphs(text: string): { title: string; content: string }[] {
 export function ImportMigrate() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const qc = useQueryClient();
+  const [peopleResult, setPeopleResult] = useState<string | null>(null);
+
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [profileBackfillLoading, setProfileBackfillLoading] = useState(false);
 
