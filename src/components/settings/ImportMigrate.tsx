@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,9 @@ interface ImportResult {
   processed: number;
   failed: number;
   types: Record<string, number>;
+  people?: string;
 }
+
 
 function splitIntoItems(text: string): string[] {
   return text
@@ -61,6 +65,9 @@ function splitByParagraphs(text: string): { title: string; content: string }[] {
 export function ImportMigrate() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const qc = useQueryClient();
+  const [peopleResult, setPeopleResult] = useState<string | null>(null);
+
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [profileBackfillLoading, setProfileBackfillLoading] = useState(false);
 
@@ -82,7 +89,18 @@ export function ImportMigrate() {
 
   const runProfileBackfill = async () => {
     setProfileBackfillLoading(true);
+    setPeopleResult(null);
     try {
+      // People creation runs first and synchronously so the result can be
+      // reported precisely — it must never end in silence.
+      const people = await supabase.functions.invoke("enrich-people", { body: { limit: 500 } });
+      if (people.error) throw people.error;
+      const message: string = people.data?.message ?? "People step returned no result.";
+      setPeopleResult(message);
+      if ((people.data?.created ?? 0) > 0 || (people.data?.linked ?? 0) > 0) {
+        qc.invalidateQueries({ queryKey: ["contacts"] });
+      }
+
       const [notes, moments] = await Promise.all([
         supabase.functions.invoke("backfill-profile-extraction", { body: { limit: 200 } }),
         supabase.functions.invoke("backfill-moment-profile-extraction", { body: { limit: 200 } }),
@@ -91,14 +109,17 @@ export function ImportMigrate() {
       if (moments.error) throw moments.error;
       toast({
         title: "Profile enrichment started",
-        description: "Re-analyzing your recent notes and timeline moments. New profile facts and suggestions will appear over the next few minutes.",
+        description: `${message} Profile facts from your recent notes and moments will keep arriving over the next few minutes.`,
       });
     } catch (err: any) {
-      toast({ title: "Enrichment failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+      const message = err?.message ?? "Unknown error";
+      setPeopleResult(`Enrichment failed: ${message}`);
+      toast({ title: "Enrichment failed", description: message, variant: "destructive" });
     } finally {
       setProfileBackfillLoading(false);
     }
   };
+
 
 
   // AI Memory import
@@ -170,13 +191,27 @@ export function ImportMigrate() {
       setProgress(Math.min(i + batch.length, items.length));
     }
 
-    setResult(result);
+    // An import containing person statements must populate the People page.
+    let peopleMessage = "People step did not run.";
+    try {
+      const res = await supabase.functions.invoke("enrich-people", { body: { limit: 500 } });
+      if (res.error) throw res.error;
+      peopleMessage = res.data?.message ?? "People step returned no result.";
+      if ((res.data?.created ?? 0) > 0 || (res.data?.linked ?? 0) > 0) {
+        qc.invalidateQueries({ queryKey: ["contacts"] });
+      }
+    } catch (err: any) {
+      peopleMessage = `People step failed: ${err?.message ?? "unknown error"}`;
+    }
+
+    setResult({ ...result, people: peopleMessage });
     setLoading(false);
     toast({
       title: "Import complete",
-      description: `Imported ${result.processed} of ${result.total} items.`,
+      description: `Imported ${result.processed} of ${result.total} items. ${peopleMessage}`,
     });
   }
+
 
   const handleAiImport = () => {
     const items = splitIntoItems(aiText).map((line) => ({
@@ -374,19 +409,24 @@ export function ImportMigrate() {
           Enrich people profiles from notes & timeline
         </CardTitle>
         <CardDescription>
-          Re-analyzes your most recent ~200 notes and timeline moments to
-          extract biographical facts about the people you've mentioned (job,
-          city, life events, relationships, etc.) and populate their profiles.
-          Existing entries are preserved — duplicates are skipped automatically.
+          Creates person records for the people named in your notes, links those
+          notes to them, and re-analyzes your most recent ~200 notes and timeline
+          moments to populate their profiles (job, city, life events,
+          relationships). Existing entries are preserved — duplicates are
+          skipped automatically.
         </CardDescription>
 
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
         <Button onClick={runProfileBackfill} disabled={profileBackfillLoading}>
           {profileBackfillLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Enrich profiles now
         </Button>
+        {peopleResult && (
+          <p className="text-sm text-muted-foreground" role="status">{peopleResult}</p>
+        )}
       </CardContent>
+
     </Card>
     </div>
   );
@@ -411,6 +451,10 @@ function ImportSummary({ result }: { result: ImportResult }) {
           ))}
         </div>
       )}
+      {result.people && (
+        <p className="text-sm text-muted-foreground pt-1" role="status">{result.people}</p>
+      )}
     </div>
+
   );
 }

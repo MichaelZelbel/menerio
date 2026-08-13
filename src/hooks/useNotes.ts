@@ -5,6 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { ilikeContains } from "@/lib/postgrest";
+import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
+
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
@@ -524,19 +526,30 @@ export function useIlikeSearch() {
         const notes = await searchNotesLocal(user!.id, q);
         return notes.map((n) => ({ ...n, similarity: null }));
       }
+      // A sentence question ("how does Nadia want to hear bad news") has no
+      // literal substring match, so we OR the phrase with its meaningful terms
+      // and rank the union locally: phrase hits first, then most terms matched.
+      const terms = extractSearchTerms(query);
+      const filters = [
+        ilikeContains("title", q),
+        ilikeContains("content", q),
+        ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
+      ];
       const { data, error } = await supabase
         .from("notes" as any)
         .select(NOTE_COLUMNS)
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
-        .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
+        .or(filters.join(","))
         .order("updated_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return ((data as unknown as Note[]) || []).map((n) => ({ ...n, similarity: null }));
+      const notes = (data as unknown as Note[]) || [];
+      return rankNotesByTerms(notes, q, terms).map((n) => ({ ...n, similarity: null }));
     },
   });
 }
+
 
 /** Semantic vector search via edge function */
 export function useSemanticSearch() {
@@ -575,16 +588,23 @@ export function useSearchNotes() {
       if (OFFLINE_CORE) {
         return searchNotesLocal(user!.id, q);
       }
+      const terms = extractSearchTerms(query);
+      const filters = [
+        ilikeContains("title", q),
+        ilikeContains("content", q),
+        ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
+      ];
       const { data, error } = await supabase
         .from("notes" as any)
         .select(NOTE_COLUMNS)
         .eq("user_id", user!.id)
         .eq("is_trashed", false)
-        .or(`${ilikeContains("title", q)},${ilikeContains("content", q)}`)
+        .or(filters.join(","))
         .order("updated_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return (data as unknown as Note[]) || [];
+      return rankNotesByTerms((data as unknown as Note[]) || [], q, terms);
+
     },
   });
 }
