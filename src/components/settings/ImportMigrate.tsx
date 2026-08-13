@@ -19,7 +19,9 @@ interface ImportResult {
   processed: number;
   failed: number;
   types: Record<string, number>;
+  people?: string;
 }
+
 
 function splitIntoItems(text: string): string[] {
   return text
@@ -170,13 +172,27 @@ export function ImportMigrate() {
       setProgress(Math.min(i + batch.length, items.length));
     }
 
-    setResult(result);
+    // An import containing person statements must populate the People page.
+    let peopleMessage = "People step did not run.";
+    try {
+      const res = await supabase.functions.invoke("enrich-people", { body: { limit: 500 } });
+      if (res.error) throw res.error;
+      peopleMessage = res.data?.message ?? "People step returned no result.";
+      if ((res.data?.created ?? 0) > 0 || (res.data?.linked ?? 0) > 0) {
+        qc.invalidateQueries({ queryKey: ["contacts"] });
+      }
+    } catch (err: any) {
+      peopleMessage = `People step failed: ${err?.message ?? "unknown error"}`;
+    }
+
+    setResult({ ...result, people: peopleMessage });
     setLoading(false);
     toast({
       title: "Import complete",
-      description: `Imported ${result.processed} of ${result.total} items.`,
+      description: `Imported ${result.processed} of ${result.total} items. ${peopleMessage}`,
     });
   }
+
 
   const handleAiImport = () => {
     const items = splitIntoItems(aiText).map((line) => ({
