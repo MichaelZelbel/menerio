@@ -451,6 +451,10 @@ function ImportSummary({ result }: { result: ImportResult }) {
           ))}
         </div>
       )}
+      {result.people && (
+        <p className="text-sm text-muted-foreground pt-1" role="status">{result.people}</p>
+      )}
     </div>
+
   );
 }
