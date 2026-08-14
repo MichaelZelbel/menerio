@@ -782,7 +782,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     // before it could ever fire. So auto-classification was effectively dead
     // during normal editing.
     if (noteChanged) {
-      if (processTimer.current) clearTimeout(processTimer.current);
+      flushProcessingRef.current();
+
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
