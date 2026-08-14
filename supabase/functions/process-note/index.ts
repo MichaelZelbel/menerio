@@ -2813,7 +2813,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const { note_id } = await req.json();
+    const { note_id, force } = await req.json();
     if (!note_id) {
       return new Response(JSON.stringify({ error: "note_id required" }), {
         status: 400,
