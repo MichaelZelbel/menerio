@@ -2542,10 +2542,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during processing of note ${noteId}`);
+        await setProcessingState(noteId, "skipped_no_credits");
         return;
       }
       throw err;
     }
+
 
     // Merge media-derived topics into note metadata
     if (mediaTopics.length > 0 && Array.isArray(metadata.topics)) {
