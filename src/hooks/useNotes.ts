@@ -83,7 +83,8 @@ type NoteUpdate = {
 };
 
 const NOTE_COLUMNS =
-  "id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, created_at, updated_at";
+  "id, user_id, title, content, metadata, tags, is_favorite, is_pinned, is_trashed, trashed_at, entity_type, source_app, source_id, source_url, folder_path, is_external, sync_status, structured_fields, related, ai_visibility, processing_status, processed_at, processing_error, created_at, updated_at";
+
 
 // SQL filter fragments for the local (SQLite) notes list.
 const LOCAL_FILTER_SQL: Record<"all" | "favorites" | "trash", string> = {
