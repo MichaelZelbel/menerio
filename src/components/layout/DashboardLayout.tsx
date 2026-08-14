@@ -8,10 +8,13 @@ import { CommandPalette } from "./CommandPalette";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LowBalanceBanner } from "./LowBalanceBanner";
+import { useProcessingSweep } from "@/hooks/useProcessingSweep";
 
 
 
 export function DashboardLayout() {
+  useProcessingSweep();
+
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full">

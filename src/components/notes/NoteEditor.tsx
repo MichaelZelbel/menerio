@@ -126,7 +126,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const AUTO_PROCESS_DELAY = 10_000;
-const MIN_WORDS_FOR_PROCESSING = 15;
+// Low floor on purpose: short notes still deserve an embedding and people
+// extraction. Anything below this is reported as "skipped (too short)".
+const MIN_WORDS_FOR_PROCESSING = 3;
+
 
 interface NoteEditorProps {
   note: Note;
@@ -223,6 +226,31 @@ function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
     );
   }
   return null;
+}
+
+/** Per-note AI indexing state. Silence was the actual bug: users could not tell
+ *  a processed note from one that was never indexed. */
+function ProcessingIndicator({ note }: { note: Pick<Note, "processing_status" | "processing_error" | "ai_visibility"> }) {
+  const status = note.processing_status;
+  if (!status || status === "processed") return null;
+  const map: Record<string, { label: string; className: string }> = {
+    processing: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
+    pending: { label: "Indexing pending", className: "bg-muted text-muted-foreground" },
+    skipped_short: { label: "Not indexed · too short", className: "bg-muted text-muted-foreground" },
+    skipped_empty: { label: "Not indexed · empty", className: "bg-muted text-muted-foreground" },
+    skipped_no_credits: { label: "Not indexed · no AI credits", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+    failed: { label: "Indexing failed", className: "bg-destructive/10 text-destructive" },
+  };
+  const entry = map[status];
+  if (!entry) return null;
+  return (
+    <span
+      title={note.processing_error || entry.label}
+      className={cn("text-[10px] shrink-0 rounded px-1.5 py-0.5", entry.className)}
+    >
+      {entry.label}
+    </span>
+  );
 }
 
 function countMarkdownLinks(content: string | null | undefined): number {
@@ -394,6 +422,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The note the pending auto-process timer belongs to, plus a ref-held flush
+  // so the []-dep unmount effect can fire it without a stale closure.
+  const pendingProcessNoteIdRef = useRef<string | null>(null);
+  const flushProcessingRef = useRef<() => void>(() => {});
+
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -645,9 +678,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
       }, 800);
 
-      // Schedule auto AI processing
+      // Schedule auto AI processing. The pending note id is tracked so the
+      // flush paths (note switch / unmount / tab hide) can still fire it.
       if (processTimer.current) clearTimeout(processTimer.current);
+      pendingProcessNoteIdRef.current = note.id;
       processTimer.current = setTimeout(() => {
+        processTimer.current = null;
+        pendingProcessNoteIdRef.current = null;
         const text = e.getText();
         const words = text.trim() ? text.trim().split(/\s+/).length : 0;
         if (words >= MIN_WORDS_FOR_PROCESSING && !note.is_trashed && checkCredits()) {
@@ -655,11 +692,47 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
       }, AUTO_PROCESS_DELAY);
     },
+
   });
 
   // Keep handleWikilinkSelect and handleWikilinkCreate referencing editor
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
+
+  // FLUSH (never cancel) the pending auto-process timer. Cancelling it on note
+  // switch / unmount was the reason notes typed and left within 10s were saved
+  // but never AI-processed. `process-note` is idempotent per content version,
+  // so firing early can't double-spend credits.
+  const flushPendingProcessing = useCallback(() => {
+    if (!processTimer.current) return;
+    clearTimeout(processTimer.current);
+    processTimer.current = null;
+    const noteId = pendingProcessNoteIdRef.current;
+    pendingProcessNoteIdRef.current = null;
+    if (!noteId) return;
+    const text = lastLocalContentRef.current ?? "";
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    if (words < MIN_WORDS_FOR_PROCESSING) return;
+    if (!checkCredits()) return;
+    processNote.mutate(noteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkCredits, processNote]);
+
+  useEffect(() => { flushProcessingRef.current = flushPendingProcessing; }, [flushPendingProcessing]);
+
+  // Tab close / app backgrounding: flush before the timer dies with the page.
+  useEffect(() => {
+    const onHide = () => flushProcessingRef.current();
+    const onVisibility = () => { if (document.visibilityState === "hidden") flushProcessingRef.current(); };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+
 
   // Set editor HTML and then asynchronously swap in resolved signed URLs for
   // any `data-attachment-name` placeholders. Fire-and-forget: this never
@@ -701,7 +774,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
-      if (processTimer.current) clearTimeout(processTimer.current);
+      flushProcessingRef.current();
+
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -733,7 +807,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     // before it could ever fire. So auto-classification was effectively dead
     // during normal editing.
     if (noteChanged) {
-      if (processTimer.current) clearTimeout(processTimer.current);
+      flushProcessingRef.current();
+
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
@@ -1480,6 +1555,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           {!note.is_trashed && !note.is_external && (
             <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
           )}
+          {!note.is_trashed && <ProcessingIndicator note={note} />}
+
           {note.entity_type && (
             <Badge variant="secondary" className="text-[10px] shrink-0">
               {note.entity_type}

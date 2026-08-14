@@ -2415,12 +2415,28 @@ async function generateWorldSuggestions(
   }
 }
 
+/* ── Processing-state helpers ── */
+const MIN_WORDS_FOR_PROCESSING = 3;
+
+async function setProcessingState(
+  noteId: string,
+  status: string,
+  extra: Record<string, unknown> = {},
+) {
+  try {
+    await supabase.from("notes").update({ processing_status: status, ...extra }).eq("id", noteId);
+  } catch (err) {
+    console.warn("failed to set processing_status", noteId, status, err);
+  }
+}
+
 /* ── Main background processor ── */
-async function processInBackground(noteId: string, authHeader: string) {
+async function processInBackground(noteId: string, authHeader: string, force = false) {
+  let contentHash: string | null = null;
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at")
+      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at, processing_status, processed_hash, embedding")
       .eq("id", noteId)
       .single();
 
@@ -2432,7 +2448,31 @@ async function processInBackground(noteId: string, authHeader: string) {
     const aiHidden = (note as any).ai_visibility === "hidden";
 
     let fullText = `${note.title}\n\n${note.content}`.trim();
-    if (!fullText) return;
+    if (!fullText) {
+      await setProcessingState(noteId, "skipped_empty", { processing_error: null });
+      return;
+    }
+
+    // Idempotency: never re-spend credits on a content version we already
+    // processed (the client flush and the server sweep can both fire).
+    contentHash = noteContentHash(`${note.title ?? ""}\n\n${note.content ?? ""}`);
+    if (
+      !force &&
+      (note as any).processing_status === "processed" &&
+      (note as any).processed_hash === contentHash &&
+      (note as any).embedding
+    ) {
+      console.log("process-note: already processed this content version:", noteId);
+      return;
+    }
+
+    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+    if (wordCount < MIN_WORDS_FOR_PROCESSING) {
+      await setProcessingState(noteId, "skipped_short", { processed_hash: contentHash, processing_error: null });
+      return;
+    }
+
+    await setProcessingState(noteId, "processing", { processing_error: null });
 
     // Include media analysis content in the embedding text
     const { data: mediaEntries } = await supabase
@@ -2454,8 +2494,10 @@ async function processInBackground(noteId: string, authHeader: string) {
     const balance = await checkBalance(supabase, note.user_id);
     if (!balance.allowed) {
       console.log(`Skipping AI processing for note ${noteId}: insufficient credits for user ${note.user_id}`);
+      await setProcessingState(noteId, "skipped_no_credits");
       return;
     }
+
 
     // Extract metadata first (single chat call). Embeddings are produced via
     // chunking below so long notes are not silently truncated.
@@ -2500,10 +2542,12 @@ async function processInBackground(noteId: string, authHeader: string) {
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
         console.log(`Credit limit reached during processing of note ${noteId}`);
+        await setProcessingState(noteId, "skipped_no_credits");
         return;
       }
       throw err;
     }
+
 
     // Merge media-derived topics into note metadata
     if (mediaTopics.length > 0 && Array.isArray(metadata.topics)) {
@@ -2689,6 +2733,15 @@ async function processInBackground(noteId: string, authHeader: string) {
     // Update the note with embedding, metadata, and optionally a smarter title
     const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
     if (aiTitle) updatePayload.title = aiTitle;
+    // Hash the content version we actually processed. When the AI renames the
+    // note we hash the new title, otherwise the sweep would see a mismatch and
+    // reprocess (and re-charge) the same note forever.
+    updatePayload.processing_status = "processed";
+    updatePayload.processed_at = new Date().toISOString();
+    updatePayload.processed_hash = noteContentHash(
+      `${aiTitle || note.title || ""}\n\n${note.content ?? ""}`,
+    );
+    updatePayload.processing_error = null;
 
     const { error: updateErr } = await supabase
       .from("notes")
@@ -2697,8 +2750,10 @@ async function processInBackground(noteId: string, authHeader: string) {
 
     if (updateErr) {
       console.error("Update error:", updateErr);
+      await setProcessingState(noteId, "failed", { processing_error: updateErr.message });
       return;
     }
+
 
     // AI-hidden notes: keep embeddings (local search) but skip every downstream
     // AI surface — review queue, profile suggestions, knowledge graph connections.
@@ -2737,8 +2792,12 @@ async function processInBackground(noteId: string, authHeader: string) {
     console.log("process-note completed for:", noteId);
   } catch (err) {
     console.error("Background processing error:", err);
+    await setProcessingState(noteId, "failed", {
+      processing_error: err instanceof Error ? err.message.slice(0, 500) : "Unknown error",
+    });
   }
 }
+
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
@@ -2754,7 +2813,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const { note_id } = await req.json();
+    const { note_id, force } = await req.json();
     if (!note_id) {
       return new Response(JSON.stringify({ error: "note_id required" }), {
         status: 400,
@@ -2792,7 +2851,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
-    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
+    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader, Boolean(force)));
 
     return new Response(JSON.stringify({ ok: true, processing: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
