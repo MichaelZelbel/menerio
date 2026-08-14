@@ -2307,6 +2307,10 @@ export type Database = {
           is_pinned: boolean | null
           is_trashed: boolean | null
           metadata: Json | null
+          processed_at: string | null
+          processed_hash: string | null
+          processing_error: string | null
+          processing_status: string | null
           related: Json | null
           source_app: string | null
           source_id: string | null
@@ -2332,6 +2336,10 @@ export type Database = {
           is_pinned?: boolean | null
           is_trashed?: boolean | null
           metadata?: Json | null
+          processed_at?: string | null
+          processed_hash?: string | null
+          processing_error?: string | null
+          processing_status?: string | null
           related?: Json | null
           source_app?: string | null
           source_id?: string | null
@@ -2357,6 +2365,10 @@ export type Database = {
           is_pinned?: boolean | null
           is_trashed?: boolean | null
           metadata?: Json | null
+          processed_at?: string | null
+          processed_hash?: string | null
+          processing_error?: string | null
+          processing_status?: string | null
           related?: Json | null
           source_app?: string | null
           source_id?: string | null
