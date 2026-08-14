@@ -126,7 +126,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const AUTO_PROCESS_DELAY = 10_000;
-const MIN_WORDS_FOR_PROCESSING = 15;
+// Low floor on purpose: short notes still deserve an embedding and people
+// extraction. Anything below this is reported as "skipped (too short)".
+const MIN_WORDS_FOR_PROCESSING = 3;
+
 
 interface NoteEditorProps {
   note: Note;
