@@ -653,9 +653,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
       }, 800);
 
-      // Schedule auto AI processing
+      // Schedule auto AI processing. The pending note id is tracked so the
+      // flush paths (note switch / unmount / tab hide) can still fire it.
       if (processTimer.current) clearTimeout(processTimer.current);
+      pendingProcessNoteIdRef.current = note.id;
       processTimer.current = setTimeout(() => {
+        processTimer.current = null;
+        pendingProcessNoteIdRef.current = null;
         const text = e.getText();
         const words = text.trim() ? text.trim().split(/\s+/).length : 0;
         if (words >= MIN_WORDS_FOR_PROCESSING && !note.is_trashed && checkCredits()) {
@@ -663,6 +667,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
       }, AUTO_PROCESS_DELAY);
     },
+
   });
 
   // Keep handleWikilinkSelect and handleWikilinkCreate referencing editor
