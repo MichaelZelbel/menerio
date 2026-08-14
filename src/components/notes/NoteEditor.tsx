@@ -228,6 +228,31 @@ function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
   return null;
 }
 
+/** Per-note AI indexing state. Silence was the actual bug: users could not tell
+ *  a processed note from one that was never indexed. */
+function ProcessingIndicator({ note }: { note: Pick<Note, "processing_status" | "processing_error" | "ai_visibility"> }) {
+  const status = note.processing_status;
+  if (!status || status === "processed") return null;
+  const map: Record<string, { label: string; className: string }> = {
+    processing: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
+    pending: { label: "Indexing pending", className: "bg-muted text-muted-foreground" },
+    skipped_short: { label: "Not indexed · too short", className: "bg-muted text-muted-foreground" },
+    skipped_empty: { label: "Not indexed · empty", className: "bg-muted text-muted-foreground" },
+    skipped_no_credits: { label: "Not indexed · no AI credits", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+    failed: { label: "Indexing failed", className: "bg-destructive/10 text-destructive" },
+  };
+  const entry = map[status];
+  if (!entry) return null;
+  return (
+    <span
+      title={note.processing_error || entry.label}
+      className={cn("text-[10px] shrink-0 rounded px-1.5 py-0.5", entry.className)}
+    >
+      {entry.label}
+    </span>
+  );
+}
+
 function countMarkdownLinks(content: string | null | undefined): number {
   return ((content ?? "").match(/\[[^\]]+\]\([^)]+\)|\[\[[^\]]+\]\]|https?:\/\/\S+|mailto:[^\s)]+/g) || []).length;
 }
