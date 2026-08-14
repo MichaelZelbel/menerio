@@ -2415,12 +2415,28 @@ async function generateWorldSuggestions(
   }
 }
 
+/* ── Processing-state helpers ── */
+const MIN_WORDS_FOR_PROCESSING = 3;
+
+async function setProcessingState(
+  noteId: string,
+  status: string,
+  extra: Record<string, unknown> = {},
+) {
+  try {
+    await supabase.from("notes").update({ processing_status: status, ...extra }).eq("id", noteId);
+  } catch (err) {
+    console.warn("failed to set processing_status", noteId, status, err);
+  }
+}
+
 /* ── Main background processor ── */
-async function processInBackground(noteId: string, authHeader: string) {
+async function processInBackground(noteId: string, authHeader: string, force = false) {
+  let contentHash: string | null = null;
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at")
+      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at, processing_status, processed_hash, embedding")
       .eq("id", noteId)
       .single();
 
@@ -2432,7 +2448,31 @@ async function processInBackground(noteId: string, authHeader: string) {
     const aiHidden = (note as any).ai_visibility === "hidden";
 
     let fullText = `${note.title}\n\n${note.content}`.trim();
-    if (!fullText) return;
+    if (!fullText) {
+      await setProcessingState(noteId, "skipped_empty", { processing_error: null });
+      return;
+    }
+
+    // Idempotency: never re-spend credits on a content version we already
+    // processed (the client flush and the server sweep can both fire).
+    contentHash = noteContentHash(`${note.title ?? ""}\n\n${note.content ?? ""}`);
+    if (
+      !force &&
+      (note as any).processing_status === "processed" &&
+      (note as any).processed_hash === contentHash &&
+      (note as any).embedding
+    ) {
+      console.log("process-note: already processed this content version:", noteId);
+      return;
+    }
+
+    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+    if (wordCount < MIN_WORDS_FOR_PROCESSING) {
+      await setProcessingState(noteId, "skipped_short", { processed_hash: contentHash, processing_error: null });
+      return;
+    }
+
+    await setProcessingState(noteId, "processing", { processing_error: null });
 
     // Include media analysis content in the embedding text
     const { data: mediaEntries } = await supabase
@@ -2454,8 +2494,10 @@ async function processInBackground(noteId: string, authHeader: string) {
     const balance = await checkBalance(supabase, note.user_id);
     if (!balance.allowed) {
       console.log(`Skipping AI processing for note ${noteId}: insufficient credits for user ${note.user_id}`);
+      await setProcessingState(noteId, "skipped_no_credits");
       return;
     }
+
 
     // Extract metadata first (single chat call). Embeddings are produced via
     // chunking below so long notes are not silently truncated.
