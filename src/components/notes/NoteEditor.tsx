@@ -674,6 +674,41 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
+  // FLUSH (never cancel) the pending auto-process timer. Cancelling it on note
+  // switch / unmount was the reason notes typed and left within 10s were saved
+  // but never AI-processed. `process-note` is idempotent per content version,
+  // so firing early can't double-spend credits.
+  const flushPendingProcessing = useCallback(() => {
+    if (!processTimer.current) return;
+    clearTimeout(processTimer.current);
+    processTimer.current = null;
+    const noteId = pendingProcessNoteIdRef.current;
+    pendingProcessNoteIdRef.current = null;
+    if (!noteId) return;
+    const text = lastLocalContentRef.current ?? "";
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    if (words < MIN_WORDS_FOR_PROCESSING) return;
+    if (!checkCredits()) return;
+    processNote.mutate(noteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkCredits, processNote]);
+
+  useEffect(() => { flushProcessingRef.current = flushPendingProcessing; }, [flushPendingProcessing]);
+
+  // Tab close / app backgrounding: flush before the timer dies with the page.
+  useEffect(() => {
+    const onHide = () => flushProcessingRef.current();
+    const onVisibility = () => { if (document.visibilityState === "hidden") flushProcessingRef.current(); };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+
+
   // Set editor HTML and then asynchronously swap in resolved signed URLs for
   // any `data-attachment-name` placeholders. Fire-and-forget: this never
   // re-reads `editor.getHTML()` afterwards, so it cannot loop with the
