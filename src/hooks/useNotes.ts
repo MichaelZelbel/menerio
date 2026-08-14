@@ -44,6 +44,10 @@ export interface Note {
   structured_fields: Record<string, unknown>;
   related: RelatedItem[];
   ai_visibility?: "visible" | "hidden";
+  processing_status?: string | null;
+  processed_at?: string | null;
+  processing_error?: string | null;
+
   created_at: string;
   updated_at: string;
 }
