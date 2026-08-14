@@ -1530,6 +1530,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           {!note.is_trashed && !note.is_external && (
             <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
           )}
+          {!note.is_trashed && <ProcessingIndicator note={note} />}
+
           {note.entity_type && (
             <Badge variant="secondary" className="text-[10px] shrink-0">
               {note.entity_type}
