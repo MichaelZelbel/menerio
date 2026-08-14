@@ -2733,6 +2733,15 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     // Update the note with embedding, metadata, and optionally a smarter title
     const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
     if (aiTitle) updatePayload.title = aiTitle;
+    // Hash the content version we actually processed. When the AI renames the
+    // note we hash the new title, otherwise the sweep would see a mismatch and
+    // reprocess (and re-charge) the same note forever.
+    updatePayload.processing_status = "processed";
+    updatePayload.processed_at = new Date().toISOString();
+    updatePayload.processed_hash = noteContentHash(
+      `${aiTitle || note.title || ""}\n\n${note.content ?? ""}`,
+    );
+    updatePayload.processing_error = null;
 
     const { error: updateErr } = await supabase
       .from("notes")
@@ -2741,8 +2750,10 @@ async function processInBackground(noteId: string, authHeader: string, force = f
 
     if (updateErr) {
       console.error("Update error:", updateErr);
+      await setProcessingState(noteId, "failed", { processing_error: updateErr.message });
       return;
     }
+
 
     // AI-hidden notes: keep embeddings (local search) but skip every downstream
     // AI surface — review queue, profile suggestions, knowledge graph connections.
