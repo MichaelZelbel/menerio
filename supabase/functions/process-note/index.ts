@@ -2851,7 +2851,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
-    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader));
+    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader, Boolean(force)));
 
     return new Response(JSON.stringify({ ok: true, processing: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
