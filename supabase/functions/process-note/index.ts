@@ -2792,8 +2792,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     console.log("process-note completed for:", noteId);
   } catch (err) {
     console.error("Background processing error:", err);
+    await setProcessingState(noteId, "failed", {
+      processing_error: err instanceof Error ? err.message.slice(0, 500) : "Unknown error",
+    });
   }
 }
+
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
