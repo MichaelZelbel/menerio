@@ -749,7 +749,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
-      if (processTimer.current) clearTimeout(processTimer.current);
+      flushProcessingRef.current();
+
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
