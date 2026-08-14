@@ -397,6 +397,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The note the pending auto-process timer belongs to, plus a ref-held flush
+  // so the []-dep unmount effect can fire it without a stale closure.
+  const pendingProcessNoteIdRef = useRef<string | null>(null);
+  const flushProcessingRef = useRef<() => void>(() => {});
+
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
