@@ -723,18 +723,16 @@ serve(async (req) => {
         return { perSubject, totals };
       };
 
-      if (scope === "contact" || scope === "owner") {
-        const result = await runAll();
-        return json({ ok: true, completed: true, scope, subjectCount: subjects.length, ...result }, 200);
-      }
-
+      // Always run backfills in the background: a synchronous pass can exceed
+      // the 150s idle timeout and return a 504 to the client.
       try {
         // @ts-expect-error - EdgeRuntime is a Supabase Edge global
         EdgeRuntime.waitUntil(runAll());
       } catch {
-        runAll();
+        void runAll();
       }
       return json({ ok: true, started: true, scope, subjectCount: subjects.length }, 202);
+
     }
 
     if (action === "write_profile_entry") {

@@ -112,14 +112,20 @@ export function useContactProfile(contactId: string | null) {
         autoNormalizationSeen.add(key);
         const totals = (data as any)?.totals;
         const changed = Number(totals?.applied || 0) + Number(totals?.review || 0) + Number(totals?.created || 0);
-        if (changed > 0) {
+        // The backfill now always runs in the background (202 + `started`), so
+        // refresh once shortly after it was kicked off.
+        const started = (data as any)?.started === true;
+        const refresh = () => {
           qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
           qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
           qc.invalidateQueries({ queryKey: ["pending-profile-suggestions", userId, contactId] });
           qc.invalidateQueries({ queryKey: ["review-queue"] });
           triggerPeopleSync({ people: [contactId] });
-        }
+        };
+        if (changed > 0) refresh();
+        else if (started) setTimeout(refresh, 15000);
       })
+
       .catch((err) => {
         console.error("[normalize-profile] automatic contact cleanup failed", err);
       })
