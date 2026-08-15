@@ -330,9 +330,50 @@ async function writeProfileEntrySafely(args: {
     throw error;
   }
 
+  // A BEFORE INSERT trigger (dedup / quality / duplicate-fact guard) can return
+  // NULL, which suppresses the row *without* raising an error. Postgrest then
+  // returns no row. Never report that as "inserted": re-read the subject and
+  // either resolve it to the entry that absorbed the fact, or fail loudly so
+  // the caller (and the user's toast) learns the fact was not stored.
+  if (!inserted?.id) {
+    const { data: after } = await subjectFilter(
+      db.from("profile_entries").select("id, category_id, label, value").eq("user_id", userId),
+      contactId,
+    );
+    const rows = (after || []) as any[];
+    const absorbing =
+      rows.find(
+        (entry) =>
+          normalizeComparable(entry.label) === normalizeComparable(fact.label) &&
+          normalizeComparable(entry.value) === normalizeComparable(dedup.value),
+      ) ||
+      rows.find(
+        (entry) =>
+          normalizeComparable(entry.label) === normalizeComparable(fact.label) &&
+          normalizeComparable(entry.value).includes(normalizeComparable(dedup.value)),
+      );
+    if (absorbing?.id) {
+      await enqueueSubjectNormalization(db, userId, contactId, "profile_entry_absorbed");
+      return { ok: true, outcome: "already_exists", entryId: absorbing.id, reason: "absorbed" };
+    }
+    console.error("[normalize-profile] insert suppressed by guard", {
+      userId,
+      contactId,
+      label: fact.label,
+      value: dedup.value,
+    });
+    return {
+      ok: false,
+      outcome: "rejected_duplicate",
+      entryId: null,
+      reason: "suppressed_by_guard",
+    };
+  }
+
   await enqueueSubjectNormalization(db, userId, contactId, "profile_entry_inserted");
   return { ok: true, outcome: "inserted", entryId: inserted?.id ?? null };
 }
+
 
 async function acceptProfileEntryReview(db: any, userId: string, reviewId: string) {
   const { data: row, error } = await db
