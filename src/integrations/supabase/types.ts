@@ -3964,6 +3964,7 @@ export type Database = {
         Args: { subset: string; superset: string }
         Returns: boolean
       }
+      profile_value_is_identifier: { Args: { t: string }; Returns: boolean }
       relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
       relationship_inverse_label: { Args: { p: string }; Returns: string }
