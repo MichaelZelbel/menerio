@@ -699,7 +699,7 @@ export function PeopleTree({
         onReparentGroup(groupId, null);
         return;
       }
-      // Dropping a person onto "All people" removes them from every group they
+      // Dropping a person onto "All People" removes them from every group they
       // currently belong to — the loose bucket lives directly under this root.
       const personId = event.dataTransfer.getData("application/x-person-id");
       if (personId) {
@@ -812,7 +812,7 @@ export function PeopleTree({
               handlers={handlers}
             />
 
-            {/* "All people" root — container for root groups + drop target that
+            {/* "All People" root — container for root groups + drop target that
                 reparents a dragged group to the top level. */}
             <div>
               <ContextMenu>
@@ -842,7 +842,7 @@ export function PeopleTree({
                       {allExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                     </span>
                     <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate">All people</span>
+                    <span className="min-w-0 flex-1 truncate">All People</span>
                     <span className="text-[10px] text-muted-foreground">{people.length}</span>
                   </button>
                 </ContextMenuTrigger>

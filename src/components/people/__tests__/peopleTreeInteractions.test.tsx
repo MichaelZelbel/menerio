@@ -97,7 +97,7 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
   it("checkbox click in the tree selects the person, prevents the row anchor's navigation, and shows the bulk bar", () => {
     const handlers = renderTree();
 
-    // Marco has no membership → renders directly under "All people" (expanded by default),
+    // Marco has no membership → renders directly under "All People" (expanded by default),
     // alongside groups, just like loose notes appear under the notes root.
     const checkbox = screen.getByRole("checkbox", { name: "Select Marco Test" });
 
@@ -148,7 +148,7 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
   it("selects a person under a group row (member rows share the same code path)", () => {
     const handlers = renderTree();
 
-    // Expand the Team group under "All people" (expanded by default).
+    // Expand the Team group under "All People" (expanded by default).
     fireEvent.click(screen.getByRole("button", { name: /^Team/ }));
     const checkbox = screen.getByRole("checkbox", { name: "Select Anna" });
 
