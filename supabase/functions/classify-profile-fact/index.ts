@@ -22,7 +22,7 @@ const CATEGORY_NAMES: Record<string, string> = {
   professional: "Professional Life",
   education: "Education",
   relationships: "Relationships & Family",
-  communication: "Communication Style",
+  communication: "Contact & Communication",
   personality: "Personality & Values",
   principles: "Principles & Operating System",
   health: "Health & Wellness",

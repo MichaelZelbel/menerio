@@ -24,7 +24,7 @@ export const PROFILE_TAXONOMY: TaxonomyEntry[] = [
   { slug: "professional", name: "Professional Life", icon: "briefcase" },
   { slug: "education", name: "Education", icon: "graduation-cap" },
   { slug: "relationships", name: "Relationships & Family", icon: "heart" },
-  { slug: "communication", name: "Communication Style", icon: "message-circle" },
+  { slug: "communication", name: "Contact & Communication", icon: "message-circle" },
   { slug: "personality", name: "Personality & Values", icon: "compass" },
   { slug: "principles", name: "Principles & Operating System", icon: "book-open" },
   { slug: "health", name: "Health & Wellness", icon: "activity" },
