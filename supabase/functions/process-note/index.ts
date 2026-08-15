@@ -5,6 +5,7 @@ import {
 } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
+import { shouldExtractFacts } from "../_shared/hub-source.ts";
 import {
   canonicalLabel,
   inverseLabel,
@@ -2757,8 +2758,19 @@ async function processInBackground(noteId: string, authHeader: string, force = f
 
     // AI-hidden notes: keep embeddings (local search) but skip every downstream
     // AI surface — review queue, profile suggestions, knowledge graph connections.
-    if (aiHidden) {
-      console.log("process-note: skipping AI-derivative work, note is ai_visibility=hidden:", noteId);
+    //
+    // Notes synced from Michael's hub take the same exit, for a different
+    // reason. They are indexed so search can find them, which is the whole
+    // point of syncing them, but they must never be mined for facts: the hub's
+    // observations are an AI's guesses about him, and extracting claims from
+    // them would let the system cite its own guesses back as things he said.
+    const hubSourced = !shouldExtractFacts((note as any).source_app);
+    if (aiHidden || hubSourced) {
+      console.log(
+        "process-note: embedded, skipping AI-derivative work for",
+        noteId,
+        aiHidden ? "(ai_visibility=hidden)" : "(synced from the hub)",
+      );
       return;
     }
 
