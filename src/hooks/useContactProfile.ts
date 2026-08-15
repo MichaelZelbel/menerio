@@ -157,8 +157,23 @@ export function useContactProfile(contactId: string | null) {
             entry: { ...entry, contact_id: contactId! },
           },
         });
-        if (error || !data?.ok) throw error || new Error(data?.reason || "Profile entry was not saved");
+        // A 409 arrives as a FunctionsHttpError whose `.context` is the
+        // Response — read the server's reason so a refused write never looks
+        // like a success (the guards can refuse silently at the DB level).
+        let reason: string | null = data?.reason ?? null;
+        if (error) {
+          const ctx = (error as { context?: { json?: () => Promise<unknown> } }).context;
+          if (ctx?.json) {
+            try {
+              reason = ((await ctx.json()) as { reason?: string })?.reason ?? reason;
+            } catch {
+              /* keep the generic message */
+            }
+          }
+        }
+        if (error || !data?.ok) throw new Error(describeWriteFailure(reason));
       }
+
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
