@@ -20,6 +20,25 @@ export interface ContactProfileEntry extends ProfileEntry {
 const autoNormalizationInFlight = new Set<string>();
 const autoNormalizationSeen = new Set<string>();
 
+/** Turns a server refusal reason into a message the user can act on. */
+function describeWriteFailure(reason: string | null | undefined): string {
+  switch (reason) {
+    case "suppressed_by_guard":
+      return "This fact was refused by the duplicate guard and not saved. Try rephrasing it or editing the existing entry.";
+    case "blocked_label":
+      return "That field is not stored on profiles (relationships and purchases live elsewhere).";
+    case "not_a_skill":
+      return "That value isn't a skill — file it under another section.";
+    case "category_unresolved":
+      return "Could not resolve the section for this fact.";
+    case "contact_not_found":
+      return "This person could not be found.";
+    default:
+      return reason ? `Profile entry was not saved (${reason})` : "Profile entry was not saved";
+  }
+}
+
+
 export function useContactProfile(contactId: string | null) {
   const { user } = useAuth();
   const qc = useQueryClient();
