@@ -3638,6 +3638,9 @@ app.all("*", async (c) => {
     return c.json({
       name: "menerio",
       version: "1.0.0",
+      // Bumped by hand whenever this function is deployed, so anyone can tell
+      // which build is live without opening a dashboard.
+      build: "2026-08-16",
       transport: "streamable-http",
       auth: "Authorization: Bearer mnr_mcp_<token>",
     });
