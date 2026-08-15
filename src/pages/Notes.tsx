@@ -330,7 +330,7 @@ export default function Notes() {
       { id: noteId, folder_path: normalizedTarget },
       {
         onSuccess: () => {
-          const target = normalizedTarget || "Vault root";
+          const target = normalizedTarget || "All Notes";
           showToast.batched.success(`note:move:${target}`, (n) =>
             n === 1 ? `Moved to ${target}` : `${n} notes moved to ${target}`,
           );
@@ -435,7 +435,7 @@ export default function Notes() {
       if (activeFolderPath === sourcePath || activeFolderPath?.startsWith(sourcePath + "/")) {
         setActiveFolderPath(newPath + (activeFolderPath.slice(sourcePath.length)));
       }
-      showToast.success(targetParentPath ? `Moved to ${targetParentPath}` : "Moved to Vault root");
+      showToast.success(targetParentPath ? `Moved to ${targetParentPath}` : "Moved to All Notes");
     } catch (err) {
       showToast.error(err instanceof Error ? err.message : "Failed to move folder");
     }

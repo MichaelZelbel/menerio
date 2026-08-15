@@ -255,7 +255,7 @@ const FolderRow = memo(function FolderRow({
               {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </span>
             {isOpen ? <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />}
-            <span className="min-w-0 flex-1 truncate">{isRoot ? "Vault root" : node.name}</span>
+            <span className="min-w-0 flex-1 truncate">{isRoot ? "All Notes" : node.name}</span>
             <span className="text-[10px] text-muted-foreground">{node.noteCount}</span>
           </button>
         </ContextMenuTrigger>
@@ -279,7 +279,7 @@ const FolderRow = memo(function FolderRow({
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
                 <ContextMenuItem onClick={() => onMoveFolder(node.path, "")}>
-                  <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+                  <Folder className="mr-2 h-3.5 w-3.5" /> All Notes
                 </ContextMenuItem>
                 {moveTargets.length > 0 && <ContextMenuSeparator />}
                 {moveTargets.map((t) => (
@@ -520,7 +520,7 @@ const NoteRow = memo(function NoteRow({
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
               <ContextMenuItem onClick={() => applyMove("")}>
-                <Folder className="mr-2 h-3.5 w-3.5" /> Vault root
+                <Folder className="mr-2 h-3.5 w-3.5" /> All Notes
               </ContextMenuItem>
               {folderOptions.length > 0 && <ContextMenuSeparator />}
               {folderOptions.map((node) => (
@@ -673,7 +673,7 @@ export function NoteTree({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   const tree = useMemo(() => {
-    const root: FolderNode = { name: "Vault root", path: "", children: [], notes: [], noteCount: 0 };
+    const root: FolderNode = { name: "All Notes", path: "", children: [], notes: [], noteCount: 0 };
     const allFolderPaths = new Set<string>();
 
     folderPaths.forEach((path) => {

@@ -86,7 +86,7 @@ export function BulkActionBar({ selectedIds, notes, onClear }: BulkActionBarProp
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-3 space-y-2">
           <p className="text-xs font-medium text-muted-foreground">
-            Move to folder (empty = Vault root)
+            Move to folder (empty = All Notes)
           </p>
           <Input
             value={movePath}
