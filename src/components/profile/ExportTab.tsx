@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
+import { displayLabel, splitProfileValues } from "@/lib/profile-list-labels";
 import type { ProfileCategory, ProfileEntry, AgentInstruction, ProfileView } from "@/hooks/useProfile";
 
 interface Props {
@@ -60,7 +61,16 @@ function generateStructured(
     if (catEntries.length === 0) continue;
     lines.push(cat.name.toUpperCase());
     for (const entry of catEntries) {
-      lines.push(`  ${entry.label}: ${entry.value}`);
+      {
+        const values = splitProfileValues(entry.label, entry.value);
+        const label = displayLabel(entry.label);
+        if (values.length > 1) {
+          lines.push(`  ${label}:`);
+          for (const v of values) lines.push(`    - ${v}`);
+        } else {
+          lines.push(`  ${label}: ${values[0] ?? entry.value}`);
+        }
+      }
       if (includeNotes && entry.linked_note_id && noteContents.has(entry.linked_note_id)) {
         lines.push(`  [Extended: ${noteContents.get(entry.linked_note_id)}]`);
       }
@@ -94,7 +104,16 @@ function generateMarkdown(
     if (catEntries.length === 0) continue;
     lines.push(`### ${cat.name}`);
     for (const entry of catEntries) {
-      lines.push(`- **${entry.label}**: ${entry.value}`);
+      {
+        const values = splitProfileValues(entry.label, entry.value);
+        const label = displayLabel(entry.label);
+        if (values.length > 1) {
+          lines.push(`- **${label}**:`);
+          for (const v of values) lines.push(`  - ${v}`);
+        } else {
+          lines.push(`- **${label}**: ${values[0] ?? entry.value}`);
+        }
+      }
       if (includeNotes && entry.linked_note_id && noteContents.has(entry.linked_note_id)) {
         lines.push(`  > ${noteContents.get(entry.linked_note_id)}`);
       }
