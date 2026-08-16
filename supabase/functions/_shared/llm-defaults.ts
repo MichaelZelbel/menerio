@@ -16,6 +16,8 @@
  */
 
 import type { Provider } from "./llm-router.ts";
+import { PROFILE_AUDIT_SYSTEM_PROMPT } from "./profile-audit.ts";
+
 
 const JSON_OBJECT = { response_format: { type: "json_object" } };
 
@@ -645,6 +647,15 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
   },
   {
+    call_site: "profile-audit.main",
+    description: "Whole-profile duplicate auditor: reads all profile entries of one person and reports which entries state the same fact.",
+    provider: "openrouter",
+    model: "google/gemini-2.5-flash",
+    system_prompt: PROFILE_AUDIT_SYSTEM_PROMPT,
+    temperature: 0, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+
     call_site: "process-note.metadata",
     description: "Extracts title, people, dates, topics, sentiment, and summary from a note.",
     provider: "openrouter",
