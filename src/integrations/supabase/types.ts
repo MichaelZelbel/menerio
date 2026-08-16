@@ -4059,6 +4059,14 @@ export type Database = {
         Returns: string[]
       }
       profile_canonical_label: { Args: { t: string }; Returns: string }
+      profile_dedup_sweep: {
+        Args: {
+          _all_contacts?: boolean
+          _contact_id?: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       profile_dedup_value_against_keys: {
         Args: { _seen_keys: string[]; _value: string }
         Returns: string
@@ -4099,12 +4107,36 @@ export type Database = {
         Args: { p_canonical: string }
         Returns: boolean
       }
+      profile_label_norm_key: { Args: { t: string }; Returns: string }
       profile_label_token_priority: {
         Args: { _label: string }
         Returns: number
       }
+      profile_label_tokens: { Args: { _label: string }; Returns: string[] }
+      profile_label_tokens_subset: {
+        Args: { a: string[]; b: string[] }
+        Returns: boolean
+      }
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
+      profile_resolve_label: {
+        Args: {
+          _category_id: string
+          _category_slug: string
+          _contact_id: string
+          _label: string
+          _user_id: string
+        }
+        Returns: string
+      }
+      profile_subset_label_sweep: {
+        Args: {
+          _all_contacts?: boolean
+          _contact_id?: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       profile_token_key_contains: {
         Args: { subset_key: string; superset_key: string }
         Returns: boolean
@@ -4119,6 +4151,7 @@ export type Database = {
         Returns: boolean
       }
       profile_value_is_identifier: { Args: { t: string }; Returns: boolean }
+      profile_value_norm_key: { Args: { t: string }; Returns: string }
       relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
       relationship_inverse_label: { Args: { p: string }; Returns: string }

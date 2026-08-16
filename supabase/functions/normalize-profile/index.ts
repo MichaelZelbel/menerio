@@ -603,6 +603,39 @@ serve(async (req) => {
     const prepareSuggestionForInsert = makePrepareSuggestion(db);
     const helpers = { filterSuppressedSuggestions: (uid: string, s: any[]) => filterSuppressedSuggestions(db, uid, s), prepareSuggestionForInsert, isSensitiveSuggestion, buildSuppressionKey };
 
+    // Deterministic duplicate-label sweep. Merges near-duplicate label
+    // clusters and collapses repeated values. No LLM, no review queue.
+    if (action === "dedup_sweep") {
+      const scope = String(body?.scope || "owner");
+      const contactId = scope === "contact" ? String(body?.contact_id || "") : null;
+      if (scope === "contact" && !contactId) return json({ error: "contact_id required" }, 400);
+      if (contactId) {
+        const { data: c } = await db.from("contacts").select("id").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (!c) return json({ error: "contact not found" }, 404);
+      }
+
+      const run = async () => {
+        const { data, error } = await db.rpc("profile_dedup_sweep", {
+          _user_id: userId,
+          _contact_id: contactId,
+          _all_contacts: scope === "all",
+        });
+        if (error) console.error("[normalize-profile] dedup_sweep failed", error);
+        else console.log("[normalize-profile] dedup_sweep", JSON.stringify(data));
+      };
+
+      if (scope === "all") {
+        // Can touch every contact — run in the background so the request
+        // never hits the 150s idle timeout.
+        // @ts-ignore EdgeRuntime is provided by the Supabase runtime
+        EdgeRuntime.waitUntil(run());
+        return json({ status: "accepted" }, 202);
+      }
+
+      await run();
+      return json({ status: "done" });
+    }
+
     if (action === "plan") {
       const scope = String(body?.scope || "owner");
       const contactId = scope === "owner" ? null : String(body?.contact_id || "");
