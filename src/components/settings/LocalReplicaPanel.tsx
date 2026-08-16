@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getReplicaDiagnostics, repairLocalReplica } from "@/sync/local-replica";
+import { useSyncHealth } from "@/sync/sync-health";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +20,7 @@ import { formatDistanceToNow } from "date-fns";
 export function LocalReplicaPanel() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const sync = useSyncHealth();
   const [repairing, setRepairing] = useState(false);
 
   const { data, isFetching, refetch } = useQuery({
@@ -86,6 +88,16 @@ export function LocalReplicaPanel() {
             {healthy ? "In sync" : "Gap detected"}
           </Badge>
         </div>
+
+        {sync.state === "unreachable" && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+            <p className="font-medium mb-1">Background sync is not running.</p>
+            <p className="text-muted-foreground">
+              {sync.error} Your notes are being read from the server directly, so this
+              screen is current, but the local copy below will not update on its own.
+            </p>
+          </div>
+        )}
 
         {data && data.missingIds.length > 0 && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">

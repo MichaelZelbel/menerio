@@ -8,6 +8,7 @@ import { ilikeContains } from "@/lib/postgrest";
 import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
+import { isLocalFirstActive, useLocalFirstActive } from "@/sync/sync-health";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
 import { broadcastInvalidation } from "@/lib/query-sync";
@@ -130,12 +131,20 @@ function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE", delay
   wikiIngestTimers.set(noteId, timer);
 }
 
-function useNotesRemote(filter: "all" | "favorites" | "trash") {
+function useNotesRemote(
+  filter: "all" | "favorites" | "trash",
+  { enabled = true, keySuffix }: { enabled?: boolean; keySuffix?: string } = {},
+) {
   const { user } = useAuth();
 
   return useQuery<Note[]>({
-    queryKey: ["notes", filter, user?.id],
-    enabled: !!user,
+    // The fallback needs its own cache entry. Registering two different query
+    // functions under one key makes whichever mounted last answer for both.
+    // Everything still invalidates on the ["notes"] prefix.
+    queryKey: keySuffix
+      ? ["notes", filter, user?.id, keySuffix]
+      : ["notes", filter, user?.id],
+    enabled: !!user && enabled,
     // The list carries full note bodies, so it is an expensive query for large
     // vaults. Freshness of the *open* note is guaranteed by `useNote` below
     // (a cheap single-row query that always revalidates on mount); the list
@@ -168,23 +177,47 @@ function useNotesRemote(filter: "all" | "favorites" | "trash") {
 
 // Local-first variant: a live SQLite query that re-renders whenever the
 // notes table changes (local edits or background sync).
-function useNotesLocal(filter: "all" | "favorites" | "trash") {
+function useNotesLocal(
+  filter: "all" | "favorites" | "trash",
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const { user } = useAuth();
 
   return usePowerSyncQuery<Note>({
     queryKey: ["notes", filter, user?.id],
-    enabled: !!user,
+    enabled: !!user && enabled,
     query: `SELECT * FROM notes WHERE user_id = ? AND ${LOCAL_FILTER_SQL[filter]} ORDER BY is_pinned DESC, updated_at DESC`,
     parameters: [user?.id ?? ""],
     select: (rows) => (rows as unknown as NoteRow[]).map(rowToNote),
   });
 }
 
+/**
+ * The local-first list, with the server as a fallback when sync is dead.
+ *
+ * Only ever called on OFFLINE_CORE sessions, so the PowerSync context that
+ * useNotesLocal needs is mounted. Both hooks run on every render and only the
+ * RESULT is chosen, because the choice changes at runtime and a conditional
+ * hook call would reorder the hook list mid-session.
+ */
+function useNotesLocalWithFallback(filter: "all" | "favorites" | "trash") {
+  const localFirst = useLocalFirstActive();
+  const local = useNotesLocal(filter, { enabled: localFirst });
+  const remote = useNotesRemote(filter, {
+    enabled: !localFirst,
+    keySuffix: "server-fallback",
+  });
+  return localFirst ? local : remote;
+}
+
 export function useNotes(filter: "all" | "favorites" | "trash" = "all") {
   // OFFLINE_CORE is constant for the lifetime of the page, so this branch is
-  // stable and hook order never changes between renders.
+  // stable and hook order never changes between renders. What is NOT constant
+  // is whether sync works, and that is handled inside the local branch rather
+  // than here, because useNotesLocal cannot even be called without the
+  // PowerSync context that only OFFLINE_CORE sessions mount.
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  return OFFLINE_CORE ? useNotesLocal(filter) : useNotesRemote(filter);
+  return OFFLINE_CORE ? useNotesLocalWithFallback(filter) : useNotesRemote(filter);
 }
 
 /**
@@ -246,7 +279,7 @@ export function useCreateNote() {
 
   return useMutation({
     mutationFn: async (input: NoteInsert = {}) => {
-      if (OFFLINE_CORE) return createNoteLocal(user!.id, input);
+      if (isLocalFirstActive()) return createNoteLocal(user!.id, input);
       const { data, error } = await supabase
         .from("notes" as any)
         .insert({ ...input, user_id: user!.id })
@@ -274,7 +307,7 @@ export function useUpdateNote() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: NoteUpdate & { id: string }) => {
-      if (OFFLINE_CORE) {
+      if (isLocalFirstActive()) {
         const db = getDb();
         const sets: string[] = [];
         const params: unknown[] = [];
@@ -359,7 +392,7 @@ export function useDeleteNote() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      if (OFFLINE_CORE) {
+      if (isLocalFirstActive()) {
         await getDb().execute("DELETE FROM notes WHERE id = ?", [id]);
         return;
       }
@@ -426,7 +459,7 @@ export function useDuplicateNote() {
 
   return useMutation({
     mutationFn: async (sourceId: string): Promise<Note> => {
-      if (OFFLINE_CORE) return duplicateNoteLocal(user!.id, sourceId);
+      if (isLocalFirstActive()) return duplicateNoteLocal(user!.id, sourceId);
 
       // Fetch source
       const { data: source, error: srcErr } = await supabase
@@ -527,7 +560,7 @@ export function useIlikeSearch() {
   return useMutation({
     mutationFn: async (query: string): Promise<SemanticSearchResult[]> => {
       const q = query.toLowerCase();
-      if (OFFLINE_CORE) {
+      if (isLocalFirstActive()) {
         const notes = await searchNotesLocal(user!.id, q);
         return notes.map((n) => ({ ...n, similarity: null }));
       }
@@ -590,7 +623,7 @@ export function useSearchNotes() {
   return useMutation({
     mutationFn: async (query: string) => {
       const q = query.toLowerCase();
-      if (OFFLINE_CORE) {
+      if (isLocalFirstActive()) {
         return searchNotesLocal(user!.id, q);
       }
       const terms = extractSearchTerms(query);

@@ -38,7 +38,43 @@ Key files: `src/lib/flags.ts` (flag), `src/sync/schema.ts` (client schema),
 Without a PowerSync endpoint configured the local database still works fully
 offline (writes queue locally); background sync just stays off.
 
-## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified)
+## The instance is GONE (2026-08-16) and the app now survives that
+
+`6a5158557f33bac37ef5cf80.powersync.journeyapps.com` returns **NXDOMAIN**. The
+parent `powersync.journeyapps.com` still resolves, so this is the instance being
+deprovisioned, not a network fault. Everything below about the live setup is kept
+as the record of how it was built, but it does not describe anything running.
+
+**What that did, and why nobody noticed.** Every local-first device (all desktop
+builds, plus any browser that ever visited `?offline-core=on`) kept reading a
+local SQLite database that could no longer be updated. `SyncManager` reported the
+failure through `console.warn`, which `vite.config.ts` strips from production
+(`drop: ["console"]`); it tried once per page load and never retried; and the
+Notes screen read local SQLite unconditionally. The result was a note list that
+looked completely normal and was weeks stale. It surfaced only when hub folders
+written straight into Postgres never appeared in the UI.
+
+**What now happens instead** (`src/sync/reachability.ts`, `src/sync/sync-health.ts`):
+
+- Before connecting, the app asks whether the host answers. This is a separate
+  probe because `db.connect()` **cannot** report this: it starts a background
+  stream that retries on its own and never rejects, so a deleted service and a
+  slow one look identical to the caller.
+- If it does not answer, `sync-health` goes `unreachable` and **reads and writes
+  both** move to the server (`useNotes` → `useNotesLocalWithFallback`,
+  `isLocalFirstActive()` in every mutation). They move together on purpose:
+  reading from the server while writing to a queue that can never drain would
+  make a person's own edit vanish as they typed it.
+- It is visible: `OfflineIndicator` shows "Not syncing", plus the count of edits
+  that exist only on that device, and Settings → Local copy explains why.
+- It retries on a backoff (15s, 30s, 60s, then every 5 min), so restoring the
+  service heals every open client without a reload.
+
+**If you re-provision:** create the instance, put its URL in `src/sync/config.ts`,
+redo the four setup steps below, and the probe will let clients back onto the
+local-first path on their own.
+
+## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified, now deprovisioned)
 
 Live setup: project **Menerio**, instance **Production** (EU) under Michael's
 PowerSync account (michael@zelbel.de); endpoint

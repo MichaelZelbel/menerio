@@ -42,8 +42,18 @@ function noteToParams(note: Note): unknown[] {
 /**
  * Write server rows into the local SQLite replica.
  *
- * `INSERT OR REPLACE` mirrors what the PowerSync download stream does, so the
- * rows are treated as synced state and are NOT queued for upload.
+ * WARNING, and the previous comment here had this exactly backwards. It claimed
+ * `INSERT OR REPLACE` mirrors the download stream so the rows are treated as
+ * synced state and are NOT queued for upload. They ARE queued. In PowerSync
+ * `notes` is a view with INSTEAD OF triggers that funnel every SQL write into
+ * the CRUD queue; the real download stream writes to the underlying
+ * `ps_data__notes` and bypasses those triggers, which SQL from here cannot do.
+ *
+ * So every row written here becomes a full-row PUT that is replayed on the next
+ * successful connect (`connector.ts`, UpdateType.PUT). Repairing 638 notes
+ * therefore queues 638 server-side upserts, each bumping `updated_at` and
+ * re-firing `process-note`. The values are the server's own, so nothing is
+ * corrupted, but it is not free and it is not silent on the server.
  */
 export async function upsertNotesLocal(notes: Note[]): Promise<number> {
   if (!OFFLINE_CORE || notes.length === 0) return 0;

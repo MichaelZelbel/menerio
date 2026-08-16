@@ -168,7 +168,13 @@ export default function Notes() {
     } catch { /* ignore */ }
   }, [sortField, sortDirection]);
 
-  const { data: allNotes = [], isLoading: loadingAll } = useNotes("all");
+  // isError was previously discarded, which meant a failed notes query left the
+  // last good list on screen with nothing to say it was stale.
+  const {
+    data: allNotes = [],
+    isLoading: loadingAll,
+    isError: allNotesFailed,
+  } = useNotes("all");
   const { data: favNotes = [] } = useNotes("favorites");
   const { data: trashNotes = [] } = useNotes("trash");
   const createNote = useCreateNote();
@@ -1173,6 +1179,14 @@ export default function Notes() {
             <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">
               Clear all
             </button>
+          </div>
+        )}
+
+        {/* A list that failed to load says so, instead of showing the last
+            good copy as though it were current. */}
+        {allNotesFailed && (
+          <div className="mx-2 mb-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-muted-foreground">
+            Could not load your notes just now. What is shown may be out of date.
           </div>
         )}
 
