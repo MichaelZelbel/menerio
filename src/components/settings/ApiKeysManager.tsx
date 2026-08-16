@@ -38,6 +38,7 @@ const ALL_SCOPES = [
   { value: "graph", label: "Graph", desc: "Connections and graph data" },
   { value: "media", label: "Media", desc: "Media analysis results" },
   { value: "stats", label: "Stats", desc: "Read-only statistics" },
+  { value: "world", label: "World", desc: "Entities, events and claims, read only" },
 ];
 
 interface ApiKey {
