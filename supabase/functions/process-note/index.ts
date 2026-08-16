@@ -2306,202 +2306,26 @@ async function generateMomentSuggestions(
 }
 
 
-/* ── World: entity + dated claim suggestions ──
-   These NEVER write directly. Everything lands in the review queue so the
-   user stays the author of their own world. */
+/* ── World ──
+   There is deliberately no world extractor here.
 
-const WORLD_EXTRACTION_PROMPT = `You extract structure-of-life data from a personal note.
+   The 2026-08-11 design gave World its own `entities` / `claims` store and a
+   note reader that filed every non-person thing it saw into the review queue.
+   The 2026-08-16 rewrite replaced that: World is now a view over rows that
+   already exist (contacts, moments, profile_entries, contact_relationships).
+   See the header of
+   supabase/migrations/20260816120000_9a3f61c2-4d70-4c88-9b21-7e0a5c1d3f84.sql:
+   "World is a view over rows that already exist. It is not a new store and it
+   has no extractor of its own."
 
-Return JSON:
-{
-  "entities": [{"name": string, "entity_type": "place"|"organization"|"project"|"thing"|"pet"|"other", "description": string}],
-  "claims": [{"subject_type": "self"|"contact"|"entity", "subject_name": string, "attribute": string, "value": string, "valid_from": "YYYY-MM-DD"|null, "confidence": "certain"|"likely"|"unsure", "quote": string}]
-}
+   The reader outlived that rewrite by one day and flooded the review queue with
+   `add_entity` / `add_claim` cards that could never auto-apply
+   (prepareSuggestionForInsert has no branch for either type), so every one of
+   them sat pending forever. It is removed here.
 
-Rules:
-- Entities are NON-PERSON things only: places, organizations, projects, objects, pets. Never people.
-- Never invent. Only extract what the note literally states.
-- Skip fictional entities (from films, novels, games) and hypotheticals.
-- attribute is short and lowercase-dashed: employer, role, lives-in, owner, status, founded-in.
-- NEVER use attribute "relationship" — relationships between people are handled elsewhere.
-- subject_name must be a person named in the note or an entity you also return under "entities". Use "" when subject_type is "self".
-- "quote" is a verbatim sentence from the note supporting the claim. No quote → drop the claim.
-- Return empty arrays when the note contains nothing durable.`;
-
-const RESERVED_CLAIM_ATTRS = new Set(["relationship", "relationships", "related-to"]);
-
-function normalizeClaimAttribute(value: string): string {
-  return String(value || "").trim().toLowerCase().replace(/\s+/g, "-");
-}
-
-async function generateWorldSuggestions(
-  userId: string,
-  noteId: string,
-  noteTitle: string,
-  fullText: string,
-  matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
-) {
-  try {
-    const preferences = await getSuggestionPreferences(userId);
-    if (preferences.mode === "off") return;
-
-    const balance = await checkBalance(supabase, userId);
-    if (!balance.allowed) return;
-
-    const text = stripHtmlIfNeeded(fullText);
-    if (text.trim().length < 80) return;
-
-    let parsed: any;
-    try {
-      const result = await runChat({
-        db: supabase,
-        userId,
-        callSite: "process-note.world_extraction",
-        messages: [{
-          role: "user",
-          content: `Note title: ${noteTitle}\nPeople in this note: ${matchedPeople.map((p) => p.canonical_name || p.name).join(", ") || "none"}\n\n${text.slice(0, 16000)}`,
-        }],
-        defaults: {
-          provider: "openrouter",
-          model: "deepseek/deepseek-v4-flash",
-          systemPrompt: WORLD_EXTRACTION_PROMPT,
-        },
-        callOptions: { response_format: { type: "json_object" } },
-      });
-      parsed = JSON.parse(result.content);
-    } catch (err: any) {
-      if (err?.message === "INSUFFICIENT_CREDITS") return;
-      console.error("[world-extract] LLM error:", err);
-      return;
-    }
-
-    const suggestions: ReviewSuggestion[] = [];
-
-    // Existing entities — never suggest one the user already has.
-    const { data: existingEntities } = await supabase
-      .from("entities")
-      .select("id, name, aliases")
-      .eq("user_id", userId);
-    const knownEntityNames = new Map<string, string>();
-    for (const e of existingEntities || []) {
-      knownEntityNames.set(String(e.name).toLowerCase(), e.id);
-      for (const a of (e.aliases || []) as string[]) knownEntityNames.set(String(a).toLowerCase(), e.id);
-    }
-
-    for (const raw of Array.isArray(parsed?.entities) ? parsed.entities : []) {
-      const name = String(raw?.name || "").trim();
-      if (!name || name.length < 2 || name.length > 120) continue;
-      if (!nameAppearsInText(name, text)) continue;
-      if (knownEntityNames.has(name.toLowerCase())) continue;
-      if (detectFictionalMention(name, text)) continue;
-      const entity_type = String(raw?.entity_type || "other").trim().toLowerCase();
-      const description = String(raw?.description || "").trim() || null;
-      suggestions.push({
-        user_id: userId,
-        source_note_id: noteId,
-        suggestion_type: "add_entity",
-        title: `Add to World: ${name}`,
-        description: description || `${entity_type} mentioned in this note`,
-        payload: { name, entity_type, description },
-        status: "pending_review",
-        target_entity_type: "entity",
-        source_title: noteTitle,
-        extracted_value: name,
-        confidence_score: 0.7,
-        is_sensitive: isSensitiveSuggestion("add_entity", { name, description: description || "" }, text),
-        suppression_key: buildSuppressionKey("add_entity", "entity", null, normalizeSuggestionValue(name)),
-      });
-    }
-
-    const suggestedEntityNames = new Set(
-      suggestions.map((s) => String((s.payload as any).name).toLowerCase()),
-    );
-
-    for (const raw of Array.isArray(parsed?.claims) ? parsed.claims : []) {
-      const attribute = normalizeClaimAttribute(raw?.attribute);
-      const value = String(raw?.value || "").trim();
-      const quote = String(raw?.quote || "").trim();
-      const subject_type = String(raw?.subject_type || "").trim();
-      const subject_name = String(raw?.subject_name || "").trim();
-      if (!attribute || !value || quote.length < 10) continue;
-      if (RESERVED_CLAIM_ATTRS.has(attribute)) continue;
-      if (!["self", "contact", "entity"].includes(subject_type)) continue;
-      if (!text.toLowerCase().includes(quote.slice(0, 40).toLowerCase())) continue;
-
-      let subject_id: string | null = null;
-      let subjectLabel = "you";
-      if (subject_type === "contact") {
-        const match = matchedPeople.find(
-          (p) => (p.canonical_name || p.name).toLowerCase() === subject_name.toLowerCase() && p.contact_id,
-        );
-        if (!match?.contact_id) continue;
-        subject_id = match.contact_id;
-        subjectLabel = match.canonical_name || match.name;
-      } else if (subject_type === "entity") {
-        const known = knownEntityNames.get(subject_name.toLowerCase());
-        if (known) subject_id = known;
-        else if (!suggestedEntityNames.has(subject_name.toLowerCase())) continue;
-        subjectLabel = subject_name;
-      }
-
-      const valid_from = /^\d{4}-\d{2}-\d{2}$/.test(String(raw?.valid_from || "")) ? String(raw.valid_from) : null;
-      const confidence = ["certain", "likely", "unsure"].includes(String(raw?.confidence)) ? String(raw.confidence) : "likely";
-
-      suggestions.push({
-        user_id: userId,
-        source_note_id: noteId,
-        suggestion_type: "add_claim",
-        title: `Add fact: ${subjectLabel} — ${attribute.replace(/-/g, " ")}: ${value}`,
-        description: quote,
-        payload: {
-          subject_type,
-          subject_id,
-          subject_name: subject_type === "self" ? null : subject_name,
-          attribute,
-          value,
-          valid_from,
-          confidence,
-          evidence_quote: quote,
-        },
-        status: "pending_review",
-        target_entity_type: "claim",
-        target_entity_id: subject_id,
-        source_title: noteTitle,
-        extracted_value: `${attribute}: ${value}`,
-        confidence_score: confidence === "certain" ? 0.85 : confidence === "likely" ? 0.7 : 0.55,
-        is_sensitive: isSensitiveSuggestion("add_claim", { attribute, value }, text),
-        suppression_key: buildSuppressionKey(
-          "add_claim",
-          "claim",
-          subject_id,
-          normalizeSuggestionValue(`${subject_type}|${subject_name}|${attribute}|${value}`),
-        ),
-      });
-    }
-
-    if (suggestions.length === 0) return;
-
-    // Dedup against what is already queued.
-    const keys = suggestions.map((s) => s.suppression_key!).filter(Boolean);
-    const { data: queued } = await supabase
-      .from("review_queue")
-      .select("suppression_key")
-      .eq("user_id", userId)
-      .in("suppression_key", keys);
-    const queuedKeys = new Set((queued || []).map((r: any) => r.suppression_key));
-    const fresh = suggestions.filter((s) => !queuedKeys.has(s.suppression_key));
-    if (fresh.length === 0) return;
-
-    const unsuppressed = await filterSuppressedSuggestions(userId, fresh);
-    if (unsuppressed.length === 0) return;
-    const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
-    const { error } = await supabase.from("review_queue").insert(prepared);
-    if (error) console.error("World suggestion insert error:", error);
-    else console.log(`[world-extract] queued ${prepared.length} entity/claim suggestions for note ${noteId}`);
-  } catch (err) {
-    console.error("generateWorldSuggestions error:", err);
-  }
-}
+   A non-person thing reaches World by hand (useCreateEntity) or through the MCP
+   `create_entity` tool. Confirming a person once is enough: they reach World
+   through the view, with no second confirmation. */
 
 /* ── Processing-state helpers ── */
 const MIN_WORDS_FOR_PROCESSING = 3;
@@ -2875,7 +2699,6 @@ async function processInBackground(noteId: string, authHeader: string, force = f
 
     // Generate timeline-moment suggestions from past events documented in the note.
     await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
-    await generateWorldSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople);
 
     // Trigger connection computation (fire-and-forget)
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;

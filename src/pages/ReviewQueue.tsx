@@ -677,6 +677,11 @@ export default function ReviewQueue() {
       return handleAcceptMoment(item);
     }
 
+    // Nothing produces add_entity / add_claim any more: the 2026-08-11 world
+    // extractor was removed from process-note when World became a view. These
+    // two branches stay on purpose. Rows created before that removal can still
+    // be on screen, and handleAccept's fallthrough would tell the user "Change
+    // kept" while writing nothing at all.
     if (type === "add_entity") {
       return handleAcceptEntity(item);
     }
