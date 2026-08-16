@@ -78,18 +78,31 @@ Return STRICT JSON only:
 If there are no duplicates at all, return {"groups":[],"none":true}.`;
 
 /** Serialize the whole profile for the audit prompt. */
-export function buildAuditUserMessage(personName: string, entries: AuditEntry[]): string {
+export function buildAuditUserMessage(
+  personName: string,
+  entries: AuditEntry[],
+  rejectedNotes: string[] = [],
+): string {
   const lines = entries.map((e) =>
     `- id=${e.id} | category=${e.category_slug} | label=${e.label} | value=${e.value}`
   );
+  const rejectedBlock = rejectedNotes.length > 0
+    ? [
+      "",
+      "Already rejected in an earlier round (do NOT propose these again; if you still think they belong together, provide a merged value that keeps EVERY detail from EVERY entry):",
+      ...rejectedNotes.slice(0, 40).map((r) => `- ${r}`),
+    ]
+    : [];
   return [
     `Person: ${personName || "the profile owner"}`,
     `Entries (${entries.length}):`,
     ...lines,
+    ...rejectedBlock,
     "",
     "Return the JSON object described in your instructions.",
   ].join("\n");
 }
+
 
 export function normalizeText(input: string): string {
   return String(input || "")
