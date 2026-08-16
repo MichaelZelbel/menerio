@@ -1,6 +1,7 @@
 import { authenticateHubKey } from "../_shared/hub-auth.ts";
 import { json, errorJson, handleOptions } from "../_shared/hub-helpers.ts";
 import postgres from "https://esm.sh/postgres@3.4.4";
+import { MIGRATION_B64 } from "./migration-sql.ts";
 
 /**
  * ONE SHOT. Applies the World migration, and nothing else, then gets deleted.
@@ -33,12 +34,13 @@ Deno.serve(async (req) => {
     return errorJson("NO_DB_URL", "SUPABASE_DB_URL is not set for this function.", 500);
   }
 
-  let migration: string;
-  try {
-    migration = await Deno.readTextFile(new URL("./migration.sql", import.meta.url));
-  } catch (err) {
-    return errorJson("NO_SQL_FILE", `Could not read migration.sql: ${(err as Error).message}`, 500);
-  }
+  // Carried as base64 in migration-sql.ts, which is generated from migration.sql
+  // in the same folder. A plain static file next to the function is not bundled
+  // at deploy time, and the SQL contains backticks, so it cannot be a template
+  // literal either.
+  const migration = new TextDecoder().decode(
+    Uint8Array.from(atob(MIGRATION_B64), (c) => c.charCodeAt(0)),
+  );
 
   const client = postgres(dbUrl, { max: 1, prepare: false });
   try {
