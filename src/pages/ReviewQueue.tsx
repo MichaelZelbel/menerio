@@ -231,6 +231,71 @@ export default function ReviewQueue() {
     }
   };
 
+  const handleAcceptUnknownProfileField = async (item: ReviewItem) => {
+    const p = item.payload as any;
+    const categorySlug = String(p?.category_slug || "").trim();
+    const canonicalLabel = String(p?.canonical_label || p?.label || "").trim();
+    const value = String(p?.value || "").trim();
+    const categoryId = p?.category_id;
+    const contactId = p?.contact_id || null;
+
+    if (!categorySlug || !canonicalLabel || !value || !categoryId) {
+      showToast.error("Incomplete profile field suggestion");
+      return;
+    }
+
+    try {
+      // 1. Register the new field so future writes are accepted.
+      const { data: field, error: fieldErr } = await supabase
+        .from("profile_fields")
+        .insert({
+          user_id: user!.id,
+          category_slug: categorySlug,
+          canonical_label: canonicalLabel,
+          cardinality: "list",
+          value_type: "text",
+          aliases: [],
+          is_system: false,
+          is_active: true,
+        })
+        .select("id")
+        .single();
+      if (fieldErr) throw fieldErr;
+
+      // 2. Write the actual profile entry. The canonicalize trigger will now
+      //    recognize the label and allow the insert.
+      const { data: entry, error: entryErr } = await supabase
+        .from("profile_entries")
+        .insert({
+          user_id: user!.id,
+          contact_id: contactId,
+          category_id: categoryId,
+          label: canonicalLabel,
+          value,
+          origin: item.source_note_id ? "review_queue" : "user_manual",
+          evidence_quote: p?.evidence_quote || null,
+          linked_note_id: p?.linked_note_id || item.source_note_id || null,
+        })
+        .select("id")
+        .single();
+      if (entryErr) throw entryErr;
+
+      invalidateProfileQueries();
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: {
+          target_entity_type: "profile_entry",
+          target_entity_id: entry?.id,
+          applied_at: new Date().toISOString(),
+        },
+      });
+      showToast.success(`Created field "${canonicalLabel}" and added the value`);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
   const handleAcceptMoment = async (item: ReviewItem) => {
     const p = item.payload as any;
     const title = String(p?.title || "").trim();
