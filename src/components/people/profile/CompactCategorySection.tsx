@@ -135,6 +135,49 @@ export function CompactCategorySection({
     setRenaming(false);
   };
 
+  const entryActions = (entry: ContactProfileEntry) => (
+    <>
+      {entry.linked_note_id && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
+            >
+              <LinkIcon className="h-3.5 w-3.5 text-primary" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open linked note</TooltipContent>
+        </Tooltip>
+      )}
+      {allowPin && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onTogglePin(entry)}>
+              {entry.is_pinned ? <PinOff className="h-3.5 w-3.5 text-primary" /> : <Pin className="h-3.5 w-3.5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
+        </Tooltip>
+      )}
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 text-destructive"
+        onClick={() => onDeleteEntry(entry.id)}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </>
+  );
+
+
+
   return (
     <div id={`cat-${category.slug}`} className="rounded-lg border border-border bg-card">
       {/* Header */}
