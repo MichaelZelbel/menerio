@@ -650,6 +650,13 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
     case "group_member_suggestion":
       await db.from("contact_group_memberships").delete().eq("id", r.target_entity_id).eq("user_id", userId);
       return;
+    case "unknown_profile_field":
+      // If a target row was written, delete the value. The field definition
+      // stays so any manual edits are not lost.
+      if (r.target_entity_id) {
+        await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+      }
+      return;
     default:
       return;
   }
