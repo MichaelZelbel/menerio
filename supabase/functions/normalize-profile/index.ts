@@ -16,6 +16,7 @@ import {
   isListValuedLabel,
 } from "../_shared/profile-canonical-schema.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
+import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
 
 import {
   buildProfileTokenIndex,
@@ -180,6 +181,30 @@ function normalizeIncomingFact(categorySlug: string, label: string, value: strin
   nextSlug = correctProfileCategory(nextLabel, nextSlug);
   nextLabel = canonicalProfileLabel(nextSlug, nextLabel);
   nextSlug = correctProfileCategory(nextLabel, nextSlug);
+
+  // Name guard — same rules as the extractor, so a normalization pass can
+  // never re-introduce a handle or noise value as a nickname.
+  if (isNameLabel(nextLabel)) {
+    const members = nextValue.split(/\s*,\s*/).map((m) => m.trim()).filter(Boolean);
+    const kept: string[] = [];
+    const handles: string[] = [];
+    for (const member of members) {
+      const decision = guardNameValue({ label: nextLabel, value: member });
+      if (decision.action === "drop") continue;
+      if (decision.action === "relabel") handles.push(decision.value);
+      else kept.push(decision.value);
+    }
+    if (kept.length > 0) {
+      nextValue = kept.join(", ");
+    } else if (handles.length > 0) {
+      nextSlug = "communication";
+      nextLabel = "Online handle";
+      nextValue = handles.join(", ");
+    } else {
+      nextValue = "";
+    }
+  }
+
   return { categorySlug: nextSlug, label: nextLabel, value: nextValue };
 }
 
