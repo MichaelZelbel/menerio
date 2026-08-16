@@ -15,7 +15,7 @@ import { ProfileFieldFilter } from "@/components/people/profile/ProfileFieldFilt
 import { CompactCategorySection } from "@/components/people/profile/CompactCategorySection";
 import { compareCategoriesForDisplay, isCategorySectionVisible } from "@/lib/profile-taxonomy";
 import { filterEntries } from "@/lib/profile-field-filter";
-import type { ProfileCategory } from "@/hooks/useProfile";
+import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
 import type { ContactProfileEntry } from "@/hooks/useContactProfile";
 
 export type ProfileSectionsEntry = ContactProfileEntry | ProfileCategory;
