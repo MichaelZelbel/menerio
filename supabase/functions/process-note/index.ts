@@ -1541,7 +1541,7 @@ async function generateProfileSuggestions(
 
     const keyFor = (t: Target) => t.contact_id || OWNER_KEY;
 
-    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; _target: Target }> = [];
+    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; source_quote?: string; _target: Target }> = [];
     for (const f of extractedFacts) {
       if (!f.contact_name || !f.category_slug || !f.label || !f.value) continue;
       if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
