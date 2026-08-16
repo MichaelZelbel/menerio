@@ -5,8 +5,6 @@
 // pipelines (process-note, etc.) know about fields the user has already
 // approved, without requiring a code redeploy.
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-
 export type ProfileFieldRow = {
   id: string;
   user_id: string | null;
@@ -32,7 +30,7 @@ function normalizeKey(label: string): string {
  * definition if they ever need to.
  */
 export async function loadProfileFields(
-  db: SupabaseClient,
+  db: { from: (table: string) => any },
   userId: string,
 ): Promise<ProfileFieldRow[]> {
   const { data, error } = await db
