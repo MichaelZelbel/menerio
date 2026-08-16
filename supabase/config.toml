@@ -160,3 +160,6 @@ verify_jwt = false
 
 [functions.profile-reconcile]
 verify_jwt = false
+
+[functions.powersync-keepalive]
+verify_jwt = false
