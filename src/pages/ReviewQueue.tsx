@@ -58,6 +58,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   adjudicate_relationship: { icon: Eye, label: "Relationship evidence", color: "text-primary" },
   add_entity: { icon: Globe, label: "Add to World", color: "text-teal-500" },
   add_claim: { icon: Calendar, label: "Dated fact", color: "text-sky-500" },
+  unknown_profile_field: { icon: Sparkles, label: "New profile field", color: "text-fuchsia-500" },
 
 };
 
@@ -225,6 +226,71 @@ export default function ReviewQueue() {
       refreshReviewQueues();
       const outcome = data.outcome === "already_exists" ? "Already in profile" : data.outcome === "merged_list" ? "Merged into profile" : "Added to profile";
       showToast.success(outcome);
+    } catch (err: any) {
+      showToast.error("Error: " + (err.message || "Unknown error"));
+    }
+  };
+
+  const handleAcceptUnknownProfileField = async (item: ReviewItem) => {
+    const p = item.payload as any;
+    const categorySlug = String(p?.category_slug || "").trim();
+    const canonicalLabel = String(p?.canonical_label || p?.label || "").trim();
+    const value = String(p?.value || "").trim();
+    const categoryId = p?.category_id;
+    const contactId = p?.contact_id || null;
+
+    if (!categorySlug || !canonicalLabel || !value || !categoryId) {
+      showToast.error("Incomplete profile field suggestion");
+      return;
+    }
+
+    try {
+      // 1. Register the new field so future writes are accepted.
+      const { data: field, error: fieldErr } = await supabase
+        .from("profile_fields")
+        .insert({
+          user_id: user!.id,
+          category_slug: categorySlug,
+          canonical_label: canonicalLabel,
+          cardinality: "list",
+          value_type: "text",
+          aliases: [],
+          is_system: false,
+          is_active: true,
+        })
+        .select("id")
+        .single();
+      if (fieldErr) throw fieldErr;
+
+      // 2. Write the actual profile entry. The canonicalize trigger will now
+      //    recognize the label and allow the insert.
+      const { data: entry, error: entryErr } = await supabase
+        .from("profile_entries")
+        .insert({
+          user_id: user!.id,
+          contact_id: contactId,
+          category_id: categoryId,
+          label: canonicalLabel,
+          value,
+          origin: item.source_note_id ? "review_queue" : "user_manual",
+          evidence_quote: p?.evidence_quote || null,
+          linked_note_id: p?.linked_note_id || item.source_note_id || null,
+        })
+        .select("id")
+        .single();
+      if (entryErr) throw entryErr;
+
+      invalidateProfileQueries();
+      updateStatus.mutate({
+        id: item.id,
+        status: "kept",
+        extra: {
+          target_entity_type: "profile_entry",
+          target_entity_id: entry?.id,
+          applied_at: new Date().toISOString(),
+        },
+      });
+      showToast.success(`Created field "${canonicalLabel}" and added the value`);
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }
@@ -597,6 +663,10 @@ export default function ReviewQueue() {
 
     if (type === "add_profile_entry") {
       return handleAcceptProfileEntry(item);
+    }
+
+    if (type === "unknown_profile_field") {
+      return handleAcceptUnknownProfileField(item);
     }
 
     if (type === "add_relationship") {
@@ -1057,6 +1127,28 @@ export default function ReviewQueue() {
                       {payload?.rationale && (
                         <p className="text-xs text-muted-foreground italic">{payload.rationale}</p>
                       )}
+                    </CardContent>
+                  );
+                })()}
+                {item.suggestion_type === "unknown_profile_field" && (() => {
+                  const p = item.payload as any;
+                  return (
+                    <CardContent className="space-y-3">
+                      <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          New field proposal
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">
+                            {p?.canonical_label || p?.label || "Unknown field"}
+                          </span>
+                          <Badge variant="secondary" className="text-[10px]">{p?.category_slug || "—"}</Badge>
+                        </div>
+                        <p className="text-sm text-foreground">{p?.value || item.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Keeping this will create the field and add the value to the profile. Roll Back discards the suggestion.
+                        </p>
+                      </div>
                     </CardContent>
                   );
                 })()}

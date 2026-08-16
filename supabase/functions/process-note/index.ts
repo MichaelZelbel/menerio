@@ -24,6 +24,10 @@ import {
   isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
+import {
+  loadProfileFields,
+  ProfileFieldsRegistry,
+} from "../_shared/profile-fields-registry.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
 import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
 
@@ -895,7 +899,7 @@ function canonicalizeLabel(label: string, categorySlug = "identity"): string {
  * reference date is in the value.
  */
 function deriveCanonicalFacts(
-  facts: Array<{ contact_name: string; category_slug: string; label: string; value: string }>,
+  facts: Array<{ contact_name: string; category_slug: string; label: string; value: string; source_quote?: string }>,
   noteDateISO: string | null,
 ) {
   const out: typeof facts = [];
@@ -1391,6 +1395,11 @@ async function generateProfileSuggestions(
       return;
     }
 
+    // Load the user's effective profile-field vocabulary so extraction respects
+    // fields they have already approved via the review queue.
+    const profileFieldsRows = await loadProfileFields(supabase, userId);
+    const profileFieldsRegistry = new ProfileFieldsRegistry(profileFieldsRows);
+
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
     const cleanContent = stripHtmlIfNeeded(noteContent);
     const noteDateLine = noteDateISO ? `\nNote date: ${noteDateISO}` : "";
@@ -1404,7 +1413,7 @@ async function generateProfileSuggestions(
       category_slug: string;
       label: string;
       value: string;
-      source_quote: string;
+      source_quote?: string;
     }> = [];
     let extractedRelationships: Array<{
       person_a: string;
@@ -1532,7 +1541,7 @@ async function generateProfileSuggestions(
 
     const keyFor = (t: Target) => t.contact_id || OWNER_KEY;
 
-    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; _target: Target }> = [];
+    const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; source_quote?: string; _target: Target }> = [];
     for (const f of extractedFacts) {
       if (!f.contact_name || !f.category_slug || !f.label || !f.value) continue;
       if (!PROFILE_CATEGORY_SLUGS.includes(f.category_slug)) {
@@ -1629,7 +1638,7 @@ async function generateProfileSuggestions(
       // know means the extractor invented a synonym ("Name alias",
       // "Alternative name"). Never auto-apply those — force human review so a
       // parallel field can't appear silently.
-      if (!isKnownCanonicalLabel(f.category_slug, f.label)) {
+      if (!profileFieldsRegistry.isKnown(f.category_slug, f.label)) {
         console.log(`[profile-extract] Unknown label "${f.label}" in ${f.category_slug} — forcing review`);
         (f as any)._unknownLabel = true;
       }
@@ -1774,37 +1783,65 @@ async function generateProfileSuggestions(
       );
 
       const ownerLabelName = target.is_self ? "your" : `${target.canonical_name}'s`;
+      const isUnknownLabel = Boolean((fact as any)._unknownLabel);
 
-      suggestions.push({
-        user_id: userId,
-        source_note_id: noteId,
-        suggestion_type: "add_profile_entry",
-        title: `Add to ${ownerLabelName} profile: ${fact.label}`,
-        description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
-        payload: {
-          contact_id: target.contact_id,
-          contact_name: target.canonical_name,
-          is_owner: target.contact_id === null,
-          category_slug: fact.category_slug,
-          category_id: catRow?.id || null,
-          label: fact.label,
-          value: effectiveValue,
-          evidence_quote: factSourceQuote,
-        },
-        status: "pending_review",
-        target_entity_type: "profile_entry",
-        source_title: noteTitle,
-        extracted_value: `${fact.label}: ${effectiveValue}`,
-        confidence_score: (fact as any)._unknownLabel
-          // Unknown label → never auto-applied; sits in the review queue so
-          // the user (not the extractor) decides whether a new field is real.
-          ? 0.2
-          : isSoftSignal
+      if (isUnknownLabel) {
+        // Unknown labels in structured categories become a "new field proposal"
+        // so the user decides whether to map it to an existing field or create
+        // a new one. The fact is NOT pre-applied to the profile.
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "unknown_profile_field",
+          title: `New profile field: ${fact.label}`,
+          description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
+          payload: {
+            contact_id: target.contact_id,
+            contact_name: target.canonical_name,
+            is_owner: target.contact_id === null,
+            category_slug: fact.category_slug,
+            category_id: catRow?.id || null,
+            label: fact.label,
+            canonical_label: fact.label,
+            value: effectiveValue,
+            evidence_quote: factSourceQuote,
+          },
+          status: "pending_review",
+          target_entity_type: "profile_entry",
+          source_title: noteTitle,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
+          confidence_score: 0.2,
+          is_sensitive: isSensitiveSuggestion("unknown_profile_field", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
+          suppression_key: buildSuppressionKey("unknown_profile_field", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
+        });
+      } else {
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_profile_entry",
+          title: `Add to ${ownerLabelName} profile: ${fact.label}`,
+          description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
+          payload: {
+            contact_id: target.contact_id,
+            contact_name: target.canonical_name,
+            is_owner: target.contact_id === null,
+            category_slug: fact.category_slug,
+            category_id: catRow?.id || null,
+            label: fact.label,
+            value: effectiveValue,
+            evidence_quote: factSourceQuote,
+          },
+          status: "pending_review",
+          target_entity_type: "profile_entry",
+          source_title: noteTitle,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
+          confidence_score: isSoftSignal
             ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
             : DEFAULT_CONFIDENCE.add_profile_entry,
-        is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
-        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
-      });
+          is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
+          suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
+        });
+      }
     }
 
 

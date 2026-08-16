@@ -2653,6 +2653,48 @@ export type Database = {
           },
         ]
       }
+      profile_fields: {
+        Row: {
+          aliases: string[]
+          canonical_label: string
+          cardinality: string
+          category_slug: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_system: boolean
+          updated_at: string
+          user_id: string | null
+          value_type: string
+        }
+        Insert: {
+          aliases?: string[]
+          canonical_label: string
+          cardinality?: string
+          category_slug: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_system?: boolean
+          updated_at?: string
+          user_id?: string | null
+          value_type?: string
+        }
+        Update: {
+          aliases?: string[]
+          canonical_label?: string
+          cardinality?: string
+          category_slug?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_system?: boolean
+          updated_at?: string
+          user_id?: string | null
+          value_type?: string
+        }
+        Relationships: []
+      }
       profile_normalization_jobs: {
         Row: {
           attempts: number

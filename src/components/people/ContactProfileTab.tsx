@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ProfileFactsPanel } from "@/components/people/profile/ProfileFactsPanel";
+import { ProfileSections } from "@/components/profile/ProfileSections";
 import { QuickAddFact } from "@/components/people/profile/QuickAddFact";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { PROFILE_TAXONOMY } from "@/lib/profile-taxonomy";
@@ -129,9 +129,10 @@ export function ContactProfileTab({
 
       <RelationshipsSection contactId={contactId} contactName={contactName} milestones={milestones} />
 
-      <ProfileFactsPanel
+      <ProfileSections
         categories={factCategories}
         entries={factEntries}
+        showPinned
         onSaveEntry={(data) => upsertEntry.mutate(data)}
         onDeleteEntry={(id) => deleteEntry.mutate(id)}
         onTogglePin={handleTogglePin}
@@ -148,7 +149,7 @@ export function ContactProfileTab({
             }}
           />
         )}
-      </ProfileFactsPanel>
+      </ProfileSections>
 
       <LifeEventsStrip contactId={contactId} />
 
