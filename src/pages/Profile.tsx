@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { User } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { SEOHead } from "@/components/SEOHead";
 import { useProfile } from "@/hooks/useProfile";
 import { ProfileSections } from "@/components/profile/ProfileSections";
