@@ -37,8 +37,10 @@ One registry table, `profile_fields`: canonical label, category, cardinality (si
 A `BEFORE INSERT OR UPDATE` trigger on `profile_entries`:
 
 - rewrites any synonym to its canonical label;
-- rejects a label that is in neither list — the write does not silently land under an invented name; it is routed to the review queue as an unknown-field item instead;
+- rejects a label that is in neither list — the write does not silently land under an invented name; it is routed to the review queue as an **unknown-field suggestion** instead;
 - enforces cardinality: a `single` field can hold one row per subject, a `list` field accumulates values in one row.
+
+For unknown-field suggestions, the row is **not** pre-written to the profile. It sits in the review queue as a proposal. **Keep** writes it (under the canonical label you choose, or as a newly approved field). **Rollback** deletes the suggestion. This is the only item type that changes the current "already applied" queue semantics, and it is what guarantees garbage labels can never enter the profile silently.
 
 Because this is a trigger, no future prompt change, edge function or component can reintroduce `Other occupation`. That is the concrete reason this one lasts where the earlier ones did not.
 
