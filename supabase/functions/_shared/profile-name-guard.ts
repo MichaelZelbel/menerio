@@ -39,9 +39,26 @@ function norm(s: string): string {
   return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/** Latin + CJK + Cyrillic + Hangul + spacing/punctuation used in real names. */
+/** Scripts real names are written in, plus spacing/punctuation. */
 const NAME_SAFE_RE =
-  /^[\p{Script=Latin}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}\p{M}\p{Zs}'’\-.·]+$/u;
+  /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}\p{M}\p{Zs}'’\-.·]+$/u;
+
+/**
+ * A name is written in ONE alphabet. "yaunderε" (Latin + a stray Greek
+ * letter) is transcription noise, not a nickname — while a fully Greek or
+ * fully Cyrillic name stays valid.
+ */
+function hasMixedAlphabets(value: string): boolean {
+  const scripts = [
+    /\p{Script=Latin}/u,
+    /\p{Script=Greek}/u,
+    /\p{Script=Cyrillic}/u,
+  ].filter((re) => re.test(value));
+  return scripts.length > 1;
+}
+
+/** Name particles that legitimately produce an internal capital letter. */
+const NAME_PARTICLE_RE = /^(mc|mac|o'|fitz|de|di|da|del|van|von|le|la|du|st\.?)/i;
 
 /** Looks like an account handle rather than a name. */
 function isHandleShaped(value: string): boolean {
@@ -49,8 +66,9 @@ function isHandleShaped(value: string): boolean {
   if (/^@/.test(v)) return true;
   if (/[_/\\]|https?:\/\//i.test(v)) return true;
   if (/\d/.test(v) && !/^\p{Lu}/u.test(v)) return true;
-  // CamelCase mash with no space: "ChocolaJoy", "DarkSoulz99"
-  if (!/\s/.test(v) && v.length >= 7 && /\p{Ll}\p{Lu}/u.test(v)) return true;
+  // CamelCase mash with no space: "ChocolaJoy", "DarkSoulz99".
+  // "McDonald", "DiCaprio" and friends are exempted by NAME_PARTICLE_RE.
+  if (!/\s/.test(v) && v.length >= 7 && /\p{Ll}\p{Lu}/u.test(v) && !NAME_PARTICLE_RE.test(v)) return true;
   return false;
 }
 
@@ -87,7 +105,7 @@ export function guardNameValue({
 
   // Mixed-script junk ("yaunderε" — Latin + a stray Greek letter) or symbols
   // that never appear in a written name: OCR/transcription noise.
-  if (!NAME_SAFE_RE.test(cleaned)) {
+  if (!NAME_SAFE_RE.test(cleaned) || hasMixedAlphabets(cleaned)) {
     if (isHandleShaped(cleaned)) {
       return { action: "relabel", label: "Online handle", value: cleaned, reason: "handle_shaped" };
     }
