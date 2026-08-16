@@ -27,7 +27,6 @@ import {
 import {
   loadProfileFields,
   ProfileFieldsRegistry,
-  resolveProfileLabel,
 } from "../_shared/profile-fields-registry.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
 import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
@@ -1784,25 +1783,7 @@ async function generateProfileSuggestions(
       );
 
       const ownerLabelName = target.is_self ? "your" : `${target.canonical_name}'s`;
-      // Near-duplicate resolution against the live data: if this label means
-      // the same thing as a registry field or a label already stored for this
-      // subject, rewrite it. A duplicate must never reach the review queue.
-      let factLabel = fact.label;
-      let isUnknownLabel = Boolean((fact as any)._unknownLabel);
-      const resolvedLabel = await resolveProfileLabel(supabase, {
-        userId,
-        contactId: target.contact_id,
-        categoryId: catRow?.id || null,
-        categorySlug: fact.category_slug,
-        label: fact.label,
-      });
-      if (resolvedLabel) {
-        if (resolvedLabel.toLowerCase() !== factLabel.toLowerCase()) {
-          console.log(`[profile-extract] Resolved near-duplicate label "${factLabel}" → "${resolvedLabel}"`);
-        }
-        factLabel = resolvedLabel;
-        isUnknownLabel = false;
-      }
+      const isUnknownLabel = Boolean((fact as any)._unknownLabel);
 
       if (isUnknownLabel) {
         // Unknown labels in structured categories become a "new field proposal"
@@ -1812,7 +1793,7 @@ async function generateProfileSuggestions(
           user_id: userId,
           source_note_id: noteId,
           suggestion_type: "unknown_profile_field",
-          title: `New profile field: ${factLabel}`,
+          title: `New profile field: ${fact.label}`,
           description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
           payload: {
             contact_id: target.contact_id,
@@ -1820,25 +1801,25 @@ async function generateProfileSuggestions(
             is_owner: target.contact_id === null,
             category_slug: fact.category_slug,
             category_id: catRow?.id || null,
-            label: factLabel,
-            canonical_label: factLabel,
+            label: fact.label,
+            canonical_label: fact.label,
             value: effectiveValue,
             evidence_quote: factSourceQuote,
           },
           status: "pending_review",
           target_entity_type: "profile_entry",
           source_title: noteTitle,
-          extracted_value: `${factLabel}: ${effectiveValue}`,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
           confidence_score: 0.2,
           is_sensitive: isSensitiveSuggestion("unknown_profile_field", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
-          suppression_key: buildSuppressionKey("unknown_profile_field", target.contact_id ? "contact" : "owner", target.contact_id, `${factLabel}:${effectiveValue}`),
+          suppression_key: buildSuppressionKey("unknown_profile_field", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
         });
       } else {
         suggestions.push({
           user_id: userId,
           source_note_id: noteId,
           suggestion_type: "add_profile_entry",
-          title: `Add to ${ownerLabelName} profile: ${factLabel}`,
+          title: `Add to ${ownerLabelName} profile: ${fact.label}`,
           description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
           payload: {
             contact_id: target.contact_id,
@@ -1846,19 +1827,19 @@ async function generateProfileSuggestions(
             is_owner: target.contact_id === null,
             category_slug: fact.category_slug,
             category_id: catRow?.id || null,
-            label: factLabel,
+            label: fact.label,
             value: effectiveValue,
             evidence_quote: factSourceQuote,
           },
           status: "pending_review",
           target_entity_type: "profile_entry",
           source_title: noteTitle,
-          extracted_value: `${factLabel}: ${effectiveValue}`,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
           confidence_score: isSoftSignal
             ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
             : DEFAULT_CONFIDENCE.add_profile_entry,
           is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
-          suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${factLabel}:${effectiveValue}`),
+          suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
         });
       }
     }
