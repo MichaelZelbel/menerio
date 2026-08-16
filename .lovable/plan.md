@@ -1,47 +1,73 @@
-# Fix "Add fact" on person profiles
+# Fix: confusing profile labels and broken multi-value rendering
 
-## What actually happened with Yumei's email
+## What is actually wrong (verified against Yumei's live rows)
 
-Verified against the live database and edge logs:
+Her Identity & Basics rows today:
 
-- At 23:05:54 the classifier ran for your fact and returned a proposal (category "Communication Style", label "Email").
-- No write ever followed. `normalize-profile` only logged its automatic cleanup passes at 23:06 / 23:10 — no `write_profile_entry` call. There is no row containing `hi14miau@gmail.com` anywhere in `profile_entries` or the review queue.
+```text
+Nickname          Yumi, Yume, Mimi, Chocola      <- 4 values crammed into one row
+Name alias        Yume
+Name alias        Mimi
+Name alias        Chocola
+Name alias        ChocolaJoy
+Alternative name  mimi
+Alternative name  yumi
+Alternative name  yaunderε
+Japanese name     Yumei
+Brazilian name    Yasmin
+Full name         Yumei
+Life events       Started working at age 14, moved out at 16
+Life history      Started working at age 14, moved out at 16   <- duplicate label pair
+```
 
-So nothing was saved. The quick-add box is a **two-step** control: first Enter classifies and shows a chip, a second Enter saves. The chip reads like a confirmation ("Communication Style · Email" + the value), so it looks finished when it is actually still a draft. That is the bug you hit.
+Three separate defects:
 
-Two more real defects found while tracing this:
+1. **Same fact stored under three different labels.** "Name alias" and "Alternative name" are not in the canonical alias list for `Nickname`, so the write-time canonicalizer let them through as new labels. They are nicknames.
+2. **Rendering is inconsistent per surface.** The bulleted-list rule exists (`src/lib/profile-list-labels.ts`) but only `CompactCategorySection` uses it. Pinned chips, the fact-add preview and the export path each print the raw comma string. And even inside the section, four `Name alias` rows render as four separate rows instead of one bulleted list — because grouping is per row, not per label.
+3. **Junk values are accepted.** `yaunderε` (mixed Latin/Greek, an encoding-mangled handle) and `ChocolaJoy` (an account name, not a nickname) passed the extractor unchallenged.
 
-- **Silent phantom saves.** When a database dedup trigger swallows an insert (it returns NULL instead of a row), the backend still reports `inserted` and the UI toasts "Entry saved" while nothing was written. Same failure mode you would have hit even if you had pressed Enter twice and the value collided with an existing row.
-- **Duplicate category sections.** Yumei has two "Identity & Basics" and two "Communication Style" category rows (created 2026-05-19 and 2026-07-12). The profile renders one section per row, which is a large part of why the profile is hard to navigate.
+## The fix
 
-## Where an email belongs
+### 1. One renderer for every profile value (kills defect 2 permanently)
 
-In the current 17-category taxonomy the contact-channel category is **Communication Style** — it already owns the canonical labels Email, Phone, Preferred channel, Social handle, Website. The classifier was right; the category *name* is wrong. It will be renamed to **Contact & Communication**, so email/phone obviously live there, and communication *style* facts stay welcome in the same place.
+New `src/components/profile/ProfileValue.tsx` — the only place a profile value is ever turned into pixels. It takes `label` + `values[]` and renders a bulleted list for 2+ items, plain text for one. Rewire `CompactCategorySection`, `PinnedHighlights`, `QuickAddFact`'s preview and the profile export to call it. A rendering test asserts every surface bullets a multi-value field, so this cannot regress again.
 
-## What to build
+### 2. Group rows by canonical label
 
-1. **Make saving explicit and unmistakable.**
-   - The proposal renders as a clearly unsaved draft: label it "Not saved yet — review and save", with visible **Save** and **Discard** buttons next to the chip (Enter still saves, Esc still discards).
-   - After saving, show the destination in the toast: `Saved to Contact & Communication · Email`, and briefly highlight the new fact in its section.
+`CompactCategorySection` groups entries by their canonical label before rendering. Four `Name alias` rows plus the comma-packed `Nickname` row collapse into a single `Nickname` block with one bullet per distinct value. Edit/delete/pin stay per underlying row (each bullet keeps its own hover actions), so nothing becomes uneditable.
 
-2. **Never report a save that did not happen.**
-   - In `normalize-profile`'s `writeProfileEntrySafely`, when the insert returns no row, re-query for the row that absorbed the value. If a row is found, return `absorbed` with its id; if nothing is found, return `ok: false` with an honest reason instead of `inserted`.
-   - The hook surfaces the outcome: saved / added to an existing entry / not saved (with reason).
+### 3. Close the label loophole at write time
 
-3. **Stop mangling emails, URLs and handles.**
-   - The value tokenizer splits `hi14miau@gmail.com` into `hi14miau`, `gmail`, `com`, which lets subset/duplicate logic suppress or rewrite contact details. Emails, URLs and `@handles` will be treated as atomic tokens in both the SQL tokenizer and the shared TypeScript dedup helper.
+- Extend the canonical schema (`supabase/functions/_shared/profile-canonical-schema.ts`): `name alias`, `alternative name`, `other name`, `also called`, `goes by online`, `username` variants map onto `Nickname`.
+- Localized birth names stay meaningful and are **not** folded into Nickname: `Japanese name` / `Brazilian name` / `Chinese name` canonicalize to `Name (Japanese)`, `Name (Brazilian)` etc. under Identity.
+- Add a **label gate**: any label the extractor invents that is not canonical and not an accepted alias no longer writes silently. It is written under the closest canonical label when the mapping is unambiguous, otherwise it goes to the review queue as a `new_profile_label` item for you to accept or reject. This is what stops new confusing labels appearing forever.
 
-4. **One section per category.**
-   - Rename the `communication` category to "Contact & Communication" (schema + taxonomy + existing rows).
-   - Merge duplicate category rows per (contact, slug): keep the oldest, move entries onto it, delete the empties. Add a unique index on (user_id, contact_id, slug) so duplicates cannot come back, and make `ensureProfileCategory` reuse instead of insert.
+### 4. Value-quality guard for name-type fields
 
-5. **Faster, cheaper classification for obvious facts.**
-   - The deterministic pre-pass missed "Emails Address" (only "email address" is an alias), so it paid for a slow LLM round-trip. Alias matching becomes plural- and punctuation-tolerant, and an email/phone/URL-shaped value routes straight to its canonical label with no LLM call.
+A deterministic guard (extends the existing skill-guard pattern) applied to `Nickname` and other name labels:
+
+- reject values mixing scripts mid-word or containing stylized/homoglyph characters (`yaunderε`, `unιkιttყ`) — those route to `Social handle` / `Username` instead of `Nickname`;
+- reject values that differ from an existing value only by case or whitespace (`mimi` vs `Mimi`);
+- reject values that are a platform account string (contains a service-y suffix, `@`, a URL, or digits) as a nickname.
+
+### 5. Backfill the existing mess
+
+One migration that, for all users:
+
+- relabels `Name alias` / `Alternative name` / `Aka` / `Other name` rows to `Nickname`;
+- relabels `Japanese name` / `Brazilian name` to `Name (Japanese)` / `Name (Brazilian)`;
+- collapses case-duplicate values, splits comma-packed values on accumulator labels into one row per value;
+- removes duplicate label pairs like `Life events` / `Life history` (keeps `Life events`);
+- moves stylized/handle-shaped nickname values to `Social handle`.
+
+Values I judge as genuinely wrong for Yumei — `yaunderε` and `ChocolaJoy` — are deleted rather than moved, since neither is a nickname you use.
 
 ## Technical notes
 
-- Frontend: `src/components/people/profile/QuickAddFact.tsx` (draft state + Save/Discard + outcome toast), `src/hooks/useContactProfile.ts` (outcome-aware toast), `src/lib/profile-categories.ts` (`ensureProfileCategory` reuse), `src/lib/profile-taxonomy.ts` (category rename).
-- Backend: `supabase/functions/normalize-profile/index.ts` (`writeProfileEntrySafely` absorbed-row lookup), `supabase/functions/_shared/profile-canonical-schema.ts` (alias normalization, value-shape routing), `supabase/functions/classify-profile-fact/index.ts` (category display name, deterministic shortcuts).
-- Migration: atomic-token fix in `profile_tokenize_value`, category rename, duplicate-category merge, unique index on (user_id, contact_id, slug).
-- Tests: unit tests for atomic-token handling, alias tolerance ("Emails Address" → Email), and the absorbed-vs-not-saved outcome; a component test asserting the proposal is not treated as saved until Save is pressed.
-- After the fix I will add your email to Yumei's profile through the UI and confirm the row exists in the database.
+- Files: `src/components/profile/ProfileValue.tsx` (new), `src/components/people/profile/CompactCategorySection.tsx`, `src/components/people/profile/PinnedHighlights.tsx`, `src/components/people/profile/QuickAddFact.tsx`, `src/lib/profile-list-labels.ts`, `supabase/functions/_shared/profile-canonical-schema.ts`, `supabase/functions/_shared/profile-name-guard.ts` (new), `supabase/functions/process-note/index.ts`, `supabase/functions/normalize-profile/index.ts`, `src/pages/ReviewQueue.tsx` (new `new_profile_label` type).
+- One migration for the backfill above.
+- Tests: label canonicalization (alias → `Nickname`), name-value guard (script mixing, case dupes, handle shapes), and rendering tests asserting bulleted output on all four surfaces.
+
+## Verification before I report done
+
+Query Yumei's `profile_entries` after the migration and confirm a single `Nickname` row set with clean values, no `Name alias` / `Alternative name` rows, no `yaunderε` / `ChocolaJoy`; then load her profile in a browser and confirm the Identity section renders one `Nickname` block as a bulleted list.
