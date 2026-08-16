@@ -1,41 +1,56 @@
-# Honest answer first: No — not 100% yet
+# Profile data: replace label dedup with a fixed-schema fact model
 
-The closed-vocabulary trigger only catches labels that are in a **hand-written synonym list**. Anything outside that list is not recognized as a duplicate — it becomes a "New profile field" suggestion in your review queue, which silently makes *you* the duplicate checker. That is exactly what you don't want, and it is a gap, not a success.
+## Why the current concept failed
 
-There is currently **no fuzzy matching, no semantic matching, and no cross-label value check** when a new label appears. "Second job" / "Additional work" / "Other occupation" were only stopped because someone typed those three strings into a list.
+The current system deduplicates **labels**. Your example is not a label duplicate:
 
-# Fix: never ask the user about duplicates
+```text
+Age moved out: 16              (label A, value "16")
+Life events: moved out at 16   (label B, value "moved out at 16")
+```
 
-## 1. Deterministic near-duplicate resolver (database, runs on every write)
+Different labels, different value strings, same fact. No label matcher can catch that, so the approach is structurally incapable of solving the problem. The same pattern shows up elsewhere on this profile today: `Wants` overlaps `Pet wish` and `Desired VRChat upgrade`; `Favorite food item` overlaps `Favorite snacks` and `Favorite desserts`. Every fix so far added another matcher on top of a model that lets the AI invent a new label whenever it wants.
 
-Before any label is accepted, it is matched against every label that already exists for that person and every canonical label in the registry, using:
+## The better concept: no invented labels, ever
 
-- normalized form (lowercase, punctuation stripped, plurals/stopwords removed, word order ignored)
-- trigram similarity (`pg_trgm`) above a strict threshold
-- token-overlap on meaning-bearing words ("second job" vs "other occupation" → both reduce to occupation tokens)
+Stop treating the label as free text produced by the AI. A profile becomes a **fixed schema of fields**, and every extracted fact must land in one of them.
 
-A match rewrites the label to the existing one and merges the values. No review item is created.
+1. **Closed field catalog.** One curated list of fields per category (roughly 80-120 total), each with a type: single-value (Occupation, Birthday, Email), list (Favorite foods, Skills), or event (Life events). The list lives in one file and is mirrored into the database.
+2. **The AI never names a field.** Extraction is given the catalog and must pick a field ID from it. If nothing fits, the fact goes to the catch-all field for that category (e.g. `Life events`, `Other notes`) — it never creates `Age moved out`. This alone removes the entire class of problem you keep hitting.
+3. **Facts, not strings.** Each fact is stored as `field_id + normalized value + optional qualifiers (age / date / place) + source quote`. "moved out at 16" becomes `Life events: moved out (age 16)`. "Age moved out: 16" cannot exist, because `Age moved out` is not a field; the age is a qualifier, not a field.
+4. **One fact key per fact.** A deterministic key is computed from `field_id + normalized content tokens + qualifier`. Same key = same fact, so the second write updates the first instead of adding a row. Because the age moved into a qualifier, both of your rows now collapse to the same key automatically — deterministically, no LLM involved.
+5. **Cross-field guard for the remaining cases.** Before a fact is written, it is checked against the existing facts of the same person that share content tokens. If an existing fact contains it, the write is dropped; if it extends it, the existing row is replaced. Only genuinely ambiguous cases go to a single adjudication step — and the result is written, not queued to you.
+6. **Rendering is derived, not stored.** One renderer per field type: single value inline, lists as bullets, events as a dated/aged timeline. There is no per-surface formatting logic left to drift.
 
-## 2. Value-first collapse (catches labels that differ but say the same thing)
+## What I can and cannot guarantee
 
-If the incoming value is identical to, or a subset of, a value already stored on the same person in the same category, the write is absorbed into the existing entry regardless of the label — the existing label wins. This kills "Second job: Private bakery service" / "Additional work: Private bakery service" even if step 1 misses the wording.
+Guaranteed, because it is deterministic and enforced in the database:
 
-## 3. LLM adjudication only for the residual, and only server-side
+- No label outside the catalog can ever be stored — a write with an unknown field is rejected, not queued to you.
+- No two rows with the same fact key can coexist (unique constraint).
+- No duplicate value inside a list field.
+- Rendering is uniform everywhere (single renderer, covered by tests).
 
-If steps 1 and 2 find no match, the extractor makes one cheap call that receives the full list of labels already used for that person plus the canonical registry, and must answer either "this is label X" or "genuinely new field". The user is never asked.
+Not guaranteed with a mathematical promise: two facts that share **no** tokens and **no** field (e.g. "grew up in Recife" vs "childhood in northeast Brazil"). The catalog + qualifier model shrinks this to a narrow residue, and the containment check catches most of it, but I will not claim 100% on paraphrase. I would rather say that now than tell you it is solved again.
 
-## 4. What actually reaches the review queue
+## Migration of existing data
 
-Only labels that survive all three gates — i.e. genuinely new concepts. The queue never contains a question of the form "is this a duplicate?". Keep = the field exists; Rollback = discarded.
-
-## 5. Retroactive cleanup
-
-A background sweep runs the same resolver over all existing profile entries, merging duplicate label clusters and collapsing duplicated values, so profiles that are already messy get repaired without manual work.
+- Map every existing label to a catalog field; anything unmappable becomes a `Life events` / `Other notes` fact with its qualifier extracted.
+- Recompute fact keys for all rows and collapse collisions, keeping the longest-sourced value.
+- One-off report of what merged, so you can spot-check.
 
 ## Technical notes
 
-- Enable `pg_trgm`; add `public.profile_resolve_label(_user_id, _contact_id, _category, _label)` returning the label to use, called from `profile_entry_canonicalize` before the existing canonical/registry logic.
-- Extend `profile_entries_prevent_duplicate_fact` with cross-label, same-category value containment.
-- `_shared/profile-fields-registry.ts` gains `resolveLabel()` so `process-note`, `normalize-profile` and `review-queue-bulk` all share one resolution path.
-- Sweep implemented as a background action on `normalize-profile` using `EdgeRuntime.waitUntil`, batched per contact.
-- Verification: query live rows for Yumei and the owner profile after the sweep and confirm zero near-duplicate label clusters remain, plus a regression test set of the known bad pairs.
+- `profile_fields` becomes the authoritative catalog (`field_id`, category, type, aliases, qualifier rules); a DB trigger rejects any `profile_entries` row whose field is not in it — no auto-creation path remains.
+- New columns on `profile_entries`: `field_id`, `qualifiers jsonb`, `fact_key text`, with `unique (contact_id, fact_key)`.
+- Qualifier extraction (age/date/place) is deterministic regex + a normalization function, applied in the trigger so it holds regardless of which edge function writes.
+- `process-note` and `normalize-profile` are changed to emit `field_id + value + qualifiers`; the "propose a new label" path and its review-queue item type are deleted.
+- Rendering consolidates on `ProfileValue` / `ProfileSections` with one branch per field type.
+- A test suite asserts the invariants above, including the exact case from your report.
+
+## Rollout
+
+1. Catalog + schema + trigger, with the old path still writing (shadow mode).
+2. Migrate and collapse existing data, produce the merge report.
+3. Switch extraction to field IDs, remove label invention and its review-queue type.
+4. Rendering consolidation + invariant tests.
