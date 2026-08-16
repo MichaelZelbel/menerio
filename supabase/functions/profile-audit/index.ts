@@ -37,7 +37,7 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const MAX_ROUNDS = 3;
+const MAX_ROUNDS = 6;
 const CALL_SITE = "profile-audit.main";
 
 function auditDefaults() {
