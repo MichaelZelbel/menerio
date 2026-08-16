@@ -1,6 +1,5 @@
 import { authenticateHubKey } from "../_shared/hub-auth.ts";
 import { json, errorJson, handleOptions } from "../_shared/hub-helpers.ts";
-import postgres from "https://esm.sh/postgres@3.4.4";
 import { MIGRATION_B64 } from "./migration-sql.ts";
 
 /**
@@ -41,6 +40,17 @@ Deno.serve(async (req) => {
   const migration = new TextDecoder().decode(
     Uint8Array.from(atob(MIGRATION_B64), (c) => c.charCodeAt(0)),
   );
+
+  // Imported here rather than at the top so a driver that fails to load returns
+  // a readable message instead of a bare "Internal Server Error" from the
+  // runtime, which is what a failed top-level import produces.
+  let postgres: (url: string, opts?: Record<string, unknown>) => any;
+  try {
+    const mod = await import("https://deno.land/x/postgresjs@v3.4.4/mod.js");
+    postgres = (mod.default ?? mod) as typeof postgres;
+  } catch (err) {
+    return errorJson("NO_DRIVER", `Could not load the postgres driver: ${(err as Error).message}`, 500);
+  }
 
   const client = postgres(dbUrl, { max: 1, prepare: false });
   try {
