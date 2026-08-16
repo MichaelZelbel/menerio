@@ -225,11 +225,13 @@ async function finish(
   patch: Record<string, unknown>,
   stats: { applied: number; removed: number },
 ) {
-  const { count } = await db
+  let cq = db
     .from("profile_entries")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .is("contact_id", contactId === null ? null : undefined);
+    .eq("user_id", userId);
+  cq = contactId ? cq.eq("contact_id", contactId) : cq.is("contact_id", null);
+  const { count } = await cq;
+
 
   await upsertRun(db, userId, contactId, {
     ...patch,
