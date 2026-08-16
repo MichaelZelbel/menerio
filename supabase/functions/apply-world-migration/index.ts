@@ -53,6 +53,52 @@ Deno.serve(async (req) => {
   }
 
   const client = postgres(dbUrl, { max: 1, prepare: false });
+
+  // POST /apply-world-migration/selftest proves the guard actually holds against
+  // the real database, inside one transaction that is always rolled back, so it
+  // leaves nothing behind. Asserting a trigger works without running it is the
+  // failure this whole check exists to avoid.
+  if (new URL(req.url).pathname.endsWith("/selftest")) {
+    try {
+      const observed: Record<string, unknown> = {};
+      await client.begin(async (tx: any) => {
+        const [cat] = await tx`
+          select id from profile_categories where user_id = ${auth.userId} limit 1`;
+        if (!cat) throw new Error("no profile category to test against");
+
+        const [row] = await tx`
+          insert into profile_entries (user_id, category_id, label, value, origin)
+          values (${auth.userId}, ${cat.id}, 'world guard test', 'the human value', 'user_manual')
+          returning id, value, rank`;
+        observed.after_human_insert = { value: row.value, rank: row.rank };
+
+        await tx`
+          update profile_entries
+          set value = 'a machine overwrote it', label = 'machine label', origin = 'ai_note'
+          where id = ${row.id}`;
+        const [afterUpdate] = await tx`
+          select value, label, rank, origin from profile_entries where id = ${row.id}`;
+        observed.after_machine_update = afterUpdate;
+
+        await tx`delete from profile_entries where id = ${row.id}`;
+        const [{ n }] = await tx`
+          select count(*)::int as n from profile_entries where id = ${row.id}`;
+        observed.survived_machine_delete = n === 1;
+
+        // Nothing above is kept. The test must not add a fact to anyone's life.
+        throw new Error("ROLLBACK_ON_PURPOSE");
+      }).catch((e: Error) => {
+        if (e.message !== "ROLLBACK_ON_PURPOSE") throw e;
+      });
+
+      return json({ data: { selftest: true, observed } });
+    } catch (err) {
+      return errorJson("SELFTEST_FAILED", (err as Error).message, 500);
+    } finally {
+      await client.end({ timeout: 5 });
+    }
+  }
+
   try {
     await client.unsafe(migration);
 
