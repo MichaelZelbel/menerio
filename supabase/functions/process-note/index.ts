@@ -1413,7 +1413,7 @@ async function generateProfileSuggestions(
       category_slug: string;
       label: string;
       value: string;
-      source_quote: string;
+      source_quote?: string;
     }> = [];
     let extractedRelationships: Array<{
       person_a: string;
