@@ -63,6 +63,45 @@ interface CompactCategorySectionProps {
   showScope?: boolean;
 }
 
+type LabelGroup = {
+  key: string;
+  label: string;
+  items: { entry: ContactProfileEntry; value: string }[];
+};
+
+/**
+ * Collapse entries that mean the same thing into one row: rows are grouped by
+ * their canonical display label ("Name alias" → "Nickname") and comma-packed
+ * values are exploded into individual items, deduplicated case-insensitively.
+ * This is what makes a multi-value field render as one bulleted list instead
+ * of several near-identical rows.
+ */
+export function groupEntriesByLabel(entries: ContactProfileEntry[]): LabelGroup[] {
+  const groups = new Map<string, LabelGroup>();
+  const seen = new Map<string, Set<string>>();
+
+  for (const entry of entries) {
+    const label = displayLabel(entry.label);
+    const key = label.trim().toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, { key, label, items: [] });
+      seen.set(key, new Set());
+    }
+    const group = groups.get(key)!;
+    const seenValues = seen.get(key)!;
+    for (const value of splitProfileValues(entry.label, entry.value)) {
+      const vKey = value.trim().toLowerCase();
+      if (!vKey || seenValues.has(vKey)) continue;
+      seenValues.add(vKey);
+      group.items.push({ entry, value });
+    }
+  }
+
+  return [...groups.values()].filter((g) => g.items.length > 0);
+}
+
+
+
 function Highlighted({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
   const segments = highlightSegments(text, query);
