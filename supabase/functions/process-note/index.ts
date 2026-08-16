@@ -1395,6 +1395,11 @@ async function generateProfileSuggestions(
       return;
     }
 
+    // Load the user's effective profile-field vocabulary so extraction respects
+    // fields they have already approved via the review queue.
+    const profileFieldsRows = await loadProfileFields(supabase, userId);
+    const profileFieldsRegistry = new ProfileFieldsRegistry(profileFieldsRows);
+
     const peopleList = matchedPeople.map((p) => p.canonical_name).join(", ");
     const cleanContent = stripHtmlIfNeeded(noteContent);
     const noteDateLine = noteDateISO ? `\nNote date: ${noteDateISO}` : "";
