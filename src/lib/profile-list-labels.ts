@@ -44,7 +44,19 @@ const SINGLE_FACT_LABELS: ReadonlySet<string> = new Set(
     "Phone",
     "Email",
     "Website",
+    // Single-valued location fields: "Frankfurt am Main, Germany" is one
+    // place, not two.
+    "Current city",
+    "Current country",
+    "Current street",
+    "Previous city",
+    "Postal code",
+    "Living situation",
+    "Nationality",
+    "Gender",
+    "Relationship status",
   ].map(norm),
+
 );
 
 /**
