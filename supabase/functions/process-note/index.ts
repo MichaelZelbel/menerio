@@ -20,10 +20,12 @@ import {
   blockedLabelAsRelationship,
   canonicalProfileLabel,
   correctProfileCategory,
+  isKnownCanonicalLabel,
   isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
+import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
 
 import {
   applyNormalization,
@@ -1793,9 +1795,13 @@ async function generateProfileSuggestions(
         target_entity_type: "profile_entry",
         source_title: noteTitle,
         extracted_value: `${fact.label}: ${effectiveValue}`,
-        confidence_score: isSoftSignal
-          ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
-          : DEFAULT_CONFIDENCE.add_profile_entry,
+        confidence_score: (fact as any)._unknownLabel
+          // Unknown label → never auto-applied; sits in the review queue so
+          // the user (not the extractor) decides whether a new field is real.
+          ? 0.2
+          : isSoftSignal
+            ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
+            : DEFAULT_CONFIDENCE.add_profile_entry,
         is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
         suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
       });
