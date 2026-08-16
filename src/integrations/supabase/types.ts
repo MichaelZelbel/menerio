@@ -2527,6 +2527,118 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_audit_merges: {
+        Row: {
+          contact_id: string | null
+          created_at: string
+          id: string
+          kept_entry_id: string | null
+          kept_label: string | null
+          kept_value: string | null
+          reason: string | null
+          removed: Json
+          rolled_back_at: string | null
+          run_id: string | null
+          user_id: string
+        }
+        Insert: {
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          kept_entry_id?: string | null
+          kept_label?: string | null
+          kept_value?: string | null
+          reason?: string | null
+          removed?: Json
+          rolled_back_at?: string | null
+          run_id?: string | null
+          user_id: string
+        }
+        Update: {
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          kept_entry_id?: string | null
+          kept_label?: string | null
+          kept_value?: string | null
+          reason?: string | null
+          removed?: Json
+          rolled_back_at?: string | null
+          run_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_audit_merges_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "profile_audit_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profile_audit_runs: {
+        Row: {
+          completed_at: string | null
+          contact_id: string | null
+          contact_key: string | null
+          created_at: string
+          dirty_at: string
+          entry_count: number
+          findings: Json
+          id: string
+          last_error: string | null
+          merged_count: number
+          rounds: number
+          started_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          contact_id?: string | null
+          contact_key?: string | null
+          created_at?: string
+          dirty_at?: string
+          entry_count?: number
+          findings?: Json
+          id?: string
+          last_error?: string | null
+          merged_count?: number
+          rounds?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          contact_id?: string | null
+          contact_key?: string | null
+          created_at?: string
+          dirty_at?: string
+          entry_count?: number
+          findings?: Json
+          id?: string
+          last_error?: string | null
+          merged_count?: number
+          rounds?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_audit_runs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_categories: {
         Row: {
           contact_id: string | null
@@ -4057,6 +4169,25 @@ export type Database = {
       mcp_sensitive_person_ids: {
         Args: { _user_id: string }
         Returns: string[]
+      }
+      profile_audit_apply_merge: {
+        Args: {
+          _keep_id: string
+          _label: string
+          _reason: string
+          _remove_ids: string[]
+          _run_id: string
+          _value: string
+        }
+        Returns: Json
+      }
+      profile_audit_mark_dirty: {
+        Args: { _contact_id: string; _user_id: string }
+        Returns: undefined
+      }
+      profile_audit_rollback_merge: {
+        Args: { _merge_id: string }
+        Returns: Json
       }
       profile_canonical_label: { Args: { t: string }; Returns: string }
       profile_dedup_sweep: {
