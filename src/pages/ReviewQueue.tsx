@@ -1130,6 +1130,28 @@ export default function ReviewQueue() {
                     </CardContent>
                   );
                 })()}
+                {item.suggestion_type === "unknown_profile_field" && (() => {
+                  const p = item.payload as any;
+                  return (
+                    <CardContent className="space-y-3">
+                      <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          New field proposal
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">
+                            {p?.canonical_label || p?.label || "Unknown field"}
+                          </span>
+                          <Badge variant="secondary" className="text-[10px]">{p?.category_slug || "—"}</Badge>
+                        </div>
+                        <p className="text-sm text-foreground">{p?.value || item.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Keeping this will create the field and add the value to the profile. Roll Back discards the suggestion.
+                        </p>
+                      </div>
+                    </CardContent>
+                  );
+                })()}
                 {item.suggestion_type === "merge_duplicate_person" && (
                   <CardContent className="space-y-2">
                     <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1">
