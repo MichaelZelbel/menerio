@@ -62,7 +62,7 @@ export function ApiKeysManager() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyScopes, setNewKeyScopes] = useState<string[]>(["profile"]);
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>([]);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -141,7 +141,7 @@ export function ApiKeysManager() {
 
   const resetDialog = () => {
     setNewKeyName("");
-    setNewKeyScopes(["profile"]);
+    setNewKeyScopes([]);
     setGeneratedKey(null);
     setCopied(false);
   };
