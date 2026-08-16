@@ -113,13 +113,10 @@ async function upsertRun(
   contactId: string | null,
   patch: Record<string, unknown>,
 ): Promise<string | null> {
-  const { data: existing } = await db
-    .from("profile_audit_runs")
-    .select("id")
-    .eq("user_id", userId)
-    .is("contact_id", contactId === null ? null : undefined)
-    .eq(contactId ? "contact_id" : "user_id", contactId ?? userId)
-    .maybeSingle();
+  let sel = db.from("profile_audit_runs").select("id").eq("user_id", userId);
+  sel = contactId ? sel.eq("contact_id", contactId) : sel.is("contact_id", null);
+  const { data: existing } = await sel.maybeSingle();
+
 
   if (existing?.id) {
     await db.from("profile_audit_runs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", existing.id);
