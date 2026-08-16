@@ -1316,6 +1316,47 @@ export default function Notes() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    <AlertDialog
+      open={!!promptState}
+      onOpenChange={(open) => { if (!open) setPromptState(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{promptState?.title}</AlertDialogTitle>
+          {promptState?.description && (
+            <AlertDialogDescription>{promptState.description}</AlertDialogDescription>
+          )}
+        </AlertDialogHeader>
+        <Input
+          autoFocus
+          value={promptValue}
+          onChange={(e) => setPromptValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const action = promptState?.onSubmit;
+              const value = promptValue.trim();
+              setPromptState(null);
+              if (action && value) void action(value);
+            }
+          }}
+          placeholder="Folder name"
+        />
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={async () => {
+              const action = promptState?.onSubmit;
+              const value = promptValue.trim();
+              setPromptState(null);
+              if (action && value) await action(value);
+            }}
+          >
+            {promptState?.confirmLabel || "Save"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
