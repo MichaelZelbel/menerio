@@ -110,57 +110,17 @@ export default function Profile() {
               noteCount={noteCount}
               onAccept={(data) => upsertEntry.mutate(data)}
             />
-            {categories.map((cat) => (
-              <CompactCategorySection
-                key={cat.id}
-                category={cat}
-                entries={entries.filter((e) => e.category_id === cat.id) as never}
-                filterQuery=""
-                matches={new Map()}
-                allowPin={false}
-                showScope
-                onSaveEntry={(data) => upsertEntry.mutate(data)}
-                onDeleteEntry={(id) => deleteEntry.mutate(id)}
-                onTogglePin={() => {}}
-                onUpdateCategory={(data) => upsertCategory.mutate(data)}
-                onDeleteCategory={(id) => deleteCategory.mutate(id)}
-              />
-            ))}
-
-            {addingCategory ? (
-              <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Input
-                    placeholder="Category name"
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                    className="text-sm"
-                  />
-                  <Input
-                    placeholder="Icon (e.g. heart)"
-                    value={newCatIcon}
-                    onChange={(e) => setNewCatIcon(e.target.value)}
-                    className="text-sm"
-                  />
-                  <Select value={newCatScope} onValueChange={setNewCatScope}>
-                    <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {SCOPE_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => setAddingCategory(false)}>Cancel</Button>
-                  <Button size="sm" onClick={handleAddCategory} disabled={!newCatName.trim()}>Add</Button>
-                </div>
-              </div>
-            ) : (
-              <Button variant="outline" className="w-full" onClick={() => setAddingCategory(true)}>
-                <Plus className="h-4 w-4 mr-2" /> Add custom category
-              </Button>
-            )}
+            <ProfileSections
+              categories={categories}
+              entries={entries}
+              showScope
+              onSaveEntry={(data) => upsertEntry.mutate(data)}
+              onDeleteEntry={(id) => deleteEntry.mutate(id)}
+              onTogglePin={() => {}}
+              onUpdateCategory={(data) => upsertCategory.mutate(data)}
+              onDeleteCategory={(id) => deleteCategory.mutate(id)}
+              onAddCategory={(data) => upsertCategory.mutate(data)}
+            />
           </TabsContent>
 
           <TabsContent value="instructions" className="mt-4">
