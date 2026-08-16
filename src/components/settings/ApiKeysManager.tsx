@@ -175,7 +175,8 @@ export function ApiKeysManager() {
             <DialogHeader>
               <DialogTitle>Generate API Key</DialogTitle>
               <DialogDescription>
-                Create a new key for an external app. Choose which data it can access.
+                Create a key for a tool. Tick Hub access for an assistant such as Claude or
+                ChatGPT, and the other boxes for the data it may touch.
               </DialogDescription>
             </DialogHeader>
 
