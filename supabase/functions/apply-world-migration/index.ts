@@ -72,9 +72,14 @@ Deno.serve(async (req) => {
           returning id, value, rank`;
         observed.after_human_insert = { value: row.value, rank: row.rank };
 
+        // The evidence quote is required by an older guard: an automated profile
+        // fact must carry the words it came from. A real machine write has one,
+        // so the test supplies one rather than dodging the rule.
         await tx`
           update profile_entries
-          set value = 'a machine overwrote it', label = 'machine label', origin = 'ai_note'
+          set value = 'a machine overwrote it', label = 'machine label',
+              origin = 'ai_note',
+              evidence_quote = 'a sentence a machine claims it read somewhere'
           where id = ${row.id}`;
         const [afterUpdate] = await tx`
           select value, label, rank, origin from profile_entries where id = ${row.id}`;
