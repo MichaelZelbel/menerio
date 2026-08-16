@@ -53,8 +53,8 @@ const INTEGRATIONS: IntegrationDef[] = [
   { key: "singlefile", tab: "singlefile", name: "Web Clipper", description: "Save web pages as Markdown notes", icon: Globe },
   { key: "github", tab: "github", name: "GitHub Sync", description: "Two-way sync with an Obsidian vault", icon: Github },
   { key: "gdrive", tab: "gdrive", name: "Google Drive Scans", description: "Auto-import scans from a Drive folder", icon: HardDrive },
-  { key: "mcp", tab: "mcp", name: "MCP Server", description: "Connect Claude / ChatGPT via MCP tokens", icon: Brain },
-  { key: "apikeys", tab: "apikeys", name: "Hub API Keys", description: "Bearer keys (mnr_) for the Hub REST API", icon: Key },
+  { key: "apikeys", tab: "apikeys", name: "API Keys", description: "One key (mnr_) for Claude, ChatGPT, your hub and the REST API", icon: Key },
+  { key: "mcp", tab: "mcp", name: "MCP Server", description: "The address your AI tool connects to, plus older tokens", icon: Brain },
 ];
 
 export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {

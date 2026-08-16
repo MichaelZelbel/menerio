@@ -30,7 +30,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Loader2, Plus, Copy, Check, Key, Trash2, AlertTriangle } from "lucide-react";
 
+const MCP_URL = "https://mcp.menerio.com";
+
 const ALL_SCOPES = [
+  { value: "hub", label: "Hub access", desc: "Let an assistant such as Claude, ChatGPT or your hub folder read and write this memory." },
   { value: "profile", label: "Profile", desc: "Profile categories, entries, agent instructions" },
   { value: "notes", label: "Notes", desc: "Read/write notes" },
   { value: "contacts", label: "Contacts", desc: "Contacts and interactions" },
@@ -150,7 +153,9 @@ export function ApiKeysManager() {
           <Key className="h-5 w-5" /> API Keys
         </CardTitle>
         <CardDescription>
-          API keys let external apps (like the Profile app) sync with your Menerio data. Each key is scoped to specific data types.
+          One key for everything. Tick <strong>Hub access</strong> and the key also connects Claude,
+          ChatGPT, OpenCode or any other MCP client to <code className="font-mono">{MCP_URL}</code>.
+          The other boxes decide which of your data a key may touch.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

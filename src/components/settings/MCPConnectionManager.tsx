@@ -5,17 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,13 +17,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Copy,
   Check,
   Plug,
@@ -42,13 +24,11 @@ import {
   Key,
   Plus,
   Loader2,
-  AlertTriangle,
   ShieldOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const MCP_URL = "https://mcp.menerio.com";
-const MCP_TOKEN_PREFIX = "mnr_mcp_";
 
 type ToolCategory = {
   category: string;
@@ -168,30 +148,6 @@ type McpApiToken = {
   revoked_at: string | null;
 };
 
-const EXPIRATION_OPTIONS = [
-  { value: "never", label: "Never" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
-  { value: "180", label: "180 days" },
-  { value: "365", label: "365 days" },
-];
-
-function base64Url(bytes: Uint8Array) {
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function sha256Hex(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function generateMcpToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return `${MCP_TOKEN_PREFIX}${base64Url(bytes)}`;
-}
-
 function formatDate(value: string | null) {
   if (!value) return "—";
   return new Date(value).toLocaleDateString();
@@ -210,11 +166,6 @@ export function MCPConnectionManager() {
   const [copied, setCopied] = useState<string | null>(null);
   const [tokens, setTokens] = useState<McpApiToken[]>([]);
   const [loadingTokens, setLoadingTokens] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newTokenName, setNewTokenName] = useState("");
-  const [expiration, setExpiration] = useState("never");
-  const [revealedToken, setRevealedToken] = useState<string | null>(null);
 
   const userId = session?.user?.id;
 
@@ -250,44 +201,6 @@ export function MCPConnectionManager() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const resetCreateDialog = () => {
-    setNewTokenName("");
-    setExpiration("never");
-    setCreating(false);
-  };
-
-  const handleCreateToken = async () => {
-    if (!userId || !newTokenName.trim()) return;
-
-    setCreating(true);
-    const rawToken = generateMcpToken();
-    const tokenHash = await sha256Hex(rawToken);
-    const expiresAt = expiration === "never"
-      ? null
-      : new Date(Date.now() + Number(expiration) * 24 * 60 * 60 * 1000).toISOString();
-
-    const { error } = await supabase.from("mcp_api_tokens" as never).insert({
-      user_id: userId,
-      name: newTokenName.trim().slice(0, 80),
-      token_hash: tokenHash,
-      token_prefix: rawToken.slice(0, 16),
-      expires_at: expiresAt,
-    } as never);
-
-    setCreating(false);
-
-    if (error) {
-      toast.error("Failed to create MCP token");
-      return;
-    }
-
-    setCreateOpen(false);
-    resetCreateDialog();
-    setRevealedToken(rawToken);
-    toast.success("Personal MCP Token created");
-    fetchTokens();
-  };
-
   const handleRevoke = async (tokenId: string) => {
     const { error } = await supabase
       .from("mcp_api_tokens" as never)
@@ -318,13 +231,13 @@ export function MCPConnectionManager() {
   const agentPrompt = useMemo(
     () => `**Set up Menerio as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
 
-**Step 1 — Get my token.** Before anything else, ask me to paste my Personal MCP Token. I'll generate it in Menerio → Settings → MCP Server (starts with \`${MCP_TOKEN_PREFIX}\`) and send it back. Wait for it.
+**Step 1 — Get my key.** Before anything else, ask me to paste my Menerio API key. I'll generate it in Menerio → Settings → API Keys with the box **Hub access** ticked (it starts with \`mnr_\`) and send it back. Wait for it.
 
 **Step 2 — Install the server.** Register Menerio as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
 
 - Transport: HTTP (streamable)
 - URL: \`${MCP_URL}\` *(exactly this — no \`/mcp\`, \`/sse\`, or \`/v1\` suffix)*
-- Auth header: \`Authorization: Bearer <the token I gave you>\`
+- Auth header: \`Authorization: Bearer <the key I gave you>\`
 
 **Step 3 — Save behavior rules.** Ask my permission, then append the following to your **global / user-level** instructions file (e.g. \`~/.claude/CLAUDE.md\`, \`GEMINI.md\`, \`AGENTS.md\`, or your tool's user-scope rules) so they apply in every future session:
 
@@ -357,66 +270,18 @@ export function MCPConnectionManager() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5" /> Personal MCP Tokens
+                <Key className="h-5 w-5" /> Older Personal MCP Tokens
               </CardTitle>
               <CardDescription>
-                Long-lived, revocable tokens for any MCP-compatible AI client.
+                Tokens made before Menerio moved to one key. They still work, and you can still
+                revoke them here. New connections use an API key instead.
               </CardDescription>
             </div>
-            <Dialog
-              open={createOpen}
-              onOpenChange={(open) => {
-                setCreateOpen(open);
-                if (!open) resetCreateDialog();
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button size="sm" disabled={!userId}>
-                  <Plus className="mr-2 h-4 w-4" /> Create token
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create Personal MCP Token</DialogTitle>
-                  <DialogDescription>
-                    Choose a label and optional expiration. The full token is shown only once after creation.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="mcp-token-name">Name</Label>
-                    <Input
-                      id="mcp-token-name"
-                      value={newTokenName}
-                      onChange={(event) => setNewTokenName(event.target.value.slice(0, 80))}
-                      maxLength={80}
-                      placeholder="My laptop"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Expiration</Label>
-                    <Select value={expiration} onValueChange={setExpiration}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EXPIRATION_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button onClick={handleCreateToken} disabled={creating || !newTokenName.trim()}>
-                    {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Create token
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <Button size="sm" variant="outline" asChild className="shrink-0">
+              <a href="/dashboard/settings?tab=apikeys">
+                <Plus className="mr-2 h-4 w-4" /> Make a key
+              </a>
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -429,7 +294,12 @@ export function MCPConnectionManager() {
               <CopyButton text={MCP_URL} id="url" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Only tokens with prefix <code className="font-mono">mnr_mcp_</code> work here (the keys under "Hub API Keys" are for a different API and will be rejected).
+              Use a key from{" "}
+              <a href="/dashboard/settings?tab=apikeys" className="underline text-primary hover:text-primary/80">
+                Settings → API Keys
+              </a>{" "}
+              with <strong>Hub access</strong> ticked. Older <code className="font-mono">mnr_mcp_</code> tokens
+              listed below keep working too.
             </p>
           </div>
 
@@ -439,7 +309,7 @@ export function MCPConnectionManager() {
             </div>
           ) : tokens.length === 0 ? (
             <p className="text-sm text-muted-foreground rounded-md border p-4 text-center">
-              No Personal MCP Tokens yet. Create one to connect an external MCP client.
+              No older MCP tokens. Nothing to do here — make a key under API Keys instead.
             </p>
           ) : (
             <div className="space-y-3">
@@ -492,44 +362,14 @@ export function MCPConnectionManager() {
         </CardContent>
       </Card>
 
-      <Dialog
-        open={Boolean(revealedToken)}
-        onOpenChange={(open) => {
-          if (!open) setRevealedToken(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Your new Personal MCP Token</DialogTitle>
-            <DialogDescription>Copy it now before closing this dialog.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <span className="text-sm font-medium">This is the only time the full token will be shown. Treat it like a password.</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 rounded-md bg-muted p-2 text-xs font-mono break-all select-all border">
-                  {revealedToken}
-                </code>
-                {revealedToken && <CopyButton text={revealedToken} id="new-token" />}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setRevealedToken(null)}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plug className="h-5 w-5" /> Protocol
           </CardTitle>
           <CardDescription>
-            Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint below using a Personal MCP Token from this page.
+            Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint
+            below using an API key with <strong>Hub access</strong>.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -547,7 +387,7 @@ export function MCPConnectionManager() {
 
             <span className="text-muted-foreground">Auth header</span>
             <code className="rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
-              Authorization: Bearer &lt;PROJECT_MCP_TOKEN&gt;
+              Authorization: Bearer &lt;MENERIO_API_KEY&gt;
             </code>
 
             <span className="text-muted-foreground">Required headers</span>
@@ -563,12 +403,12 @@ export function MCPConnectionManager() {
             <span className="text-muted-foreground">Alternate auth</span>
             <span className="text-muted-foreground">
               Clients that can't set custom headers (e.g. ChatGPT custom connectors) can append{" "}
-              <code className="font-mono text-foreground">?key=&lt;PROJECT_MCP_TOKEN&gt;</code> to the URL instead.
+              <code className="font-mono text-foreground">?key=&lt;MENERIO_API_KEY&gt;</code> to the URL instead.
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
             Keep the endpoint exactly as shown — don't append <code className="font-mono">/mcp</code>, <code className="font-mono">/sse</code>, or any other path.
-            The token must start with <code className="font-mono">mnr_mcp_</code>.
+            The key must start with <code className="font-mono">mnr_</code> and carry <strong>Hub access</strong>.
           </p>
         </CardContent>
       </Card>

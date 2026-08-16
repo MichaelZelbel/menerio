@@ -9,6 +9,7 @@ import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
+import { lookupHubKey } from "../_shared/hub-auth.ts";
 import {
   applyVisibility,
   assertWritable,
@@ -26,10 +27,15 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const MCP_TOKEN_PREFIX = "mnr_mcp_";
 const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
+// The API-key scope that lets a key act as a connector key. Same word on the
+// screen ("Hub access") and in every message below, so a refusal names the box.
+const HUB_SCOPE = "hub";
 const INVALID_TOKEN_FORMAT_MESSAGE =
-  "Invalid token format. This MCP server only accepts long-lived personal MCP tokens (prefix `mnr_mcp_`). Create one in Settings → MCP Server.";
-const HUB_KEY_USED_MESSAGE =
-  "You used a Hub API key (prefix `mnr_`). The MCP server needs a separate Personal MCP Token (prefix `mnr_mcp_`). Create one in Menerio → Settings → MCP Server.";
+  "Invalid key format. This MCP server accepts a Menerio API key (prefix `mnr_`) with the `hub` scope — the box labelled \"Hub access\" in Menerio → Settings → API Keys.";
+const MISSING_HUB_SCOPE_MESSAGE =
+  "This API key does not carry the `hub` scope. Open Menerio → Settings → API Keys, edit this key and tick \"Hub access\", then try again.";
+const MALFORMED_MCP_TOKEN_MESSAGE =
+  "That looks like an older Personal MCP Token but its shape is wrong. Use a Menerio API key with \"Hub access\" from Settings → API Keys instead.";
 const RESPONSE_CHAR_BUDGET = 6000; // hard cap on a search tool's total text response
 const SNIPPET_CAP = 320;           // max chars per result snippet
 const CANDIDATE_CAP = 50;          // max ranked candidates hybrid search returns
@@ -66,12 +72,26 @@ function extractBearerToken(authHeader: string | undefined) {
 async function authenticateMcpRequest(authHeader: string | undefined) {
   const token = extractBearerToken(authHeader);
   if (!token) {
-    return { userId: null, error: { status: 401, message: "Missing Authorization header. Create a Personal MCP Token in Settings → MCP Server and send it as `Authorization: Bearer <token>`." } };
+    return { userId: null, error: { status: 401, message: "Missing Authorization header. Create an API key with \"Hub access\" in Settings → API Keys and send it as `Authorization: Bearer <key>`." } };
   }
 
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+    // Any other mnr_ key is an API key. It opens this door when it carries the
+    // `hub` scope, so one key can serve the connector and the REST API alike.
+    // Older mnr_mcp_ tokens keep working through the branch below.
     if (token.startsWith("mnr_")) {
-      return { userId: null, error: { status: 401, message: HUB_KEY_USED_MESSAGE } };
+      const { result, errorMessage } = await lookupHubKey(token, supabase);
+      if (!result) {
+        console.warn("MCP API key rejected", {
+          reason: errorMessage,
+          token_prefix: token.slice(0, 12),
+        });
+        return { userId: null, error: { status: 401, message: errorMessage ?? "Invalid or revoked key." } };
+      }
+      if (!result.scopes.includes(HUB_SCOPE)) {
+        return { userId: null, error: { status: 403, message: MISSING_HUB_SCOPE_MESSAGE } };
+      }
+      return { userId: result.userId, error: null };
     }
     return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
@@ -81,7 +101,7 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
       token_prefix: token.slice(0, 16),
       token_length: token.length,
     });
-    return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
+    return { userId: null, error: { status: 401, message: MALFORMED_MCP_TOKEN_MESSAGE } };
   }
 
   const tokenHash = await sha256Hex(token);
@@ -3640,9 +3660,10 @@ app.all("*", async (c) => {
       version: "1.0.0",
       // Bumped by hand whenever this function is deployed, so anyone can tell
       // which build is live without opening a dashboard.
-      build: "2026-08-16",
+      build: "2026-08-16-one-key",
       transport: "streamable-http",
-      auth: "Authorization: Bearer mnr_mcp_<token>",
+      auth: "Authorization: Bearer mnr_<api key with the hub scope>",
+      accepts_api_keys: true,
     });
   }
 
@@ -3657,7 +3678,7 @@ app.all("*", async (c) => {
         ? (authHeader.toLowerCase().startsWith("bearer ") ? "bearer" : "other")
         : "none",
     });
-    return c.json({ error: auth.error.message }, auth.error.status as 401);
+    return c.json({ error: auth.error.message }, auth.error.status as 401 | 403);
   }
 
   return await requestContext.run({ userId: auth.userId! }, async () => {

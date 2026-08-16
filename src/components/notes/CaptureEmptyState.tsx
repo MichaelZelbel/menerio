@@ -36,7 +36,7 @@ const OPTIONS: CaptureOption[] = [
   {
     key: "mcp",
     title: "MCP Server",
-    description: "Capture from Claude or ChatGPT through MCP tokens.",
+    description: "Capture from Claude or ChatGPT with one Menerio key.",
     icon: Brain,
     to: "/dashboard/settings?tab=mcp",
   },
