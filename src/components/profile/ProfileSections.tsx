@@ -22,10 +22,10 @@ export type ProfileSectionsEntry = ContactProfileEntry | ProfileCategory;
 
 interface ProfileSectionsProps {
   categories: ProfileCategory[];
-  entries: ContactProfileEntry[];
+  entries: ProfileEntry[];
   onSaveEntry: (data: any) => void;
   onDeleteEntry: (id: string) => void;
-  onTogglePin: (entry: ContactProfileEntry) => void;
+  onTogglePin: (entry: ProfileEntry) => void;
   onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
   onDeleteCategory: (id: string) => void;
   onAddCategory: (data: Partial<ProfileCategory>) => void;
