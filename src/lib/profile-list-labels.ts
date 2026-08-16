@@ -175,6 +175,9 @@ const DISPLAY_LABEL_MAP: ReadonlyMap<string, string> = new Map(
     "german name": "Name (German)",
     "english name": "Name (English)",
     "korean name": "Name (Korean)",
+    "nicknames liked": "Preferred nicknames",
+    "favorite nicknames": "Preferred nicknames",
+    "liked nicknames": "Preferred nicknames",
     // Duplicate label pair — one canonical home for life-history facts.
     "life history": "Life events",
   }),
