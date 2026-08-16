@@ -10,6 +10,22 @@ import {
   paginationParams,
 } from "../_shared/hub-helpers.ts";
 
+/**
+ * A folder path the note tree can actually render.
+ *
+ * The tree builds its folders by splitting this string on "/", so a leading
+ * slash would put every note inside a nameless folder above the real one. Kept
+ * character for character the same as normalizePath in
+ * src/components/notes/NoteTree.tsx, which is what the UI applies when it reads
+ * the column back, so a path cannot mean one thing on write and another on read.
+ *
+ * An empty string is the root, which is what the column defaults to.
+ */
+function normalizeFolderPath(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return handleOptions();
 
@@ -96,7 +112,7 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && action && action !== "search" && action !== "sync-status") {
       const { data, error } = await supabase
         .from("notes")
-        .select("id, title, content, tags, entity_type, metadata, structured_fields, related, is_favorite, is_pinned, is_external, source_app, source_id, source_url, sync_status, created_at, updated_at")
+        .select("id, title, content, tags, entity_type, metadata, structured_fields, related, is_favorite, is_pinned, is_external, source_app, source_id, source_url, folder_path, sync_status, created_at, updated_at")
         .eq("id", action)
         .eq("user_id", userId)
         .eq("is_trashed", false)
@@ -118,7 +134,7 @@ Deno.serve(async (req) => {
 
       let query = supabase
         .from("notes")
-        .select("id, title, content, tags, entity_type, is_favorite, is_pinned, source_app, created_at, updated_at", { count: "exact" })
+        .select("id, title, content, tags, entity_type, is_favorite, is_pinned, source_app, folder_path, created_at, updated_at", { count: "exact" })
         .eq("user_id", userId)
         .eq("is_trashed", false);
 
@@ -153,6 +169,7 @@ Deno.serve(async (req) => {
         source_app: body.source_app || "hub-api",
         source_id: body.source_id || null,
         source_url: body.source_url || null,
+        folder_path: normalizeFolderPath(body.folder_path),
       };
 
       const { data, error } = await supabase
@@ -189,6 +206,9 @@ Deno.serve(async (req) => {
       if (body.structured_fields !== undefined) updates.structured_fields = body.structured_fields;
       if (body.is_favorite !== undefined) updates.is_favorite = body.is_favorite;
       if (body.is_pinned !== undefined) updates.is_pinned = body.is_pinned;
+      if (body.folder_path !== undefined) {
+        updates.folder_path = normalizeFolderPath(body.folder_path);
+      }
 
       if (Object.keys(updates).length === 0) {
         return errorJson("BAD_REQUEST", "No valid fields to update", 400);
