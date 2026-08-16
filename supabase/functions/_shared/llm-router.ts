@@ -261,6 +261,29 @@ async function callGemini(opts: {
 }
 
 /**
+ * The output-language rule, in one place, for every call site whose answer a
+ * human reads.
+ *
+ * A model writes back in whatever language it leans towards unless told
+ * otherwise, and most of this app's call sites run on `deepseek-v4-flash`,
+ * which leans Chinese. That stayed invisible for as long as it did because
+ * almost every field these prompts return is a fixed choice, an ISO date or a
+ * verbatim quote from the note. Free text is the only place it can show, and
+ * when it showed, it showed as review-queue cards describing a dog in Chinese.
+ *
+ * Pass this through `systemSuffix`, never through `defaults.systemPrompt`, so a
+ * row in `llm_call_configs` cannot drop it.
+ */
+export function outputLanguageRule(language: string): string {
+  const lang = String(language || "").trim() || "English";
+  return `OUTPUT LANGUAGE — write every free-text field you return in ${lang}, whatever language the source material is in.
+- This covers titles, descriptions, summaries, labels and reasons: anything a human reads rather than a machine matches on.
+- Do NOT translate: personal names, company, brand and product names, addresses, usernames and handles, or any field that must be a verbatim quote from the source. Those stay exactly as written.
+- Do NOT translate values from a fixed list of allowed options. Return those exactly as the option is spelled in these instructions.
+- If you cannot translate something confidently, keep the original wording rather than guessing.`;
+}
+
+/**
  * Run a chat completion through the configured provider and deduct credits.
  */
 export async function runChat(args: {
@@ -275,10 +298,22 @@ export async function runChat(args: {
   skipDeduct?: boolean;
   /** Values substituted into `{{placeholders}}` inside the system prompt. */
   templateVars?: Record<string, string | number | null | undefined>;
+  /**
+   * Policy appended to the system prompt AFTER the DB row has had its say, and
+   * therefore the one part of the prompt an admin edit or a stale row cannot
+   * drop. `defaults.systemPrompt` is only a fallback: the moment a call site has
+   * an enabled row in `llm_call_configs`, that row wins and anything written
+   * only into the code default is silently discarded. That is how the profile
+   * language setting became a no-op. Put invariants here, not in the default.
+   */
+  systemSuffix?: string;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
   const interpolated = interpolatePrompt(effective.system_prompt, args.templateVars);
-  const messages = buildMessagesWithSystem(args.messages, interpolated);
+  const suffixed = args.systemSuffix
+    ? `${interpolated ?? ""}${interpolated ? "\n\n" : ""}${args.systemSuffix}`
+    : interpolated;
+  const messages = buildMessagesWithSystem(args.messages, suffixed);
   const extra = { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) };
 
   let result: any;

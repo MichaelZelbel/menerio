@@ -83,6 +83,39 @@ Derived-fact examples:
 
 export const QUICK_CAPTURE_METADATA_PROMPT = PROCESS_NOTE_METADATA_PROMPT;
 
+/**
+ * Moment extraction. This lives here rather than inside process-note because
+ * `process-note.moment_extraction` is registered below, and a registered call
+ * site with a second copy of its prompt in the edge function is exactly how
+ * `process-note.profile_extraction` ended up running a prompt nobody had read
+ * in months. One constant, imported by the one caller.
+ *
+ * The output-language rule is deliberately NOT in here. It is appended at call
+ * time through `runChat`'s `systemSuffix`, because anything written into this
+ * string can be replaced by a row in `llm_call_configs`, and the language rule
+ * is the part that must never be droppable.
+ */
+export const PROCESS_NOTE_MOMENT_PROMPT = `You inspect a personal note (which may include OCR text from attached scanned documents) and decide whether it documents a single concrete PAST real-world event that belongs on the user's personal timeline (e.g. wedding, graduation, birth, move, job change, trip, hospitalisation, milestone meeting, funeral, anniversary celebration).
+
+Return JSON:
+{
+  "is_event": boolean,
+  "happened_at": "YYYY-MM-DD" | null,
+  "title": short explicit title (e.g. "Wedding of Michael and Xihui"),
+  "description": one-sentence description,
+  "impact_level": integer 1-4 (1=minor, 4=major life event),
+  "confidence_date": integer 0-10,
+  "confidence_truth": integer 0-10,
+  "participants": [ { "name": string, "is_self": boolean } ]
+}
+
+Rules:
+- is_event = true ONLY when a clearly identifiable past event with a specific date is described or documented. Diaries, opinions, prompts, code, articles, recurring routines → false.
+- happened_at MUST be an ISO date present in the note (or computable from the OCR).
+- title should describe the event explicitly (not the note's title verbatim).
+- participants lists the real humans involved, marking the OWNER with is_self:true.
+- If unsure, return is_event:false.`;
+
 export const INGEST_THOUGHT_METADATA_PROMPT = `Extract metadata from the user's captured note. Return JSON with:
 - "people": array of people mentioned (empty if none)
 - "action_items": array of implied to-dos (empty if none)
@@ -669,6 +702,21 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
+    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+    // Registered so it is visible and steerable from the admin screen. It was
+    // not, and that is half of why the world extractor could quietly run a
+    // model nobody had chosen: an unregistered call site does not appear there
+    // at all and silently uses whatever is hardcoded in the edge function.
+    // This one writes moment titles and descriptions, and add_moment is in
+    // AUTO_APPLY_THRESHOLDS, so its output reaches the timeline with no review
+    // card to make a problem visible.
+    call_site: "process-note.moment_extraction",
+    description: "Decides whether a note documents a past event for the timeline, and titles it.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: PROCESS_NOTE_MOMENT_PROMPT,
     temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {

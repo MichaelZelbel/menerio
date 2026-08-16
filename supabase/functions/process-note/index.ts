@@ -3,7 +3,8 @@ import {
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { outputLanguageRule, runChat } from "../_shared/llm-router.ts";
+import { PROCESS_NOTE_MOMENT_PROMPT } from "../_shared/llm-defaults.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { shouldExtractFacts } from "../_shared/hub-source.ts";
 import {
@@ -1435,6 +1436,11 @@ async function generateProfileSuggestions(
           model: "deepseek/deepseek-v4-flash",
           systemPrompt: profileExtractionPrompt(preferences.profileLanguage),
         },
+        // The language block inside profileExtractionPrompt above only reaches
+        // the model when this call site has no row in llm_call_configs. It has
+        // one, so that block has never been used in production. This suffix is
+        // appended after the row, so it always is.
+        systemSuffix: outputLanguageRule(preferences.profileLanguage),
         callOptions: { response_format: { type: "json_object" } },
       });
 
@@ -2104,27 +2110,6 @@ async function generateProfileSuggestions(
  * Detects concrete PAST events in the note (with attached document OCR) and
  * proposes adding them to the timeline. Honors auto-apply prefs via
  * prepareSuggestionForInsert and dedups against existing moments. */
-const MOMENT_EXTRACTION_PROMPT = `You inspect a personal note (which may include OCR text from attached scanned documents) and decide whether it documents a single concrete PAST real-world event that belongs on the user's personal timeline (e.g. wedding, graduation, birth, move, job change, trip, hospitalisation, milestone meeting, funeral, anniversary celebration).
-
-Return JSON:
-{
-  "is_event": boolean,
-  "happened_at": "YYYY-MM-DD" | null,
-  "title": short explicit title (e.g. "Wedding of Michael and Xihui"),
-  "description": one-sentence description,
-  "impact_level": integer 1-4 (1=minor, 4=major life event),
-  "confidence_date": integer 0-10,
-  "confidence_truth": integer 0-10,
-  "participants": [ { "name": string, "is_self": boolean } ]
-}
-
-Rules:
-- is_event = true ONLY when a clearly identifiable past event with a specific date is described or documented. Diaries, opinions, prompts, code, articles, recurring routines → false.
-- happened_at MUST be an ISO date present in the note (or computable from the OCR).
-- title should describe the event explicitly (not the note's title verbatim).
-- participants lists the real humans involved, marking the OWNER with is_self:true.
-- If unsure, return is_event:false.`;
-
 async function generateMomentSuggestions(
   userId: string,
   noteId: string,
@@ -2160,8 +2145,13 @@ async function generateMomentSuggestions(
         defaults: {
           provider: "openrouter",
           model: "deepseek/deepseek-v4-flash",
-          systemPrompt: MOMENT_EXTRACTION_PROMPT,
+          systemPrompt: PROCESS_NOTE_MOMENT_PROMPT,
         },
+        // A moment's title and description are free text, and add_moment is in
+        // AUTO_APPLY_THRESHOLDS, so this one writes to the timeline without a
+        // review card. It had the same missing language rule as the removed
+        // world extractor, with nothing on screen to make it visible.
+        systemSuffix: outputLanguageRule(preferences.profileLanguage),
         callOptions: { response_format: { type: "json_object" } },
       });
       parsed = JSON.parse(result.content);
