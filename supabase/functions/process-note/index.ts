@@ -1783,37 +1783,65 @@ async function generateProfileSuggestions(
       );
 
       const ownerLabelName = target.is_self ? "your" : `${target.canonical_name}'s`;
+      const isUnknownLabel = Boolean((fact as any)._unknownLabel);
 
-      suggestions.push({
-        user_id: userId,
-        source_note_id: noteId,
-        suggestion_type: "add_profile_entry",
-        title: `Add to ${ownerLabelName} profile: ${fact.label}`,
-        description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
-        payload: {
-          contact_id: target.contact_id,
-          contact_name: target.canonical_name,
-          is_owner: target.contact_id === null,
-          category_slug: fact.category_slug,
-          category_id: catRow?.id || null,
-          label: fact.label,
-          value: effectiveValue,
-          evidence_quote: factSourceQuote,
-        },
-        status: "pending_review",
-        target_entity_type: "profile_entry",
-        source_title: noteTitle,
-        extracted_value: `${fact.label}: ${effectiveValue}`,
-        confidence_score: (fact as any)._unknownLabel
-          // Unknown label → never auto-applied; sits in the review queue so
-          // the user (not the extractor) decides whether a new field is real.
-          ? 0.2
-          : isSoftSignal
+      if (isUnknownLabel) {
+        // Unknown labels in structured categories become a "new field proposal"
+        // so the user decides whether to map it to an existing field or create
+        // a new one. The fact is NOT pre-applied to the profile.
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "unknown_profile_field",
+          title: `New profile field: ${fact.label}`,
+          description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
+          payload: {
+            contact_id: target.contact_id,
+            contact_name: target.canonical_name,
+            is_owner: target.contact_id === null,
+            category_slug: fact.category_slug,
+            category_id: catRow?.id || null,
+            label: fact.label,
+            canonical_label: fact.label,
+            value: effectiveValue,
+            evidence_quote: factSourceQuote,
+          },
+          status: "pending_review",
+          target_entity_type: "profile_entry",
+          source_title: noteTitle,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
+          confidence_score: 0.2,
+          is_sensitive: isSensitiveSuggestion("unknown_profile_field", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
+          suppression_key: buildSuppressionKey("unknown_profile_field", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
+        });
+      } else {
+        suggestions.push({
+          user_id: userId,
+          source_note_id: noteId,
+          suggestion_type: "add_profile_entry",
+          title: `Add to ${ownerLabelName} profile: ${fact.label}`,
+          description: `"${effectiveValue}" — extracted from "${noteTitle}"`,
+          payload: {
+            contact_id: target.contact_id,
+            contact_name: target.canonical_name,
+            is_owner: target.contact_id === null,
+            category_slug: fact.category_slug,
+            category_id: catRow?.id || null,
+            label: fact.label,
+            value: effectiveValue,
+            evidence_quote: factSourceQuote,
+          },
+          status: "pending_review",
+          target_entity_type: "profile_entry",
+          source_title: noteTitle,
+          extracted_value: `${fact.label}: ${effectiveValue}`,
+          confidence_score: isSoftSignal
             ? Math.min(SOFT_SIGNAL_CONFIDENCE_CAP, DEFAULT_CONFIDENCE.add_profile_entry)
             : DEFAULT_CONFIDENCE.add_profile_entry,
-        is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
-        suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
-      });
+          is_sensitive: isSensitiveSuggestion("add_profile_entry", { ...(fact as unknown as Record<string, unknown>), value: effectiveValue }, noteContent),
+          suppression_key: buildSuppressionKey("add_profile_entry", target.contact_id ? "contact" : "owner", target.contact_id, `${fact.label}:${effectiveValue}`),
+        });
+      }
     }
 
 
