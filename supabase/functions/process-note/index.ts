@@ -1638,7 +1638,7 @@ async function generateProfileSuggestions(
       // know means the extractor invented a synonym ("Name alias",
       // "Alternative name"). Never auto-apply those — force human review so a
       // parallel field can't appear silently.
-      if (!isKnownCanonicalLabel(f.category_slug, f.label)) {
+      if (!profileFieldsRegistry.isKnown(f.category_slug, f.label)) {
         console.log(`[profile-extract] Unknown label "${f.label}" in ${f.category_slug} — forcing review`);
         (f as any)._unknownLabel = true;
       }
