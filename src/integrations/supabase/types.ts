@@ -835,6 +835,7 @@ export type Database = {
           label: string
           origin: string
           pair_key: string | null
+          rank: string
           source_id: string | null
           source_type: string
           target_id: string | null
@@ -854,6 +855,7 @@ export type Database = {
           label: string
           origin: string
           pair_key?: string | null
+          rank?: string
           source_id?: string | null
           source_type: string
           target_id?: string | null
@@ -873,6 +875,7 @@ export type Database = {
           label?: string
           origin?: string
           pair_key?: string | null
+          rank?: string
           source_id?: string | null
           source_type?: string
           target_id?: string | null
@@ -1931,6 +1934,13 @@ export type Database = {
             referencedRelation: "moments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "moment_entities_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "world_events"
+            referencedColumns: ["id"]
+          },
         ]
       }
       moment_participants: {
@@ -1952,6 +1962,13 @@ export type Database = {
             columns: ["moment_id"]
             isOneToOne: false
             referencedRelation: "moments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moment_participants_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "world_events"
             referencedColumns: ["id"]
           },
         ]
@@ -1996,6 +2013,13 @@ export type Database = {
             columns: ["moment_id"]
             isOneToOne: false
             referencedRelation: "moments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moment_provenance_moment_id_fkey"
+            columns: ["moment_id"]
+            isOneToOne: false
+            referencedRelation: "world_events"
             referencedColumns: ["id"]
           },
         ]
@@ -2567,6 +2591,7 @@ export type Database = {
           label: string
           linked_note_id: string | null
           origin: string
+          rank: string
           sort_order: number | null
           updated_at: string | null
           user_id: string
@@ -2582,6 +2607,7 @@ export type Database = {
           label: string
           linked_note_id?: string | null
           origin?: string
+          rank?: string
           sort_order?: number | null
           updated_at?: string | null
           user_id: string
@@ -2597,6 +2623,7 @@ export type Database = {
           label?: string
           linked_note_id?: string | null
           origin?: string
+          rank?: string
           sort_order?: number | null
           updated_at?: string | null
           user_id?: string
@@ -3727,6 +3754,91 @@ export type Database = {
           tokens_granted: number | null
           tokens_used: number | null
           user_id: string | null
+        }
+        Relationships: []
+      }
+      world_claims: {
+        Row: {
+          attribute: string | null
+          category: string | null
+          created_at: string | null
+          evidence_quote: string | null
+          id: string | null
+          object_id: string | null
+          origin: string | null
+          rank: string | null
+          source_table: string | null
+          subject_id: string | null
+          subject_kind: string | null
+          updated_at: string | null
+          user_id: string | null
+          valid_from: string | null
+          valid_to: string | null
+          value: string | null
+        }
+        Relationships: []
+      }
+      world_entities: {
+        Row: {
+          ai_visibility: string | null
+          aliases: string[] | null
+          created_at: string | null
+          description: string | null
+          id: string | null
+          is_sensitive: boolean | null
+          kind: string | null
+          name: string | null
+          source_table: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      world_events: {
+        Row: {
+          ai_visibility: string | null
+          category: string | null
+          created_at: string | null
+          description: string | null
+          happened_at: string | null
+          happened_end: string | null
+          id: string | null
+          person_id: string | null
+          source_table: string | null
+          status: string | null
+          title: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          ai_visibility?: string | null
+          category?: string | null
+          created_at?: string | null
+          description?: string | null
+          happened_at?: string | null
+          happened_end?: string | null
+          id?: string | null
+          person_id?: string | null
+          source_table?: never
+          status?: string | null
+          title?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          ai_visibility?: string | null
+          category?: string | null
+          created_at?: string | null
+          description?: string | null
+          happened_at?: string | null
+          happened_end?: string | null
+          id?: string | null
+          person_id?: string | null
+          source_table?: never
+          status?: string | null
+          title?: string | null
+          updated_at?: string | null
+          user_id?: string | null
         }
         Relationships: []
       }
