@@ -665,6 +665,10 @@ export default function ReviewQueue() {
       return handleAcceptProfileEntry(item);
     }
 
+    if (type === "unknown_profile_field") {
+      return handleAcceptUnknownProfileField(item);
+    }
+
     if (type === "add_relationship") {
       return handleAcceptRelationship(item);
     }
