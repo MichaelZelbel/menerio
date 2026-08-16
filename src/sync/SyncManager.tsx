@@ -4,7 +4,11 @@ import { OFFLINE_CORE } from "@/lib/flags";
 import { POWERSYNC_URL } from "./config";
 import { getDb } from "./db";
 import { SupabaseConnector } from "./connector";
-import { isSyncServiceReachable, serviceHost } from "./reachability";
+import {
+  isSyncServiceReachable,
+  serviceHost,
+  startConnectWatchdog,
+} from "./reachability";
 import { setSyncHealth } from "./sync-health";
 
 const POWERSYNC_USER_KEY = "menerio:powersync-user";
@@ -47,6 +51,7 @@ export function SyncManager() {
     let cancelled = false;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let stopWatchdog: (() => void) | undefined;
 
     // The stream reporting itself connected is the only positive proof of a
     // working sync, so it and nothing else clears the alarm.
@@ -55,6 +60,7 @@ export function SyncManager() {
         if (cancelled) return;
         if (status?.connected) {
           attempt = 0;
+          stopWatchdog?.();
           setSyncHealth({ state: "live", error: null });
         }
       },
@@ -88,9 +94,12 @@ export function SyncManager() {
           return;
         }
 
-        // Ask whether the host is there BEFORE handing it to connect(), which
-        // resolves happily against a service that no longer exists and then
-        // retries in the background forever without ever raising anything.
+        // A fast negative, and only that. The probe cannot prove sync WORKS: on a
+        // machine behind a proxy it returns true for a host DNS calls NXDOMAIN,
+        // because the proxy answers with its own page and no-cors cannot tell
+        // that from a real reply. Gating on it alone is what made the first
+        // version of this fallback do nothing on exactly the machine it was
+        // written for.
         if (!(await isSyncServiceReachable(POWERSYNC_URL))) {
           await reportUnreachable(
             `The sync service at ${serviceHost(POWERSYNC_URL)} did not answer, so this device is not receiving changes.`,
@@ -100,8 +109,21 @@ export function SyncManager() {
         }
 
         await db.connect(new SupabaseConnector());
-        // Not "live" yet — statusChanged decides that. connect() returning only
-        // means the attempt started.
+
+        // connect() returning means the attempt STARTED, nothing more. It starts
+        // a background stream that retries on its own and never rejects, so the
+        // only honest test is whether the stream reports itself connected within
+        // a sane time. If it does not, sync is dead whatever the reason.
+        stopWatchdog?.();
+        stopWatchdog = startConnectWatchdog({
+          isConnected: () => !!db.currentStatus?.connected,
+          onDead: () => {
+            void reportUnreachable(
+              `The sync service at ${serviceHost(POWERSYNC_URL)} accepted the connection but never started syncing, so this device is not receiving changes.`,
+            );
+            scheduleRetry();
+          },
+        });
       } catch (error) {
         if (cancelled) return;
         await reportUnreachable(describe(error));
@@ -124,6 +146,7 @@ export function SyncManager() {
     return () => {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
+      stopWatchdog?.();
       unregister?.();
     };
   }, [user, loading]);

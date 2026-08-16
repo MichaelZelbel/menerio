@@ -14,8 +14,19 @@
  *
  * `mode: "no-cors"` is deliberate. We never read the response, only ask whether
  * the host resolves and answers, so an opaque reply is a pass and so is any 404
- * or 500. Only DNS failure, a refused connection, or a timeout reject, and those
- * are exactly the cases where sync is genuinely gone.
+ * or 500.
+ *
+ * READ THIS BEFORE TRUSTING A `true`. A pass is NOT proof that sync works, and
+ * this was learned the hard way: on a machine behind a proxy, this probe
+ * returned true for a host that DNS reports as NXDOMAIN, because the proxy
+ * answered with its own error page and `no-cors` cannot tell that apart from a
+ * real reply. The first version of the fallback gated on this probe alone, so on
+ * that machine it decided sync was fine and kept serving a frozen local database
+ * exactly as before the fix.
+ *
+ * So: a `false` here is a fast, reliable negative. A `true` means only "something
+ * answered". The authority on whether sync actually works is PowerSync reporting
+ * itself connected, which is what the watchdog below waits for.
  */
 export type ReachabilityOptions = {
   fetchImpl?: typeof fetch;
@@ -47,6 +58,32 @@ export async function isSyncServiceReachable(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Declare sync dead when it has not reported a connection in time.
+ *
+ * This, not the probe, is the real test. It asks the only question that matters
+ * ("is the stream actually up?") and it is indifferent to WHY the answer is no:
+ * a deleted instance, a proxy swallowing the request, expired credentials and a
+ * flat network all look the same to a user staring at stale notes, and all of
+ * them must end in the same fallback.
+ */
+export type ConnectWatchdogOptions = {
+  isConnected: () => boolean;
+  onDead: () => void;
+  timeoutMs?: number;
+};
+
+export function startConnectWatchdog({
+  isConnected,
+  onDead,
+  timeoutMs = 12_000,
+}: ConnectWatchdogOptions): () => void {
+  const timer = setTimeout(() => {
+    if (!isConnected()) onDead();
+  }, timeoutMs);
+  return () => clearTimeout(timer);
 }
 
 /** Host only, for a message a person can act on without reading a URL. */

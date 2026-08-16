@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 
-import { isSyncServiceReachable, serviceHost } from "../reachability";
+import {
+  isSyncServiceReachable,
+  serviceHost,
+  startConnectWatchdog,
+} from "../reachability";
 import {
   getSyncHealth,
   setSyncHealth,
@@ -62,11 +66,60 @@ describe("isSyncServiceReachable", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("can be fooled into saying yes, which is why it is never the last word", () => {
+    // THE REAL INCIDENT. Behind a proxy, this returned true for a host that DNS
+    // reports as NXDOMAIN: the proxy answered with its own error page, and
+    // no-cors cannot tell that from a genuine reply. The first fallback gated on
+    // this alone and therefore did nothing on the very machine it was written
+    // for. The watchdog below is the authority; this is only a fast negative.
+    const proxyErrorPage = vi
+      .fn()
+      .mockResolvedValue({ type: "opaque" } as unknown as Response);
+    return isSyncServiceReachable("https://deleted.example.com", {
+      fetchImpl: proxyErrorPage as unknown as typeof fetch,
+    }).then((r) => expect(r).toBe(true));
+  });
+
   it("names the host so the message can be acted on", () => {
     expect(serviceHost("https://abc123.powersync.journeyapps.com")).toBe(
       "abc123.powersync.journeyapps.com",
     );
     expect(serviceHost("not a url")).toBe("not a url");
+  });
+});
+
+describe("startConnectWatchdog", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("declares sync dead when the stream never reports a connection", () => {
+    const onDead = vi.fn();
+    startConnectWatchdog({ isConnected: () => false, onDead, timeoutMs: 12_000 });
+    vi.advanceTimersByTime(11_999);
+    expect(onDead).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onDead).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet once the stream is connected", () => {
+    const onDead = vi.fn();
+    let connected = false;
+    startConnectWatchdog({ isConnected: () => connected, onDead, timeoutMs: 12_000 });
+    connected = true;
+    vi.advanceTimersByTime(60_000);
+    expect(onDead).not.toHaveBeenCalled();
+  });
+
+  it("can be cancelled, so a teardown does not fire a false alarm", () => {
+    const onDead = vi.fn();
+    const stop = startConnectWatchdog({
+      isConnected: () => false,
+      onDead,
+      timeoutMs: 12_000,
+    });
+    stop();
+    vi.advanceTimersByTime(60_000);
+    expect(onDead).not.toHaveBeenCalled();
   });
 });
 
