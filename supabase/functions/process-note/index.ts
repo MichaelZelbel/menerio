@@ -899,7 +899,7 @@ function canonicalizeLabel(label: string, categorySlug = "identity"): string {
  * reference date is in the value.
  */
 function deriveCanonicalFacts(
-  facts: Array<{ contact_name: string; category_slug: string; label: string; value: string }>,
+  facts: Array<{ contact_name: string; category_slug: string; label: string; value: string; source_quote?: string }>,
   noteDateISO: string | null,
 ) {
   const out: typeof facts = [];
