@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { localNoteUpdatedAt, upsertNotesLocal } from "@/sync/local-replica";
 
@@ -181,7 +181,6 @@ export default function Notes() {
   const updateNote = useUpdateNote();
   const ilikeSearch = useIlikeSearch();
   const semanticSearch = useSemanticSearch();
-  const [savedFolders, setSavedFolders] = useState<string[]>([]);
   const [confirmState, setConfirmState] = useState<{
     title: string;
     description: string;
@@ -189,18 +188,71 @@ export default function Notes() {
     destructive?: boolean;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
+  // Replaces window.prompt(): browsers suppress prompts inside embedded/preview
+  // frames, which made rename / new-folder silently do nothing.
+  const [promptState, setPromptState] = useState<{
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    onSubmit: (value: string) => void | Promise<void>;
+  } | null>(null);
+  const [promptValue, setPromptValue] = useState("");
 
-  const refreshFolders = useCallback(async () => {
-    const { data } = await supabase
-      .from("note_folders" as any)
-      .select("path")
-      .order("path", { ascending: true });
-    setSavedFolders(((data || []) as unknown as Array<{ path: string }>).map((f) => f.path));
+  const openPrompt = useCallback((state: {
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    initialValue?: string;
+    onSubmit: (value: string) => void | Promise<void>;
+  }) => {
+    setPromptValue(state.initialValue ?? "");
+    setPromptState({
+      title: state.title,
+      description: state.description,
+      confirmLabel: state.confirmLabel,
+      onSubmit: state.onSubmit,
+    });
   }, []);
 
-  useEffect(() => {
-    refreshFolders();
-  }, [refreshFolders]);
+  const { data: savedFolders = [] } = useQuery({
+    queryKey: ["note-folders"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("note_folders" as any)
+        .select("path")
+        .order("path", { ascending: true });
+      if (error) throw error;
+      return ((data || []) as unknown as Array<{ path: string }>).map((f) => f.path);
+    },
+    staleTime: 30_000,
+  });
+
+  const refreshFolders = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["note-folders"] });
+  }, [queryClient]);
+
+  /**
+   * Turn any failure into a message the user can act on. A network failure
+   * ("Failed to fetch") used to surface as a silent no-op or a bare technical
+   * string, which is what made a brief backend outage look like a broken app.
+   */
+  const folderErrorMessage = useCallback((err: unknown, action: string) => {
+    const message = err instanceof Error ? err.message : String(err ?? "");
+    if (/failed to fetch|network|timeout|fetch failed/i.test(message)) {
+      return `Couldn't reach the server — ${action} was not applied. Please try again.`;
+    }
+    return message || `Could not ${action}`;
+  }, []);
+
+  /** Single atomic RPC call; either the whole folder operation applies or none of it does. */
+  const callFolderRpc = useCallback(async (
+    fn: "create_note_folder" | "rename_note_folder" | "move_note_folder" | "reconcile_note_folders",
+    args: Record<string, string>,
+  ) => {
+    const { data, error } = await supabase.rpc(fn as any, args as any);
+    if (error) throw new Error(error.message);
+    return data;
+  }, []);
 
   const folderPaths = useMemo(() => {
     return [...new Set([
@@ -209,41 +261,27 @@ export default function Notes() {
     ])].sort((a, b) => a.localeCompare(b));
   }, [allNotes, savedFolders]);
 
+  const createFolderAtPath = useCallback(async (path: string) => {
+    const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+    if (!normalized) return;
+    try {
+      await callFolderRpc("create_note_folder", { p_path: normalized });
+      await refreshFolders();
+      setActiveFolderPath(normalized);
+      showToast.success(`Folder "${normalized}" created`);
+    } catch (err) {
+      showToast.error(folderErrorMessage(err, "creating the folder"));
+    }
+  }, [callFolderRpc, folderErrorMessage, refreshFolders]);
+
   const createFolder = useCallback(async () => {
     const rawPath = newFolderPath.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
     const path = activeFolderPath && rawPath && !rawPath.includes("/") ? `${activeFolderPath}/${rawPath}` : rawPath;
     if (!path) return;
-    const name = path.split("/").pop() || path;
-    const parent_path = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
-    const { error } = await supabase.from("note_folders" as any).upsert(
-      { path, name, parent_path },
-      { onConflict: "user_id,path" }
-    );
-    if (error) {
-      showToast.error("Failed to create folder");
-      return;
-    }
     setNewFolderPath("");
-    await refreshFolders();
-    setActiveFolderPath(path);
-  }, [activeFolderPath, newFolderPath, refreshFolders]);
+    await createFolderAtPath(path);
+  }, [activeFolderPath, createFolderAtPath, newFolderPath]);
 
-  const createFolderAtPath = useCallback(async (path: string) => {
-    const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
-    if (!normalized) return;
-    const name = normalized.split("/").pop() || normalized;
-    const parent_path = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
-    const { error } = await supabase.from("note_folders" as any).upsert(
-      { path: normalized, name, parent_path },
-      { onConflict: "user_id,path" }
-    );
-    if (error) {
-      showToast.error("Failed to create folder");
-      return;
-    }
-    await refreshFolders();
-    setActiveFolderPath(normalized);
-  }, [refreshFolders]);
 
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -255,10 +293,14 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
-    setSearchMode(false);
-    selectNote(note.id);
-  }, [activeFolderPath, createNote, selectNote]);
+    try {
+      const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
+      setSearchMode(false);
+      selectNote(note.id);
+    } catch (err) {
+      showToast.error(folderErrorMessage(err, "creating the note"));
+    }
+  }, [activeFolderPath, createNote, folderErrorMessage, selectNote]);
 
   // Detect "empty" notes: no meaningful title and no meaningful body content.
   // Strips HTML tags, empty markdown headings/list bullets/horizontal rules and all
@@ -311,18 +353,27 @@ export default function Notes() {
 
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
     setActiveFolderPath(folderPath);
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
-    setSearchMode(false);
-    selectNote(note.id);
-  }, [createNote, selectNote]);
+    try {
+      const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
+      setSearchMode(false);
+      selectNote(note.id);
+    } catch (err) {
+      showToast.error(folderErrorMessage(err, "creating the note"));
+    }
+  }, [createNote, folderErrorMessage, selectNote]);
 
   const handleCreateFolderInFolder = useCallback((folderPath: string) => {
-    const folderName = window.prompt("Folder name");
-    if (!folderName) return;
-    const normalizedName = folderName.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
-    if (!normalizedName) return;
-    createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
-  }, [createFolderAtPath]);
+    openPrompt({
+      title: folderPath ? `New folder in "${folderPath}"` : "New folder",
+      description: "Enter a name for the new folder.",
+      confirmLabel: "Create folder",
+      onSubmit: async (value) => {
+        const normalizedName = value.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+        if (!normalizedName) return;
+        await createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
+      },
+    });
+  }, [createFolderAtPath, openPrompt]);
 
   const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
     const normalizedTarget = (folderPath || "").replace(/^\/+|\/+$/g, "");
@@ -346,74 +397,35 @@ export default function Notes() {
     setActiveFolderPath(normalizedTarget);
   }, [allNotes, updateNote]);
 
-  // Rewrite folder path prefix for note_folders + notes (recursive).
-  const rewriteFolderPrefix = useCallback(async (oldPath: string, newPath: string) => {
-    // 1) Update affected note_folders rows
-    const { data: affected, error: fetchErr } = await supabase
-      .from("note_folders" as any)
-      .select("path")
-      .or(`path.eq.${pgOrValue(oldPath)},path.like.${pgOrValue(escapeLike(oldPath) + "/%")}`);
-    if (fetchErr) throw fetchErr;
-    const rows = ((affected || []) as unknown as Array<{ path: string }>);
-    for (const row of rows) {
-      const suffix = row.path === oldPath ? "" : row.path.slice(oldPath.length);
-      const next = newPath + suffix;
-      const name = next.split("/").pop() || next;
-      const parent_path = next.includes("/") ? next.split("/").slice(0, -1).join("/") : "";
-      const { error: upErr } = await supabase
-        .from("note_folders" as any)
-        .update({ path: next, name, parent_path })
-        .eq("path", row.path);
-      if (upErr) throw upErr;
-    }
-    // 2) Update affected notes.folder_path
-    const { data: affectedNotes, error: nFetchErr } = await supabase
-      .from("notes" as any)
-      .select("id, folder_path")
-      .or(`folder_path.eq.${pgOrValue(oldPath)},folder_path.like.${pgOrValue(escapeLike(oldPath) + "/%")}`);
-    if (nFetchErr) throw nFetchErr;
-    const noteRows = ((affectedNotes || []) as unknown as Array<{ id: string; folder_path: string }>);
-    for (const n of noteRows) {
-      const suffix = n.folder_path === oldPath ? "" : n.folder_path.slice(oldPath.length);
-      const { error: upErr } = await supabase
-        .from("notes" as any)
-        .update({ folder_path: newPath + suffix })
-        .eq("id", n.id);
-      if (upErr) throw upErr;
-    }
-  }, []);
-
-  const handleRenameFolder = useCallback(async (oldPath: string) => {
+  const handleRenameFolder = useCallback((oldPath: string) => {
     if (!oldPath) return;
     const currentName = oldPath.split("/").pop() || oldPath;
-    const input = window.prompt("Rename folder", currentName);
-    if (!input) return;
-    const newName = input.replace(/\//g, "").trim();
-    if (!newName || newName === currentName) return;
-    const parent = oldPath.includes("/") ? oldPath.split("/").slice(0, -1).join("/") : "";
-    const newPath = parent ? `${parent}/${newName}` : newName;
-    // Conflict check
-    const { data: existing } = await supabase
-      .from("note_folders" as any)
-      .select("path")
-      .eq("path", newPath)
-      .maybeSingle();
-    if (existing) {
-      showToast.error(`A folder "${newPath}" already exists`);
-      return;
-    }
-    try {
-      await rewriteFolderPrefix(oldPath, newPath);
-      await refreshFolders();
-      await queryClient.invalidateQueries({ queryKey: ["notes"] });
-      if (activeFolderPath === oldPath || activeFolderPath?.startsWith(oldPath + "/")) {
-        setActiveFolderPath(newPath + (activeFolderPath.slice(oldPath.length)));
-      }
-      showToast.success("Folder renamed");
-    } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Failed to rename folder");
-    }
-  }, [activeFolderPath, queryClient, refreshFolders, rewriteFolderPrefix]);
+    openPrompt({
+      title: "Rename folder",
+      description: `Renaming "${oldPath}" also updates every subfolder and note inside it.`,
+      confirmLabel: "Rename",
+      initialValue: currentName,
+      onSubmit: async (value) => {
+        const newName = value.replace(/\//g, "").trim();
+        if (!newName || newName === currentName) return;
+        const parent = oldPath.includes("/") ? oldPath.split("/").slice(0, -1).join("/") : "";
+        const newPath = parent ? `${parent}/${newName}` : newName;
+        try {
+          // Single transaction on the server: folder rows + note paths move
+          // together, so a failure can no longer leave a half-renamed tree.
+          await callFolderRpc("rename_note_folder", { p_old_path: oldPath, p_new_path: newPath });
+          await refreshFolders();
+          await queryClient.invalidateQueries({ queryKey: ["notes"] });
+          if (activeFolderPath === oldPath || activeFolderPath?.startsWith(oldPath + "/")) {
+            setActiveFolderPath(newPath + activeFolderPath.slice(oldPath.length));
+          }
+          showToast.success("Folder renamed");
+        } catch (err) {
+          showToast.error(folderErrorMessage(err, "renaming the folder"));
+        }
+      },
+    });
+  }, [activeFolderPath, callFolderRpc, folderErrorMessage, openPrompt, queryClient, refreshFolders]);
 
   const handleMoveFolder = useCallback(async (sourcePath: string, targetParentPath: string) => {
     if (!sourcePath) return;
@@ -425,27 +437,21 @@ export default function Notes() {
     const name = sourcePath.split("/").pop() || sourcePath;
     const newPath = targetParentPath ? `${targetParentPath}/${name}` : name;
     if (newPath === sourcePath) return;
-    const { data: existing } = await supabase
-      .from("note_folders" as any)
-      .select("path")
-      .eq("path", newPath)
-      .maybeSingle();
-    if (existing) {
-      showToast.error(`A folder "${newPath}" already exists`);
-      return;
-    }
     try {
-      await rewriteFolderPrefix(sourcePath, newPath);
+      await callFolderRpc("move_note_folder", {
+        p_source_path: sourcePath,
+        p_target_parent_path: targetParentPath || "",
+      });
       await refreshFolders();
       await queryClient.invalidateQueries({ queryKey: ["notes"] });
       if (activeFolderPath === sourcePath || activeFolderPath?.startsWith(sourcePath + "/")) {
-        setActiveFolderPath(newPath + (activeFolderPath.slice(sourcePath.length)));
+        setActiveFolderPath(newPath + activeFolderPath.slice(sourcePath.length));
       }
       showToast.success(targetParentPath ? `Moved to ${targetParentPath}` : "Moved to All Notes");
     } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Failed to move folder");
+      showToast.error(folderErrorMessage(err, "moving the folder"));
     }
-  }, [activeFolderPath, queryClient, refreshFolders, rewriteFolderPrefix]);
+  }, [activeFolderPath, callFolderRpc, folderErrorMessage, queryClient, refreshFolders]);
 
   const handleDeleteFolder = useCallback(async (path: string) => {
     if (!path) return;
@@ -1306,6 +1312,47 @@ export default function Notes() {
             }}
           >
             {confirmState?.confirmLabel || "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <AlertDialog
+      open={!!promptState}
+      onOpenChange={(open) => { if (!open) setPromptState(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{promptState?.title}</AlertDialogTitle>
+          {promptState?.description && (
+            <AlertDialogDescription>{promptState.description}</AlertDialogDescription>
+          )}
+        </AlertDialogHeader>
+        <Input
+          autoFocus
+          value={promptValue}
+          onChange={(e) => setPromptValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const action = promptState?.onSubmit;
+              const value = promptValue.trim();
+              setPromptState(null);
+              if (action && value) void action(value);
+            }
+          }}
+          placeholder="Folder name"
+        />
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={async () => {
+              const action = promptState?.onSubmit;
+              const value = promptValue.trim();
+              setPromptState(null);
+              if (action && value) await action(value);
+            }}
+          >
+            {promptState?.confirmLabel || "Save"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

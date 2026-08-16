@@ -4019,6 +4019,7 @@ export type Database = {
         Returns: Json
       }
       cleanup_profile_token_duplicates: { Args: never; Returns: Json }
+      create_note_folder: { Args: { p_path: string }; Returns: Json }
       deduct_ai_tokens:
         | {
             Args: {
@@ -4170,6 +4171,11 @@ export type Database = {
         Args: { _user_id: string }
         Returns: string[]
       }
+      move_note_folder: {
+        Args: { p_source_path: string; p_target_parent_path: string }
+        Returns: Json
+      }
+      note_folder_normalize_path: { Args: { p_path: string }; Returns: string }
       profile_audit_apply_merge: {
         Args: {
           _keep_id: string
@@ -4283,6 +4289,7 @@ export type Database = {
       }
       profile_value_is_identifier: { Args: { t: string }; Returns: boolean }
       profile_value_norm_key: { Args: { t: string }; Returns: string }
+      reconcile_note_folders: { Args: never; Returns: Json }
       relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
       relationship_inverse_label: { Args: { p: string }; Returns: string }
@@ -4312,6 +4319,10 @@ export type Database = {
         Returns: string
       }
       relationship_strength: { Args: { p: string }; Returns: number }
+      rename_note_folder: {
+        Args: { p_new_path: string; p_old_path: string }
+        Returns: Json
+      }
       replace_group_members_section: {
         Args: { p_content: string; p_members_section: string }
         Returns: string
