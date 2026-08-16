@@ -63,6 +63,16 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // One copy of each of these, whatever the build machine resolves.
+    // React Query and React hand out state through module-level React
+    // contexts, so a second copy is a second context: the provider mounted
+    // from one copy is invisible to a hook imported from the other, and the
+    // app dies at render with "No QueryClient set". This is not theoretical.
+    // The production build on 2026-08-16 shipped @tanstack/react-query in BOTH
+    // the query chunk and the powersync chunk, and every local-first session
+    // crashed on the notes screen while local builds from the same source were
+    // fine, because only the build environment's resolution differed.
+    dedupe: ["@tanstack/react-query", "react", "react-dom"],
   },
   // Strip console.log/debugger from production bundles to reduce
   // main-thread overhead. Dev keeps them for debugging.
@@ -85,12 +95,12 @@ export default defineConfig(({ mode }) => ({
             "@radix-ui/react-tooltip",
             "@radix-ui/react-tabs",
           ],
-          query: ["@tanstack/react-query"],
-          powersync: [
-            "@powersync/web",
-            "@powersync/react",
-            "@powersync/tanstack-react-query",
-          ],
+          // @powersync/tanstack-react-query sits WITH react-query on purpose.
+          // Splitting a library from the context provider it consumes is what
+          // lets a bundler give each chunk its own copy; sharing one chunk
+          // makes a second copy impossible rather than merely unlikely.
+          query: ["@tanstack/react-query", "@powersync/tanstack-react-query"],
+          powersync: ["@powersync/web", "@powersync/react"],
           icons: ["lucide-react"],
           motion: ["framer-motion"],
           dates: ["date-fns"],
