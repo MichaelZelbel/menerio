@@ -98,6 +98,9 @@ verify_jwt = false
 [functions.hub-api-world]
 verify_jwt = false
 
+[functions.apply-world-migration]
+verify_jwt = false
+
 [functions.receive-note]
 verify_jwt = false
 
