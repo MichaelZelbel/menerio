@@ -35,18 +35,14 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileIcon } from "@/components/profile/ProfileIcon";
 import { ProfileRow } from "@/components/profile/ProfileRow";
+import { ProfileValue } from "@/components/profile/ProfileValue";
 import { ScopeBadge, SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 
 import { EntryForm } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
-import {
-  displayLabel,
-  isCharacterLabel,
-  shouldRenderAsList,
-  splitListValue,
-  titleCaseCharacterName,
-} from "@/lib/profile-list-labels";
+import { displayLabel, splitProfileValues } from "@/lib/profile-list-labels";
+
 import type { ProfileCategory } from "@/hooks/useProfile";
 import type { ContactProfileEntry } from "@/hooks/useContactProfile";
 
