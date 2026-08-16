@@ -1587,6 +1587,50 @@ async function generateProfileSuggestions(
         }
       }
 
+      // Name guard: handles, OCR noise and re-statements of the person's own
+      // name must never become "Nickname" entries. Multi-value name fields
+      // are decided member by member.
+      if (isNameLabel(f.label)) {
+        const members = String(f.value)
+          .split(/\s*,\s*/)
+          .map((m) => m.trim())
+          .filter(Boolean);
+        const kept: string[] = [];
+        const handles: string[] = [];
+        for (const member of members) {
+          const decision = guardNameValue({ label: f.label, value: member, personName: f.contact_name });
+          if (decision.action === "drop") {
+            console.log(`[profile-extract] Name guard dropped "${member}" (${decision.reason})`);
+            continue;
+          }
+          if (decision.action === "relabel") {
+            console.log(`[profile-extract] Name guard relabelled "${member}" → ${decision.label} (${decision.reason})`);
+            handles.push(decision.value);
+            continue;
+          }
+          kept.push(decision.value);
+        }
+        if (handles.length > 0) {
+          extractedFacts.push({
+            ...f,
+            label: "Online handle",
+            category_slug: "communication",
+            value: handles.join(", "),
+            _skillChecked: true,
+          } as any);
+        }
+        if (kept.length === 0) continue;
+        f.value = kept.join(", ");
+      }
+
+      // Label gate: in a structured category, a label the schema does not
+      // know means the extractor invented a synonym ("Name alias",
+      // "Alternative name"). Never auto-apply those — force human review so a
+      // parallel field can't appear silently.
+      if (!isKnownCanonicalLabel(f.category_slug, f.label)) {
+        console.log(`[profile-extract] Unknown label "${f.label}" in ${f.category_slug} — forcing review`);
+        (f as any)._unknownLabel = true;
+      }
 
 
       // Blocked labels never become profile entries. Relationship edges are
