@@ -235,6 +235,11 @@ async function writeProfileEntrySafely(args: {
 
   const fact = normalizeIncomingFact(categorySlug, input.label, input.value);
 
+  // Name guard may have emptied the value (handle/noise only).
+  if (!fact.value.trim()) {
+    return { ok: false, outcome: "rejected_duplicate", reason: "empty_after_guards" };
+  }
+
   // Hard gate: relationship edges, purchase/event facts and the retired
   // "Current address" blob must never reach profile_entries — no matter which
   // path (LLM, review queue, manual add) tried to write them.
