@@ -22,7 +22,7 @@ export const PROFILE_CANONICAL_SCHEMA: Record<string, CategorySchema> = {
     labels: [
       { canonical: "Full name", single: true, aliases: ["legal name", "name", "full legal name"] },
       { canonical: "Preferred name", single: true, aliases: ["first name", "goes by", "preferred name"] },
-      { canonical: "Nickname", single: false, aliases: ["nickname", "nicknames", "alias", "aliases", "name aliases", "handle", "pet name", "aka", "also known as", "known as"] },
+      { canonical: "Nickname", single: false, aliases: ["nickname", "nicknames", "nick name", "alias", "aliases", "name alias", "name aliases", "alternative name", "alternative names", "alternate name", "other name", "other names", "also called", "handle", "pet name", "aka", "a.k.a.", "also known as", "known as", "goes by", "short name", "familiar name"] },
       { canonical: "Date of birth", single: true, aliases: ["birthday", "dob", "born on", "geburtsdatum", "geburtstag", "date of birth", "birth date"] },
       { canonical: "Place of birth", single: true, aliases: ["birthplace", "born in", "place of birth"] },
       { canonical: "Nationality", single: false, aliases: ["citizenship", "nationality"] },
@@ -558,3 +558,20 @@ export const CANONICAL_LABELS_FOR_PROMPT: string = (() => {
 
 // Banned labels, rendered for LLM system prompts.
 export const BLOCKED_LABELS_FOR_PROMPT: string = Object.keys(BLOCKED_PROFILE_LABELS).join(", ");
+
+
+/**
+ * Is this label one the schema actually knows? Used as a WRITE GATE: an
+ * unknown label in a structured category means the extractor invented a new
+ * synonym (the "Name alias" / "Alternative name" class of bug), so the fact
+ * goes to the review queue instead of silently creating a parallel field.
+ */
+export function isKnownCanonicalLabel(categorySlug: string, label: string): boolean {
+  const schema = PROFILE_CANONICAL_SCHEMA[categorySlug];
+  const key = normalizeKey(label);
+  if (!key) return false;
+  // Open categories accept free-form labels by design.
+  if (!schema || schema.shape === "open") return true;
+  if (PER_CATEGORY_ALIAS_MAP[categorySlug]?.has(key)) return true;
+  return GLOBAL_ALIAS_MAP.has(key);
+}
