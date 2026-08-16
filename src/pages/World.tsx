@@ -3,43 +3,55 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SEOHead } from "@/components/SEOHead";
 import { EntityDetail } from "@/components/world/EntityDetail";
-import {
-  ENTITY_TYPE_SUGGESTIONS,
-  useCreateEntity,
-  useEntities,
-} from "@/hooks/useEntities";
+import { ENTITY_TYPE_SUGGESTIONS, useCreateEntity, useEntities } from "@/hooks/useEntities";
+import { useWorldClaims, useWorldEntities, useWorldEvents } from "@/hooks/useWorld";
+import { groupClaims, isHumanWritten } from "@/lib/world-claims";
 
 /**
- * "World" — the non-person things in a user's life: places, organizations,
- * projects, objects and pets. People stay under People; this sits next to it.
+ * World: everything in your life as three lists. A thing that exists (entity),
+ * a thing that happened (event), a thing believed about something (claim).
+ *
+ * Every row here already existed somewhere else. World is a view over your
+ * people, your moments and your facts, so nothing is copied and no name ends up
+ * in two places.
  */
 export default function World() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { data: entities = [], isLoading } = useEntities();
+
+  const { data: entities = [], isLoading: entitiesLoading } = useWorldEntities();
+  const { data: events = [], isLoading: eventsLoading } = useWorldEvents();
+  const { data: claims = [], isLoading: claimsLoading } = useWorldClaims();
+  const { data: ownEntities = [] } = useEntities();
   const createEntity = useCreateEntity();
 
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("place");
 
-  // Filter chips come from the data, not a hardcoded list — the vocabulary is open.
-  const types = useMemo(() => {
+  const nameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of entities) map.set(e.id, e.name);
+    return map;
+  }, [entities]);
+
+  const kinds = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const e of entities) seen.set(e.entity_type, (seen.get(e.entity_type) || 0) + 1);
+    for (const e of entities) seen.set(e.kind, (seen.get(e.kind) || 0) + 1);
     return Array.from(seen.entries()).sort((a, b) => b[1] - a[1]);
   }, [entities]);
 
-  const filtered = useMemo(() => {
+  const visibleEntities = useMemo(() => {
     const q = search.trim().toLowerCase();
     return entities.filter((e) => {
-      if (typeFilter && e.entity_type !== typeFilter) return false;
+      if (kindFilter && e.kind !== kindFilter) return false;
       if (!q) return true;
       return (
         e.name.toLowerCase().includes(q) ||
@@ -47,9 +59,38 @@ export default function World() {
         (e.description || "").toLowerCase().includes(q)
       );
     });
-  }, [entities, search, typeFilter]);
+  }, [entities, search, kindFilter]);
 
-  const selected = entities.find((e) => e.id === id) ?? null;
+  const visibleEvents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return events;
+    return events.filter(
+      (e) =>
+        e.title.toLowerCase().includes(q) ||
+        (e.description || "").toLowerCase().includes(q),
+    );
+  }, [events, search]);
+
+  const claimGroups = useMemo(() => {
+    const groups = groupClaims(claims);
+    const q = search.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter(
+      (g) =>
+        g.attribute.toLowerCase().includes(q) ||
+        g.top.value.toLowerCase().includes(q) ||
+        (g.subject_id ? (nameById.get(g.subject_id) || "").toLowerCase().includes(q) : false),
+    );
+  }, [claims, search, nameById]);
+
+  // Only a row that lives in the `entities` table has an editable detail view.
+  // A person opens on the People screen, which is their real home.
+  const selected = ownEntities.find((e) => e.id === id) ?? null;
+
+  const subjectName = (kind: string, subjectId: string | null) => {
+    if (kind === "self" || !subjectId) return "You";
+    return nameById.get(subjectId) || "Someone";
+  };
 
   const create = () => {
     if (!newName.trim()) return;
@@ -65,119 +106,219 @@ export default function World() {
     );
   };
 
+  if (selected) {
+    return (
+      <>
+        <SEOHead title="World — Menerio" description="Everything in your life as entities, events and claims." />
+        <EntityDetail entity={selected} onDeleted={() => navigate("/dashboard/world")} />
+      </>
+    );
+  }
+
   return (
     <>
-      <SEOHead title="World — Menerio" description="Places, organizations, projects and things in your life." />
+      <SEOHead title="World — Menerio" description="Everything in your life as entities, events and claims." />
 
-      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
             <h1 className="text-lg font-semibold">World</h1>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2" onClick={() => setAdding((v) => !v)}>
-              {adding ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-              {adding ? "Cancel" : "Add"}
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              Things that exist, things that happened, and what is believed about them.
+            </p>
           </div>
+          <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" onClick={() => setAdding((v) => !v)}>
+            {adding ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+            {adding ? "Cancel" : "Add a thing"}
+          </Button>
+        </div>
 
-          {adding && (
-            <div className="space-y-2 rounded-md border border-dashed border-border p-2">
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && create()}
-                placeholder="Name"
-                className="h-8 text-sm"
-                autoFocus
-              />
-              <Input
-                value={newType}
-                onChange={(e) => setNewType(e.target.value)}
-                list="entity-type-suggestions"
-                placeholder="Type"
-                className="h-8 text-sm"
-              />
-              <datalist id="entity-type-suggestions">
-                {ENTITY_TYPE_SUGGESTIONS.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
-              <Button size="sm" className="w-full" onClick={create} disabled={!newName.trim() || createEntity.isPending}>
-                Add
-              </Button>
-            </div>
-          )}
-
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        {adding && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border p-2">
             <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search"
-              className="h-8 pl-8 text-sm"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && create()}
+              placeholder="Name"
+              className="h-8 w-48 text-sm"
+              autoFocus
             />
-          </div>
-
-          {types.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {types.map(([type, count]) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-xs capitalize transition-colors",
-                    typeFilter === type
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  {type} {count}
-                </button>
+            <Input
+              value={newType}
+              onChange={(e) => setNewType(e.target.value)}
+              list="entity-type-suggestions"
+              placeholder="Type"
+              className="h-8 w-36 text-sm"
+            />
+            <datalist id="entity-type-suggestions">
+              {ENTITY_TYPE_SUGGESTIONS.map((t) => (
+                <option key={t} value={t} />
               ))}
-            </div>
-          )}
+            </datalist>
+            <Button size="sm" onClick={create} disabled={!newName.trim() || createEntity.isPending}>
+              Add
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              People are added on the People screen.
+            </span>
+          </div>
+        )}
 
-          <nav className="space-y-0.5">
-            {isLoading ? (
-              <p className="px-2 text-sm text-muted-foreground">Loading…</p>
-            ) : filtered.length === 0 ? (
-              <p className="px-2 text-sm text-muted-foreground">
-                {entities.length === 0
-                  ? "Nothing here yet. Add a place, an organization, a project or a thing."
-                  : "No matches."}
-              </p>
-            ) : (
-              filtered.map((entity) => (
-                <button
-                  key={entity.id}
-                  type="button"
-                  onClick={() => navigate(`/dashboard/world/${entity.id}`)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                    entity.id === id ? "bg-accent font-medium" : "hover:bg-accent/60",
-                  )}
-                >
-                  <span className="truncate">{entity.name}</span>
-                  <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] capitalize">
-                    {entity.entity_type}
-                  </Badge>
-                </button>
-              ))
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search the whole world"
+            className="h-8 pl-8 text-sm"
+          />
+        </div>
+
+        <Tabs defaultValue="entities">
+          <TabsList>
+            <TabsTrigger value="entities">Entities {entities.length > 0 && entities.length}</TabsTrigger>
+            <TabsTrigger value="events">Events {events.length > 0 && events.length}</TabsTrigger>
+            <TabsTrigger value="claims">Claims {claimGroups.length > 0 && claimGroups.length}</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="entities" className="space-y-3 pt-3">
+            {kinds.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                {kinds.map(([kind, count]) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => setKindFilter(kindFilter === kind ? null : kind)}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-xs capitalize transition-colors",
+                      kindFilter === kind
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {kind} {count}
+                  </button>
+                ))}
+              </div>
             )}
-          </nav>
-        </aside>
 
-        <section className="min-w-0">
-          {selected ? (
-            <EntityDetail entity={selected} onDeleted={() => navigate("/dashboard/world")} />
-          ) : (
-            <div className="rounded-lg border border-dashed border-border p-10 text-center">
-              <p className="text-sm text-muted-foreground">
-                Select something to see its facts, timeline and the notes that mention it.
-              </p>
-            </div>
-          )}
-        </section>
+            {entitiesLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : visibleEntities.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing matches.</p>
+            ) : (
+              <ul className="divide-y divide-border rounded-md border border-border">
+                {visibleEntities.map((entity) => (
+                  <li key={`${entity.source_table}-${entity.id}`}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(
+                          entity.source_table === "contact"
+                            ? `/dashboard/people/${entity.id}`
+                            : `/dashboard/world/${entity.id}`,
+                        )
+                      }
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-accent/60"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate">{entity.name}</span>
+                        {entity.description && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {entity.description}
+                          </span>
+                        )}
+                      </span>
+                      <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] capitalize">
+                        {entity.kind}
+                      </Badge>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </TabsContent>
+
+          <TabsContent value="events" className="space-y-3 pt-3">
+            {eventsLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : visibleEvents.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing dated yet.</p>
+            ) : (
+              <ul className="divide-y divide-border rounded-md border border-border">
+                {visibleEvents.map((event) => (
+                  <li key={event.id} className="flex gap-3 px-3 py-2 text-sm">
+                    <span className="w-24 shrink-0 tabular-nums text-xs text-muted-foreground">
+                      {(event.happened_at || "").slice(0, 10)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{event.title}</span>
+                      {event.description && (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {event.description}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </TabsContent>
+
+          <TabsContent value="claims" className="space-y-3 pt-3">
+            {claimsLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : claimGroups.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing believed yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {claimGroups.map((group) => (
+                  <li key={group.key} className="rounded-md border border-border px-3 py-2 text-sm">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-xs text-muted-foreground">
+                        {subjectName(group.subject_kind, group.subject_id)}
+                      </span>
+                      <span className="font-medium capitalize">{group.attribute}</span>
+                      <span>{group.top.value}</span>
+                      {isHumanWritten(group.top) ? (
+                        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                          you wrote this
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                          a machine wrote this
+                        </Badge>
+                      )}
+                      {(group.top.valid_from || group.top.valid_to) && (
+                        <span className="text-xs text-muted-foreground">
+                          {group.top.valid_from || "always"} to {group.top.valid_to || "now"}
+                        </span>
+                      )}
+                    </div>
+
+                    {group.others.length > 0 && (
+                      <div className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
+                        {group.others.map((other) => (
+                          <div key={other.id} className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
+                            <span>{other.value}</span>
+                            <span>
+                              {isHumanWritten(other) ? "you wrote this too" : "a machine also wrote"}
+                            </span>
+                          </div>
+                        ))}
+                        {group.disagreed && (
+                          <p className="text-xs text-muted-foreground">
+                            Kept, not replaced. Your version is the one above.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </>
   );

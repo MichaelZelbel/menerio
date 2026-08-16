@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "name is required" }), { status: 400, headers });
       }
 
-      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats"];
+      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world"];
       if (!Array.isArray(scopes) || scopes.length === 0 || !scopes.every((s: string) => validScopes.includes(s))) {
         return new Response(
           JSON.stringify({ error: `scopes must be a non-empty array of: ${validScopes.join(", ")}` }),
@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
         updates.name = body.name.trim();
       }
 
-      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats"];
+      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world"];
       if (Array.isArray(body.scopes) && body.scopes.length > 0 && body.scopes.every((s: string) => validScopes.includes(s))) {
         updates.scopes = body.scopes;
       }

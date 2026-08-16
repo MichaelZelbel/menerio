@@ -95,6 +95,9 @@ verify_jwt = false
 [functions.hub-api-stats]
 verify_jwt = false
 
+[functions.hub-api-world]
+verify_jwt = false
+
 [functions.receive-note]
 verify_jwt = false
 
