@@ -67,6 +67,15 @@ export function SyncManager() {
     });
 
     const reportUnreachable = async (message: string) => {
+      // A flat network is not a dead sync service, and must not be treated as
+      // one: the fallback would send reads to a server that is equally out of
+      // reach and turn a working offline app into an error message. Stay on the
+      // local copy, keep retrying, and let the offline pill do the talking.
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        setSyncHealth({ state: "starting", error: null });
+        scheduleRetry();
+        return;
+      }
       let pendingUploads = 0;
       try {
         // Named out loud because these are edits that exist only on this device.

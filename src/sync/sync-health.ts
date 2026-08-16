@@ -89,14 +89,51 @@ export function useSyncHealth(): SyncHealth {
  * together: reading from the server while writing to a local queue that can
  * never drain would make a person's own edit disappear as they typed it.
  */
+export function shouldUseLocalFirst({
+  offlineCore,
+  state,
+  online,
+}: {
+  offlineCore: boolean;
+  state: SyncHealthState;
+  online: boolean;
+}): boolean {
+  if (!offlineCore) return false;
+  // Only a service that is missing while the network is fine sends reads to the
+  // server. Everything else stays local.
+  return !(state === "unreachable" && online);
+}
+
 export function isLocalFirstActive(): boolean {
-  return OFFLINE_CORE && health.state !== "unreachable";
+  return shouldUseLocalFirst({
+    offlineCore: OFFLINE_CORE,
+    state: health.state,
+    online: isOnline(),
+  });
 }
 
 /** The reactive twin of isLocalFirstActive, for components and hooks. */
 export function useLocalFirstActive(): boolean {
   const { state } = useSyncHealth();
-  return OFFLINE_CORE && state !== "unreachable";
+  return shouldUseLocalFirst({
+    offlineCore: OFFLINE_CORE,
+    state,
+    online: isOnline(),
+  });
+}
+
+/**
+ * A device with no network stays on its local copy, always.
+ *
+ * Falling back to the server because sync is down is right when the network is
+ * there and only the sync service is missing. Doing it on a train would throw
+ * away the entire point of holding a local copy: reads would go to a server that
+ * cannot be reached either, and a working offline app would turn into an error
+ * message. Offline is the one case where the frozen local copy IS the right
+ * answer, and the offline pill already says so.
+ */
+function isOnline(): boolean {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
 /** Test seam. Resets the module back to how it loads. */

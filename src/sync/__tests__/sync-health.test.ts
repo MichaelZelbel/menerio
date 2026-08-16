@@ -10,6 +10,7 @@ import {
   setSyncHealth,
   resetSyncHealth,
   isLocalFirstActive,
+  shouldUseLocalFirst,
   subscribe,
 } from "../sync-health";
 
@@ -177,6 +178,37 @@ describe("isLocalFirstActive", () => {
   it("stays false once the service is known to be unreachable", () => {
     setSyncHealth({ state: "unreachable", error: "gone" });
     expect(isLocalFirstActive()).toBe(false);
+  });
+
+  // OFFLINE_CORE is false in this environment, so the decision itself is tested
+  // through the pure function both callers delegate to.
+  it("sends reads to the server only when the service is gone AND the network is fine", () => {
+    expect(
+      shouldUseLocalFirst({ offlineCore: true, state: "unreachable", online: true }),
+    ).toBe(false);
+  });
+
+  it("keeps using the local copy when the DEVICE is offline", () => {
+    // On a train, falling back would throw away the entire point of holding a
+    // local copy: reads would go to a server that is equally out of reach, and a
+    // working offline app would become an error message.
+    expect(
+      shouldUseLocalFirst({ offlineCore: true, state: "unreachable", online: false }),
+    ).toBe(true);
+  });
+
+  it("stays local while connecting, so a slow start is not a fallback", () => {
+    for (const state of ["starting", "live"] as const) {
+      expect(shouldUseLocalFirst({ offlineCore: true, state, online: true })).toBe(true);
+    }
+  });
+
+  it("is never local-first on a device that does not have a local copy", () => {
+    for (const online of [true, false]) {
+      expect(
+        shouldUseLocalFirst({ offlineCore: false, state: "unreachable", online }),
+      ).toBe(false);
+    }
   });
 
   it("does not flip to the server merely because connecting is slow", () => {
