@@ -260,9 +260,6 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Unauthorized" }, 401);
-
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -271,8 +268,20 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "run");
 
+    // Scheduled sweep: pg_cron posts with the anon key and a signed body marker.
+    if (body?.cron === "profile-audit") {
+      const limit = Math.min(Number(body?.limit ?? 25), 200);
+      // @ts-ignore Deno runtime global
+      EdgeRuntime.waitUntil(sweepDirty(db, limit));
+      return json({ accepted: true, cron: true, limit }, 202);
+    }
+
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
     const isServiceCall = !!SERVICE_ROLE && bearer === SERVICE_ROLE;
+
 
     let userId: string;
     if (isServiceCall) {
