@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { localNoteUpdatedAt, upsertNotesLocal } from "@/sync/local-replica";
 
