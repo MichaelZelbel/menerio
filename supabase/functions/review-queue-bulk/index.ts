@@ -477,6 +477,39 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       await markKept(membershipId ? { target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: r.applied_at || now } : undefined);
       return;
     }
+    case "unknown_profile_field": {
+      const categorySlug = String(p.category_slug || "").trim();
+      const canonicalLabel = String(p.canonical_label || p.label || "").trim();
+      const value = String(p.value || "").trim();
+      const categoryId = p.category_id as string | undefined;
+      if (!categorySlug || !canonicalLabel || !value || !categoryId) {
+        await markKept();
+        return;
+      }
+      await db.from("profile_fields").insert({
+        user_id: userId,
+        category_slug: categorySlug,
+        canonical_label: canonicalLabel,
+        cardinality: "list",
+        value_type: "text",
+        aliases: [],
+        is_system: false,
+        is_active: true,
+      }).select("id").single();
+      const { data: entry, error } = await db.from("profile_entries").insert({
+        user_id: userId,
+        contact_id: p.contact_id || null,
+        category_id: categoryId,
+        label: canonicalLabel,
+        value,
+        origin: r.source_note_id ? "review_queue" : "user_manual",
+        evidence_quote: p.evidence_quote || null,
+        linked_note_id: p.linked_note_id || r.source_note_id || null,
+      }).select("id").single();
+      if (error) throw error;
+      await markKept(entry?.id ? { target_entity_type: "profile_entry", target_entity_id: entry.id, applied_at: now } : undefined);
+      return;
+    }
     default: {
       await markKept();
       return;
