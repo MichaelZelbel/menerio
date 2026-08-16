@@ -58,6 +58,7 @@ const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: 
   adjudicate_relationship: { icon: Eye, label: "Relationship evidence", color: "text-primary" },
   add_entity: { icon: Globe, label: "Add to World", color: "text-teal-500" },
   add_claim: { icon: Calendar, label: "Dated fact", color: "text-sky-500" },
+  unknown_profile_field: { icon: Sparkles, label: "New profile field", color: "text-fuchsia-500" },
 
 };
 
