@@ -138,8 +138,45 @@ const DISPLAY_LABEL_MAP: ReadonlyMap<string, string> = new Map(
     "favorite show": "Favorite shows",
     "favorite series": "Favorite series",
     "favorite sport": "Favorite sports",
+    // Name-ish synonyms the extractor invented before the alias list caught
+    // them. "Name alias" / "Alternative name" / "Aka" are all nicknames.
+    "nicknames": "Nickname",
+    "nick name": "Nickname",
+    "name alias": "Nickname",
+    "name aliases": "Nickname",
+    "alias": "Nickname",
+    "aliases": "Nickname",
+    "alternative name": "Nickname",
+    "alternate name": "Nickname",
+    "other name": "Nickname",
+    "other names": "Nickname",
+    "also called": "Nickname",
+    "also known as": "Nickname",
+    "aka": "Nickname",
+    "pet name": "Nickname",
+    // Localized birth names stay meaningful — they are NOT nicknames.
+    "japanese name": "Name (Japanese)",
+    "brazilian name": "Name (Brazilian)",
+    "chinese name": "Name (Chinese)",
+    "german name": "Name (German)",
+    "english name": "Name (English)",
+    "korean name": "Name (Korean)",
+    // Duplicate label pair — one canonical home for life-history facts.
+    "life history": "Life events",
   }),
 );
+
+/**
+ * Split a stored (label, value) pair into the individual values the UI should
+ * show. The one place that decides "is this one fact or several" — every
+ * profile surface must go through it so they cannot drift apart.
+ */
+export function splitProfileValues(label: string, value: string): string[] {
+  return shouldRenderAsList(label, value)
+    ? splitListValue(value)
+    : [String(value ?? "").trim()].filter((v) => v.length > 0);
+}
+
 
 /**
  * Map a stored label to the label used in the UI. Falls back to the raw
