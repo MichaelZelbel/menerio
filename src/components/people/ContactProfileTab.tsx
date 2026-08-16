@@ -129,9 +129,10 @@ export function ContactProfileTab({
 
       <RelationshipsSection contactId={contactId} contactName={contactName} milestones={milestones} />
 
-      <ProfileFactsPanel
+      <ProfileSections
         categories={factCategories}
         entries={factEntries}
+        showPinned
         onSaveEntry={(data) => upsertEntry.mutate(data)}
         onDeleteEntry={(id) => deleteEntry.mutate(id)}
         onTogglePin={handleTogglePin}
@@ -148,7 +149,7 @@ export function ContactProfileTab({
             }}
           />
         )}
-      </ProfileFactsPanel>
+      </ProfileSections>
 
       <LifeEventsStrip contactId={contactId} />
 
