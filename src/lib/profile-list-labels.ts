@@ -91,9 +91,11 @@ export function splitListValue(value: string): string[] {
  * always-list labels render as bullets even with a single item.
  */
 export function shouldRenderAsList(label: string, value: string): boolean {
-  const key = norm(label);
+  // Canonicalize first so "Name alias" behaves exactly like "Nickname".
+  const key = norm(displayLabel(label));
   if (SINGLE_FACT_LABELS.has(key)) return false;
   if (ALWAYS_LIST_LABELS.has(key)) return true;
+
   return splitListValue(value).length >= 2;
 }
 
