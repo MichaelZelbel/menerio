@@ -353,18 +353,27 @@ export default function Notes() {
 
   const handleCreateInFolder = useCallback(async (folderPath: string) => {
     setActiveFolderPath(folderPath);
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
-    setSearchMode(false);
-    selectNote(note.id);
-  }, [createNote, selectNote]);
+    try {
+      const note = await createNote.mutateAsync({ title: "", content: "", folder_path: folderPath || "" });
+      setSearchMode(false);
+      selectNote(note.id);
+    } catch (err) {
+      showToast.error(folderErrorMessage(err, "creating the note"));
+    }
+  }, [createNote, folderErrorMessage, selectNote]);
 
   const handleCreateFolderInFolder = useCallback((folderPath: string) => {
-    const folderName = window.prompt("Folder name");
-    if (!folderName) return;
-    const normalizedName = folderName.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
-    if (!normalizedName) return;
-    createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
-  }, [createFolderAtPath]);
+    openPrompt({
+      title: folderPath ? `New folder in "${folderPath}"` : "New folder",
+      description: "Enter a name for the new folder.",
+      confirmLabel: "Create folder",
+      onSubmit: async (value) => {
+        const normalizedName = value.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+        if (!normalizedName) return;
+        await createFolderAtPath(folderPath ? `${folderPath}/${normalizedName}` : normalizedName);
+      },
+    });
+  }, [createFolderAtPath, openPrompt]);
 
   const handleMoveNote = useCallback((noteId: string, folderPath: string) => {
     const normalizedTarget = (folderPath || "").replace(/^\/+|\/+$/g, "");
