@@ -36,10 +36,6 @@ export default function Profile() {
   const { user } = useAuth();
 
   const [seeded, setSeeded] = useState(false);
-  const [addingCategory, setAddingCategory] = useState(false);
-  const [newCatName, setNewCatName] = useState("");
-  const [newCatIcon, setNewCatIcon] = useState("folder");
-  const [newCatScope, setNewCatScope] = useState("all");
 
   // Get note count for nudge logic
   const { data: noteCount = 0 } = useQuery({
