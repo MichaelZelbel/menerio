@@ -24,6 +24,10 @@ import {
   isBlockedProfileLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
+import {
+  loadProfileFields,
+  ProfileFieldsRegistry,
+} from "../_shared/profile-fields-registry.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
 import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
 
