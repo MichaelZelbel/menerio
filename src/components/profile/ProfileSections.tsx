@@ -152,7 +152,9 @@ export function ProfileSections({
         </div>
       )}
 
-      {showPinned && <PinnedHighlights entries={entries} onTogglePin={onTogglePin} />}
+      {showPinned && (
+        <PinnedHighlights entries={entries as ContactProfileEntry[]} onTogglePin={onTogglePin as (e: ContactProfileEntry) => void} />
+      )}
 
       {children}
 
@@ -166,12 +168,12 @@ export function ProfileSections({
         <CompactCategorySection
           key={cat.id}
           category={cat}
-          entries={entries.filter((e) => e.category_id === cat.id)}
+          entries={entries.filter((e) => e.category_id === cat.id) as ContactProfileEntry[]}
           filterQuery={filterQuery}
           matches={matches}
           onSaveEntry={onSaveEntry}
           onDeleteEntry={onDeleteEntry}
-          onTogglePin={onTogglePin}
+          onTogglePin={onTogglePin as (e: ContactProfileEntry) => void}
           onUpdateCategory={onUpdateCategory}
           onDeleteCategory={onDeleteCategory}
           allowPin={showPinned}
