@@ -38,21 +38,25 @@ Key files: `src/lib/flags.ts` (flag), `src/sync/schema.ts` (client schema),
 Without a PowerSync endpoint configured the local database still works fully
 offline (writes queue locally); background sync just stays off.
 
-## The instance is GONE (2026-08-16) and the app now survives that
+## A transient outage froze every client permanently (2026-08-16)
 
-`6a5158557f33bac37ef5cf80.powersync.journeyapps.com` returns **NXDOMAIN**. The
-parent `powersync.journeyapps.com` still resolves, so this is the instance being
-deprovisioned, not a network fault. Everything below about the live setup is kept
-as the record of how it was built, but it does not describe anything running.
+**The instance is alive.** Between roughly 19:20 and 19:30 local on 2026-08-16,
+`6a5158557f33bac37ef5cf80.powersync.journeyapps.com` returned **NXDOMAIN** from
+public resolvers while the parent domain resolved normally. Half an hour later it
+resolved 10 times out of 10, answered HTTPS, and a browser connected and synced a
+wiped local database back to full. So it was a blip, not a deprovisioning. An
+earlier draft of this section claimed the instance had been deleted; that was a
+permanent conclusion drawn from one momentary reading, and it was wrong.
 
-**What that did, and why nobody noticed.** Every local-first device (all desktop
-builds, plus any browser that ever visited `?offline-core=on`) kept reading a
-local SQLite database that could no longer be updated. `SyncManager` reported the
-failure through `console.warn`, which `vite.config.ts` strips from production
-(`drop: ["console"]`); it tried once per page load and never retried; and the
-Notes screen read local SQLite unconditionally. The result was a note list that
-looked completely normal and was weeks stale. It surfaced only when hub folders
-written straight into Postgres never appeared in the UI.
+**A blip was enough to freeze a client forever, and that is the real defect.**
+`SyncManager` connected once per page load with no retry, and reported failure
+through `console.warn`, which `vite.config.ts` strips from production
+(`drop: ["console"]`). The Notes screen read local SQLite unconditionally with no
+indicator. So a client that happened to start during those ten minutes stayed
+frozen after the service recovered, showed a completely normal note list, and
+said nothing. That is how a device ended up on 577 notes against 638 on the
+server, and it surfaced only when hub folders written straight into Postgres
+never appeared in the UI.
 
 **What now happens instead** (`src/sync/reachability.ts`, `src/sync/sync-health.ts`):
 
@@ -70,11 +74,12 @@ written straight into Postgres never appeared in the UI.
 - It retries on a backoff (15s, 30s, 60s, then every 5 min), so restoring the
   service heals every open client without a reload.
 
-**If you re-provision:** create the instance, put its URL in `src/sync/config.ts`,
-redo the four setup steps below, and the probe will let clients back onto the
-local-first path on their own.
+**Verified end to end on 2026-08-16**, on the deployed site with the local
+database and caches wiped: the client connected, `currentStatus.connected` went
+true, 64 rows streamed back down into an empty replica, and no false "not
+syncing" alarm was raised. The healthy path and the alarm are both exercised.
 
-## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified, now deprovisioned)
+## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified, still live)
 
 Live setup: project **Menerio**, instance **Production** (EU) under Michael's
 PowerSync account (michael@zelbel.de); endpoint
