@@ -148,7 +148,9 @@ async function auditScope(
     let totalApplied = 0;
     let totalRemoved = 0;
     let findings: unknown[] = [];
+    let rejectedNotes: string[] = [];
     let clean = false;
+    let lastRoundApplied = 0;
 
     while (rounds < MAX_ROUNDS) {
       rounds += 1;
@@ -165,6 +167,7 @@ async function auditScope(
         const res = await applyPlan(db, runId, exact);
         totalApplied += res.applied;
         totalRemoved += res.removed;
+        lastRoundApplied = res.applied;
         continue;
       }
 
@@ -173,7 +176,7 @@ async function auditScope(
         userId,
         callSite: CALL_SITE,
         defaults: auditDefaults(),
-        messages: [{ role: "user", content: buildAuditUserMessage(name, entries) }],
+        messages: [{ role: "user", content: buildAuditUserMessage(name, entries, rejectedNotes) }],
         callOptions: { response_format: { type: "json_object" } },
       });
 
@@ -185,10 +188,17 @@ async function auditScope(
       }
 
       const { merges, rejected } = planMerges(entries, groups);
-      findings = [...findings, ...rejected];
+      findings = [...findings, ...rejected].slice(-200);
+      for (const r of rejected as any[]) {
+        const ids = Array.isArray(r?.entry_ids) ? r.entry_ids : [];
+        const note = `${r?.reason || "rejected"}: ${ids.join(" + ")}`;
+        if (!rejectedNotes.includes(note)) rejectedNotes.push(note);
+      }
+      rejectedNotes = rejectedNotes.slice(-40);
 
       if (merges.length === 0) {
-        // The model keeps proposing merges the guards refuse: stop and flag.
+        // Nothing safe left to merge this round: the remainder are genuinely
+        // distinct facts (or need a human), so stop here.
         return await finish(db, runId, userId, contactId, {
           status: rejected.length > 0 ? "conflict" : "clean",
           rounds,
@@ -200,15 +210,21 @@ async function auditScope(
       const res = await applyPlan(db, runId, merges);
       totalApplied += res.applied;
       totalRemoved += res.removed;
+      lastRoundApplied = res.applied;
       if (res.applied === 0) break;
     }
 
+    // Rounds exhausted while still making progress → keep the scope dirty so the
+    // next sweep continues instead of falsely reporting a conflict.
+    const status = clean ? "clean" : lastRoundApplied > 0 ? "dirty" : "conflict";
+
     return await finish(db, runId, userId, contactId, {
-      status: clean ? "clean" : "conflict",
+      status,
       rounds,
       merged_count: totalApplied,
       findings,
     }, { applied: totalApplied, removed: totalRemoved });
+
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[profile-audit] scope failed", userId, contactId, message);
