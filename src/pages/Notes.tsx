@@ -293,10 +293,14 @@ export default function Notes() {
   }, [navigate]);
 
   const handleCreate = useCallback(async () => {
-    const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
-    setSearchMode(false);
-    selectNote(note.id);
-  }, [activeFolderPath, createNote, selectNote]);
+    try {
+      const note = await createNote.mutateAsync({ title: "", content: "", folder_path: activeFolderPath || "" });
+      setSearchMode(false);
+      selectNote(note.id);
+    } catch (err) {
+      showToast.error(folderErrorMessage(err, "creating the note"));
+    }
+  }, [activeFolderPath, createNote, folderErrorMessage, selectNote]);
 
   // Detect "empty" notes: no meaningful title and no meaningful body content.
   // Strips HTML tags, empty markdown headings/list bullets/horizontal rules and all
