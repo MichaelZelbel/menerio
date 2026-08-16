@@ -16,6 +16,8 @@
  */
 
 import type { Provider } from "./llm-router.ts";
+import { PROFILE_AUDIT_SYSTEM_PROMPT } from "./profile-audit.ts";
+
 
 const JSON_OBJECT = { response_format: { type: "json_object" } };
 
