@@ -79,23 +79,6 @@ export default function Profile() {
     );
   }
 
-  const handleAddCategory = () => {
-    if (!newCatName.trim()) return;
-    const slug = newCatName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    upsertCategory.mutate({
-      name: newCatName.trim(),
-      slug,
-      icon: newCatIcon,
-      visibility_scope: newCatScope,
-      sort_order: categories.length,
-      is_default: false,
-    });
-    setAddingCategory(false);
-    setNewCatName("");
-    setNewCatIcon("folder");
-    setNewCatScope("all");
-  };
-
   return (
     <>
       <SEOHead title="My Profile — Menerio" description="Manage the personal profile AI agents use to understand you — your bio, preferences, goals, and context that powers personalized responses." noIndex />
