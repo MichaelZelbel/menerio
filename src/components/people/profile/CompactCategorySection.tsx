@@ -275,98 +275,57 @@ export function CompactCategorySection({
         </div>
       )}
 
-      {/* Entries */}
+      {/* Entries — grouped by canonical display label so that four
+          "Name alias" rows and a comma-packed "Nickname" row collapse into a
+          single bulleted "Nickname" block. */}
       {isOpen && visibleEntries.length > 0 && (
         <div className="border-t border-border">
-          {visibleEntries.map((entry) =>
-            editingEntryId === entry.id ? (
-              <div key={entry.id} className="px-4 py-3 border-b border-border last:border-b-0">
-                <EntryForm
-                  initial={entry}
-                  categoryId={category.id}
-                  suggestedLabels={suggestedLabels}
-                  existingLabels={existingLabels}
-                  onSave={handleSaveEntry}
-                  onCancel={() => setEditingEntryId(null)}
-                />
-              </div>
-            ) : (
-              <ProfileRow
-                key={entry.id}
-                label={<Highlighted text={displayLabel(entry.label)} query={filterQuery} />}
-                actions={
-                  <>
-                    {entry.linked_note_id && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
-                          >
-                            <LinkIcon className="h-3.5 w-3.5 text-primary" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Open linked note</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {allowPin && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => onTogglePin(entry)}
-                          >
-                            {entry.is_pinned ? (
-                              <PinOff className="h-3.5 w-3.5 text-primary" />
-                            ) : (
-                              <Pin className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => onDeleteEntry(entry.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </>
-                }
-              >
-                {shouldRenderAsList(entry.label, entry.value) ? (
-                  <ul className="text-sm break-words w-full list-disc pl-5 space-y-0.5 marker:text-muted-foreground">
-                    {splitListValue(entry.value).map((item, idx) => {
-                      const display = isCharacterLabel(entry.label)
-                        ? titleCaseCharacterName(item)
-                        : item;
-                      return (
-                        <li key={idx}>
-                          <Highlighted text={display} query={filterQuery} />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <span className="text-sm break-words">
-                    <Highlighted text={entry.value} query={filterQuery} />
-                  </span>
+          {groupEntriesByLabel(visibleEntries).map((group) => {
+            const editing = group.items.filter((it) => it.entry.id === editingEntryId);
+            const rest = group.items.filter((it) => it.entry.id !== editingEntryId);
+            const editEntry = editing[0]?.entry;
+
+            return (
+              <div key={group.key}>
+                {editEntry && (
+                  <div className="px-4 py-3 border-b border-border">
+                    <EntryForm
+                      initial={editEntry}
+                      categoryId={category.id}
+                      suggestedLabels={suggestedLabels}
+                      existingLabels={existingLabels}
+                      onSave={handleSaveEntry}
+                      onCancel={() => setEditingEntryId(null)}
+                    />
+                  </div>
                 )}
-              </ProfileRow>
-            ),
-          )}
+                {rest.length > 0 && (
+                  <ProfileRow
+                    label={<Highlighted text={group.label} query={filterQuery} />}
+                    actions={rest.length === 1 ? entryActions(rest[0].entry) : undefined}
+                  >
+                    <ProfileValue
+                      label={group.label}
+                      values={rest.map((it) => it.value)}
+                      renderText={(t) => <Highlighted text={t} query={filterQuery} />}
+                      itemActions={
+                        rest.length === 1
+                          ? undefined
+                          : (i) => (
+                              <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                {entryActions(rest[i].entry)}
+                              </span>
+                            )
+                      }
+                    />
+                  </ProfileRow>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
