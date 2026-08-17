@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { runChat } from "../_shared/llm-router.ts";
 import { AI_MODERATE_CONTENT_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
@@ -20,7 +20,6 @@ const CONFIDENCE_THRESHOLD = 0.85;
 const STRIKE_LIMIT = 5;
 
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend/emails";
-const AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 const CLASSIFY_TOOL = {
   type: "function" as const,
@@ -50,7 +49,11 @@ Deno.serve(async (req) => {
     const lovableKey = Deno.env.get("LOVABLE_API_KEY");
     const resendKey = Deno.env.get("RESEND_API_KEY");
 
-    if (!lovableKey) return ok({ error: "LOVABLE_API_KEY not configured" }, 500);
+    // No longer a hard requirement for classifying: the model and its key now come
+    // from the row via runChat, which may well be OpenRouter. This key is still
+    // needed for the violation email, which goes through Lovable's Resend
+    // connector, so its absence degrades notification rather than moderation.
+    if (!lovableKey) console.warn("LOVABLE_API_KEY not configured: violation emails will be skipped");
 
     const admin = createClient(supabaseUrl, serviceKey);
 
@@ -74,7 +77,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const classification = await classifyContent(admin, item.content_snapshot, lovableKey);
+        const classification = await classifyContent(admin, item.content_snapshot, item.user_id);
 
         if (!classification) {
           // AI call failed
@@ -161,32 +164,51 @@ Deno.serve(async (req) => {
   }
 });
 
-async function classifyContent(admin: any, content: string, apiKey: string): Promise<{ is_violation: boolean; category?: string; confidence: number; reason: string } | null> {
+/**
+ * Classify one queued item.
+ *
+ * This used to resolve its PROMPT from `llm_call_configs` and then hardcode the
+ * gateway, the key and the model, which is the worst of both worlds: the admin
+ * screen showed a provider and a model it did not control, and gave no hint that
+ * two of the three knobs were decorative. It now goes through `runChat`, so the
+ * row decides, the same way every other call site works.
+ *
+ * `skipDeduct` is deliberate. This function never touched the credit ledger, and
+ * routing it through `runChat` would otherwise start charging each moderated user
+ * from their own allowance for the platform checking their shared note. That is a
+ * new charge nobody agreed to, so moderation stays a platform cost.
+ *
+ * The forced tool call still works: `callOptions` reaches the request body
+ * unchanged, and the answer is read from `raw`, because `runChat`'s `content` is
+ * empty when a model replies with a tool call instead of text.
+ */
+async function classifyContent(admin: any, content: string, userId: string): Promise<{ is_violation: boolean; category?: string; confidence: number; reason: string } | null> {
   try {
-    const systemPrompt = await resolveSystemPrompt(admin, "ai-moderate-content.main", AI_MODERATE_CONTENT_PROMPT);
-    const resp = await fetch(AI_GATEWAY, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const result = await runChat({
+      db: admin,
+      userId,
+      callSite: "ai-moderate-content.main",
+      messages: [
+        { role: "user", content: `Classify this shared note content:\n\n${content.slice(0, 5000)}` },
+      ],
+      defaults: {
+        provider: "lovable",
         model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Classify this shared note content:\n\n${content.slice(0, 5000)}` },
-        ],
+        systemPrompt: AI_MODERATE_CONTENT_PROMPT,
+      },
+      callOptions: {
         tools: [CLASSIFY_TOOL],
         tool_choice: { type: "function", function: { name: "classify_content" } },
-      }),
+      },
+      skipDeduct: true,
     });
 
-    if (!resp.ok) {
-      console.error("AI gateway error:", resp.status, await resp.text());
-      return null;
-    }
-
-    const data = await resp.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    const toolCall = (result.raw as any)?.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
-      console.error("No tool call in AI response:", JSON.stringify(data));
+      console.error(
+        `No tool call in AI response (provider=${result.provider}, model=${result.model}, config=${result.configSource}). ` +
+          `A model that cannot do forced tool calls will always land here.`,
+      );
       return null;
     }
 
@@ -233,11 +255,15 @@ async function sendViolationEmail(
   userId: string,
   noteTitle: string,
   category: string,
-  lovableKey: string,
+  lovableKey: string | undefined,
   resendKey?: string,
 ) {
   if (!resendKey) {
     console.warn("RESEND_API_KEY not configured, skipping violation email");
+    return;
+  }
+  if (!lovableKey) {
+    console.warn("LOVABLE_API_KEY not configured, skipping violation email");
     return;
   }
 
