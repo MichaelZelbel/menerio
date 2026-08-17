@@ -29,19 +29,45 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "unauthorized" }, 401);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !user) return json({ error: "unauthorized" }, 401);
+    const token = authHeader.replace("Bearer ", "").trim();
 
     const { note_id } = await req.json();
     if (!note_id) return json({ error: "note_id required" }, 400);
+
+    // Two callers, two credentials.
+    //
+    // A person saving a note arrives with a user JWT. But process-note fans out
+    // to here with whatever Authorization it was itself called with, and both
+    // sweep-note-processing and the post-OCR re-trigger in analyze-media call
+    // process-note with the SERVICE ROLE KEY. A service-role key is not a user
+    // JWT, so getUser() rejected it and this answered 401 — and because the
+    // fan-out is a bare fetch().catch(), an HTTP 401 resolves normally and
+    // nothing was ever logged. Every note the sweep rescued silently got no
+    // connections, which is exactly the set most likely to need them.
+    //
+    // The internal branch takes the owner from the note row rather than from
+    // the request body, so it cannot be pointed at another user's note.
+    let userId: string;
+    if (token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      const { data: owner } = await supabase
+        .from("notes")
+        .select("user_id")
+        .eq("id", note_id)
+        .single();
+      if (!owner) return json({ error: "Note not found" }, 404);
+      userId = owner.user_id;
+    } else {
+      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !user) return json({ error: "unauthorized" }, 401);
+      userId = user.id;
+    }
 
     // Fetch the note
     const { data: note, error: noteErr } = await supabase
       .from("notes")
       .select("id, user_id, title, content, metadata, embedding, tags, ai_visibility")
       .eq("id", note_id)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
 
     if (noteErr || !note) return json({ error: "Note not found" }, 404);
@@ -60,7 +86,7 @@ Deno.serve(async (req: Request) => {
     const { data: contacts } = await supabase
       .from("contacts")
       .select("id, name, aliases")
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
     const myTitle = note.title || "";
     const aliasMap = buildAliasMap((contacts || []) as Contact[]);
 
@@ -80,7 +106,7 @@ Deno.serve(async (req: Request) => {
         query_embedding: embedding,
         match_threshold: 0.65,
         match_count: 11,
-        p_user_id: user.id,
+        p_user_id: userId,
       });
 
       const semanticMatches = (matches || []).filter((m: { id: string }) => m.id !== note_id).slice(0, 10);
@@ -92,7 +118,7 @@ Deno.serve(async (req: Request) => {
           connection_type: "semantic",
           strength: Math.round(m.similarity * 100) / 100,
           metadata: { similarity: m.similarity },
-          user_id: user.id,
+          user_id: userId,
         });
       }
 
@@ -103,7 +129,7 @@ Deno.serve(async (req: Request) => {
         .select("id, target_note_id")
         .eq("source_note_id", note_id)
         .eq("connection_type", "semantic")
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       const toDelete = (existing || [])
         .filter((e: { target_note_id: string }) => !keepIds.has(e.target_note_id))
@@ -120,7 +146,7 @@ Deno.serve(async (req: Request) => {
       ? (await supabase
           .from("notes")
           .select("id, title, metadata")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("is_trashed", false)
           .eq("ai_visibility", "visible")
           .neq("id", note_id)
@@ -144,7 +170,7 @@ Deno.serve(async (req: Request) => {
               shared_person_count: result.sharedIds.length,
               shared_person_ids: result.sharedIds,
             },
-            user_id: user.id,
+            user_id: userId,
           });
         }
       }
@@ -167,7 +193,7 @@ Deno.serve(async (req: Request) => {
             connection_type: "shared_topic",
             strength: result.strength,
             metadata: { topics: result.shared },
-            user_id: user.id,
+            user_id: userId,
           });
         }
       }
@@ -192,7 +218,7 @@ Deno.serve(async (req: Request) => {
         .select("id, target_note_id")
         .eq("source_note_id", note_id)
         .eq("connection_type", type)
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       const toDelete = (existing || [])
         .filter((e: { target_note_id: string }) => !keepTargets.has(e.target_note_id))

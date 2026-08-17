@@ -2685,7 +2685,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     // Generate timeline-moment suggestions from past events documented in the note.
     await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
 
-    // Trigger connection computation (fire-and-forget)
+    // Trigger connection computation (fire-and-forget, but never silent).
+    //
+    // fetch() only rejects on a transport error, so an HTTP 4xx/5xx from the
+    // callee used to vanish with no log line at all. That is how every
+    // sweep-processed note silently missed the knowledge graph for as long as
+    // it did: compute-connections answered 401 and the .catch() never fired.
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
     fetch(computeUrl, {
       method: "POST",
@@ -2694,7 +2699,15 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ note_id: noteId }),
-    }).catch(err => console.error("compute-connections trigger error:", err));
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          console.error(
+            `compute-connections rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
+          );
+        }
+      })
+      .catch((err) => console.error("compute-connections trigger error:", err));
 
     console.log("process-note completed for:", noteId);
   } catch (err) {
