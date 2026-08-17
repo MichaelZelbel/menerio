@@ -2621,8 +2621,14 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       chunking: { count: chunkInfo.count, truncated: chunkInfo.truncated, failures: chunkInfo.failures, updated_at: new Date().toISOString() },
     };
 
-    // Update the note with embedding, metadata, and optionally a smarter title
-    const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
+    // Update the note with embedding, metadata, and optionally a smarter title.
+    //
+    // `embedding` is only written when we actually produced one. It used to go
+    // in unconditionally, so a chunking run that failed without throwing wrote
+    // embedding: null and wiped a perfectly good vector off the note, taking it
+    // out of note-level semantic search until something reprocessed it.
+    const updatePayload: Record<string, unknown> = { metadata: mergedMetadata };
+    if (embedding) updatePayload.embedding = embedding;
     if (aiTitle) updatePayload.title = aiTitle;
     // Hash the content version we actually processed. When the AI renames the
     // note we hash the new title, otherwise the sweep would see a mismatch and
