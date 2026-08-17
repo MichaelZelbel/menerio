@@ -3,7 +3,7 @@ import {
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { outputLanguageRule, runChat } from "../_shared/llm-router.ts";
+import { outputLanguageRule, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { PROCESS_NOTE_MOMENT_PROMPT } from "../_shared/llm-defaults.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { shouldExtractFacts } from "../_shared/hub-source.ts";
@@ -2420,6 +2420,7 @@ async function processInBackground(noteId: string, authHeader: string, force = f
           model: "deepseek/deepseek-v4-flash",
           systemPrompt: METADATA_SYSTEM_PROMPT,
         },
+        systemSuffix: sourceLanguageRule(),
         callOptions: { response_format: { type: "json_object" } },
       });
 

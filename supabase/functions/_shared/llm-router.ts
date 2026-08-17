@@ -284,6 +284,25 @@ export function outputLanguageRule(language: string): string {
 }
 
 /**
+ * The other half of the language question, for call sites that describe a note
+ * back to its author: a title, a summary, topic tags.
+ *
+ * These do not get `outputLanguageRule`, because forcing a German note to carry
+ * an English title would be a change nobody asked for. What they need is the
+ * floor: answer in the language the source is written in, and never in a third
+ * one. Without it there is no rule at all, which is how a note about a packing
+ * checklist could have been titled in Chinese.
+ *
+ * Pass through `systemSuffix`, for the same reason as `outputLanguageRule`.
+ */
+export function sourceLanguageRule(): string {
+  return `OUTPUT LANGUAGE — write every free-text field you return in the SAME language the source material is written in.
+- A German note gets German text back, an English note gets English text back.
+- Never answer in a third language, whatever language you would otherwise lean towards. If the source mixes languages, use the one most of it is written in.
+- Leave personal names, company, brand and product names, and place names exactly as they appear in the source. Do not translate them in either direction.`;
+}
+
+/**
  * Run a chat completion through the configured provider and deduct credits.
  */
 export async function runChat(args: {

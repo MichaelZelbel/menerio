@@ -3,7 +3,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { INGEST_THOUGHT_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -146,6 +146,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             model: "deepseek/deepseek-v4-flash",
             systemPrompt: INGEST_THOUGHT_METADATA_PROMPT,
           },
+          systemSuffix: sourceLanguageRule(),
           callOptions: { response_format: { type: "json_object" } },
         }),
       ]);
