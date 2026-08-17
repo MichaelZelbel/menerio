@@ -8,6 +8,8 @@
  * validate_collection_item_data trigger as a hard backstop.
  */
 
+import { safeFetchText } from "./ssrf-guard.ts";
+
 export type FieldType =
   | "text" | "longtext" | "number" | "date" | "datetime" | "boolean"
   | "select" | "multiselect" | "currency" | "url" | "email" | "phone"
@@ -112,14 +114,18 @@ export function validateItemData(
   return { ok: true, data: cleaned };
 }
 
-/** Fetch a URL and return trimmed text (~15KB budget). Used by extract_item_from_url. */
+/**
+ * Fetch a URL and return trimmed text (~15KB budget).
+ *
+ * Used by extract_item_from_url, whose `url` argument is chosen by the MODEL —
+ * so note content can steer where this points. It previously called fetch()
+ * directly with redirect:"follow", no scheme check, no host check, no timeout
+ * and no size cap, which made it a server-side request forgery reachable from
+ * a tool call. It now goes through the shared outbound guard: https only, no
+ * internal or link-local hosts, every redirect hop re-checked.
+ */
 export async function fetchUrlAsText(url: string, maxChars = 15000): Promise<string> {
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Menerio/1.0 (+https://menerio.com)" },
-    redirect: "follow",
-  });
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const html = await res.text();
+  const html = await safeFetchText(url);
   // Naive HTML -> text; good enough for structured extraction context.
   const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
