@@ -13,6 +13,9 @@ vi.mock("@/lib/toast", () => ({
 
 // Minimal chainable supabase mock: list queries resolve empty, mutations
 // succeed. Only the shapes useContactProfile actually calls are implemented.
+// `functions.invoke` is here because a NEW profile entry is written through the
+// normalize-profile edge function, not by a direct insert — the server-side
+// guards can refuse the write and return a `reason`.
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     from: () => ({
@@ -27,6 +30,9 @@ vi.mock("@/integrations/supabase/client", () => ({
       update: () => ({ eq: async () => ({ error: null }) }),
       delete: () => ({ eq: async () => ({ error: null }) }),
     }),
+    functions: {
+      invoke: async () => ({ data: { ok: true, reason: null }, error: null }),
+    },
   },
 }));
 
