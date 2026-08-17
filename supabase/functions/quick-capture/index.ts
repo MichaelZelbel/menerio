@@ -4,6 +4,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
   insufficientCreditsResponse,
+  balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
 import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { QUICK_CAPTURE_METADATA_PROMPT, metadataFieldContract } from "../_shared/llm-defaults.ts";
@@ -68,7 +69,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Pre-check balance
     const balance = await checkBalance(supabase, userId);
     if (!balance.allowed) {
-      return insufficientCreditsResponse(corsHeaders);
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
     }
 
     const body = await req.json();

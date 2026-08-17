@@ -10,6 +10,7 @@ import {
   checkBalance,
   openRouterWithCredits,
   insufficientCreditsResponse,
+  balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
 import { resolveConfig, resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { NOTE_CHAT_SUMMARIZE_PROMPT } from "../_shared/llm-defaults.ts";
@@ -360,7 +361,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const balance = await checkBalance(db, user.id);
-    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+    if (!balance.allowed) {
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
+    }
 
     // Summarization mode (matches note-chat contract so the client can reuse
     // its buildApiMessages + refreshSummaryIfNeeded logic).

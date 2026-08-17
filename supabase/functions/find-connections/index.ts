@@ -3,6 +3,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
   insufficientCreditsResponse,
+  balanceUnavailableResponse,
   type CreditInfo,
 } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
@@ -45,7 +46,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Pre-check balance before any LLM calls
     const balance = await checkBalance(supabase, user.id);
-    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+    if (!balance.allowed) {
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
+    }
 
     let embedding: number[] | null = null;
     let sourceNote: { id: string; title: string; content: string; metadata: Record<string, unknown> } | null = null;

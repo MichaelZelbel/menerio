@@ -3,6 +3,7 @@ import {
   checkBalance,
   openRouterWithCredits,
   insufficientCreditsResponse,
+  balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
 import { resolveSystemPrompt, resolveConfig } from "../_shared/llm-router.ts";
 import {
@@ -266,7 +267,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Check credits
     const balance = await checkBalance(db, user.id);
-    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+    if (!balance.allowed) {
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
+    }
 
     // Lightweight summarization mode — used by the client to compress
     // older turns into a rolling summary so context doesn't grow unbounded.

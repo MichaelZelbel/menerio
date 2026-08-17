@@ -13,6 +13,8 @@ export interface ChunkEmbedResult {
   firstChunkEmbedding: number[] | null;
   remainingCredits?: number | null;
   insufficientCredits?: boolean;
+  /** The allowance could not be read at all. Distinct from a spent quota. */
+  balanceUnavailable?: boolean;
 }
 
 export async function embedAndStoreNoteChunks(
@@ -28,10 +30,9 @@ export async function embedAndStoreNoteChunks(
   const truncated = chunks.length > MAX_CHUNKS_PER_NOTE;
   const limited = truncated ? chunks.slice(0, MAX_CHUNKS_PER_NOTE) : chunks;
 
-  // Replace any existing chunks for this note.
-  await admin.from("note_chunks").delete().eq("note_id", noteId);
-
   if (limited.length === 0) {
+    // The note really has no chunks now, so clearing them is the correct result.
+    await admin.from("note_chunks").delete().eq("note_id", noteId);
     return { chunkCount: 0, truncated: false, failures: 0, firstChunkEmbedding: null };
   }
 
@@ -39,6 +40,14 @@ export async function embedAndStoreNoteChunks(
   let firstChunkEmbedding: number[] | null = null;
   let remainingCredits: number | null = null;
   let insufficientCredits = false;
+  let balanceUnavailable = false;
+  // The old chunks are deleted only once a replacement has actually been
+  // produced. Deleting up front turned any transient credit or embedding failure
+  // into permanent data loss: the note did not merely fail to gain new chunks, it
+  // lost the ones it had, and every downstream search silently stopped finding
+  // it. Keeping stale chunks until a real replacement exists is strictly better
+  // than keeping none.
+  let replacedExisting = false;
 
   for (const chunk of limited) {
     const input = buildEmbeddingInput(noteTitle, chunk);
@@ -48,6 +57,11 @@ export async function embedAndStoreNoteChunks(
       );
       remainingCredits = credits?.remaining_credits ?? remainingCredits;
       if (chunk.index === 0) firstChunkEmbedding = embedding;
+
+      if (!replacedExisting) {
+        await admin.from("note_chunks").delete().eq("note_id", noteId);
+        replacedExisting = true;
+      }
 
       const { error } = await admin.from("note_chunks").insert({
         note_id: noteId,
@@ -66,6 +80,13 @@ export async function embedAndStoreNoteChunks(
       const msg = (err as Error).message || String(err);
       console.warn("chunk embedding failed", noteId, chunk.index, msg);
       failures += 1;
+      if (msg === "BALANCE_UNAVAILABLE") {
+        // Not a spent quota: the allowance could not be read. Stop for the same
+        // reason (no point embedding the rest), but report it as the different
+        // thing it is, so a retry is obviously worth attempting.
+        balanceUnavailable = true;
+        break;
+      }
       if (msg === "INSUFFICIENT_CREDITS" || msg.toLowerCase().includes("insufficient")) {
         insufficientCredits = true;
         break;
@@ -80,6 +101,7 @@ export async function embedAndStoreNoteChunks(
     firstChunkEmbedding,
     remainingCredits,
     insufficientCredits,
+    balanceUnavailable,
   };
 }
 

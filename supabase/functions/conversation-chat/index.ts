@@ -1,7 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveSystemPrompt, resolveConfig } from "../_shared/llm-router.ts";
 import { CONVERSATION_CHAT_PROMPT } from "../_shared/llm-defaults.ts";
-import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import {
+  balanceUnavailableResponse,
+  checkBalance,
+  getEmbeddingWithCredits,
+  insufficientCreditsResponse,
+} from "../_shared/llm-credits.ts";
 import { getUserProfile, formatUserProfileDigest } from "../_shared/user-profile.ts";
 import { buildAwarenessContext } from "../_shared/awareness.ts";
 import { webSearchTool, runWebSearch } from "../_shared/web-search.ts";
@@ -50,7 +55,11 @@ Deno.serve(async (req) => {
 
     // Enforce credits (Mira now runs on OpenRouter with credit accounting).
     const balance = await checkBalance(supabase, user.id);
-    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+    if (!balance.allowed) {
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
+    }
 
     const [historyResult, personResult, profileResult, notesResult, momentsResult, shortDocsResult] = await Promise.all([
       supabase.from("conversation_messages").select("role, content").eq("user_id", user.id).eq("person_id", personId).order("created_at", { ascending: false }).limit(10),

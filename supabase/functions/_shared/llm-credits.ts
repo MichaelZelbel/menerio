@@ -22,26 +22,73 @@ export interface BalanceCheck {
   allowed: boolean;
   remaining_tokens: number;
   remaining_credits: number;
+  /**
+   * True when the allowance could not be READ at all, as opposed to being read
+   * and found empty. Both block the call; only this one is a fault on our side.
+   */
+  unavailable?: boolean;
+  /** The database error text, when `unavailable` is true. */
+  error?: string | null;
 }
 
 /**
  * Quick pre-check: does the user have any remaining AI credits?
  * Uses the v_ai_allowance_current view (no locking).
+ *
+ * "I cannot see your allowance" is NOT "you have no credits".
+ *
+ * This function used to destructure `data` and throw the `error` away, so an RLS
+ * block, a missing grant, a PostgREST schema-cache miss or any transient error
+ * was indistinguishable from a spent quota: the caller raised
+ * INSUFFICIENT_CREDITS and the work was abandoned with nothing in the log saying
+ * why. On 2026-08-17 every chunk embedding for one note failed that way while a
+ * direct SQL query of the same view showed a healthy balance.
+ *
+ * The two outcomes are now distinguishable. Both still fail CLOSED, because the
+ * alternative leaks a paid provider call per error, and because the problem here
+ * was never strictness, it was silence. What changed is that the error is logged
+ * with its real code and message, and callers that answer over HTTP can say 503
+ * ("I cannot check") instead of 402 ("you are out").
+ *
+ * Deliberately does not throw: 17 call sites do `if (!balance.allowed)`, several
+ * inside background sweeps where an exception would abandon a whole batch rather
+ * than skip one optional step. Throwing belongs at {@link openRouterWithCredits},
+ * which already runs inside a caller's try/catch.
  */
 export async function checkBalance(
   db: any,
   userId: string
 ): Promise<BalanceCheck> {
   // Tolerate stray duplicate rows (one per period_start) by ordering and taking the first.
-  const { data } = await db
+  const { data, error } = await db
     .from("v_ai_allowance_current")
     .select("remaining_tokens, remaining_credits, period_start")
     .eq("user_id", userId)
     .order("period_start", { ascending: false })
     .limit(1);
 
+  if (error) {
+    const detail = [error.code, error.message].filter(Boolean).join(" ") || String(error);
+    console.error(
+      `[llm-credits] allowance lookup FAILED for user=${userId}: ${detail}. ` +
+        `This is not an empty balance; the view could not be read.`
+    );
+    return {
+      allowed: false,
+      remaining_tokens: 0,
+      remaining_credits: 0,
+      unavailable: true,
+      error: detail,
+    };
+  }
+
   const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
-  if (!row) return { allowed: false, remaining_tokens: 0, remaining_credits: 0 };
+  if (!row) {
+    console.warn(
+      `[llm-credits] no active allowance period for user=${userId} (view readable, zero rows)`
+    );
+    return { allowed: false, remaining_tokens: 0, remaining_credits: 0 };
+  }
   const rt = Number(row.remaining_tokens) || 0;
   const rc = Number(row.remaining_credits) || 0;
   return { allowed: rt > 0, remaining_tokens: rt, remaining_credits: rc };
@@ -116,7 +163,9 @@ export async function openRouterWithCredits(
   // Pre-check balance
   const balance = await checkBalance(db, userId);
   if (!balance.allowed) {
-    const err: any = new Error("INSUFFICIENT_CREDITS");
+    const err: any = new Error(
+      balance.unavailable ? "BALANCE_UNAVAILABLE" : "INSUFFICIENT_CREDITS"
+    );
     err.creditInfo = balance;
     throw err;
   }
@@ -239,6 +288,34 @@ export async function deductExternalLLMTokens(
     completionTokens: ct,
     usageSource,
   });
+}
+
+/**
+ * True when a thrown error means "the allowance could not be read", rather than
+ * "the allowance was read and it is empty". Keep the two apart at every boundary
+ * a human or a retry policy looks at: the first is our fault and worth retrying,
+ * the second is a real quota and is not.
+ */
+export function isBalanceUnavailable(err: unknown): boolean {
+  return (err as { message?: string } | null)?.message === "BALANCE_UNAVAILABLE";
+}
+
+/**
+ * The answer for "I cannot check your balance right now". 503, not 402: nothing
+ * is known about the user's quota, so telling them they are out of credits would
+ * be a guess presented as a fact.
+ */
+export function balanceUnavailableResponse(corsHeaders: Record<string, string>) {
+  return new Response(
+    JSON.stringify({
+      error: "Could not verify your AI credit balance. This is a problem on our side, not your quota.",
+      code: "BALANCE_UNAVAILABLE",
+    }),
+    {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    }
+  );
 }
 
 /**

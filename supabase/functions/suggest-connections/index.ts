@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
   insufficientCreditsResponse,
+  balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
 import { runChat } from "../_shared/llm-router.ts";
 import { SUGGEST_CONNECTIONS_PROMPT } from "../_shared/llm-defaults.ts";
@@ -46,7 +47,11 @@ Deno.serve(async (req: Request) => {
 
     // Pre-check balance before LLM call
     const balance = await checkBalance(supabase, user.id);
-    if (!balance.allowed) return insufficientCreditsResponse(corsHeaders);
+    if (!balance.allowed) {
+      return balance.unavailable
+        ? balanceUnavailableResponse(corsHeaders)
+        : insufficientCreditsResponse(corsHeaders);
+    }
 
     const { data: note } = await supabase
       .from("notes")
