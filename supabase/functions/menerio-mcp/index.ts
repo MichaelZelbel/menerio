@@ -11,6 +11,7 @@ import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import {
+import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
   applyVisibility,
   assertWritable,
   enterVisibilityScope,
@@ -661,7 +662,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
-    .or(`title.ilike.*${q}*,content.ilike.*${q}*`)
+    .or(ilikeAnyColumn(["title", "content"], q))
     .order("updated_at", { ascending: false })
     .limit(CANDIDATE_CAP);
   textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
@@ -746,7 +747,7 @@ async function searchLexiconPages(query: string, limit: number): Promise<any[]> 
     .from("wiki_pages")
     .select("slug, title, page_type, summary, source_count, updated_at")
     .eq("user_id", getCurrentUserId())
-    .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
+    .or(ilikeAnyColumn(["title", "slug", "content"], q))
     .order("updated_at", { ascending: false })
     .limit(limit);
   return data || [];
@@ -1436,7 +1437,7 @@ server.registerTool(
 
       if (query) {
         const qq = String(query).replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
-        q = q.or(`name.ilike.*${qq}*,company.ilike.*${qq}*`);
+        q = q.or(ilikeAnyColumn(["name", "company"], qq));
       }
       if (relationship) q = q.eq("relationship", relationship);
       q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
@@ -1746,8 +1747,11 @@ server.registerTool(
     inputSchema: { query: z.string(), limit: z.number().optional().default(20) },
   },
   async ({ query, limit }) => {
-    const escaped = query.replace(/[,()'"\\*%_]/g, " ").replace(/\s+/g, " ").trim();
-    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(`title.ilike.*${escaped}*,description.ilike.*${escaped}*`).order("happened_at", { ascending: false }).limit(limit);
+    // The filter grammar's delimiters used to be stripped to spaces here, which
+    // kept the request valid at the cost of silently changing the search: a
+    // query for "Q1 (draft)" actually searched for "Q1 draft". ilikeAnyColumn
+    // quotes them instead, so the term is matched as typed.
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(ilikeAnyColumn(["title", "description"], query)).order("happened_at", { ascending: false }).limit(limit);
     q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
@@ -2678,7 +2682,7 @@ server.registerTool(
         .from("wiki_pages")
         .select("slug, title, page_type, summary, source_count, updated_at")
         .eq("user_id", getCurrentUserId())
-        .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`)
+        .or(ilikeAnyColumn(["title", "slug", "content"], q))
         .order("updated_at", { ascending: false })
         .limit(safeLimit);
 

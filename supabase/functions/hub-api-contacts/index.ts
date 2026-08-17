@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
 import {
+import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
   json,
   errorJson,
   handleOptions,
@@ -138,7 +139,7 @@ Deno.serve(async (req) => {
 
       if (relationship) query = query.eq("relationship", relationship);
       if (tag) query = query.contains("tags", [tag]);
-      if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,company.ilike.%${search}%`);
+      if (search) query = query.or(ilikeAnyColumn(["name", "email", "company"], search));
 
       query = query.order("updated_at", { ascending: false }).range(offset, offset + limit - 1);
 
