@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
+import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
 
@@ -32,7 +33,7 @@ async function ilikeFallback(userId: string, query: string, limit: number, calle
     )
     .eq("user_id", userId)
     .eq("is_trashed", false)
-    .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+    .or(ilikeAnyColumn(["title", "content"], q))
     .order("updated_at", { ascending: false })
     .limit(limit);
   if (caller === "mcp") qb = qb.eq("ai_visibility", "visible");

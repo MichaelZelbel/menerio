@@ -84,3 +84,65 @@ export async function safeWebhookPost(
   }
   return null; // too many redirects
 }
+
+/**
+ * GET a user- or model-supplied URL and return its body as text.
+ *
+ * Same protections as safeWebhookPost, plus two this caller needs: a timeout,
+ * and a byte cap enforced WHILE streaming. Reading the whole body and slicing
+ * afterwards lets a hostile or merely enormous page exhaust the isolate's
+ * memory before the slice ever runs.
+ *
+ * Throws rather than returning null: the only caller turns a failure into a
+ * message the model reads, and "refused" needs to be distinguishable from
+ * "fetched an empty page".
+ */
+export async function safeFetchText(
+  startUrl: string,
+  opts: { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<string> {
+  const { timeoutMs = 10_000, maxBytes = 2_000_000 } = opts;
+  let url = startUrl;
+
+  for (let hop = 0; hop < 3; hop++) {
+    if (!isSafeOutboundUrl(url)) {
+      throw new Error("refused: URL is not a public https address");
+    }
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "User-Agent": "Menerio/1.0 (+https://menerio.com)" },
+    });
+
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      await res.body?.cancel();
+      if (!loc) throw new Error("refused: redirect without a location");
+      url = new URL(loc, url).toString(); // re-validated at the top of the next hop
+      continue;
+    }
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+
+    const reader = res.body?.getReader();
+    if (!reader) return "";
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+    await reader.cancel().catch(() => {});
+
+    const buf = new Uint8Array(total);
+    let at = 0;
+    for (const c of chunks) {
+      buf.set(c, at);
+      at += c.length;
+    }
+    return new TextDecoder().decode(buf.subarray(0, maxBytes));
+  }
+  throw new Error("refused: too many redirects");
+}

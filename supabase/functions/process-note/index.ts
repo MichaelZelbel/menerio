@@ -2312,6 +2312,52 @@ async function setProcessingState(
 }
 
 /* ── Main background processor ── */
+/**
+ * How long a claim can sit before another run may take it. Must match
+ * sweep-note-processing's STUCK_MS, which is what decides a note is stuck and
+ * re-triggers it; a shorter value here would let two runs overlap again, and a
+ * longer one would make the sweep re-trigger notes this function then refuses.
+ */
+const CLAIM_STALE_MS = 10 * 60_000;
+
+/**
+ * Take exclusive ownership of a note before spending anything on it.
+ *
+ * The content-hash check in processInBackground stops a re-run of a version we
+ * already finished. It cannot stop two runs STARTING at once, which is the race
+ * its own comment describes: the client flush and the sweep both fire, both
+ * read a status that is not yet "processing", both proceed, and the note is
+ * embedded and extracted twice at double the credit cost.
+ *
+ * The conditional update collapses that read-then-write into one statement, so
+ * exactly one caller gets a row back.
+ *
+ * The or() is what stops the claim becoming a deadlock. A run that dies
+ * mid-flight leaves the status at "processing" forever, and a bare
+ * `neq("processing_status", "processing")` would then refuse every retry.
+ * `is.null` is in there because a legacy note has no status at all, and in SQL
+ * `NULL <> 'processing'` is NULL rather than true, so neq alone would skip it.
+ */
+async function claimNoteForProcessing(noteId: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("notes")
+    .update({ processing_status: "processing", processing_error: null })
+    .eq("id", noteId)
+    .or(
+      `processing_status.is.null,processing_status.neq.processing,updated_at.lt.${staleBefore}`,
+    )
+    .select("id");
+
+  if (error) {
+    console.warn("failed to claim note for processing", noteId, error.message);
+    return false;
+  }
+  const won = Array.isArray(data) && data.length > 0;
+  if (!won) console.log(`process-note: ${noteId} is already being processed, skipping`);
+  return won;
+}
+
 async function processInBackground(noteId: string, authHeader: string, force = false) {
   let contentHash: string | null = null;
   try {
@@ -2353,7 +2399,13 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       return;
     }
 
-    await setProcessingState(noteId, "processing", { processing_error: null });
+    // Claim it before spending. `force` is the deliberate admin re-run and
+    // keeps its existing override.
+    if (force) {
+      await setProcessingState(noteId, "processing", { processing_error: null });
+    } else if (!(await claimNoteForProcessing(noteId))) {
+      return;
+    }
 
     // Include media analysis content in the embedding text
     const { data: mediaEntries } = await supabase
@@ -2621,8 +2673,14 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       chunking: { count: chunkInfo.count, truncated: chunkInfo.truncated, failures: chunkInfo.failures, updated_at: new Date().toISOString() },
     };
 
-    // Update the note with embedding, metadata, and optionally a smarter title
-    const updatePayload: Record<string, unknown> = { embedding, metadata: mergedMetadata };
+    // Update the note with embedding, metadata, and optionally a smarter title.
+    //
+    // `embedding` is only written when we actually produced one. It used to go
+    // in unconditionally, so a chunking run that failed without throwing wrote
+    // embedding: null and wiped a perfectly good vector off the note, taking it
+    // out of note-level semantic search until something reprocessed it.
+    const updatePayload: Record<string, unknown> = { metadata: mergedMetadata };
+    if (embedding) updatePayload.embedding = embedding;
     if (aiTitle) updatePayload.title = aiTitle;
     // Hash the content version we actually processed. When the AI renames the
     // note we hash the new title, otherwise the sweep would see a mismatch and
@@ -2679,7 +2737,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     // Generate timeline-moment suggestions from past events documented in the note.
     await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
 
-    // Trigger connection computation (fire-and-forget)
+    // Trigger connection computation (fire-and-forget, but never silent).
+    //
+    // fetch() only rejects on a transport error, so an HTTP 4xx/5xx from the
+    // callee used to vanish with no log line at all. That is how every
+    // sweep-processed note silently missed the knowledge graph for as long as
+    // it did: compute-connections answered 401 and the .catch() never fired.
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
     fetch(computeUrl, {
       method: "POST",
@@ -2688,7 +2751,15 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ note_id: noteId }),
-    }).catch(err => console.error("compute-connections trigger error:", err));
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          console.error(
+            `compute-connections rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
+          );
+        }
+      })
+      .catch((err) => console.error("compute-connections trigger error:", err));
 
     console.log("process-note completed for:", noteId);
   } catch (err) {

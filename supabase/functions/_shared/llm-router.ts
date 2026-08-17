@@ -7,7 +7,7 @@
  * current behaviour. If the DB row is missing or disabled, defaults win.
  */
 
-import { deductTokens, type CreditInfo } from "./llm-credits.ts";
+import { checkBalance, deductTokens, type CreditInfo } from "./llm-credits.ts";
 
 export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
@@ -42,6 +42,8 @@ export interface RunChatResult {
   configSource: "db" | "fallback-default";
   model: string;
   provider: Provider;
+  /** True when the provider was paid but the ledger could not record it. */
+  deductFailed?: boolean;
 }
 
 const FALLBACK_TOKENS: Record<string, number> = {
@@ -375,6 +377,32 @@ export async function runChat(args: {
   systemSuffix?: string;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
+
+  // Check the balance BEFORE contacting a provider.
+  //
+  // openRouterWithCredits has always pre-checked. runChat did not: it called the
+  // provider, then deducted inside a try/catch that only warned. So a user at
+  // zero balance kept getting answers — the deduction threw INSUFFICIENT_CREDITS,
+  // the warning scrolled past, and the content was returned anyway. The ledger
+  // was advisory on the one path every migrated call site uses.
+  //
+  // Fails CLOSED, matching openRouterWithCredits: an unreadable allowance blocks
+  // too, but reports itself as BALANCE_UNAVAILABLE so a caller answering over
+  // HTTP can say 503 ("I cannot check") rather than 402 ("you are out").
+  //
+  // skipDeduct also skips this. That flag is the admin test-run, which exists to
+  // exercise a call site regardless of quota.
+  if (!args.skipDeduct) {
+    const balance = await checkBalance(args.db, args.userId);
+    if (!balance.allowed) {
+      const err: any = new Error(
+        balance.unavailable ? "BALANCE_UNAVAILABLE" : "INSUFFICIENT_CREDITS"
+      );
+      err.creditInfo = balance;
+      throw err;
+    }
+  }
+
   const interpolated = interpolatePrompt(effective.system_prompt, args.templateVars);
   const suffixed = args.systemSuffix
     ? `${interpolated ?? ""}${interpolated ? "\n\n" : ""}${args.systemSuffix}`
@@ -466,12 +494,20 @@ export async function runChat(args: {
       });
       break;
     }
+    default: {
+      // Unreachable while llm_call_configs_provider_chk matches the Provider
+      // union. If those ever drift apart, fail loudly: leaving `result`
+      // undefined makes the extraction below yield content:"" , which reads
+      // downstream as "the model had nothing to say" rather than as a fault.
+      throw new Error(`Unknown LLM provider '${provider}' for ${args.callSite}`);
+    }
   }
 
   const content: string = result?.choices?.[0]?.message?.content ?? "";
 
   // Deduct credits
   let credits: CreditInfo | undefined;
+  let deductFailed = false;
   if (!args.skipDeduct) {
     const usage = result?.usage ?? {};
     const pt = usage.prompt_tokens ?? 0;
@@ -501,7 +537,16 @@ export async function runChat(args: {
         // non-fatal
       }
     } catch (err) {
-      console.warn(`[llm-router] deduct failed for ${args.callSite}:`, (err as Error).message);
+      // The provider has already been paid by this point, so the answer is
+      // returned rather than binning work the spend cannot be undone on. But
+      // this must never be quiet: it means real money went unrecorded, and the
+      // pre-check above is what stops that becoming unlimited.
+      deductFailed = true;
+      console.error(
+        `[llm-router] SPEND NOT RECORDED for ${args.callSite} ` +
+          `(user=${args.userId}, model=${effective.model}, tokens=${total}): ` +
+          `${(err as Error).message}`
+      );
     }
   }
 
@@ -512,6 +557,7 @@ export async function runChat(args: {
     configSource: source,
     model: effective.model,
     provider: effective.provider,
+    deductFailed,
   };
 }
 

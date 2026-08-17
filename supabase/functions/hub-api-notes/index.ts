@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
 import {
+import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
   corsHeaders,
   json,
   errorJson,
@@ -76,7 +77,7 @@ Deno.serve(async (req) => {
         .select("id, title, content, tags, entity_type, is_favorite, is_pinned, created_at, updated_at")
         .eq("user_id", userId)
         .eq("is_trashed", false)
-        .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+        .or(ilikeAnyColumn(["title", "content"], query))
         .order("updated_at", { ascending: false })
         .limit(limit);
 

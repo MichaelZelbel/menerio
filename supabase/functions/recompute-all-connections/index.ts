@@ -5,6 +5,7 @@ import {
   scoreSharedTopics,
   type Contact,
 } from "../_shared/graph-matching.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -56,14 +57,21 @@ Deno.serve(async (req: Request) => {
     const batchSize = body.batch_size || 50;
     const minStrength = body.min_strength || 0.65;
 
-    // Get all users who have notes
-    const { data: userIds } = await supabase
-      .from("notes")
-      .select("user_id")
-      .eq("is_trashed", false)
-      .limit(1000);
-
-    const uniqueUsers = [...new Set((userIds || []).map((r: any) => r.user_id))];
+    // Every user who has a note.
+    //
+    // Not "every user among the first 1000 note rows", which is what the
+    // unbounded select returned: it capped at 1000 NOTES and then deduplicated
+    // to users, so one prolific account filled the page and crowded everyone
+    // else out of the recompute entirely.
+    const userRows = await selectAllRows<{ user_id: string }>((from, to) =>
+      supabase
+        .from("notes")
+        .select("user_id")
+        .eq("is_trashed", false)
+        .order("user_id", { ascending: true })
+        .range(from, to)
+    );
+    const uniqueUsers = [...new Set(userRows.map((r) => r.user_id))];
     let totalProcessed = 0;
     let totalConnections = 0;
 

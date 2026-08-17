@@ -77,6 +77,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ilikeContains } from "@/lib/postgrest";
 import {
   Sheet,
   SheetContent,
@@ -908,7 +909,9 @@ function LinkPicker({
           .order("updated_at", { ascending: false })
           .limit(10);
         const { data } = term
-          ? await request.or(`title.ilike.%${term}%,content.ilike.%${term}%`)
+          ? await request.or(
+              [ilikeContains("title", term), ilikeContains("content", term)].join(","),
+            )
           : await request;
         if (!cancelled)
           setResults(

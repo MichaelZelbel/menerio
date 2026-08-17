@@ -10,6 +10,7 @@
  * local to note-chat, which is the only agent with a "current note".
  */
 import { openRouterWithCredits } from "./llm-credits.ts";
+import { ilikeAnyColumn } from "./postgrest-filters.ts";
 
 const SEMANTIC_EMBED_MODEL = "openai/text-embedding-3-small";
 
@@ -210,7 +211,7 @@ export async function executeReadTool(
         .eq("user_id", userId)
         .eq("is_trashed", false)
         .eq("ai_visibility", "visible")
-        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .or(ilikeAnyColumn(["title", "content"], q))
         .order("updated_at", { ascending: false })
         .limit(10);
       if (error) return JSON.stringify({ error: error.message });
@@ -230,7 +231,7 @@ export async function executeReadTool(
         .select("id, note_id, storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
         .eq("user_id", userId)
         .eq("analysis_status", "complete")
-        .or(`extracted_text.ilike.%${q}%,description.ilike.%${q}%`)
+        .or(ilikeAnyColumn(["extracted_text", "description"], q))
         .order("created_at", { ascending: false })
         .limit(10);
       if (error) return JSON.stringify({ error: error.message });
