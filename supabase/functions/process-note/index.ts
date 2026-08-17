@@ -2312,6 +2312,52 @@ async function setProcessingState(
 }
 
 /* ── Main background processor ── */
+/**
+ * How long a claim can sit before another run may take it. Must match
+ * sweep-note-processing's STUCK_MS, which is what decides a note is stuck and
+ * re-triggers it; a shorter value here would let two runs overlap again, and a
+ * longer one would make the sweep re-trigger notes this function then refuses.
+ */
+const CLAIM_STALE_MS = 10 * 60_000;
+
+/**
+ * Take exclusive ownership of a note before spending anything on it.
+ *
+ * The content-hash check in processInBackground stops a re-run of a version we
+ * already finished. It cannot stop two runs STARTING at once, which is the race
+ * its own comment describes: the client flush and the sweep both fire, both
+ * read a status that is not yet "processing", both proceed, and the note is
+ * embedded and extracted twice at double the credit cost.
+ *
+ * The conditional update collapses that read-then-write into one statement, so
+ * exactly one caller gets a row back.
+ *
+ * The or() is what stops the claim becoming a deadlock. A run that dies
+ * mid-flight leaves the status at "processing" forever, and a bare
+ * `neq("processing_status", "processing")` would then refuse every retry.
+ * `is.null` is in there because a legacy note has no status at all, and in SQL
+ * `NULL <> 'processing'` is NULL rather than true, so neq alone would skip it.
+ */
+async function claimNoteForProcessing(noteId: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("notes")
+    .update({ processing_status: "processing", processing_error: null })
+    .eq("id", noteId)
+    .or(
+      `processing_status.is.null,processing_status.neq.processing,updated_at.lt.${staleBefore}`,
+    )
+    .select("id");
+
+  if (error) {
+    console.warn("failed to claim note for processing", noteId, error.message);
+    return false;
+  }
+  const won = Array.isArray(data) && data.length > 0;
+  if (!won) console.log(`process-note: ${noteId} is already being processed, skipping`);
+  return won;
+}
+
 async function processInBackground(noteId: string, authHeader: string, force = false) {
   let contentHash: string | null = null;
   try {
@@ -2353,7 +2399,13 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       return;
     }
 
-    await setProcessingState(noteId, "processing", { processing_error: null });
+    // Claim it before spending. `force` is the deliberate admin re-run and
+    // keeps its existing override.
+    if (force) {
+      await setProcessingState(noteId, "processing", { processing_error: null });
+    } else if (!(await claimNoteForProcessing(noteId))) {
+      return;
+    }
 
     // Include media analysis content in the embedding text
     const { data: mediaEntries } = await supabase
