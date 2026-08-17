@@ -1,3 +1,29 @@
+-- The same stale-row fault at four more call sites, found while fixing the three
+-- above. Every statement touches system_prompt ONLY and is guarded on the exact
+-- md5 read live on 2026-08-17. provider and model are deliberately left alone:
+-- all four carry hand-picked models that differ from CALL_SITE_DEFAULTS, and a
+-- force sync would destroy them.
+--
+-- note-chat.general is the proof that a migration file is not a production
+-- change. 20260711100000_note_chat_general_agent_prompt.sql was written to replace
+-- this very text five weeks ago and never applied; both of its LIKE conditions
+-- still match the live row.
+--
+-- Rollback: supabase/rollback/20260817_stale_prompt_rows_rollback.sql
+
+-- The strict owner-only attribution rule: suggest a fact only when the source
+-- makes a first-person statement about the OWNER, and never a fact that describes
+-- somebody else mentioned in the notes. The 120-character live row had none of
+-- it, so other people's facts could be proposed for the owner's own profile. A
+-- weaker version of the rule survives in the user-role prompt, which is why this
+-- was degraded rather than entirely absent.
+--
+-- Applied by the Lovable agent on 2026-08-17 as this file. The identical SQL was
+-- authored as 20260817120200_stale_prompt_rows.sql, generated from the code
+-- constants rather than typed by hand; that duplicate is removed so one file
+-- carries both the statement and the reason. Verified byte-identical before
+-- consolidating.
+--
 update public.llm_call_configs
 set system_prompt = $p$You are a profile analyst building ONLY the profile owner's own personal profile. Strict subject-attribution: only suggest a fact when the source text makes a first-person statement about the OWNER ("I…", "my…") or names the owner explicitly. Never suggest facts that describe other people mentioned in the notes (contacts, partners, family, personas, colleagues) — those facts belong to those people, not the owner. When the subject is ambiguous, omit the suggestion. Return ONLY a JSON array of suggestion objects. No markdown, no explanation outside the JSON.$p$
 where call_site in ('generate-profile-suggestions.main')

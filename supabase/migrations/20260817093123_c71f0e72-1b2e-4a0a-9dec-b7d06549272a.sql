@@ -1,3 +1,30 @@
+-- Defects 1 and 3, which turned out to be one defect: profile extraction
+-- discarded everything it extracted.
+--
+-- The row seeded on 2026-06-01 never asked for "source_quote". On 2026-08-09 the
+-- code began discarding any fact whose quote could not be found verbatim in the
+-- note, so from then until 2026-08-17 every fact the model found was dropped by a
+-- silent continue, and the log line on the way out said the facts were already
+-- known. About 370 notes went through it and produced nothing. Separately, no
+-- profile card had ever carried an evidence quote, and the relationship evidence
+-- gate had rejected 100% of automated relationships for its entire life.
+--
+-- The field contract now travels in runChat's systemSuffix, appended after this
+-- row has had its say, so extraction no longer depends on this text being
+-- current. What this row holds from here on is policy only: what to extract, what
+-- to refuse, how to derive a date, how not to flatten a mood into a trait. The
+-- JSON shape, the mandatory source_quote and the three schema-derived label blocks
+-- are deliberately NOT here, because freezing them into a row is what froze a
+-- snapshot of the profile schema in the first place.
+--
+-- Rollback: supabase/rollback/20260817_stale_prompt_rows_rollback.sql
+--
+-- Applied by the Lovable agent on 2026-08-17 as this file. The identical SQL was
+-- authored as 20260817120100_profile_extraction_prompt_policy_half.sql, generated from the code
+-- constants rather than typed by hand; that duplicate is removed so one file
+-- carries both the statement and the reason. Verified byte-identical before
+-- consolidating.
+--
 update public.llm_call_configs
 set system_prompt = $p$You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
 

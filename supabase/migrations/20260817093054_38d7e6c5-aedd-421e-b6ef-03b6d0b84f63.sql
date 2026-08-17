@@ -1,3 +1,29 @@
+-- Defect 2: the fiction guard was switched off in production.
+--
+-- process-note.metadata and quick-capture.metadata were seeded on 2026-06-01 with
+-- a nine-line stub that never asked the model for "content_mode". The code
+-- defaults that field to "personal" when it is absent, which left BOTH fiction
+-- gates dead: the primary one (skipPersonSuggestions) and the heuristic backup,
+-- which is itself gated on contentMode !== "personal". A cast of characters became
+-- a list of contacts.
+--
+-- This writes the real prompt, carrying the fictional-character exclusion policy,
+-- "mentioned_works" and "content_mode". The field contract also travels in
+-- runChat's systemSuffix from 2026-08-17, so the guard no longer depends on this
+-- text being current; this update stops the row contradicting it.
+--
+-- The guard is the exact md5 of the stub as read live on 2026-08-17, so a
+-- hand-edited row is never touched, and on a fresh database (seeded with the new
+-- default from llm-defaults.ts) it matches nothing and does nothing.
+--
+-- Rollback: supabase/rollback/20260817_stale_prompt_rows_rollback.sql
+--
+-- Applied by the Lovable agent on 2026-08-17 as this file. The identical SQL was
+-- authored as 20260817120000_metadata_prompt_fiction_guard.sql, generated from the code
+-- constants rather than typed by hand; that duplicate is removed so one file
+-- carries both the statement and the reason. Verified byte-identical before
+-- consolidating.
+--
 update public.llm_call_configs
 set system_prompt = $p$Extract metadata from the user's note. Return JSON with:
 - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
