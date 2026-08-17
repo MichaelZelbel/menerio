@@ -33,3 +33,6 @@ dist-ssr
 # Tauri build output
 src-tauri/target/
 src-tauri/gen/
+
+# Supabase CLI scratch (project link state). Can hold a pooler URL with credentials.
+supabase/.temp/
