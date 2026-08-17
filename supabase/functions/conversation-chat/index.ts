@@ -48,10 +48,14 @@ Deno.serve(async (req) => {
 
     const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!openRouterKey) throw new Error("OPENROUTER_API_KEY not configured");
-    // Long-term memory embeddings were generated via the Lovable gateway; keep
-    // using it for the RAG lookup so vectors stay in the same space. Optional —
-    // if absent, we simply skip long-term memory.
-    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    // Long-term memory used to embed its query through the Lovable chat gateway,
+    // on the reasoning that the stored vectors came from there too and the two
+    // had to share a space. The reasoning was right; the space was not. A chat
+    // model asked to emit 768 numbers invents them, and the padding and
+    // normalising downstream meant the result was always a unit vector of exactly
+    // the right length, so nothing ever errored. Both sides of the comparison
+    // were noise. Both now come from the real embeddings model, through the same
+    // helper the note pipeline uses.
 
     // Enforce credits (Mira now runs on OpenRouter with credit accounting).
     const balance = await checkBalance(supabase, user.id);
@@ -84,7 +88,7 @@ Deno.serve(async (req) => {
     }).slice(0, 10);
 
     let longTermContext = "";
-    if (personId && lovableKey) longTermContext = await searchLongTermMemory(supabase, lovableKey, message, personId, user.id);
+    if (personId) longTermContext = await searchLongTermMemory(supabase, openRouterKey, message, personId, user.id);
 
     const personContext = [
       buildPersonContext(person, profileResult.data || [], relatedNotes, relatedMoments),
@@ -212,7 +216,9 @@ function buildConversationContext(ctx?: ConversationContext) {
 
 async function searchLongTermMemory(supabase: any, apiKey: string, query: string, personId: string, userId: string) {
   try {
-    const embedding = await generateEmbedding(apiKey, query);
+    const { embedding } = await getEmbeddingWithCredits(
+      supabase, apiKey, userId, "conversation-chat:long-term-memory", query.slice(0, 8000),
+    );
     const { data, error } = await supabase.rpc("match_person_documents", {
       query_embedding: JSON.stringify(embedding),
       match_person_id: personId,
@@ -226,26 +232,4 @@ async function searchLongTermMemory(supabase: any, apiKey: string, query: string
     console.error("long-term memory search failed:", error);
     return "";
   }
-}
-
-async function generateEmbedding(apiKey: string, text: string): Promise<number[]> {
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash-lite",
-      temperature: 0,
-      messages: [{ role: "user", content: `Generate a 768-dimensional semantic embedding vector for this text:\n\n${text.substring(0, 2000)}` }],
-      tools: [{ type: "function", function: { name: "store_embedding", description: "Store the embedding vector", parameters: { type: "object", properties: { embedding: { type: "array", items: { type: "number" } } }, required: ["embedding"], additionalProperties: false } } }],
-      tool_choice: { type: "function", function: { name: "store_embedding" } },
-    }),
-  });
-  if (!response.ok) throw new Error(`Embedding generation failed: ${response.status}`);
-  const data = await response.json();
-  const args = JSON.parse(data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments || "{}");
-  let embedding = Array.isArray(args.embedding) ? args.embedding : [];
-  embedding = embedding.slice(0, 768).map((v: unknown) => Number(v) || 0);
-  while (embedding.length < 768) embedding.push(0);
-  const magnitude = Math.sqrt(embedding.reduce((sum: number, v: number) => sum + v * v, 0));
-  return magnitude > 0 ? embedding.map((v: number) => v / magnitude) : embedding;
 }

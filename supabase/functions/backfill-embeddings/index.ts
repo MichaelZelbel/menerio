@@ -117,11 +117,12 @@ Deno.serve(async (req) => {
           skipped += 1;
         }
 
-        if (result.insufficientCredits) { stop = true; break; }
+        if (result.insufficientCredits || result.balanceUnavailable) { stop = true; break; }
       } catch (err) {
-        console.warn("backfill failed", note.id, (err as Error).message);
+        const msg = String((err as Error).message);
+        console.warn("backfill failed", note.id, msg);
         failures += 1;
-        if (String((err as Error).message).toLowerCase().includes("insufficient")) break;
+        if (msg === "BALANCE_UNAVAILABLE" || msg.toLowerCase().includes("insufficient")) break;
       }
     }
 
