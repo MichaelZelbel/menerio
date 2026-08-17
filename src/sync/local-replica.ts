@@ -110,15 +110,32 @@ export async function getReplicaDiagnostics(userId: string): Promise<ReplicaDiag
       "SELECT count(*) AS total, sum(case when is_favorite = 1 then 1 else 0 end) AS favorites FROM notes WHERE user_id = ? AND is_trashed = 0",
       [userId],
     ),
-    supabase
-      .from("notes" as never)
-      .select("id, is_favorite")
-      .eq("user_id", userId)
-      .eq("is_trashed", false),
+    // Paged deliberately. An unbounded select stops at PostgREST's 1000-row
+    // cap, so past 1000 notes serverTotal pinned at 1000 and missingIds was
+    // diffed against a partial set: the check that exists to catch a broken
+    // replica became the thing hiding one. repairLocalReplica below already
+    // pages; this did not.
+    (async () => {
+      const rows: { id: string; is_favorite: boolean }[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from("notes" as never)
+          .select("id, is_favorite")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const page = (data as unknown as { id: string; is_favorite: boolean }[]) || [];
+        rows.push(...page);
+        if (page.length < pageSize) return rows;
+      }
+    })(),
     db.getUploadQueueStats().catch(() => ({ count: 0 })),
   ]);
 
-  const server = ((serverRows.data as unknown as { id: string; is_favorite: boolean }[]) || []);
+  const server = serverRows;
   const localIds = new Set(
     (
       await db.getAll<{ id: string }>("SELECT id FROM notes WHERE user_id = ?", [userId])
