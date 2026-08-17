@@ -22,6 +22,35 @@ interface NoteResult {
   updated_at: string;
 }
 
+/** Normalize a title for comparison: trim, collapse whitespace, strip diacritics, lowercase. */
+function norm(s: string): string {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Rank title matches: exact > prefix > word-boundary > substring; ties by recency. */
+function rankNotes(rows: NoteResult[], query: string): NoteResult[] {
+  const q = norm(query);
+  const score = (title: string): number => {
+    const t = norm(title);
+    if (t === q) return 0;
+    if (t.startsWith(q)) return 1;
+    if (new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t)) return 2;
+    if (t.includes(q)) return 3;
+    return 4;
+  };
+  return [...rows].sort((a, b) => {
+    const d = score(a.title) - score(b.title);
+    if (d !== 0) return d;
+    return (b.updated_at || "").localeCompare(a.updated_at || "");
+  });
+}
+
+
 export function WikilinkAutocomplete({
   isOpen,
   onClose,
