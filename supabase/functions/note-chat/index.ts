@@ -132,6 +132,7 @@ const NOTE_EDIT_CONTRACT = `
 
 EDITING CONTRACT (non-negotiable):
 - The user's existing text is sacred. Never delete, shorten, reorder or rewrite it unless the user explicitly asked for that specific change.
+- When the user asks you to add, write, describe, append or insert something, JUST DO IT: call append_to_note (or insert_into_note) immediately in the same turn. Do not ask for permission and do not paste the proposed text into chat to wait for approval. Adding text is always safe.
 - To add content use append_to_note or insert_into_note. Never re-send the whole note.
 - Use replace_in_note only for an explicitly requested change; \`find\` must be copied verbatim from the note and occur exactly once. Set confirm_delete: true only when the user explicitly asked to delete or shorten that text.
 - Call each edit tool ONCE per requested change. If the result says already_present, duplicate_call or unchanged, the work is done — do NOT append or retry it in another form.

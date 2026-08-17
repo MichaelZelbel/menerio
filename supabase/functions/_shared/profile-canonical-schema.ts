@@ -545,6 +545,14 @@ export function matchProfileCategoryByLabel(
   return { slug: hit.slug, canonicalLabel: hit.canonical };
 }
 
+/**
+ * The category slugs, derived from the schema itself so there is exactly one
+ * list. Edge functions used to keep their own hand-typed copy (process-note had
+ * a 17-entry array of its own), which is how a slug list in a prompt and the
+ * slug list used to validate the answer could drift apart.
+ */
+export const PROFILE_CATEGORY_SLUGS: string[] = Object.keys(PROFILE_CANONICAL_SCHEMA);
+
 // Compact human-readable list grouped by category — for LLM system prompts.
 export const CANONICAL_LABELS_FOR_PROMPT: string = (() => {
   const lines: string[] = [];

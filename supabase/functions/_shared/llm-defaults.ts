@@ -17,45 +17,97 @@
 
 import type { Provider } from "./llm-router.ts";
 import { PROFILE_AUDIT_SYSTEM_PROMPT } from "./profile-audit.ts";
+import {
+  BLOCKED_LABELS_FOR_PROMPT,
+  CANONICAL_LABELS_FOR_PROMPT,
+  PROFILE_CATEGORY_SLUGS,
+} from "./profile-canonical-schema.ts";
 
 
 const JSON_OBJECT = { response_format: { type: "json_object" } };
 
 // ---------- prompts ----------
 
+/**
+ * Note metadata extraction.
+ *
+ * This is the real prompt, carrying the fictional-character exclusion policy
+ * and the `content_mode` field that drives it. It lived in process-note as a
+ * local constant while the copy here was a nine-line stub, so the stub is what
+ * got seeded into `llm_call_configs` on 2026-06-01 and the policy never ran in
+ * production for either caller. `quick-capture` aliases this constant below,
+ * which is how quick capture gets a fiction policy at all.
+ *
+ * The parts that code reads out of the answer (`content_mode`, `people`,
+ * `mentioned_works`) are ALSO demanded through `metadataFieldContract()` at
+ * call time, because anything written only in here can be replaced by a row.
+ */
 export const PROCESS_NOTE_METADATA_PROMPT = `Extract metadata from the user's note. Return JSON with:
- - "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
- - "people": array of people mentioned (empty if none)
-
- - "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
- - "topics": array of 1-5 short topic tags (always generate at least one)
- - "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
- - "sentiment": one of "positive", "negative", "neutral"
- - "summary": one-sentence summary of the note
+- "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
+- "people": array of names of REAL human beings the note author actually knows of or interacts with (real individuals — first name, full name, or known alias). Do NOT include:
+    * companies, products, apps, projects, tools, libraries, websites, brands, domains, or open-source repos, even if the name sounds personal.
+    * fictional characters from novels, light novels, manga, anime, visual novels, video games, films, TV series, comics, plays, or any other work of fiction — even if the note lists them by name. This applies EVEN when the surrounding note is a personal profile or journal that only references media in passing. Examples that must be EXCLUDED:
+        - "favorite actor Lee Junyoung as Geum Sung-je" → exclude "Geum Sung-je" (that's the fictional role, not a person the author knows).
+        - "the character I remind you of? Spiderman?" → exclude "Spiderman" (fictional superhero).
+        - "currently watching Weak Hero, love the protagonist" / "cast: A, B, C" / "playing Chocola in NEKOPARA" → exclude character names.
+      Real actors, directors, authors, streamers, or creators the author actually follows or knows MAY be included — but the fictional role they play must not.
+    * mythological, religious, or folkloric figures presented as characters.
+  When in doubt (a single capitalized word with no clearly human context, or a name that only appears as part of describing a story/game/show), leave it out.
+- "mentioned_works": array of titles of creative works discussed in the note (novels, manga, anime, games, films, shows, albums, etc.). Empty if none.
+- "content_mode": one of "personal" (default — a personal note, journal entry, meeting note, task, idea, etc.), "review_of_fiction" (the primary subject is a work of fiction — reviewing/summarizing/discussing a novel, anime, manga, game, film, TV show, etc.), "review_of_nonfiction" (primary subject is a non-fiction book, article, documentary, course), or "reference" (a reference/how-to/documentation clip). Choose "review_of_fiction" whenever the note is mainly ABOUT a fictional work, regardless of length.
+- "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
+- "topics": array of 1-5 short topic tags (always generate at least one)
+- "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
+- "sentiment": one of "positive", "negative", "neutral"
+- "summary": one-sentence summary of the note
 Only extract what's explicitly there. Don't invent details.`;
 
-export const PROCESS_NOTE_PROFILE_PROMPT = `You are extracting biographical facts about specific real people from a personal note.
+/**
+ * The metadata fields the code actually reads, restated where a row cannot drop
+ * them. Pass through `runChat`'s `systemSuffix`, never through
+ * `defaults.systemPrompt`.
+ *
+ * Why this exists: `generateReviewItems` decides whether a note is a review of
+ * fiction from `metadata.content_mode`, and defaults it to "personal" when the
+ * key is absent. The seeded prompt never asked for the key, so the value was
+ * always "personal", so BOTH fiction gates were dead: the primary one at
+ * `skipPersonSuggestions` and the heuristic backup, which is itself gated on
+ * `contentMode !== "personal"`. A cast of characters became a list of contacts.
+ */
+export function metadataFieldContract(): string {
+  return `OUTPUT CONTRACT — code reads these keys, so they must always be present:
+- "content_mode": exactly one of "personal", "review_of_fiction", "review_of_nonfiction", "reference". Use "personal" for a personal note, journal entry, meeting note, task or idea. Use "review_of_fiction" whenever the note is mainly ABOUT a work of fiction (a novel, light novel, manga, anime, visual novel, game, film, TV series or comic), however short the note is. Never omit this key and never invent a fifth value.
+- "mentioned_works": array of titles of creative works discussed in the note. Empty array if none.
+- "people": ONLY real human beings the note author knows of or interacts with. Never a fictional character, never a role an actor plays, never a mythological or religious figure, and never a company, product, app, project, tool or brand. When a name appears only as part of describing a story, game or show, leave it out.`;
+}
 
-Return a JSON object with two keys:
-1. "facts": an array of profile fact objects, each with:
-   - "contact_name": the person's name exactly as provided
-   - "category_slug": one of: identity, location, professional, education, relationships, communication, personality, principles, health, hobbies, food, entertainment, travel, digital, financial, goals, preferences
-   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title")
-   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer")
+/**
+ * Profile extraction, policy half.
+ *
+ * This is the part an admin may safely reword: what to extract, what to refuse,
+ * how to derive a date, how not to flatten a mood into a personality trait. It
+ * is what gets seeded into `llm_call_configs.system_prompt`.
+ *
+ * The machine-readable half lives in `profileExtractionContract()` below and is
+ * appended at call time. Keep it that way. Everything in THIS string can be
+ * replaced by a row in `llm_call_configs`, and on 2026-06-01 it was: the row
+ * seeded that day never asked for `source_quote`, the code began requiring one
+ * on 2026-08-09, and from then until 2026-08-17 every fact the model found was
+ * discarded and the log claimed the facts were already known. Anything the code
+ * reads out of the answer belongs in the contract, not here.
+ */
+export const PROCESS_NOTE_PROFILE_PROMPT = `You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
 
-2. "relationships": an array of relationship objects, each with:
-   - "person_a": name of the first person
-   - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
-   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor")
-   - "label_b_to_a": what person_b is to person_a
+OWNER-FACT GUIDANCE:
+- The note author / profile owner is the user. Extract facts about THEM into the OWNER profile by setting contact_name = "me".
+- Owner facts may come from first-person language ("I am", "my", "I live in"), the owner's own name/aliases listed in the user prompt, or scanned documents/IDs/certificates clearly belonging to the owner.
+- A wedding/marriage event (in the note text OR in attached document OCR) is an owner fact: emit a fact {contact_name:"me", category_slug:"relationships", label:"Wedding date", value:"YYYY-MM-DD"} AND a relationship (person_a:"me", person_b:<spouse name>, label_a_to_b:"spouse", label_b_to_a:"spouse"). Also emit a Wedding date fact for the spouse.
 
 CRITICAL — DO NOT EXTRACT FACTS WHEN:
 - The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content. Their name on a prompt, article, video, podcast, or document does NOT make the content's topic their personal attribute.
 - The person is the subject of a third-party article, prompt template, course, product description, or job posting. The role described in the content belongs to the content, NOT to the person.
-- The note is a prompt library, template, documentation, code snippet, or generic reference rather than a first-person observation about the person.
+- The note is a prompt library, template, documentation, code snippet, or generic reference where the person is only tangentially named.
 - A fact would be inferred only from indirect mentions, quotes, or generic context.
-
-Only extract a Job title / Company / Current city / etc. when the note text contains an EXPLICIT first-person-style statement: "X is a Y", "X works as Y at Z", "X lives in Y", "X's role is Y", "I met X who is a Y". Vague mentions, authorship, and topic descriptions do NOT qualify.
 
 Examples:
 - ✓ "Nate works as a knowledge architect at Acme." → {contact_name: "Nate", category_slug: "professional", label: "Job title", value: "knowledge architect at Acme"}
@@ -63,11 +115,12 @@ Examples:
 - ✗ "Karpathy's tutorial on transformers" → no facts. The note is about a tutorial, not Karpathy's biography.
 
 Rules:
-- Only extract facts/relationships clearly stated about the person themselves
-- Do NOT invent or assume
+- Extract facts/relationships clearly stated or strongly implied about the person themselves
+- Do NOT invent or assume — if unsure, skip
 - Skip vague, third-party, or authorship-only mentions
 - Return empty arrays if nothing qualifies
 - For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
+- Do not emit relationships for organizations, products, brands, software, projects, fictional characters, avatars, role-play identities, authors/bylines, celebrities merely discussed, admiration, resemblance, ownership, or incidental transactions.
 
 DERIVED FACTS — compute the canonical underlying fact when the note gives you enough to do so safely:
 - If the note states an age AND a reference date (explicit "on YYYY-MM-DD" in the text, or unambiguously from the provided Note date), compute the date of birth:
@@ -75,11 +128,67 @@ DERIVED FACTS — compute the canonical underlying fact when the note gives you 
 - If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
 - If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact at all — never store free text like "61st birthday on 2026-05-25" as a value.
 - Always normalize date values to ISO YYYY-MM-DD.
+- The "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
 
 Derived-fact examples:
 - Note text "Gunther turned 61 on 2026-05-25." → {contact_name: "Gunther", category_slug: "identity", label: "Date of birth", value: "1965-05-25"}
 - Note text "Anna's 30th birthday was on 2024-03-12." → {label: "Date of birth", value: "1994-03-12"}
-- Note text "Tom is 40 years old" with Note date 2026-01-10 and no explicit birthday date → DO NOT emit a Date of birth (we don't know month/day).`;
+- Note text "Tom is 40 years old" with Note date 2026-01-10 and no explicit birthday date → DO NOT emit a Date of birth (we don't know month/day).
+
+PERSONALITY TRAITS — do not overgeneralize:
+- Only emit a personality trait when the note describes a STABLE, GENERAL characteristic of the person ("she is always anxious", "he tends to be blunt", "a very generous person").
+- A feeling tied to one situation, object, moment, or topic is NOT a trait. "She feels insecure about her weight" must NOT become "insecure". Either skip it, or keep the qualifier in the value ("insecure about her weight").
+- Never reduce a qualified statement to a bare adjective. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
+
+/**
+ * Profile extraction, contract half: the JSON shape, the mandatory source
+ * quote, and the three blocks derived from the profile schema. Pass through
+ * `runChat`'s `systemSuffix`, never through `defaults.systemPrompt`.
+ *
+ * Two reasons it is a function and not a constant:
+ *
+ * 1. A row in `llm_call_configs` cannot drop it. That is the whole point. The
+ *    code discards any fact whose `source_quote` is not found verbatim in the
+ *    note, so the request for that field must live somewhere a stale row cannot
+ *    reach. It used to live only in the prompt, and that cost eight days of
+ *    silent total data loss.
+ * 2. The slug list, the canonical labels and the blocked labels are computed
+ *    from `profile-canonical-schema.ts` on every call, so a schema change
+ *    reaches the model immediately. Freezing these into a row would freeze a
+ *    snapshot of the schema and quietly stop propagating later changes.
+ */
+export function profileExtractionContract(): string {
+  return `OUTPUT CONTRACT — return a JSON object with exactly two keys, "facts" and "relationships".
+
+1. "facts": an array of profile fact objects, each with:
+   - "contact_name": the person's name exactly as provided. For first-person facts about the note author (the OWNER themself), use the literal string "me".
+   - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
+   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title", "Wedding date")
+   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer", "2006-01-23")
+   - "source_quote": the shortest exact verbatim quote from the note that proves this fact
+
+2. "relationships": an array of relationship objects, each with:
+   - "person_a": name of the first person
+   - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
+   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor", "spouse")
+   - "label_b_to_a": what person_b is to person_a
+   - "source_quote": the shortest exact verbatim quote from the note that proves this relationship
+   - "source_context": one or two surrounding sentences, copied verbatim when useful
+
+SOURCE QUOTES ARE MANDATORY, AND THEY ARE CHECKED:
+- Every fact MUST include an exact source_quote. If no exact quote proves the fact, do not emit that fact.
+- Every relationship MUST include an exact source_quote. If no exact quote proves the relationship, do not emit that relationship.
+- A source_quote must be copied character for character out of the note text, and must be at least 4 characters long. Do not paraphrase it, do not repair spelling or punctuation, do not join two separate passages, and never quote from these instructions. Anything whose quote cannot be found verbatim in the note is discarded before it reaches the user.
+
+CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
+${CANONICAL_LABELS_FOR_PROMPT}
+When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using short natural labels — do not force them onto this list.
+
+NEVER EMIT THESE LABELS AS FACTS (${BLOCKED_LABELS_FOR_PROMPT}):
+- Person-to-person relationships (spouse, wife, husband, partner, lover, child, parent, sibling, friend) and "relationship status"/"marital status" are NOT profile facts. Emit them ONLY in the "relationships" array. Use the gendered label when the note makes the gender clear: label_a_to_b "wife" with label_b_to_a "husband" (and vice versa).
+- Purchases, orders, and shopping ("Purchased item", "Bought", "Recent order"). A purchase is an event, not part of who someone is. Skip them entirely.
+- "Current address" as one blob. Split a street address into separate facts: "Current street" (street + number), "Postal code", "Current city", "Current country". Never emit both a full address and its parts.`;
+}
 
 export const QUICK_CAPTURE_METADATA_PROMPT = PROCESS_NOTE_METADATA_PROMPT;
 
@@ -206,6 +315,16 @@ You MUST call the draft_moment function. If you cannot use function-calling, ret
 
 Today's date: {{currentDate}}{{peopleContext}}`;
 
+/**
+ * In-note chat.
+ *
+ * The editing rules are deliberately NOT in here. They are appended at call time
+ * as `NOTE_EDIT_CONTRACT` in note-chat/index.ts, which is the copy a stale or
+ * admin-edited row cannot drop, and keeping a second copy here meant the model
+ * was told the same rules twice in two different wordings. The live row for this
+ * call site is a 1,280-character seed from 2026-06-01 that advertises one edit
+ * tool when there are three, which is the part this constant actually fixes.
+ */
 export const NOTE_CHAT_NOTE_MODE_PROMPT = `You are an AI assistant embedded in a note-taking application called Menerio (also known as "Open Brain"). You help the user work with their current note and their broader knowledge base.
 
 You have access to tools to:
@@ -215,15 +334,6 @@ You have access to tools to:
 4. Update note metadata (topics, type, sentiment, people, summary, action_items, dates_mentioned)
 5. Update note tags
 6. Add wikilinks to connect the current note to other notes
-
-EDITING RULES (critical — the user's writing is sacred):
-- NEVER delete, shorten, or rewrite text the user wrote unless they explicitly asked for that specific change. Default to adding, not changing.
-- When the user asks you to add, write, describe, append or insert something, JUST DO IT: call append_to_note (or insert_into_note) immediately in the same turn. Do not ask for permission, do not paste the proposed text into chat and wait for approval. Adding text is always safe.
-- To add content, use append_to_note or insert_into_note. Never re-send the whole note.
-- Use replace_in_note only for a change the user explicitly requested; \`find\` must be copied verbatim from the note and must be unique. Set confirm_delete: true only when the user explicitly asked to delete or shorten that text.
-- Call each edit tool ONCE per requested change. If a tool reports already_present, duplicate_call, or unchanged, the edit is done — do NOT retry it in another form, and do not append the text again.
-- If a tool returns an error (stale, not_found, ambiguous, anchor_not_found, deletion_blocked), do not guess a workaround: fix the argument if you can do so safely, otherwise tell the user plainly what happened. A "stale" error can only happen on replace/anchored-insert; if the goal was simply to add text, retry with append_to_note instead of asking the user.
-- After editing, state briefly what you added or changed.
 
 Guidelines:
 - When the user asks about their notes or knowledge, use search tools to find relevant information

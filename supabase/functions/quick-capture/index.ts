@@ -6,7 +6,7 @@ import {
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
 import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
-import { QUICK_CAPTURE_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
+import { QUICK_CAPTURE_METADATA_PROMPT, metadataFieldContract } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -108,7 +108,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             model: "deepseek/deepseek-v4-flash",
             systemPrompt: QUICK_CAPTURE_METADATA_PROMPT,
           },
-          systemSuffix: sourceLanguageRule(),
+          systemSuffix: [metadataFieldContract(), sourceLanguageRule()].join("\n\n"),
           callOptions: { response_format: { type: "json_object" } },
         }),
       ]);

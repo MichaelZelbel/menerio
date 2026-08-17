@@ -4,7 +4,13 @@ import {
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
 import { outputLanguageRule, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
-import { PROCESS_NOTE_MOMENT_PROMPT } from "../_shared/llm-defaults.ts";
+import {
+  PROCESS_NOTE_METADATA_PROMPT,
+  PROCESS_NOTE_MOMENT_PROMPT,
+  PROCESS_NOTE_PROFILE_PROMPT,
+  metadataFieldContract,
+  profileExtractionContract,
+} from "../_shared/llm-defaults.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { shouldExtractFacts } from "../_shared/hub-source.ts";
 import {
@@ -15,9 +21,8 @@ import {
   type EntityRef,
 } from "../_shared/relationship-canonical.ts";
 import {
-  BLOCKED_LABELS_FOR_PROMPT,
-  CANONICAL_LABELS_FOR_PROMPT,
   PROFILE_CANONICAL_SCHEMA,
+  PROFILE_CATEGORY_SLUGS,
   blockedLabelAsRelationship,
   canonicalProfileLabel,
   correctProfileCategory,
@@ -681,31 +686,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const METADATA_SYSTEM_PROMPT = `Extract metadata from the user's note. Return JSON with:
-- "title": If the first line of the note is 10 words or fewer and reads like a natural title or heading, use it verbatim. Otherwise, generate a concise title (max 8 words) that captures the essence of the note.
-- "people": array of names of REAL human beings the note author actually knows of or interacts with (real individuals — first name, full name, or known alias). Do NOT include:
-    * companies, products, apps, projects, tools, libraries, websites, brands, domains, or open-source repos, even if the name sounds personal.
-    * fictional characters from novels, light novels, manga, anime, visual novels, video games, films, TV series, comics, plays, or any other work of fiction — even if the note lists them by name. This applies EVEN when the surrounding note is a personal profile or journal that only references media in passing. Examples that must be EXCLUDED:
-        - "favorite actor Lee Junyoung as Geum Sung-je" → exclude "Geum Sung-je" (that's the fictional role, not a person the author knows).
-        - "the character I remind you of? Spiderman?" → exclude "Spiderman" (fictional superhero).
-        - "currently watching Weak Hero, love the protagonist" / "cast: A, B, C" / "playing Chocola in NEKOPARA" → exclude character names.
-      Real actors, directors, authors, streamers, or creators the author actually follows or knows MAY be included — but the fictional role they play must not.
-    * mythological, religious, or folkloric figures presented as characters.
-  When in doubt (a single capitalized word with no clearly human context, or a name that only appears as part of describing a story/game/show), leave it out.
-- "mentioned_works": array of titles of creative works discussed in the note (novels, manga, anime, games, films, shows, albums, etc.). Empty if none.
-- "content_mode": one of "personal" (default — a personal note, journal entry, meeting note, task, idea, etc.), "review_of_fiction" (the primary subject is a work of fiction — reviewing/summarizing/discussing a novel, anime, manga, game, film, TV show, etc.), "review_of_nonfiction" (primary subject is a non-fiction book, article, documentary, course), or "reference" (a reference/how-to/documentation clip). Choose "review_of_fiction" whenever the note is mainly ABOUT a fictional work, regardless of length.
-- "dates_mentioned": array of dates in YYYY-MM-DD format (empty if none)
-- "topics": array of 1-5 short topic tags (always generate at least one)
-- "type": one of "observation", "task", "idea", "reference", "person_note", "meeting_note", "decision", "project"
-- "sentiment": one of "positive", "negative", "neutral"
-- "summary": one-sentence summary of the note
-Only extract what's explicitly there. Don't invent details.`;
-
-const PROFILE_CATEGORY_SLUGS = [
-  "identity", "location", "professional", "education", "relationships",
-  "communication", "personality", "principles", "health", "hobbies",
-  "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
-];
+// The metadata prompt and the profile prompt now live in `_shared/llm-defaults.ts`
+// as PROCESS_NOTE_METADATA_PROMPT and PROCESS_NOTE_PROFILE_PROMPT, with the
+// fields the code reads restated in metadataFieldContract() and
+// profileExtractionContract() and appended via systemSuffix. Both used to have a
+// second copy here, and a registered call site with a second copy in the edge
+// function is exactly how each of them ended up running a prompt nobody had read
+// in months. The category slugs come from the canonical schema for the same
+// reason: one list, no hand-typed duplicate.
 
 type ReviewSuggestion = {
   user_id: string;
@@ -799,73 +787,7 @@ export function isOvergeneralizedTrait(value: string, noteContent: string): bool
   return qualified === found;
 }
 
-function profileExtractionPrompt(profileLanguage: string): string {
-  return `${PROFILE_EXTRACTION_PROMPT}
 
-PROFILE LANGUAGE — the user's profile language is ${profileLanguage}.
-- Write the VALUE of standardised fields in ${profileLanguage}: job title, industry, nationality, languages, education level, city and country names, relationship labels, colours, and similar closed-vocabulary facts. Example (when the profile language is English): a German note saying "Modedesignerin" must be emitted as "Fashion Designer".
-- Do NOT translate: personal names, company/brand names, street addresses, direct quotes, usernames/handles, or dish/product names that are proper nouns.
-- Never invent a translation you are unsure of — if you cannot translate confidently, keep the original wording.`;
-}
-
-const PROFILE_EXTRACTION_PROMPT = `You are extracting biographical facts about specific real people from a personal note (which may include OCR text from attached images/documents).
-
-Return a JSON object with two keys:
-1. "facts": an array of profile fact objects, each with:
-   - "contact_name": the person's name exactly as provided. For first-person facts about the note author (the OWNER themself), use the literal string "me".
-   - "category_slug": one of: ${PROFILE_CATEGORY_SLUGS.join(", ")}
-   - "label": a short label for the fact (e.g. "Favorite cuisine", "Current city", "Job title", "Wedding date", "Spouse")
-   - "value": the actual value (e.g. "Japanese", "Berlin", "Software Engineer", "2006-01-23", "Xihui")
-    - "source_quote": the shortest exact verbatim quote from the note that proves this fact
-
-2. "relationships": an array of relationship objects, each with:
-   - "person_a": name of the first person
-   - "person_b": name of the second person (can be "me" or "myself" if referring to the note author)
-   - "label_a_to_b": what person_a is to person_b (e.g. "employee", "brother", "friend", "mentor", "spouse")
-   - "label_b_to_a": what person_b is to person_a
-    - "source_quote": the shortest exact verbatim quote from the note that proves this relationship
-    - "source_context": one or two surrounding sentences, copied verbatim when useful
-
-OWNER-FACT GUIDANCE:
-- The note author / profile owner is the user. Extract facts about THEM into the OWNER profile by setting contact_name = "me".
-- Owner facts may come from first-person language ("I am", "my", "I live in"), the owner's own name/aliases listed in the user prompt, or scanned documents/IDs/certificates clearly belonging to the owner.
-- A wedding/marriage event (in the note text OR in attached document OCR) is an owner fact: emit {contact_name:"me", category_slug:"relationships", label:"Wedding date", value:"YYYY-MM-DD"} AND a relationship (person_a:"me", person_b:<spouse name>, label_a_to_b:"spouse", label_b_to_a:"spouse"). Also emit a Wedding date fact for the spouse.
-
-CRITICAL — DO NOT EXTRACT FACTS WHEN:
-- The person appears only as the author / byline / source / "by X" / "via X" / link metadata of the content.
-- The person is the subject of a third-party article, prompt template, course, product description, or job posting where the role described belongs to the content.
-- The note is a prompt library, template, documentation, code snippet, or generic reference where the person is only tangentially named.
-- A fact would be inferred only from indirect mentions, quotes, or generic context.
-
-Rules:
-- Extract facts/relationships clearly stated or strongly implied about the person themselves
-- Do NOT invent or assume — if unsure, skip
-- Return empty arrays if nothing qualifies
-- Every fact MUST include an exact source_quote. If no exact quote proves the fact, do not emit it.
-- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student
-- Every relationship MUST include an exact source_quote. If no exact quote proves the relationship, do not emit it.
-- Do not emit relationships for organizations, products, brands, software, projects, fictional characters, avatars, role-play identities, authors/bylines, celebrities merely discussed, admiration, resemblance, ownership, or incidental transactions.
-
-DERIVED FACTS — compute the canonical underlying fact when possible:
-- If the note states an age AND a reference date, compute date of birth: label = "Date of birth", value = "YYYY-MM-DD" (year = referenceYear - age).
-- If the note states a wedding anniversary in the same shape, derive label = "Anniversary", value = "YYYY-MM-DD".
-- If you cannot derive an exact ISO date confidently, do NOT emit a Birthday/Anniversary fact.
-- Always normalize date values to ISO YYYY-MM-DD.
-- The "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
-
-CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
-${CANONICAL_LABELS_FOR_PROMPT}
-When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits.
-
-NEVER EMIT THESE LABELS AS FACTS (${BLOCKED_LABELS_FOR_PROMPT}):
-- Person-to-person relationships (spouse, wife, husband, partner, lover, child, parent, sibling, friend) and "relationship status"/"marital status" are NOT profile facts. Emit them ONLY in the "relationships" array. Use the gendered label when the note makes the gender clear: label_a_to_b "wife" with label_b_to_a "husband" (and vice versa).
-- Purchases, orders, and shopping ("Purchased item", "Bought", "Recent order"). A purchase is an event, not part of who someone is. Skip them entirely.
-- "Current address" as one blob. Split a street address into separate facts: "Current street" (street + number), "Postal code", "Current city", "Current country". Never emit both a full address and its parts.
-
-PERSONALITY TRAITS — do not overgeneralize:
-- Only emit a personality trait when the note describes a STABLE, GENERAL characteristic of the person ("she is always anxious", "he tends to be blunt", "a very generous person").
-- A feeling tied to one situation, object, moment, or topic is NOT a trait. "She feels insecure about her weight" must NOT become "insecure". Either skip it, or keep the qualifier in the value ("insecure about her weight").
-- Never reduce a qualified statement to a bare adjective. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using natural labels — do not force them onto this list. Do NOT deduplicate or drop facts; still extract everything you find — labeling is normalized downstream.`;
 
 // Singleton labels = labels with at most one truth per subject. Derived from
 // the shared canonical schema so the two stay in sync. Legacy alias forms are
@@ -1434,13 +1356,18 @@ async function generateProfileSuggestions(
         defaults: {
           provider: "openrouter",
           model: "deepseek/deepseek-v4-flash",
-          systemPrompt: profileExtractionPrompt(preferences.profileLanguage),
+          systemPrompt: PROCESS_NOTE_PROFILE_PROMPT,
         },
-        // The language block inside profileExtractionPrompt above only reaches
-        // the model when this call site has no row in llm_call_configs. It has
-        // one, so that block has never been used in production. This suffix is
-        // appended after the row, so it always is.
-        systemSuffix: outputLanguageRule(preferences.profileLanguage),
+        // Everything here is appended AFTER the llm_call_configs row, so it is
+        // the only part of the prompt a stale row cannot drop. That matters more
+        // than it sounds: this call site HAS a row, seeded 2026-06-01, and it
+        // never asked for `source_quote`. The quote gate below then discarded
+        // every fact the model found, for eight days, while the log said the
+        // facts were already known. The field contract belongs here for good.
+        systemSuffix: [
+          profileExtractionContract(),
+          outputLanguageRule(preferences.profileLanguage),
+        ].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
       });
 
@@ -1760,6 +1687,12 @@ async function generateProfileSuggestions(
 
     const suggestions: ReviewSuggestion[] = [];
     const perTargetCount = new Map<string, number>();
+    // Why each fact was let go, so a total wipeout can never look like a quiet
+    // success again. `noQuote` counts facts the model returned with no
+    // source_quote at all, which is the signature of a live prompt that does not
+    // ask for the field; `unverifiableQuote` counts quotes that were returned but
+    // could not be found verbatim in the note.
+    const dropped = { deduped: 0, noQuote: 0, unverifiableQuote: 0, perContactCap: 0 };
 
     for (const fact of validFacts) {
       const target = fact._target;
@@ -1771,6 +1704,7 @@ async function generateProfileSuggestions(
         index: dedupIndex,
       });
       if (dd.action === "skip") {
+        dropped.deduped++;
         console.log(`[profile-extract] dedup skip (${dd.reason}) "${fact.label}: ${fact.value}" for ${target.canonical_name}`);
         continue;
       }
@@ -1778,10 +1712,22 @@ async function generateProfileSuggestions(
       // list label with partial overlap this drops the tokens already known.
       const effectiveValue = dd.value;
       const factSourceQuote = String(fact.source_quote || "").trim();
-      if (!exactQuoteExists(cleanContent, factSourceQuote)) continue;
+      if (!exactQuoteExists(cleanContent, factSourceQuote)) {
+        if (!factSourceQuote) {
+          dropped.noQuote++;
+          console.log(`[profile-extract] dropped "${fact.label}: ${effectiveValue}" — model returned no source_quote`);
+        } else {
+          dropped.unverifiableQuote++;
+          console.log(`[profile-extract] dropped "${fact.label}: ${effectiveValue}" — source_quote not found verbatim in note: ${JSON.stringify(factSourceQuote.slice(0, 120))}`);
+        }
+        continue;
+      }
 
       const count = perTargetCount.get(tKey) || 0;
-      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) continue;
+      if (count >= MAX_FACTS_PER_CONTACT_PER_NOTE) {
+        dropped.perContactCap++;
+        continue;
+      }
       perTargetCount.set(tKey, count + 1);
 
       const catRow = existingCategories.find(
@@ -1857,8 +1803,19 @@ async function generateProfileSuggestions(
       const { error } = await supabase.from("review_queue").insert(prepared);
       if (error) console.error("Profile suggestion insert error:", error);
       else console.log(`Created ${prepared.length} profile suggestions for note ${noteId}`);
+    } else if (validFacts.length === 0) {
+      console.log(`[profile-extract] no valid facts to consider for note ${noteId}`);
+    } else if (dropped.noQuote === validFacts.length) {
+      // The failure that hid for eight days. Say it out loud.
+      console.error(
+        `[profile-extract] DROPPED ALL ${validFacts.length}/${validFacts.length} facts for note ${noteId}: the model returned no source_quote for any of them. The live prompt for process-note.profile_extraction is probably missing the source_quote field — check llm_call_configs.`,
+      );
+    } else if (dropped.deduped === validFacts.length) {
+      console.log(`[profile-extract] all ${validFacts.length} facts already known for note ${noteId} (deduped)`);
     } else {
-      console.log(`All profile facts already known for note ${noteId}`);
+      console.log(
+        `[profile-extract] no suggestions for note ${noteId} from ${validFacts.length} valid facts — deduped ${dropped.deduped}, no source_quote ${dropped.noQuote}, unverifiable quote ${dropped.unverifiableQuote}, over per-contact cap ${dropped.perContactCap}`,
+      );
     }
 
 
@@ -1896,8 +1853,13 @@ async function generateProfileSuggestions(
       }
 
       const selfCtxRel = await loadSelfContext(userId);
+      // Same reasoning as the fact loop: one rejection is routine, every
+      // candidate rejected for the same reason is a broken prompt, and until now
+      // the two looked identical in the log.
+      let relNoQuote = 0;
       for (const rel of extractedRelationships) {
         if (!exactQuoteExists(cleanContent, rel.source_quote)) {
+          if (!String(rel.source_quote || "").trim()) relNoQuote++;
           console.log(`[relationships] Rejected candidate without a verifiable exact quote: ${rel.person_a} / ${rel.person_b}`);
           continue;
         }
@@ -2058,6 +2020,12 @@ async function generateProfileSuggestions(
         const { error } = await supabase.from("review_queue").insert(preparedRels);
         if (error) console.error("Relationship suggestion insert error:", error);
         else console.log(`Created ${preparedRels.length} relationship suggestions for note ${noteId}`);
+      } else if (relNoQuote === extractedRelationships.length && extractedRelationships.length > 0) {
+        // Blocked-label reroutes are pushed with an empty quote on purpose, so
+        // this only reads as a prompt fault when the model itself returned none.
+        console.error(
+          `[relationships] DROPPED ALL ${extractedRelationships.length}/${extractedRelationships.length} candidates for note ${noteId}: not one carried a source_quote. If these came from the model rather than from a blocked-label reroute, the live prompt for process-note.profile_extraction is missing the source_quote field.`,
+        );
       }
     }
 
@@ -2418,9 +2386,13 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         defaults: {
           provider: "openrouter",
           model: "deepseek/deepseek-v4-flash",
-          systemPrompt: METADATA_SYSTEM_PROMPT,
+          systemPrompt: PROCESS_NOTE_METADATA_PROMPT,
         },
-        systemSuffix: sourceLanguageRule(),
+        // `content_mode` drives the fiction gate in generateReviewItems, so it is
+        // demanded here rather than only in the prompt above: this call site has
+        // a row in llm_call_configs that never asked for the field, which left
+        // both fiction gates permanently off.
+        systemSuffix: [metadataFieldContract(), sourceLanguageRule()].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
       });
 
