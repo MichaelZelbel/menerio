@@ -1,8 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
-import {
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import {
   corsHeaders,
   json,
   errorJson,

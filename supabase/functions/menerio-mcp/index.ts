@@ -10,8 +10,8 @@ import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_s
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
-import {
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import {
   applyVisibility,
   assertWritable,
   enterVisibilityScope,
