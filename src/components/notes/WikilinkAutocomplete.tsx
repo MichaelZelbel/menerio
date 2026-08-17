@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { escapeLike } from "@/lib/postgrest";
+import { escapeLike, pgOrValue, ilikeContains } from "@/lib/postgrest";
 import { Badge } from "@/components/ui/badge";
 import { Plus } from "lucide-react";
+
 
 interface WikilinkAutocompleteProps {
   isOpen: boolean;
@@ -20,6 +21,35 @@ interface NoteResult {
   metadata: Record<string, unknown> | null;
   updated_at: string;
 }
+
+/** Normalize a title for comparison: trim, collapse whitespace, strip diacritics, lowercase. */
+function norm(s: string): string {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Rank title matches: exact > prefix > word-boundary > substring; ties by recency. */
+function rankNotes(rows: NoteResult[], query: string): NoteResult[] {
+  const q = norm(query);
+  const score = (title: string): number => {
+    const t = norm(title);
+    if (t === q) return 0;
+    if (t.startsWith(q)) return 1;
+    if (new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t)) return 2;
+    if (t.includes(q)) return 3;
+    return 4;
+  };
+  return [...rows].sort((a, b) => {
+    const d = score(a.title) - score(b.title);
+    if (d !== 0) return d;
+    return (b.updated_at || "").localeCompare(a.updated_at || "");
+  });
+}
+
 
 export function WikilinkAutocomplete({
   isOpen,
@@ -38,6 +68,10 @@ export function WikilinkAutocomplete({
   const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  const [loading, setLoading] = useState(false);
+  const [exactExists, setExactExists] = useState(false);
+  const reqId = useRef(0);
+
   useEffect(() => {
     if (isOpen) {
       setQuery("");
@@ -48,34 +82,50 @@ export function WikilinkAutocomplete({
 
   useEffect(() => {
     if (!isOpen || !user) return;
-    const fetchNotes = async () => {
+    const trimmed = query.trim();
+    const myReq = ++reqId.current;
+    setLoading(true);
+
+    const timer = setTimeout(async () => {
       let q = supabase
         .from("notes")
         .select("id, title, metadata, updated_at")
         .eq("user_id", user.id)
         .eq("is_trashed", false)
         .order("updated_at", { ascending: false })
-        .limit(15);
+        .limit(trimmed ? 50 : 15);
 
-      if (query.trim()) {
-        q = q.ilike("title", `%${escapeLike(query)}%`);
+      if (trimmed) {
+        // Include an exact-title branch so the exactly-titled note can never be
+        // truncated away by the recency-ordered contains branch.
+        q = q.or(
+          [
+            `title.ilike.${pgOrValue(escapeLike(trimmed))}`,
+            ilikeContains("title", trimmed),
+          ].join(",")
+        );
       }
 
       const { data } = await q;
-      const filtered = (data || []).filter((n: any) => n.id !== excludeNoteId);
-      setNotes(filtered as NoteResult[]);
+      if (myReq !== reqId.current) return; // stale response
+
+      const rows = (data || []).filter((n: any) => n.id !== excludeNoteId) as NoteResult[];
+      const ranked = trimmed ? rankNotes(rows, trimmed) : rows;
+      setNotes(ranked.slice(0, 15));
+      setExactExists(rows.some((n) => norm(n.title) === norm(trimmed)));
       setSelectedIndex(0);
-    };
-    fetchNotes();
+      setLoading(false);
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [isOpen, query, user, excludeNoteId]);
 
   const hasCreateOption = useMemo(
-    () =>
-      !!query.trim() &&
-      !notes.some((n) => n.title.toLowerCase() === query.trim().toLowerCase()),
-    [query, notes]
+    () => !!query.trim() && !loading && !exactExists,
+    [query, loading, exactExists]
   );
   const totalItems = notes.length + (hasCreateOption ? 1 : 0);
+
 
   // Clamp selectedIndex when results shrink
   useEffect(() => {
