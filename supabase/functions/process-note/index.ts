@@ -3,7 +3,7 @@ import {
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { outputLanguageRule, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
+import { outputLanguageRule, parseModelJson, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import {
   PROCESS_NOTE_METADATA_PROMPT,
   PROCESS_NOTE_MOMENT_PROMPT,
@@ -1003,7 +1003,7 @@ async function verifyRealPeopleWithLLM(
       },
       callOptions: { response_format: { type: "json_object" } },
     });
-    const parsed = JSON.parse(result.content || "{}");
+    const parsed = parseModelJson<any>(result.content) ?? {};
     const verdicts = Array.isArray(parsed?.verdicts) ? parsed.verdicts : [];
     const real = new Set<string>();
     for (const v of verdicts) {
@@ -1373,7 +1373,14 @@ async function generateProfileSuggestions(
 
       const rawContent = result.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
-      const parsed = JSON.parse(rawContent);
+      const parsed = parseModelJson<any>(rawContent);
+      if (parsed === null) {
+        // Not the same thing as "no facts in this note". Say which it was.
+        console.error(
+          `[profile-extract] model returned no parseable JSON for note ${noteId} — extraction abandoned. First 200 chars: ${JSON.stringify(String(rawContent ?? "").slice(0, 200))}`,
+        );
+        return;
+      }
 
       // Normalize response shapes for facts
       let parseShape: string;
@@ -2122,7 +2129,11 @@ async function generateMomentSuggestions(
         systemSuffix: outputLanguageRule(preferences.profileLanguage),
         callOptions: { response_format: { type: "json_object" } },
       });
-      parsed = JSON.parse(result.content);
+      parsed = parseModelJson<any>(result.content);
+      if (parsed === null) {
+        console.error(`[moment-extract] model returned no parseable JSON for note ${noteId}; first 200 chars: ${JSON.stringify(String(result.content ?? "").slice(0, 200))}`);
+        return;
+      }
     } catch (err: any) {
       if (err?.message === "INSUFFICIENT_CREDITS") return;
       console.error("[moment-extract] LLM error:", err);
@@ -2396,9 +2407,14 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         callOptions: { response_format: { type: "json_object" } },
       });
 
-      try {
-        metadata = JSON.parse(chatResult.content);
-      } catch {
+      metadata = parseModelJson<Record<string, unknown>>(chatResult.content) ?? {};
+      if (Object.keys(metadata).length === 0) {
+        // The old code fell back silently here, so a note whose metadata pass
+        // returned junk looked identical to one with genuinely nothing to say,
+        // and content_mode went missing without a trace.
+        console.error(
+          `[process-note] metadata pass returned no parseable JSON for note ${noteId}; falling back to defaults. First 200 chars: ${JSON.stringify(String(chatResult.content ?? "").slice(0, 200))}`,
+        );
         metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
       }
 

@@ -303,6 +303,53 @@ export function sourceLanguageRule(): string {
 }
 
 /**
+ * Parse a JSON answer out of a model reply.
+ *
+ * Every JSON call site passes `response_format: { type: "json_object" }`, and
+ * most models honour it. `deepseek-v4-flash` does not always: it sometimes wraps
+ * the object in a ```json fence, and a bare `JSON.parse` then throws. In
+ * `process-note` that threw inside the extraction try/catch, which returned, so
+ * one stray fence cost a note its entire profile extraction. It happened live on
+ * 2026-08-17 at 09:10:45. Seven other edge functions had each grown a private
+ * copy of this strip; new code should use this one.
+ *
+ * Returns `null` rather than throwing when there is nothing parseable, so a
+ * caller can tell "the model returned nothing usable" apart from "the model
+ * returned something and I crashed on it". Those two need different log lines,
+ * and conflating them is how a broken prompt hides.
+ */
+export function parseModelJson<T = unknown>(raw: string | null | undefined): T | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  const unfenced = text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  for (const candidate of unfenced === text ? [text] : [unfenced, text]) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // fall through to the next shape
+    }
+  }
+
+  // Last resort: the outermost bracketed span, for a reply that wrapped the JSON
+  // in prose ("Here is the JSON: {...}").
+  const first = unfenced.search(/[[{]/);
+  const last = Math.max(unfenced.lastIndexOf("}"), unfenced.lastIndexOf("]"));
+  if (first >= 0 && last > first) {
+    try {
+      return JSON.parse(unfenced.slice(first, last + 1)) as T;
+    } catch {
+      // give up
+    }
+  }
+  return null;
+}
+
+/**
  * Run a chat completion through the configured provider and deduct credits.
  */
 export async function runChat(args: {
