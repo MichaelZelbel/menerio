@@ -1,49 +1,37 @@
-# Fix: endless "Saving…" and a folder that never shows up in the tree
+# Fix: `[[` note search doesn't surface the exactly-titled note
 
-## What I could and could not verify
+## What's happening
 
-Verified in code:
+The `[[` autocomplete (`src/components/notes/WikilinkAutocomplete.tsx`) queries notes with:
 
-- The note autosave sets the status to "Saving…" on every keystroke and only clears it when the write **resolves**. If the request neither succeeds nor errors (a hung connection), the indicator stays on "Saving…" forever — there is no timeout, no watchdog and no retry. That exactly matches "it saves forever".
-- The folder list is a React Query (`["note-folders"]`) with a 30s stale time, **no refetch on window focus and no realtime subscription**. A folder created in another browser/session is only picked up when that query happens to refetch — a reload of the page should pick it up, so if it still does not appear, the folder row was probably never written.
-- Folder creation goes through the `create_note_folder` RPC and reports failures with a toast, but the notes tree also derives folders from `notes.folder_path`, so a half-written folder can appear and vanish.
+- `title ilike '%<query>%'`
+- `order by updated_at desc`
+- `limit 15`
 
-Not verified (I could not read the database this turn — the Supabase connection returned "Forbidden"): whether the `lovable` folder row and the `lovable` note actually exist in production. That is the first thing the fix does.
+So the ordering is purely "most recently edited", not "best title match". With many notes whose titles contain "Michael" (e.g. wiki/lexicon-style pages), the note actually titled **Michael** — if it hasn't been edited recently — falls outside the 15 rows and never renders.
 
-The browser snapshot from your session also shows every Supabase REST call failing with `Failed to fetch` and edge functions returning 401 — i.e. the backend was unreachable at that moment. The app's job is to make that visible instead of spinning forever; today it does not.
+The bogus "Create: Michael" row is a direct consequence: the create option is shown when no *returned* row has an exactly matching title. Since the real note was truncated away, the component believes it doesn't exist.
 
-## Step 1 — Find out what actually landed (before changing anything)
+Unverified: I could not query the database this turn (the Supabase workspace binding is currently not authorized), so the "there are >15 recently-updated notes containing Michael" part is inferred from the code, not confirmed against data. The first implementation step confirms it.
 
-Re-establish the Supabase connection and check:
+## Fix
 
-- whether a `note_folders` row with path `lovable` exists for your user, and when it was created;
-- whether a note titled `lovable` exists, its `folder_path`, and its `updated_at`;
-- recent Postgres/API error logs around the time of the save.
+1. **Relevance ranking instead of recency.** Fetch candidates, then sort client-side:
+   1. exact title match (trimmed, case-insensitive, whitespace/diacritics normalized)
+   2. title starts with the query
+   3. word-boundary match inside the title
+   4. any other substring match
+   Ties broken by `updated_at desc`.
 
-This decides whether the folder was never written (server-side failure) or written but not shown (client cache issue). Both fixes below are worth doing either way, but this tells us which one was your bug.
+2. **Guarantee the exact match is in the candidate set.** Run the search as a single request using an `.or(...)` filter combining an exact-title condition and the contains condition, and raise the fetch limit (e.g. 50) while still rendering ~15 rows. This way truncation can never hide the exact-title note.
 
-## Step 2 — Never spin forever on a save
+3. **Only offer "Create" when the title truly doesn't exist.** Base the create option on the exact-match branch of the query result (and hide it while a request is in flight), not on whatever subset happened to render.
 
-In the note editor:
-
-- Add a **save watchdog**: if a content or title write has not resolved within ~10 seconds, flip the indicator to "Couldn't save — retrying" and retry with backoff, keeping the pending text in memory (it is already held in a ref, so nothing is lost).
-- Distinguish the states: `Saving…` → `Saved` → `Offline — changes kept locally` → `Save failed (reason)`. A failure shows the real message plus a "Retry now" action.
-- Use the existing online/offline signal: when the browser or backend is unreachable, say so instead of showing an eternal "Saving…", and flush the queued text automatically once connectivity returns.
-- Block navigation-away silently discarding: on unmount the pending payload is already flushed; add a warning toast if the flush itself fails.
-
-## Step 3 — Make the folder tree converge
-
-- Refetch `["note-folders"]` on window focus and on reconnect, so returning to the preview tab shows folders created elsewhere.
-- Subscribe to realtime changes on `note_folders` for the signed-in user and invalidate the query on insert/update/delete, so a folder created in another browser appears without a reload.
-- Surface a real error when the `create_note_folder` RPC fails, including the case where the request never completes (same watchdog treatment).
-- After a successful create/rename, call `reconcile_note_folders()` so folders derived only from note paths become real rows and can no longer appear-then-vanish.
-
-## Step 4 — Repair the current state
-
-Once Step 1 shows what exists: if the `lovable` folder row is missing while notes point at that path, run `reconcile_note_folders()` to materialise it; if neither exists, create the folder cleanly. No note content is touched.
+4. **Small UX touches:** debounce typing (~150 ms), ignore out-of-order responses via a request id, and show a subtle "Exact match" ordering so the correct note is always the pre-selected first row (Enter links it immediately).
 
 ## Technical notes
 
-- Files: `src/components/notes/NoteEditor.tsx` (watchdog, save-state machine, retry), `src/pages/Notes.tsx` (folder query options, realtime subscription, reconcile after mutations).
-- Realtime subscription lives in a `useEffect` with `supabase.removeChannel` cleanup; requires `note_folders` in the `supabase_realtime` publication — a one-line migration if it is not already there.
-- No change to note content handling, markdown conversion, or the AI processing pipeline.
+- Only `src/components/notes/WikilinkAutocomplete.tsx` changes; the trigger plugin, node and resolver stay as-is.
+- Query built with the existing `escapeLike` / `pgOrValue` / `ilikeContains` helpers from `src/lib/postgrest.ts` so `%`, `_`, `,` and `(` in titles stay literal.
+- Keeps existing `user_id` and `is_trashed = false` filters.
+- Verification: type `Michael` in the editor after `[[`; the note titled exactly "Michael" must be the first row and the "Create" row must disappear.
