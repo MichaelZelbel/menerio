@@ -33,16 +33,19 @@ import { Loader2, Plus, Copy, Check, Key, Trash2, AlertTriangle } from "lucide-r
 const MCP_URL = "https://mcp.menerio.com";
 
 const ALL_SCOPES = [
-  { value: "hub", label: "Hub access", desc: "Let an assistant such as Claude, ChatGPT or your hub folder read and write this memory." },
   { value: "profile", label: "Profile", desc: "Profile categories, entries, agent instructions" },
   { value: "notes", label: "Notes", desc: "Read/write notes" },
-  { value: "contacts", label: "Contacts", desc: "Contacts and interactions" },
+  { value: "contacts", label: "Contacts", desc: "Contacts, groups and interactions" },
   { value: "actions", label: "Actions", desc: "Action items" },
   { value: "graph", label: "Graph", desc: "Connections and graph data" },
   { value: "media", label: "Media", desc: "Media analysis results" },
   { value: "stats", label: "Stats", desc: "Read-only statistics" },
-  { value: "world", label: "World", desc: "Entities, events and claims, read only" },
+  { value: "world", label: "World", desc: "Entities, dated things and claims" },
+  { value: "lexicon", label: "Lexicon", desc: "Lexicon pages" },
+  { value: "collections", label: "Collections", desc: "Collections and their items" },
 ];
+
+const ALL_SCOPE_VALUES = ALL_SCOPES.map((s) => s.value);
 
 interface ApiKey {
   id: string;
@@ -62,7 +65,7 @@ export function ApiKeysManager() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyScopes, setNewKeyScopes] = useState<string[]>([]);
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>(ALL_SCOPE_VALUES);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -141,7 +144,7 @@ export function ApiKeysManager() {
 
   const resetDialog = () => {
     setNewKeyName("");
-    setNewKeyScopes([]);
+    setNewKeyScopes(ALL_SCOPE_VALUES);
     setGeneratedKey(null);
     setCopied(false);
   };
@@ -153,9 +156,10 @@ export function ApiKeysManager() {
           <Key className="h-5 w-5" /> API Keys
         </CardTitle>
         <CardDescription>
-          One key for everything. Tick <strong>Hub access</strong> and the key also connects Claude,
-          ChatGPT, OpenCode or any other MCP client to <code className="font-mono">{MCP_URL}</code>.
-          The other boxes decide which of your data a key may touch.
+          One key for everything. It connects your tools — your hub folder, Claude, ChatGPT,
+          OpenCode or any other MCP client — to your memory at{" "}
+          <code className="font-mono">{MCP_URL}</code>, and works for the REST API too.
+          The boxes on a key decide which of your data it may touch.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -175,8 +179,9 @@ export function ApiKeysManager() {
             <DialogHeader>
               <DialogTitle>Generate API Key</DialogTitle>
               <DialogDescription>
-                Create a key for a tool. Tick Hub access for an assistant such as Claude or
-                ChatGPT, and the other boxes for the data it may touch.
+                Name the key after the machine or tool it is for. All boxes start ticked —
+                full access, right for your own assistant or hub. Untick boxes to narrow a
+                key you hand to someone else's app.
               </DialogDescription>
             </DialogHeader>
 
@@ -214,7 +219,20 @@ export function ApiKeysManager() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Scopes</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>This key may touch</Label>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                      onClick={() =>
+                        setNewKeyScopes((prev) =>
+                          prev.length === ALL_SCOPE_VALUES.length ? [] : ALL_SCOPE_VALUES
+                        )
+                      }
+                    >
+                      {newKeyScopes.length === ALL_SCOPE_VALUES.length ? "Clear all" : "Select all"}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     {ALL_SCOPES.map((scope) => (
                       <label

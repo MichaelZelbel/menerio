@@ -231,7 +231,7 @@ export function MCPConnectionManager() {
   const agentPrompt = useMemo(
     () => `**Set up Menerio as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
 
-**Step 1 — Get my key.** Before anything else, ask me to paste my Menerio API key. I'll generate it in Menerio → Settings → API Keys with the box **Hub access** ticked (it starts with \`mnr_\`) and send it back. Wait for it.
+**Step 1 — Get my key.** Before anything else, ask me to paste my Menerio API key. I'll generate it in Menerio → Settings → API Keys (it starts with \`mnr_\`; the boxes on it decide which of my data it may touch) and send it back. Wait for it.
 
 **Step 2 — Install the server.** Register Menerio as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
 
@@ -298,7 +298,8 @@ export function MCPConnectionManager() {
               <a href="/dashboard/settings?tab=apikeys" className="underline text-primary hover:text-primary/80">
                 Settings → API Keys
               </a>{" "}
-              with <strong>Hub access</strong> ticked. Older <code className="font-mono">mnr_mcp_</code> tokens
+              — any key connects here; which tools answer depends on the boxes that key
+              carries. Older <code className="font-mono">mnr_mcp_</code> tokens
               listed below keep working too.
             </p>
           </div>
@@ -369,7 +370,7 @@ export function MCPConnectionManager() {
           </CardTitle>
           <CardDescription>
             Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint
-            below using an API key with <strong>Hub access</strong>.
+            below using any API key from Settings → API Keys.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -408,7 +409,7 @@ export function MCPConnectionManager() {
           </div>
           <p className="text-xs text-muted-foreground">
             Keep the endpoint exactly as shown — don't append <code className="font-mono">/mcp</code>, <code className="font-mono">/sse</code>, or any other path.
-            The key must start with <code className="font-mono">mnr_</code> and carry <strong>Hub access</strong>.
+            The key must start with <code className="font-mono">mnr_</code>; the boxes it carries decide which tools answer.
           </p>
         </CardContent>
       </Card>

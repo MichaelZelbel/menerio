@@ -28,30 +28,37 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const MCP_TOKEN_PREFIX = "mnr_mcp_";
 const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
-// The API-key scope that lets a key act as a connector key. Same word on the
-// screen ("Hub access") and in every message below, so a refusal names the box.
-const HUB_SCOPE = "hub";
+// Retired connector scope: it used to gate this endpoint. Now every active API
+// key authenticates here and the data scopes decide which tools answer, so the
+// only job left for "hub" is to be ignored when an old key still carries it.
+const RETIRED_HUB_SCOPE = "hub";
 const INVALID_TOKEN_FORMAT_MESSAGE =
-  "Invalid key format. This MCP server accepts a Menerio API key (prefix `mnr_`) with the `hub` scope — the box labelled \"Hub access\" in Menerio → Settings → API Keys.";
-const MISSING_HUB_SCOPE_MESSAGE =
-  "This API key does not carry the `hub` scope. Open Menerio → Settings → API Keys, edit this key and tick \"Hub access\", then try again.";
+  "Invalid key format. This MCP server accepts any Menerio API key (prefix `mnr_`) from Menerio → Settings → API Keys.";
 const MALFORMED_MCP_TOKEN_MESSAGE =
-  "That looks like an older Personal MCP Token but its shape is wrong. Use a Menerio API key with \"Hub access\" from Settings → API Keys instead.";
+  "That looks like an older Personal MCP Token but its shape is wrong. Use a Menerio API key from Settings → API Keys instead.";
 const RESPONSE_CHAR_BUDGET = 6000; // hard cap on a search tool's total text response
 const SNIPPET_CAP = 320;           // max chars per result snippet
 const CANDIDATE_CAP = 50;          // max ranked candidates hybrid search returns
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Per-request user ID — stored in AsyncLocalStorage so concurrent requests
-// can never observe each other's authenticated identity.
-const requestContext = new AsyncLocalStorage<{ userId: string }>();
+// Per-request user ID and key scopes — stored in AsyncLocalStorage so
+// concurrent requests can never observe each other's authenticated identity.
+// scopes is "all" for legacy mnr_mcp_ tokens, which were never scoped.
+const requestContext = new AsyncLocalStorage<{ userId: string; scopes: string[] | "all" }>();
 function getCurrentUserId(): string {
   const store = requestContext.getStore();
   if (!store?.userId) {
     throw new Error("MCP request context missing — tool invoked outside an authenticated request scope");
   }
   return store.userId;
+}
+function getCurrentScopes(): string[] | "all" {
+  const store = requestContext.getStore();
+  if (!store?.scopes) {
+    throw new Error("MCP request context missing — tool invoked outside an authenticated request scope");
+  }
+  return store.scopes;
 }
 
 async function sha256Hex(value: string) {
@@ -73,12 +80,12 @@ function extractBearerToken(authHeader: string | undefined) {
 async function authenticateMcpRequest(authHeader: string | undefined) {
   const token = extractBearerToken(authHeader);
   if (!token) {
-    return { userId: null, error: { status: 401, message: "Missing Authorization header. Create an API key with \"Hub access\" in Settings → API Keys and send it as `Authorization: Bearer <key>`." } };
+    return { userId: null, scopes: null, error: { status: 401, message: "Missing Authorization header. Create an API key in Settings → API Keys and send it as `Authorization: Bearer <key>`." } };
   }
 
   if (!token.startsWith(MCP_TOKEN_PREFIX)) {
-    // Any other mnr_ key is an API key. It opens this door when it carries the
-    // `hub` scope, so one key can serve the connector and the REST API alike.
+    // Any other mnr_ key is an API key. Every active key opens this door; the
+    // data scopes it carries decide which tools answer, checked per tool call.
     // Older mnr_mcp_ tokens keep working through the branch below.
     if (token.startsWith("mnr_")) {
       const { result, errorMessage } = await lookupHubKey(token, supabase);
@@ -87,14 +94,12 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
           reason: errorMessage,
           token_prefix: token.slice(0, 12),
         });
-        return { userId: null, error: { status: 401, message: errorMessage ?? "Invalid or revoked key." } };
+        return { userId: null, scopes: null, error: { status: 401, message: errorMessage ?? "Invalid or revoked key." } };
       }
-      if (!result.scopes.includes(HUB_SCOPE)) {
-        return { userId: null, error: { status: 403, message: MISSING_HUB_SCOPE_MESSAGE } };
-      }
-      return { userId: result.userId, error: null };
+      const dataScopes = result.scopes.filter((s) => s !== RETIRED_HUB_SCOPE);
+      return { userId: result.userId, scopes: dataScopes, error: null };
     }
-    return { userId: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
+    return { userId: null, scopes: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
   }
 
   if (!MCP_TOKEN_PATTERN.test(token)) {
@@ -102,7 +107,7 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
       token_prefix: token.slice(0, 16),
       token_length: token.length,
     });
-    return { userId: null, error: { status: 401, message: MALFORMED_MCP_TOKEN_MESSAGE } };
+    return { userId: null, scopes: null, error: { status: 401, message: MALFORMED_MCP_TOKEN_MESSAGE } };
   }
 
   const tokenHash = await sha256Hex(token);
@@ -116,10 +121,11 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
       token_length: token.length,
       format_ok: MCP_TOKEN_PATTERN.test(token),
     });
-    return { userId: null, error: { status: 401, message: "Invalid or revoked token." } };
+    return { userId: null, scopes: null, error: { status: 401, message: "Invalid or revoked token." } };
   }
 
-  return { userId: tokenRow.user_id as string, error: null };
+  // Legacy personal MCP tokens predate scopes and were always all-or-nothing.
+  return { userId: tokenRow.user_id as string, scopes: "all" as const, error: null };
 }
 
 const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown"] as const;
@@ -539,6 +545,128 @@ const server = new McpServer({
   name: "menerio",
   version: "1.0.0",
 });
+
+// ---------------------------------------------------------------------------
+// Per-tool scope gating. A key is a door; the scope boxes are rooms. Every
+// active key opens the door, and each tool checks its own room when called,
+// so a narrowed key gets a refusal that names the exact box to tick.
+// The map below must name every registered tool — registerTool throws at
+// startup on a missing entry, so a new tool cannot ship ungated by accident.
+// ---------------------------------------------------------------------------
+const SCOPE_LABELS: Record<string, string> = {
+  profile: "Profile",
+  notes: "Notes",
+  contacts: "Contacts",
+  actions: "Actions",
+  graph: "Graph",
+  media: "Media",
+  stats: "Stats",
+  world: "World",
+  lexicon: "Lexicon",
+  collections: "Collections",
+};
+
+const TOOL_SCOPES: Record<string, string> = {
+  // notes
+  search_notes: "notes",
+  get_note: "notes",
+  list_recent_notes: "notes",
+  capture_note: "notes",
+  update_note: "notes",
+  trash_note: "notes",
+  get_person_notes: "notes",
+  search_brain: "notes",
+  search_thoughts: "notes",
+  list_recent: "notes",
+  capture_thought: "notes",
+  // stats / actions / profile
+  get_stats: "stats",
+  get_action_items: "actions",
+  get_user_profile: "profile",
+  // contacts and groups
+  search_contacts: "contacts",
+  get_contact_context: "contacts",
+  get_contact_profile: "contacts",
+  list_people: "contacts",
+  log_interaction: "contacts",
+  list_groups: "contacts",
+  get_group: "contacts",
+  create_group: "contacts",
+  add_group_member: "contacts",
+  update_group_membership: "contacts",
+  log_group_interaction: "contacts",
+  create_group_next_step: "contacts",
+  suggest_group_next_step: "contacts",
+  generate_group_briefing: "contacts",
+  add_members_from_notes: "contacts",
+  preview_group_members_from_note: "contacts",
+  import_group_members_from_note: "contacts",
+  review_group_member_suggestion: "contacts",
+  // world: moments, entities, claims
+  list_moments: "world",
+  search_moments: "world",
+  create_moment_with_ai: "world",
+  create_moment_raw: "world",
+  create_moment: "world",
+  create_entity: "world",
+  search_entities: "world",
+  get_entity_context: "world",
+  add_claim: "world",
+  get_claims: "world",
+  // graph
+  get_connected_notes: "graph",
+  find_path: "graph",
+  get_clusters: "graph",
+  // media
+  search_images: "media",
+  get_note_media: "media",
+  // lexicon
+  lexicon_search: "lexicon",
+  lexicon_get_page: "lexicon",
+  lexicon_create_page: "lexicon",
+  lexicon_update_page: "lexicon",
+  lexicon_run_lint: "lexicon",
+  // collections
+  list_collections: "collections",
+  get_collection_schema: "collections",
+  add_collection_item: "collections",
+  update_collection_item: "collections",
+  list_collection_items: "collections",
+  search_all_collections: "collections",
+};
+
+function scopeRefusal(scope: string) {
+  const label = SCOPE_LABELS[scope] ?? scope;
+  return {
+    content: [{
+      type: "text" as const,
+      text: `This key's boxes don't include ${label}. Open Menerio → Settings → API Keys and tick ${label} on this key, or use a key that has it.`,
+    }],
+    isError: true,
+  };
+}
+
+// Wrap registerTool once so every tool, present and future, is scope-checked
+// at invocation time. Listing stays ungated; the refusal happens on call.
+{
+  const registerToolUnscoped = server.registerTool.bind(server);
+  // deno-lint-ignore no-explicit-any
+  (server as any).registerTool = (name: string, meta: unknown, handler: (...args: any[]) => any) => {
+    const scope = TOOL_SCOPES[name];
+    if (!scope) {
+      throw new Error(`Tool "${name}" has no entry in TOOL_SCOPES — every tool must name the scope that gates it.`);
+    }
+    // deno-lint-ignore no-explicit-any
+    const gated = async (...args: any[]) => {
+      const scopes = getCurrentScopes();
+      if (scopes !== "all" && !scopes.includes(scope)) {
+        return scopeRefusal(scope);
+      }
+      return await handler(...args);
+    };
+    return registerToolUnscoped(name, meta as never, gated as never);
+  };
+}
 
 // Relationship synonyms — terms that, when present in a query, mark it as a
 // first-person personal-fact question. Used to boost exact-phrase hits and to
@@ -3664,9 +3792,9 @@ app.all("*", async (c) => {
       version: "1.0.0",
       // Bumped by hand whenever this function is deployed, so anyone can tell
       // which build is live without opening a dashboard.
-      build: "2026-08-16-one-key",
+      build: "2026-08-18-every-key-a-door",
       transport: "streamable-http",
-      auth: "Authorization: Bearer mnr_<api key with the hub scope>",
+      auth: "Authorization: Bearer mnr_<api key>",
       accepts_api_keys: true,
     });
   }
@@ -3685,7 +3813,7 @@ app.all("*", async (c) => {
     return c.json({ error: auth.error.message }, auth.error.status as 401 | 403);
   }
 
-  return await requestContext.run({ userId: auth.userId! }, async () => {
+  return await requestContext.run({ userId: auth.userId!, scopes: auth.scopes! }, async () => {
     return await enterVisibilityScope(async () => {
       addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
       if (!server.isConnected()) {

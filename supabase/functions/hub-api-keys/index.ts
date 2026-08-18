@@ -51,8 +51,11 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "name is required" }), { status: 400, headers });
       }
 
-      const validScopes = ["hub", "profile", "notes", "contacts", "actions", "graph", "media", "stats", "world"];
-      if (!Array.isArray(scopes) || scopes.length === 0 || !scopes.every((s: string) => validScopes.includes(s))) {
+      // "hub" is the retired connector scope: every key connects now, so an old
+      // client still sending it gets it silently dropped rather than an error.
+      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world", "lexicon", "collections"];
+      const requestedScopes = Array.isArray(scopes) ? scopes.filter((s: string) => s !== "hub") : scopes;
+      if (!Array.isArray(requestedScopes) || requestedScopes.length === 0 || !requestedScopes.every((s: string) => validScopes.includes(s))) {
         return new Response(
           JSON.stringify({ error: `scopes must be a non-empty array of: ${validScopes.join(", ")}` }),
           { status: 400, headers }
@@ -79,7 +82,7 @@ Deno.serve(async (req) => {
           key_hash: keyHash,
           key_prefix: keyPrefix,
           name: name.trim(),
-          scopes,
+          scopes: requestedScopes,
         })
         .select("id, name, key_prefix, scopes, created_at")
         .single();
@@ -137,9 +140,10 @@ Deno.serve(async (req) => {
         updates.name = body.name.trim();
       }
 
-      const validScopes = ["hub", "profile", "notes", "contacts", "actions", "graph", "media", "stats", "world"];
-      if (Array.isArray(body.scopes) && body.scopes.length > 0 && body.scopes.every((s: string) => validScopes.includes(s))) {
-        updates.scopes = body.scopes;
+      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world", "lexicon", "collections"];
+      const patchScopes = Array.isArray(body.scopes) ? body.scopes.filter((s: string) => s !== "hub") : body.scopes;
+      if (Array.isArray(patchScopes) && patchScopes.length > 0 && patchScopes.every((s: string) => validScopes.includes(s))) {
+        updates.scopes = patchScopes;
       }
 
       if (Object.keys(updates).length === 0) {
