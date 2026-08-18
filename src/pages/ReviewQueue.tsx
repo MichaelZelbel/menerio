@@ -468,16 +468,21 @@ export default function ReviewQueue() {
       const { data, error } = await supabase.functions.invoke("normalize-profile", {
         body: { action: "apply", review_id: item.id },
       });
-      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
-      if (stale) {
+      if (data && data.ok === false && data.reason === "stale") {
         showToast.info("This profile changed since the suggestion was made — skipping");
         refreshReviewQueues();
         invalidateProfileQueries();
         return;
       }
       if (error || !data?.ok) {
-        showToast.error("Could not clean up profile: " + (error?.message || data?.reason || "Unknown error"));
+        const reason = data?.reason || error?.message || "Unknown error";
+        if (data?.resolved) {
+          showToast.info(`Suggestion closed — it could not be applied (${reason})`);
+        } else {
+          showToast.error(`Could not clean up profile — it stays in the queue: ${reason}`);
+        }
         refreshReviewQueues();
+        invalidateProfileQueries();
         return;
       }
       invalidateProfileQueries();
@@ -871,12 +876,13 @@ export default function ReviewQueue() {
       const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
       const okCount = Math.max(0, Number(j.done) || 0);
       const failCount = Math.max(0, Number(j.failed) || 0);
+      const why = j.last_error ? ` — ${j.last_error}` : "";
       if (failCount === 0) showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
       else if (okCount === 0)
-        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue`);
+        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue${why}`);
       else
         showToast.error(
-          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue`,
+          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue${why}`,
         );
 
     }
