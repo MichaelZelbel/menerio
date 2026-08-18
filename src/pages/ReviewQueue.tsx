@@ -876,12 +876,13 @@ export default function ReviewQueue() {
       const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
       const okCount = Math.max(0, Number(j.done) || 0);
       const failCount = Math.max(0, Number(j.failed) || 0);
+      const why = j.last_error ? ` — ${j.last_error}` : "";
       if (failCount === 0) showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
       else if (okCount === 0)
-        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue`);
+        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue${why}`);
       else
         showToast.error(
-          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue`,
+          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue${why}`,
         );
 
     }
