@@ -298,8 +298,8 @@ export function MCPConnectionManager() {
               <a href="/dashboard/settings?tab=apikeys" className="underline text-primary hover:text-primary/80">
                 Settings → API Keys
               </a>{" "}
-              — any key connects here; which tools answer depends on the boxes that key
-              carries. Older <code className="font-mono">mnr_mcp_</code> tokens
+              (any key connects here; which tools answer depends on the boxes that key
+              carries). Older <code className="font-mono">mnr_mcp_</code> tokens
               listed below keep working too.
             </p>
           </div>

@@ -156,8 +156,8 @@ export function ApiKeysManager() {
           <Key className="h-5 w-5" /> API Keys
         </CardTitle>
         <CardDescription>
-          One key for everything. It connects your tools — your hub folder, Claude, ChatGPT,
-          OpenCode or any other MCP client — to your memory at{" "}
+          One key for everything. It connects your tools (your hub folder, Claude, ChatGPT,
+          OpenCode or any other MCP client) to your memory at{" "}
           <code className="font-mono">{MCP_URL}</code>, and works for the REST API too.
           The boxes on a key decide which of your data it may touch.
         </CardDescription>
@@ -179,9 +179,9 @@ export function ApiKeysManager() {
             <DialogHeader>
               <DialogTitle>Generate API Key</DialogTitle>
               <DialogDescription>
-                Name the key after the machine or tool it is for. All boxes start ticked —
-                full access, right for your own assistant or hub. Untick boxes to narrow a
-                key you hand to someone else's app.
+                Name the key after the machine or tool it is for. All boxes start ticked:
+                full access, the right shape for your own assistant or hub. Untick boxes to
+                narrow a key you hand to someone else's app.
               </DialogDescription>
             </DialogHeader>
 
