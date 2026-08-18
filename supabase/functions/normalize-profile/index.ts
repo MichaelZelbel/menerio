@@ -816,19 +816,26 @@ serve(async (req) => {
 
       const result = await applyNormalization(db, row.payload as NormalizationPayload);
       if (!result.ok) {
-        // The suggestion can no longer be applied (source entries were edited
-        // or deleted, or the target category vanished). Resolve the queue row
-        // so it stops re-appearing in the user's Review Queue forever.
-        if (["stale", "empty", "category_unresolved", "already_exists", "absorbed_unresolved"].includes(result.reason || "")) {
+        // A suggestion may never get permanently stuck in the queue. Only a
+        // genuinely transient failure (an unexpected exception) keeps the row
+        // pending; every other outcome would fail identically on every retry,
+        // so the row is resolved server-side with the reason recorded.
+        const reason = result.reason || "unknown";
+        if (reason !== "exception") {
           await db
             .from("review_queue")
-            .update({ status: "removed", reviewed_at: new Date().toISOString() })
+            .update({
+              status: "removed",
+              reviewed_at: new Date().toISOString(),
+              payload: { ...(row.payload as Record<string, unknown>), apply_failure_reason: reason },
+            })
             .eq("id", reviewId);
           // Not an error: the row was resolved server-side. Return 200 so the
           // client (and the platform error reporter) don't treat it as a failure.
-          return json({ ok: false, reason: result.reason, resolved: true }, 200);
+          return json({ ok: false, reason, resolved: true }, 200);
         }
-        return json({ ok: false, reason: result.reason }, 409);
+        return json({ ok: false, reason }, 409);
+
 
       }
 
