@@ -468,16 +468,21 @@ export default function ReviewQueue() {
       const { data, error } = await supabase.functions.invoke("normalize-profile", {
         body: { action: "apply", review_id: item.id },
       });
-      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
-      if (stale) {
+      if (data && data.ok === false && data.reason === "stale") {
         showToast.info("This profile changed since the suggestion was made — skipping");
         refreshReviewQueues();
         invalidateProfileQueries();
         return;
       }
       if (error || !data?.ok) {
-        showToast.error("Could not clean up profile: " + (error?.message || data?.reason || "Unknown error"));
+        const reason = data?.reason || error?.message || "Unknown error";
+        if (data?.resolved) {
+          showToast.info(`Suggestion closed — it could not be applied (${reason})`);
+        } else {
+          showToast.error(`Could not clean up profile — it stays in the queue: ${reason}`);
+        }
         refreshReviewQueues();
+        invalidateProfileQueries();
         return;
       }
       invalidateProfileQueries();
