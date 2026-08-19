@@ -5,7 +5,13 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  // ESLint 9 flat config does not read .gitignore, so build output has to be
+  // named here. src-tauri/target is the Tauri desktop build's cache; it holds
+  // generated asset files that are not JavaScript in any useful sense, and
+  // ESLint was reporting 421 parse errors against them. That was the whole
+  // reason `npm run lint` failed, and therefore the reason CI never got as far
+  // as running the tests.
+  { ignores: ["dist", "dev-dist", "src-tauri/target", ".lovable"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
