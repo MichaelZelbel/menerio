@@ -118,7 +118,7 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
           };
       const oldSnapshot = { ...row, source_note_id: noteId, evidence_quote: quote, evidence_context: context };
       let outcome = adjudication.outcome;
-      let newLabel = adjudication.canonicalLabel || canonicalLabel(row.label);
+      const newLabel = adjudication.canonicalLabel || canonicalLabel(row.label);
 
       if (outcome === "keep") {
         const duplicate = await admin.from("contact_relationships").select("id,label").eq("user_id", userId).eq("pair_key", row.pair_key || "").neq("id", row.id).limit(1).maybeSingle();

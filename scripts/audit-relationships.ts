@@ -7,6 +7,7 @@
  * Requires the managed Postgres env vars (PGHOST, PGUSER, …).
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import {
   describeRelationship,
   relationshipKind,
@@ -45,7 +46,7 @@ const SQL = `
 const fileArg = process.argv.indexOf("--file");
 const raw =
   fileArg > -1
-    ? require("node:fs").readFileSync(process.argv[fileArg + 1], "utf8").trim()
+    ? readFileSync(process.argv[fileArg + 1], "utf8").trim()
     : execFileSync("psql", ["-At", "-c", SQL], { encoding: "utf8" }).trim();
 const rows: Row[] = raw && raw !== "" ? JSON.parse(raw) : [];
 

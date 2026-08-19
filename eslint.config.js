@@ -30,6 +30,16 @@ export default tseslint.config(
       // Downgraded to warn: 370+ legacy `any` usages across src/ and supabase/.
       // Fix incrementally; tracked in docs/DEPENDENCY_DECISIONS.md.
       "@typescript-eslint/no-explicit-any": "warn",
+      // @ts-ignore is allowed when it says why. The alternative the rule
+      // suggests, @ts-expect-error, errors when the line below it has no
+      // error — and the four uses in supabase/functions/profile-audit sit
+      // above the `Deno` global, which nothing typechecks today but a Deno
+      // check would resolve fine. Swapping them would break the moment anyone
+      // adds one.
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        { "ts-ignore": "allow-with-description", minimumDescriptionLength: 3 },
+      ],
     },
   },
 );

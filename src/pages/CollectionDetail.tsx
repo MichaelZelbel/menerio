@@ -2503,7 +2503,6 @@ export default function CollectionDetail() {
     } catch {
       // ignore
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   useEffect(() => {
@@ -3043,7 +3042,6 @@ export default function CollectionDetail() {
       refreshTree();
     },
     // deleteItem is defined below in the same component; ESLint can't see it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, routeItemId, closeItem, refreshTree],
   );
 

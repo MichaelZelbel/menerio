@@ -67,7 +67,7 @@ function normalizeTokenForList(label: string, token: string): { key: string; dis
 function splitListTokens(label: string, value: string): Array<{ key: string; display: string }> {
   return String(value || "")
     .replace(/^allergic\s+to\s+/i, "")
-    .split(/[,;\/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
+    .split(/[,;/]|\band\b|\bund\b|\balso\b|\bor\b|\boder\b/i)
     .map((t) => normalizeTokenForList(label, t))
     .filter((t) => t.display.length > 0 && t.key.length > 0);
 }
