@@ -16,6 +16,7 @@ import {
   GitCompare,
 } from "lucide-react";
 import { showToast } from "@/lib/toast";
+import { BRAND } from "@/lib/brand";
 
 interface ConflictEntry {
   id: string;
@@ -153,7 +154,7 @@ export function SyncConflictsPanel() {
           <Badge variant="destructive" className="ml-auto">{conflicts.length + entityConflicts.length}</Badge>
         </CardTitle>
         <CardDescription>
-          These items were edited in both Menerio and GitHub since the last sync.
+          These items were edited in both {BRAND.name} and GitHub since the last sync.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -168,7 +169,7 @@ export function SyncConflictsPanel() {
                 onClick={() => resolveAllMutation.mutate("keep_local")}
               >
                 {resolveAllMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                Keep all Menerio
+                Keep all {BRAND.name}
               </Button>
               <Button
                 variant="outline"
@@ -205,7 +206,7 @@ export function SyncConflictsPanel() {
                     onClick={() => resolveMutation.mutate({ noteId: conflict.note_id, resolution: "keep_local" })}
                   >
                     <ArrowRight className="h-3 w-3" />
-                    Keep Menerio
+                    Keep {BRAND.name}
                   </Button>
                   <Button
                     size="sm"
@@ -256,7 +257,7 @@ export function SyncConflictsPanel() {
                     onClick={() => resolveEntityMutation.mutate({ entry, resolution: "keep_local" })}
                   >
                     <ArrowRight className="h-3 w-3" />
-                    Keep Menerio
+                    Keep {BRAND.name}
                   </Button>
                   <Button
                     size="sm"

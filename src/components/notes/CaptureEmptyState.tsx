@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Send, Globe, Brain, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BRAND } from "@/lib/brand";
 
 interface CaptureEmptyStateProps {
   onCreateNote?: () => void;
@@ -36,7 +37,7 @@ const OPTIONS: CaptureOption[] = [
   {
     key: "mcp",
     title: "MCP Server",
-    description: "Capture from Claude or ChatGPT with one Menerio key.",
+    description: `Capture from Claude or ChatGPT with one ${BRAND.name} key.`,
     icon: Brain,
     to: "/dashboard/settings?tab=mcp",
   },
