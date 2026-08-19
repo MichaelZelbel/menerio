@@ -3604,7 +3604,7 @@ server.registerTool(
     let notes: any[] = [];
     if (needles.length) {
       const escaped = needles.map((n) => n.replace(/[,()'"\\*%_]/g, " ").trim()).filter(Boolean);
-      let nq = supabase
+      const nq = supabase
         .from("notes")
         .select("id, title, created_at, ai_visibility, person_id, metadata")
         .eq("user_id", userId)

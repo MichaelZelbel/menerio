@@ -27,6 +27,7 @@ import {
   ShieldOff,
 } from "lucide-react";
 import { toast } from "sonner";
+import { BRAND } from "@/lib/brand";
 
 const MCP_URL = "https://mcp.menerio.com";
 
@@ -231,7 +232,7 @@ export function MCPConnectionManager() {
   const agentPrompt = useMemo(
     () => `**Set up Menerio as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
 
-**Step 1 — Get my key.** Before anything else, ask me to paste my Menerio API key. I'll generate it in Menerio → Settings → API Keys (it starts with \`mnr_\`; the boxes on it decide which of my data it may touch) and send it back. Wait for it.
+**Step 1 — Get my key.** Before anything else, ask me to paste my ${BRAND.name} API key. I'll generate it in Menerio → Settings → API Keys (it starts with \`mnr_\`; the boxes on it decide which of my data it may touch) and send it back. Wait for it.
 
 **Step 2 — Install the server.** Register Menerio as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
 
@@ -273,7 +274,7 @@ export function MCPConnectionManager() {
                 <Key className="h-5 w-5" /> Older Personal MCP Tokens
               </CardTitle>
               <CardDescription>
-                Tokens made before Menerio moved to one key. They still work, and you can still
+                Tokens made before {BRAND.name} moved to one key. They still work, and you can still
                 revoke them here. New connections use an API key instead.
               </CardDescription>
             </div>

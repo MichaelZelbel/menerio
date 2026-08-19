@@ -135,7 +135,7 @@ async function runJob(
   }
 
   // Wiki revisions (only when scope=all, keeps parity with the current UI)
-  let wikiIds: string[] = [];
+  const wikiIds: string[] = [];
   if (body.scope === "all") {
     let from = 0;
     while (true) {

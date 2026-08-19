@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus, Loader2, Trash2, Server } from "lucide-react";
 import { toast } from "sonner";
+import { BRAND } from "@/lib/brand";
 
 /**
  * Connected AI tools (outbound MCP servers). Lets the user register third-party
@@ -134,9 +135,9 @@ export function UserMcpServersManager() {
               <Server className="h-5 w-5" /> Connected AI tools (MCP)
             </CardTitle>
             <CardDescription>
-              Give Menerio's AI chat extra tools by connecting your own Model
+              Give {BRAND.name}'s AI chat extra tools by connecting your own Model
               Context Protocol (MCP) servers. When enabled, the in-note chat and
-              Mira can call these servers' tools while helping you. Only add
+              {BRAND.personaName} can call these servers' tools while helping you. Only add
               servers you trust — their tools run on your behalf.
             </CardDescription>
           </div>

@@ -509,7 +509,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         },
       );
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [note.id, updateNote],
   );
 
@@ -715,7 +714,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (words < MIN_WORDS_FOR_PROCESSING) return;
     if (!checkCredits()) return;
     processNote.mutate(noteId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkCredits, processNote]);
 
   useEffect(() => { flushProcessingRef.current = flushPendingProcessing; }, [flushPendingProcessing]);

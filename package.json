@@ -9,7 +9,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "node scripts/check-edge-functions.mjs && vitest run",
+    "check:functions": "node scripts/check-edge-functions.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -120,6 +121,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "esbuild": "^0.25.12",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",

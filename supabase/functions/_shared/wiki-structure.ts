@@ -229,7 +229,7 @@ export function factFingerprint(markdown: string): Set<string> {
     // a sentence terminator, or a list/heading marker means this capital is
     // positional, not an entity.
     const before = plain.slice(Math.max(0, index - 60), index);
-    if (/(^|[.!?:;]|[-*+>|]|#|\n)\s*(["'“”(\[]\s*)?$/.test(before)) continue;
+    if (/(^|[.!?:;]|[-*+>|]|#|\n)\s*(["'“”([]\s*)?$/.test(before)) continue;
     tokens.add(`ent:${match[0].toLowerCase()}`);
   }
   return tokens;

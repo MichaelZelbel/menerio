@@ -611,7 +611,7 @@ export default function ReviewQueue() {
       showToast.error("Relationships are managed in the Relationships section, not as facts");
       return;
     }
-    let subjectId: string | null = subjectType === "self" ? null : (p?.subject_id || item.target_entity_id || null);
+    const subjectId: string | null = subjectType === "self" ? null : (p?.subject_id || item.target_entity_id || null);
     if (subjectType !== "self" && !subjectId) {
       showToast.error("This fact has no person or entity to attach to");
       return;
