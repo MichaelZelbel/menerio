@@ -63,7 +63,7 @@
 
 `eslint.config.js` currently ignores only `dist`. ESLint 9's flat config does **not** read `.gitignore`, so everything else that is git-ignored still gets linted, including the Tauri desktop build's asset cache.
 
-- [ ] **Step 1: Measure the starting point**
+- [x] **Step 1: Measure the starting point**
 
 Run: `npm run lint 2>&1 | tail -3; npm run lint >/dev/null 2>&1; echo "exit: $?"`
 
@@ -71,7 +71,7 @@ Expected: `✖ 1697 problems (434 errors, 1263 warnings)` and `exit: 1`.
 
 If the error count is not 434, the tree has moved since this plan was written. Carry on anyway — the fix is the same — but re-measure at each step rather than trusting the numbers here.
 
-- [ ] **Step 2: Confirm the errors really are build output**
+- [x] **Step 2: Confirm the errors really are build output**
 
 Run:
 
@@ -94,7 +94,7 @@ real.forEach(r=>console.log("  "+r));
 
 Expected: `build-output errors: 421`, `real-source errors: 13`, and the 13 listed are the ones in Task 2.
 
-- [ ] **Step 3: Add the ignores**
+- [x] **Step 3: Add the ignores**
 
 In `eslint.config.js`, change line 8 from:
 
@@ -114,13 +114,13 @@ to:
   { ignores: ["dist", "dev-dist", "src-tauri/target", ".lovable"] },
 ```
 
-- [ ] **Step 4: Verify the drop**
+- [x] **Step 4: Verify the drop**
 
 Run: `npm run lint 2>&1 | tail -3`
 
 Expected: `✖ 1276 problems (13 errors, 1263 warnings)`. Exit is still 1; that is correct at this point.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add eslint.config.js
@@ -145,7 +145,7 @@ why CI never reached npm test."
 - Consumes: Task 1's ignore list.
 - Produces: `npm run lint` exits 0.
 
-- [ ] **Step 1: Let ESLint fix the four it can**
+- [x] **Step 1: Let ESLint fix the four it can**
 
 Run: `npx eslint . --fix`
 
@@ -158,7 +158,7 @@ This rewrites four `let` declarations that are never reassigned into `const`:
 | `supabase/functions/profile-lint/index.ts` | 121 | `let newLabel = adjudication.canonicalLabel \|\| canonicalLabel(row.label);` |
 | `supabase/functions/review-queue-bulk/index.ts` | 138 | `let wikiIds: string[] = [];` |
 
-- [ ] **Step 2: Check what --fix changed, and that it changed nothing else**
+- [x] **Step 2: Check what --fix changed, and that it changed nothing else**
 
 Run: `git diff --stat`
 
@@ -167,7 +167,7 @@ Expected: exactly those four files, one line each. `--fix` can touch formatting 
 Run: `npm run lint 2>&1 | tail -2`
 Expected: 9 errors remaining.
 
-- [ ] **Step 3: Remove four unnecessary regex escapes**
+- [x] **Step 3: Remove four unnecessary regex escapes**
 
 These are `no-useless-escape`: a backslash before a character that is not special in that position. Removing it does not change what the pattern matches, which is why this is safe.
 
@@ -213,7 +213,7 @@ becomes
     if (/(^|[.!?:;]|[-*+>|]|#|\n)\s*(["'“”([]\s*)?$/.test(before)) continue;
 ```
 
-- [ ] **Step 4: Prove the regexes still behave identically**
+- [x] **Step 4: Prove the regexes still behave identically**
 
 These four sit on text-normalisation paths with real test coverage, so do not just trust the reasoning.
 
@@ -235,7 +235,7 @@ for (const c of cases) {
 
 Expected: every line starts `same`.
 
-- [ ] **Step 5: Replace the `require()` in the audit script**
+- [x] **Step 5: Replace the `require()` in the audit script**
 
 `scripts/audit-relationships.ts:44-50` currently reads:
 
@@ -263,7 +263,7 @@ with, at the top of the file:
 import { readFileSync } from "node:fs";
 ```
 
-- [ ] **Step 6: Allow `@ts-ignore` when it explains itself — do NOT swap it for `@ts-expect-error`**
+- [x] **Step 6: Allow `@ts-ignore` when it explains itself — do NOT swap it for `@ts-expect-error`**
 
 The last four errors are `@typescript-eslint/ban-ts-comment` at `supabase/functions/profile-audit/index.ts` lines 290, 348, 355 and 375. All four are the same line:
 
@@ -290,7 +290,7 @@ Configure the rule to accept a described `@ts-ignore` instead. In `eslint.config
 
 The four existing comments already carry the description `Deno runtime global`, which is 19 characters, so they pass.
 
-- [ ] **Step 7: Verify the gate is green**
+- [x] **Step 7: Verify the gate is green**
 
 Run:
 
@@ -311,7 +311,7 @@ npx vitest run && npm run build
 
 Expected: 409 tests pass, build succeeds.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A
@@ -346,7 +346,7 @@ and do not affect the exit code."
 
 **What it deliberately does not do.** It does not typecheck. Full type checking needs Deno, because these modules import from `https://esm.sh/...` and use the `Deno` global. That is Step 6, optional, with its own trade-off. This script catches the two things that actually break a deploy, in about a second, with no new toolchain.
 
-- [ ] **Step 1: Make esbuild an explicit dependency**
+- [x] **Step 1: Make esbuild an explicit dependency**
 
 It currently resolves only because Vite depends on it. Relying on a transitive dependency is how a script breaks during an unrelated upgrade.
 
@@ -354,7 +354,7 @@ Run: `npm install --save-dev esbuild`
 
 Expected: `package.json` gains `"esbuild"` under `devDependencies` at roughly `^0.25.12` (the version already in the tree). No meaningful download — it is already installed.
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 Create `scripts/check-edge-functions.mjs` exactly as below. This is the version I tested; the `.ts`-extension fallback in the import check is load-bearing, because the Vitest files under `__tests__/` are resolved by Node and correctly omit the extension, and without it they produce two false failures.
 
@@ -430,7 +430,7 @@ if (problems.length) {
 console.log(`edge-function check passed: ${files.length} files parsed, imports resolve`);
 ```
 
-- [ ] **Step 3: Verify it passes on a clean tree**
+- [x] **Step 3: Verify it passes on a clean tree**
 
 Run: `node scripts/check-edge-functions.mjs; echo "exit: $?"`
 
@@ -438,7 +438,7 @@ Expected: `edge-function check passed: 138 files parsed, imports resolve` and `e
 
 If it reports the two `__tests__` files as unresolved imports, the `.ts` fallback from Step 2 was not copied correctly.
 
-- [ ] **Step 4: Verify it fails on the bug it exists to catch**
+- [x] **Step 4: Verify it fails on the bug it exists to catch**
 
 A check nobody has seen fail is a check nobody should trust. Break a file deliberately, both ways, then restore it.
 
@@ -467,7 +467,7 @@ Expected (b): `hub-api-notes/index.ts  unresolved import: "../_shared/postgrest-
 
 Then confirm you restored it: `git status --short` shows nothing, and the check passes again.
 
-- [ ] **Step 5: Wire it in**
+- [x] **Step 5: Wire it in**
 
 In `package.json`, add the script and chain it into `test` so it runs locally too:
 
@@ -491,7 +491,7 @@ In `.github/workflows/ci.yml`, add a step of its own after the lint step, so a f
 Run: `npm test`
 Expected: the check line prints first, then 409 tests pass.
 
-- [ ] **Step 6 (optional, and a real decision): add a full Deno typecheck**
+- [x] **Step 6 (optional, and a real decision): add a full Deno typecheck**
 
 Everything above catches syntax and missing files. It does not catch type errors, and a type error can still break a deploy.
 
@@ -510,7 +510,7 @@ deno check supabase/functions/**/index.ts 2>&1 | tail -40
 
 Then report the count to Michael and let him decide, rather than starting an open-ended cleanup inside this plan. If the number is small, adding the step is worth it. If it is in the hundreds, it is its own piece of work and should be its own plan.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scripts/check-edge-functions.mjs package.json package-lock.json .github/workflows/ci.yml
@@ -538,7 +538,7 @@ the size of the existing backlog is unknown."
 
 A green run proves the steps pass. It does not prove the gate would catch a regression, which is the thing that was actually broken.
 
-- [ ] **Step 1: Full local run, in CI's order**
+- [x] **Step 1: Full local run, in CI's order**
 
 ```bash
 npm run lint;                         echo "lint:      $?"
@@ -550,7 +550,7 @@ npm run build >/dev/null 2>&1;        echo "build:     $?"
 
 Expected: all five report `0`.
 
-- [ ] **Step 2: Prove each gate still bites**
+- [x] **Step 2: Prove each gate still bites**
 
 Break one thing per gate, confirm the exit code, restore it. Verify `git status --short` is empty after each.
 
@@ -577,7 +577,7 @@ Expected: `lint should be 1: 1`, `lint back to 0: 0`, `test should be 1: 1`.
 
 If any of those reports the opposite, that gate is not gating and it is a finding worth reporting rather than working around.
 
-- [ ] **Step 3: Push and watch CI**
+- [x] **Step 3: Push and watch CI**
 
 ```bash
 git pull --rebase origin main
@@ -588,7 +588,7 @@ gh run watch
 
 Expected: all steps green. **This is the first green CI run on this repo in a long time**, so if it goes green, say so explicitly in the report rather than treating it as unremarkable.
 
-- [ ] **Step 4: Merge**
+- [x] **Step 4: Merge**
 
 ```bash
 git checkout main && git pull --rebase origin main
