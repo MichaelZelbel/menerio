@@ -149,23 +149,33 @@ export function splitToFacts(label: string, value: string): string[] {
   if (!v) return [];
   if (NEVER_SPLIT_LABELS.has(String(label || "").trim().toLowerCase())) return [v];
 
-  const segments: string[] = [];
-  let depth = 0;
-  let current = "";
-  let separators = 0;
-  for (const ch of v) {
-    if (ch === "(" || ch === "[") depth++;
-    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
-    const isSep = depth === 0 && (ch === "," || ch === ";" || ch === "\n");
-    if (isSep) {
-      separators++;
-      segments.push(current);
-      current = "";
-      continue;
+  const scan = (respectBrackets: boolean) => {
+    const segments: string[] = [];
+    let depth = 0;
+    let current = "";
+    let separators = 0;
+    for (const ch of v) {
+      if (respectBrackets) {
+        if (ch === "(" || ch === "[") depth++;
+        else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+      }
+      if (depth === 0 && (ch === "," || ch === ";" || ch === "\n")) {
+        separators++;
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      current += ch;
     }
-    current += ch;
-  }
-  segments.push(current);
+    segments.push(current);
+    return { segments, separators, unbalanced: depth > 0 };
+  };
+
+  // Legacy bags are frequently truncated mid-parenthesis ("… Happy Meal
+  // (nuggets"). An unclosed bracket must not swallow the rest of the value,
+  // so fall back to a bracket-blind scan in that case.
+  let { segments, separators, unbalanced } = scan(true);
+  if (unbalanced) ({ segments, separators } = scan(false));
 
   // One short "A, B" stays whole — it is usually a single qualified fact.
   if (separators < 2 && v.length <= 60) return [v];
