@@ -4266,6 +4266,10 @@ export type Database = {
         }
         Returns: string
       }
+      profile_split_fact_value: {
+        Args: { p_label: string; p_value: string }
+        Returns: string[]
+      }
       profile_subset_label_sweep: {
         Args: {
           _all_contacts?: boolean

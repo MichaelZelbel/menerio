@@ -5,10 +5,12 @@ import {
   applyNormalization,
   createNormalizationSuggestions,
   planSubjectNormalization,
+  resolveCategoryId,
   rollbackNormalization,
   splitListTokens,
   type NormalizationPayload,
 } from "../_shared/profile-normalization.ts";
+import { gateStoredValue } from "../_shared/profile-fact-gate.ts";
 import {
   canonicalProfileLabel,
   correctProfileCategory,
@@ -602,6 +604,106 @@ serve(async (req) => {
 
     const prepareSuggestionForInsert = makePrepareSuggestion(db);
     const helpers = { filterSuppressedSuggestions: (uid: string, s: any[]) => filterSuppressedSuggestions(db, uid, s), prepareSuggestionForInsert, isSensitiveSuggestion, buildSuppressionKey };
+
+    // Legacy repair: rows written before the atomizer trigger existed are
+    // "bags" — several facts joined into one string, often under a label they
+    // don't fit ("Full name: Yumei, hi14miau@gmail.com, Occupation: …").
+    // This re-files every stored value through the admission gate: atomic
+    // facts are re-inserted under the label their TYPE says they belong to,
+    // and prose stranded in a typed field moves to a neutral "Unfiled note"
+    // row in the same category instead of being silently dropped.
+    if (action === "explode_bags") {
+      const scope = String(body?.scope || "owner");
+      const subjects: Array<string | null> = [];
+      if (scope === "owner") {
+        subjects.push(null);
+      } else if (scope === "contact") {
+        const contactId = String(body?.contact_id || "");
+        if (!contactId) return json({ error: "contact_id required" }, 400);
+        const { data: c } = await db.from("contacts").select("id").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (!c) return json({ error: "contact not found" }, 404);
+        subjects.push(contactId);
+      } else if (scope === "all_contacts") {
+        subjects.push(null);
+        const { data: contacts } = await db
+          .from("contacts").select("id").eq("user_id", userId).is("merged_into", null).limit(500);
+        for (const c of (contacts || []) as any[]) subjects.push(c.id);
+      } else {
+        return json({ error: "invalid scope" }, 400);
+      }
+
+      const stats = { examined: 0, exploded: 0, rerouted: 0, unfiled: 0, skipped: 0 };
+
+      for (const subj of subjects) {
+        const q = db
+          .from("profile_entries")
+          .select("id, category_id, label, value, origin, evidence_quote, linked_note_id, sort_order")
+          .eq("user_id", userId)
+          .limit(2000);
+        const { data: rows } = subj ? await q.eq("contact_id", subj) : await q.is("contact_id", null);
+
+        const catIds = [...new Set((rows || []).map((r: any) => r.category_id).filter(Boolean))];
+        const slugById = new Map<string, string>();
+        if (catIds.length > 0) {
+          const { data: cats } = await db.from("profile_categories").select("id, slug").in("id", catIds);
+          for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
+        }
+
+        for (const row of (rows || []) as any[]) {
+          stats.examined++;
+          const slug = slugById.get(row.category_id) || "other";
+          const facts = gateStoredValue({ label: row.label, categorySlug: slug, value: row.value });
+
+          const unchanged =
+            facts.length === 1 &&
+            facts[0].accepted &&
+            facts[0].value === String(row.value || "").trim() &&
+            facts[0].label === row.label;
+          if (unchanged) { stats.skipped++; continue; }
+          if (facts.length === 1 && !facts[0].accepted && facts[0].reason === "not_atomic") {
+            stats.skipped++;
+            continue;
+          }
+
+          const writes: Array<{ label: string; slug: string; value: string }> = [];
+          for (const f of facts) {
+            if (f.accepted) {
+              if (f.reason === "rerouted_by_type") stats.rerouted++;
+              writes.push({ label: f.label, slug: f.categorySlug, value: f.value });
+            } else if (f.reason?.startsWith("type_mismatch")) {
+              stats.unfiled++;
+              writes.push({ label: "Unfiled note", slug, value: f.value });
+            }
+          }
+          if (writes.length === 0) { stats.skipped++; continue; }
+
+          await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
+          for (const w of writes) {
+            const categoryId =
+              w.slug === slug
+                ? row.category_id
+                : await resolveCategoryId(db, userId, subj, w.slug);
+            if (!categoryId) continue;
+            const { error: insErr } = await db.from("profile_entries").insert({
+              user_id: userId,
+              contact_id: subj,
+              category_id: categoryId,
+              label: w.label,
+              value: w.value,
+              origin: row.origin,
+              evidence_quote: row.evidence_quote,
+              linked_note_id: row.linked_note_id,
+              sort_order: row.sort_order ?? 0,
+            } as any);
+            // A blocked insert means the fact already exists elsewhere in a
+            // cleaner form — the dedup guard is the authority, not this job.
+            if (!insErr) stats.exploded++;
+          }
+        }
+      }
+
+      return json({ ok: true, ...stats });
+    }
 
     if (action === "plan") {
       const scope = String(body?.scope || "owner");
