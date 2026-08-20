@@ -1623,7 +1623,31 @@ async function generateProfileSuggestions(
         continue;
       }
       f.contact_name = target.canonical_name;
-      validFacts.push({ ...f, _target: target });
+
+      // Admission gate: one row = one fact, filed where its TYPE says it
+      // belongs. A model that answers "Full name" with a name + an email + an
+      // occupation yields three separately-filed facts here, not one wall.
+      const gated = gateStoredValue({
+        label: f.label,
+        categorySlug: f.category_slug,
+        value: f.value,
+      });
+      for (const g of gated) {
+        if (!g.accepted) {
+          console.log(`[profile-extract] Dropping fact "${f.label}: ${g.value}" (${g.reason})`);
+          continue;
+        }
+        if (g.label !== f.label || g.categorySlug !== f.category_slug) {
+          console.log(`[profile-extract] Refiled "${f.label}" → "${g.label}" (${g.categorySlug})`);
+        }
+        validFacts.push({
+          ...f,
+          label: g.label,
+          category_slug: g.categorySlug,
+          value: g.value,
+          _target: target,
+        });
+      }
 
     }
 
