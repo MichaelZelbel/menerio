@@ -5,10 +5,12 @@ import {
   applyNormalization,
   createNormalizationSuggestions,
   planSubjectNormalization,
+  resolveCategoryId,
   rollbackNormalization,
   splitListTokens,
   type NormalizationPayload,
 } from "../_shared/profile-normalization.ts";
+import { gateStoredValue } from "../_shared/profile-fact-gate.ts";
 import {
   canonicalProfileLabel,
   correctProfileCategory,
