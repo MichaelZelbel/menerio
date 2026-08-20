@@ -852,7 +852,7 @@ export async function createNormalizationSuggestions(args: {
 }
 
 // Resolve (or create) a profile_categories row for (user, slug, contact_id).
-async function resolveCategoryId(
+export async function resolveCategoryId(
   supabase: any,
   userId: string,
   contactId: string | null,
