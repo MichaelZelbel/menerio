@@ -36,6 +36,7 @@ import {
 } from "../_shared/profile-fields-registry.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
 import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
+import { gateStoredValue } from "../_shared/profile-fact-gate.ts";
 
 import {
   applyNormalization,
