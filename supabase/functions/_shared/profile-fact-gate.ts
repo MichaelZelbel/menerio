@@ -122,7 +122,9 @@ export function expectedTypesForLabel(canonicalLabel: string): FactType[] | null
 
 export function labelAcceptsType(canonicalLabel: string, type: FactType): boolean {
   const expected = expectedTypesForLabel(canonicalLabel);
-  if (!expected) return type !== "sentence" || true; // free-form labels accept prose
+  // Free-form labels (traits, favorites, open categories) accept any type,
+  // including prose — atomicity is enforced separately by length + splitting.
+  if (!expected) return true;
   return expected.includes(type);
 }
 
