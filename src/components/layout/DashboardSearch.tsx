@@ -85,7 +85,11 @@ export function DashboardSearch() {
   const commit = useCallback((updater: (prev: SemanticSearchResult[]) => SemanticSearchResult[]) => {
     const base = pendingRef.current ?? resultsRef.current;
     const next = updater(base);
-    if (isHoveringRef.current) {
+    // The dropdown can open underneath a stationary pointer. Do not freeze its
+    // initial empty state: the first completed pass must always become visible.
+    // Once rows are rendered, later enrichment remains frozen while hovering so
+    // the item under the pointer cannot change before a click.
+    if (isHoveringRef.current && resultsRef.current.length > 0) {
       pendingRef.current = next; // keep the visible list frozen
       return;
     }
