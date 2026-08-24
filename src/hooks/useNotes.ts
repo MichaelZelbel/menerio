@@ -678,25 +678,13 @@ export function useSearchNotes() {
   return useMutation({
     mutationFn: async (query: string) => {
       const q = query.toLowerCase();
-      if (isLocalFirstActive()) {
-        return searchNotesLocal(user!.id, q);
-      }
       const terms = extractSearchTerms(query);
-      const filters = [
-        ilikeContains("title", q),
-        ilikeContains("content", q),
-        ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
-      ];
-      const { data, error } = await supabase
-        .from("notes" as any)
-        .select(NOTE_COLUMNS)
-        .eq("user_id", user!.id)
-        .eq("is_trashed", false)
-        .or(filters.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return rankNotesByTerms((data as unknown as Note[]) || [], q, terms);
+      if (isLocalFirstActive()) {
+        return rankNotesByTerms(await searchNotesLocal(user!.id, q, terms), q, terms);
+      }
+      const notes = await fetchKeywordCandidates(user!.id, q, terms);
+      return rankNotesByTerms(notes, q, terms);
+
 
     },
   });
