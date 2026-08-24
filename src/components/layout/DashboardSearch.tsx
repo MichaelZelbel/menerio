@@ -134,7 +134,7 @@ export function DashboardSearch() {
       try {
         const res = await semanticSearch.mutateAsync({ query, limit: MAX_RESULTS, threshold: 0.25 });
         if (requestIdRef.current !== reqId) return;
-        commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
+        commit((prev) => pinTitleHits(mergeStable(prev, res.results, MAX_RESULTS), query));
       } catch { /* ignore */ }
 
       if (requestIdRef.current === reqId) setStatus("done");
