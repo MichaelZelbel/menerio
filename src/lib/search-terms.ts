@@ -1,10 +1,15 @@
 /**
- * Query term extraction for keyword search.
+ * Keyword relevance for note search.
  *
- * A sentence question like "how does Nadia want to hear bad news" must never
- * perform worse than the key noun inside it. Substring search on the whole
- * sentence finds nothing, so we also search the meaningful terms and rank the
- * union: exact phrase first, then notes matching the most terms.
+ * One scoring function is shared by every search surface (header search, the
+ * Notes page, `[[` autocomplete, the note picker, the command palette) so the
+ * surfaces can never drift apart.
+ *
+ * The scorer is COVERAGE-AWARE: how much of the *title* the query accounts for
+ * matters more than anything else. Typing "ownward s" must surface the note
+ * titled `Ownward Studio` above eight freshly edited journal entries whose long
+ * headlines merely contain the same phrase. Recency is only a final tie-break
+ * and can never overturn a coverage or position difference.
  */
 
 const STOPWORDS = new Set([
@@ -21,17 +26,31 @@ const STOPWORDS = new Set([
 
 const MAX_TERMS = 6;
 
+/** Normalize text for comparison: diacritics stripped, whitespace collapsed, lowercased. */
+export function normalizeForMatch(s: string | null | undefined): string {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function tokenize(query: string): string[] {
+  return (normalizeForMatch(query).match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []);
+}
+
 /**
  * Meaningful search terms inside a query. Stopwords and 1-2 character tokens are
  * dropped; capitalised words (likely names) are always kept even if short.
  */
 export function extractSearchTerms(query: string): string[] {
-  const raw = query.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+  const rawTokens = query.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
   const seen = new Set<string>();
   const terms: { term: string; index: number; isName: boolean }[] = [];
 
-  raw.forEach((token, index) => {
-    const lower = token.toLowerCase();
+  rawTokens.forEach((token, index) => {
+    const lower = normalizeForMatch(token);
     // A capitalised word that isn't the first word and isn't a stopword looks
     // like a proper noun ("Nadia") — those are the highest-signal terms.
     const isName = index > 0 && /^\p{Lu}/u.test(token) && !STOPWORDS.has(lower);
@@ -51,6 +70,18 @@ export function extractSearchTerms(query: string): string[] {
     .map((t) => t.term);
 }
 
+/**
+ * The trailing token of a query someone is still typing ("ownward s" → "s").
+ * It is a prefix, not a whole word, so it is excluded from `extractSearchTerms`
+ * (a bare "s" would match everything) but IS useful for the title probe that
+ * guarantees the exactly-titled note is in the candidate set.
+ */
+export function trailingPrefix(query: string): string {
+  if (/\s$/.test(query)) return "";
+  const tokens = tokenize(query);
+  const last = tokens[tokens.length - 1] ?? "";
+  return last.length > 0 && last.length < 3 ? last : "";
+}
 
 export interface RankableNote {
   title?: string | null;
@@ -58,60 +89,154 @@ export interface RankableNote {
   updated_at?: string | null;
 }
 
-/** Normalize text for comparison: diacritics stripped, whitespace collapsed, lowercased. */
-export function normalizeForMatch(s: string | null | undefined): string {
-  return (s || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
 /** Number of query terms present in a note's title or content. */
 export function countTermMatches<T extends RankableNote>(note: T, terms: string[]): number {
-  const haystack = `${note.title ?? ""}\n${note.content ?? ""}`.toLowerCase();
+  const haystack = `${normalizeForMatch(note.title)}\n${normalizeForMatch(note.content)}`;
   return terms.reduce((n, t) => (haystack.includes(t) ? n + 1 : n), 0);
 }
 
-function wordBoundaryHit(haystack: string, needle: string): boolean {
-  if (!needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|\\W)${escaped}`).test(haystack);
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Index of the first occurrence of `needle` at a word boundary, or -1. */
+function wordStartIndex(haystack: string, needle: string): number {
+  if (!needle) return -1;
+  const m = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRe(needle)})`, "u").exec(haystack);
+  return m ? m.index + m[1].length : -1;
+}
+
+/** Bounded Levenshtein distance; returns `max + 1` as soon as it exceeds `max`. */
+export function boundedLevenshtein(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      curr.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+/** How many edits a term of this length may be off by. 0 disables fuzzy matching. */
+function fuzzyBudget(term: string): number {
+  if (term.length >= 8) return 2;
+  if (term.length >= 5) return 1;
+  return 0;
+}
+
+function fuzzyTermHit(titleTokens: string[], term: string): boolean {
+  const budget = fuzzyBudget(term);
+  if (budget === 0) return false;
+  return titleTokens.some((tok) => boundedLevenshtein(tok, term, budget) <= budget);
+}
+
+/** Score bands. Any title match outranks any body-only match. */
+const BAND = {
+  titleFloor: 150,
+  bodyCeiling: 149,
+} as const;
+
+export interface NoteScore {
+  /** Total relevance; 0 means "no match at all, drop it". */
+  score: number;
+  /** True when the note matched on its title rather than only in its body. */
+  titleHit: boolean;
 }
 
 /**
- * Tier of a note against the query. Lower is better; a title match always beats
- * a body match, no matter how recent the body match is.
+ * Relevance of one note against a query.
  *
- * 0 title equals the query
- * 1 title contains the whole query phrase
- * 2 title starts with the query, or every term hits a word boundary in the title
- * 3 title contains every term
- * 4 title contains some terms
- * 5 body-only match
+ * Title matches are scored by *what fraction of the title the query covers* and
+ * *where* the match starts, so a short, precise title always beats a long
+ * sentence headline that happens to contain the same words.
  */
-export function matchTier<T extends RankableNote>(
+export function scoreNote<T extends RankableNote>(
   note: T,
   phrase: string,
   terms: string[],
-): { tier: number; titleTerms: number; matches: number; phraseHit: boolean } {
+  options: { fuzzy?: boolean } = {},
+): NoteScore {
   const q = normalizeForMatch(phrase);
   const title = normalizeForMatch(note.title);
-  const body = `${note.title ?? ""}\n${note.content ?? ""}`.toLowerCase();
-  const phraseHit = q.length > 0 && (title.includes(q) || body.includes(q));
-  const matches = countTermMatches(note, terms);
-  const titleTerms = terms.reduce((n, t) => (title.includes(t) ? n + 1 : n), 0);
+  const content = normalizeForMatch(note.content);
+  const haystack = `${title}\n${content}`;
 
-  let tier = 5;
-  if (q.length > 0 && title === q) tier = 0;
-  else if (q.length > 0 && title.includes(q)) tier = 1;
-  else if (q.length > 0 && title.startsWith(q)) tier = 2;
-  else if (terms.length > 0 && terms.every((t) => wordBoundaryHit(title, t))) tier = 2;
-  else if (terms.length > 0 && titleTerms === terms.length) tier = 3;
-  else if (titleTerms > 0) tier = 4;
+  if (!q && terms.length === 0) return { score: 0, titleHit: false };
 
-  return { tier, titleTerms, matches, phraseHit };
+  // --- Title scoring -------------------------------------------------------
+  const titleLen = Math.max(title.length, 1);
+  let titleScore = 0;
+
+  if (q) {
+    const coverage = Math.min(q.length / titleLen, 1); // 0..1
+    if (title === q) {
+      titleScore = 1000;
+    } else {
+      const idx = title.indexOf(q);
+      if (idx === 0) {
+        titleScore = 800 + coverage * 150;
+      } else if (idx > 0) {
+        const wordStart = wordStartIndex(title, q);
+        const base = wordStart >= 0 ? 620 : 480;
+        const pos = wordStart >= 0 ? wordStart : idx;
+        // Later in the title = weaker signal, but capped so coverage still leads.
+        titleScore = base + coverage * 150 - Math.min(pos, 120) * 0.25;
+      }
+    }
+  }
+
+  if (titleScore === 0 && terms.length > 0) {
+    const inTitle = terms.filter((t) => title.includes(t));
+    const atWordStart = terms.filter((t) => wordStartIndex(title, t) >= 0);
+    if (inTitle.length > 0) {
+      const frac = inTitle.length / terms.length;
+      const matchedChars = inTitle.reduce((n, t) => n + t.length, 0);
+      const coverage = Math.min(matchedChars / titleLen, 1);
+      const firstPos = Math.min(
+        ...inTitle.map((t) => {
+          const w = wordStartIndex(title, t);
+          return w >= 0 ? w : title.indexOf(t);
+        }),
+      );
+      const allWordStart = atWordStart.length === terms.length;
+      const base = frac === 1 ? (allWordStart ? 460 : 380) : 200 + frac * 120;
+      titleScore = base + coverage * 150 - Math.min(firstPos, 120) * 0.25;
+    }
+  }
+
+  if (titleScore === 0 && options.fuzzy) {
+    const titleTokens = tokenize(title);
+    const hits = terms.filter((t) => fuzzyTermHit(titleTokens, t));
+    if (hits.length > 0) {
+      const frac = hits.length / terms.length;
+      const matchedChars = hits.reduce((n, t) => n + t.length, 0);
+      const coverage = Math.min(matchedChars / titleLen, 1);
+      titleScore = BAND.titleFloor + frac * 120 + coverage * 100;
+    }
+  }
+
+  if (titleScore > 0) {
+    // Body agreement is a small bonus, never enough to reorder title bands.
+    const bodyTerms = terms.filter((t) => content.includes(t)).length;
+    return { score: titleScore + Math.min(bodyTerms, 5) * 2, titleHit: true };
+  }
+
+  // --- Body-only scoring ---------------------------------------------------
+  let bodyScore = 0;
+  if (q && haystack.includes(q)) bodyScore = 100;
+  const bodyTermHits = terms.filter((t) => content.includes(t)).length;
+  if (bodyTermHits > 0) {
+    bodyScore = Math.max(bodyScore, 20 + (bodyTermHits / Math.max(terms.length, 1)) * 60);
+  }
+  return { score: Math.min(bodyScore, BAND.bodyCeiling), titleHit: false };
 }
 
 /** True when the note matched on its title rather than only in its body. */
@@ -120,36 +245,43 @@ export function isTitleHit<T extends RankableNote>(
   phrase: string,
   terms: string[],
 ): boolean {
-  return matchTier(note, phrase, terms).tier <= 3;
+  return scoreNote(note, phrase, terms).titleHit;
 }
 
 /**
- * Rank keyword hits title-first: exact title, title phrase, title terms, then
- * body matches. Recency only breaks ties inside a tier. Notes matching nothing
- * are dropped.
+ * Rank keyword hits by relevance. Notes matching nothing are dropped.
+ *
+ * A bounded typo-tolerant pass runs only when the strict pass produced no title
+ * match at all, so fuzzy hits can never dilute exact results.
  */
 export function rankNotesByTerms<T extends RankableNote>(
   notes: T[],
   phrase: string,
   terms: string[],
 ): T[] {
-  const scored = notes.map((note, index) => ({
+  const strict = notes.map((note, index) => ({
     note,
     index,
     updated: note.updated_at ?? "",
-    ...matchTier(note, phrase, terms),
+    ...scoreNote(note, phrase, terms),
   }));
 
+  const noTitleHit = !strict.some((s) => s.titleHit);
+  const scored = noTitleHit
+    ? notes.map((note, index) => ({
+        note,
+        index,
+        updated: note.updated_at ?? "",
+        ...scoreNote(note, phrase, terms, { fuzzy: true }),
+      }))
+    : strict;
+
   return scored
-    .filter((s) => s.phraseHit || s.matches > 0 || terms.length === 0)
+    .filter((s) => s.score > 0 || (!phrase.trim() && terms.length === 0))
     .sort((a, b) => {
-      if (a.tier !== b.tier) return a.tier - b.tier;
-      if (a.titleTerms !== b.titleTerms) return b.titleTerms - a.titleTerms;
-      if (a.phraseHit !== b.phraseHit) return a.phraseHit ? -1 : 1;
-      if (a.matches !== b.matches) return b.matches - a.matches;
+      if (b.score !== a.score) return b.score - a.score;
       if (a.updated !== b.updated) return a.updated < b.updated ? 1 : -1;
       return a.index - b.index;
     })
     .map((s) => s.note);
 }
-
