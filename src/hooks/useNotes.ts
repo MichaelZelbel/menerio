@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue } from "@/lib/postgrest";
-import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
+import { extractSearchTerms, rankNotesByTerms, trailingPrefix } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
 import { isLocalFirstActive, useLocalFirstActive } from "@/sync/sync-health";
@@ -544,14 +544,26 @@ export function useProcessNote() {
 // note whose *title* is what the user typed.
 async function searchNotesLocal(userId: string, q: string, terms: string[]): Promise<Note[]> {
   const pattern = `%${escapeLike(q)}%`;
+  const prefix = trailingPrefix(q);
   const db = getDb();
+  // Exact / prefix title probe: the note whose title IS what was typed can
+  // never be pushed out of the candidate set by a limit.
+  const exactRows = await db.getAll<NoteRow>(
+    `SELECT * FROM notes
+     WHERE user_id = ? AND is_trashed = 0
+       AND (lower(title) = ? OR lower(title) LIKE ? ESCAPE '\\')
+     ORDER BY length(title) ASC
+     LIMIT 5`,
+    [userId, q.trim(), `${escapeLike(q.trim())}%`],
+  );
+  const titleTerms = [...terms, ...(prefix ? [prefix] : [])];
   const titleRows = await db.getAll<NoteRow>(
     `SELECT * FROM notes
      WHERE user_id = ? AND is_trashed = 0
-       AND (lower(title) LIKE ? ESCAPE '\\'${terms.map(() => ` OR lower(title) LIKE ? ESCAPE '\\'`).join("")})
+       AND (lower(title) LIKE ? ESCAPE '\\'${titleTerms.map(() => ` OR lower(title) LIKE ? ESCAPE '\\'`).join("")})
      ORDER BY length(title) ASC
      LIMIT 30`,
-    [userId, pattern, ...terms.map((t) => `%${escapeLike(t)}%`)],
+    [userId, pattern, ...titleTerms.map((t) => `%${escapeLike(t)}%`)],
   );
   const rows = await db.getAll<NoteRow>(
     `SELECT * FROM notes
@@ -563,7 +575,7 @@ async function searchNotesLocal(userId: string, q: string, terms: string[]): Pro
   );
   const seen = new Set<string>();
   const merged: NoteRow[] = [];
-  for (const r of [...titleRows, ...rows]) {
+  for (const r of [...exactRows, ...titleRows, ...rows]) {
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     merged.push(r);
@@ -572,19 +584,25 @@ async function searchNotesLocal(userId: string, q: string, terms: string[]): Pro
 }
 
 /**
- * Candidate rows for a keyword search. Runs two passes so that title matches are
- * always part of the candidate set: a title-only pass (short titles first, so an
- * exactly-titled note is never truncated away) and the broad title+content pass.
+ * Candidate rows for a keyword search. Three passes so title matches are always
+ * part of the candidate set: an exact/prefix-title probe, a title-only pass and
+ * the broad title+content pass.
  */
 async function fetchKeywordCandidates(
   userId: string,
   q: string,
   terms: string[],
 ): Promise<Note[]> {
+  const trimmed = q.trim();
+  const prefix = trailingPrefix(q);
+  const exactFilters = [
+    `title.ilike.${pgOrValue(escapeLikeFilter(trimmed))}`,
+    `title.ilike.${pgOrValue(`${escapeLikeFilter(trimmed)}%`)}`,
+  ];
   const titleFilters = [
-    `title.ilike.${pgOrValue(escapeLikeFilter(q))}`, // exact title
     ilikeContains("title", q),
     ...terms.map((t) => ilikeContains("title", t)),
+    ...(prefix ? [ilikeContains("title", prefix)] : []),
   ];
   // A sentence question ("how does Nadia want to hear bad news") has no
   // literal substring match, so we OR the phrase with its meaningful terms
@@ -595,27 +613,23 @@ async function fetchKeywordCandidates(
     ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
   ];
 
-  const [titleRes, broadRes] = await Promise.all([
+  const base = () =>
     supabase
       .from("notes" as any)
       .select(NOTE_COLUMNS)
       .eq("user_id", userId)
-      .eq("is_trashed", false)
-      .or(titleFilters.join(","))
-      .limit(30),
-    supabase
-      .from("notes" as any)
-      .select(NOTE_COLUMNS)
-      .eq("user_id", userId)
-      .eq("is_trashed", false)
-      .or(broadFilters.join(","))
-      .order("updated_at", { ascending: false })
-      .limit(50),
+      .eq("is_trashed", false);
+
+  const [exactRes, titleRes, broadRes] = await Promise.all([
+    base().or(exactFilters.join(",")).limit(5),
+    base().or(titleFilters.join(",")).limit(50),
+    base().or(broadFilters.join(",")).order("updated_at", { ascending: false }).limit(50),
   ]);
   if (broadRes.error) throw broadRes.error;
 
   const byId = new Map<string, Note>();
   for (const n of [
+    ...((exactRes.data as unknown as Note[]) || []),
     ...((titleRes.data as unknown as Note[]) || []),
     ...((broadRes.data as unknown as Note[]) || []),
   ]) {
