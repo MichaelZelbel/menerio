@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
-import { ilikeContains } from "@/lib/postgrest";
+import { ilikeContains, escapeLike, pgOrValue } from "@/lib/postgrest";
 import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
