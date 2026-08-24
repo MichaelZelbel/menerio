@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue } from "@/lib/postgrest";
-import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
+import { extractSearchTerms, rankNotesByTerms, trailingPrefix } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
 import { isLocalFirstActive, useLocalFirstActive } from "@/sync/sync-health";
