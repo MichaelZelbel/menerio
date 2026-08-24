@@ -134,7 +134,9 @@ export function DashboardSearch() {
       try {
         const res = await semanticSearch.mutateAsync({ query, limit: MAX_RESULTS, threshold: 0.25 });
         if (requestIdRef.current !== reqId) return;
-        commit((prev) => pinTitleHits(mergeStable(prev, res.results, MAX_RESULTS), query));
+        // Append-only: rows already rendered keep their exact position so a row
+        // can never jump out from under the user's cursor mid-click.
+        commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
       } catch { /* ignore */ }
 
       if (requestIdRef.current === reqId) setStatus("done");
