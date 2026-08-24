@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { escapeLike, pgOrValue, ilikeContains } from "@/lib/postgrest";
+import { extractSearchTerms, normalizeForMatch, rankNotesByTerms } from "@/lib/search-terms";
 import { Badge } from "@/components/ui/badge";
 import { Plus } from "lucide-react";
 
@@ -23,32 +24,17 @@ interface NoteResult {
 }
 
 /** Normalize a title for comparison: trim, collapse whitespace, strip diacritics, lowercase. */
-function norm(s: string): string {
-  return (s || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+const norm = normalizeForMatch;
+
+/** Rank title matches with the shared, title-first search ranking. */
+function rankNotes(rows: NoteResult[], query: string): NoteResult[] {
+  const q = query.trim().toLowerCase();
+  const ranked = rankNotesByTerms(rows, q, extractSearchTerms(query));
+  // Never drop a row the query already fetched — unranked rows go last.
+  const inRanked = new Set(ranked.map((r) => r.id));
+  return [...ranked, ...rows.filter((r) => !inRanked.has(r.id))];
 }
 
-/** Rank title matches: exact > prefix > word-boundary > substring; ties by recency. */
-function rankNotes(rows: NoteResult[], query: string): NoteResult[] {
-  const q = norm(query);
-  const score = (title: string): number => {
-    const t = norm(title);
-    if (t === q) return 0;
-    if (t.startsWith(q)) return 1;
-    if (new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t)) return 2;
-    if (t.includes(q)) return 3;
-    return 4;
-  };
-  return [...rows].sort((a, b) => {
-    const d = score(a.title) - score(b.title);
-    if (d !== 0) return d;
-    return (b.updated_at || "").localeCompare(a.updated_at || "");
-  });
-}
 
 
 export function WikilinkAutocomplete({

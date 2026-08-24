@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
-import { ilikeContains } from "@/lib/postgrest";
+import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue } from "@/lib/postgrest";
 import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
@@ -540,9 +540,20 @@ export function useProcessNote() {
 
 // Case-insensitive substring search against the local SQLite replica.
 // Instant and fully offline; callers pass an already-lowercased query.
-async function searchNotesLocal(userId: string, q: string): Promise<Note[]> {
+// Title matches are fetched separately so a recency cut-off can never hide the
+// note whose *title* is what the user typed.
+async function searchNotesLocal(userId: string, q: string, terms: string[]): Promise<Note[]> {
   const pattern = `%${escapeLike(q)}%`;
-  const rows = await getDb().getAll<NoteRow>(
+  const db = getDb();
+  const titleRows = await db.getAll<NoteRow>(
+    `SELECT * FROM notes
+     WHERE user_id = ? AND is_trashed = 0
+       AND (lower(title) LIKE ? ESCAPE '\\'${terms.map(() => ` OR lower(title) LIKE ? ESCAPE '\\'`).join("")})
+     ORDER BY length(title) ASC
+     LIMIT 30`,
+    [userId, pattern, ...terms.map((t) => `%${escapeLike(t)}%`)],
+  );
+  const rows = await db.getAll<NoteRow>(
     `SELECT * FROM notes
      WHERE user_id = ? AND is_trashed = 0
        AND (lower(title) LIKE ? ESCAPE '\\' OR lower(content) LIKE ? ESCAPE '\\')
@@ -550,7 +561,67 @@ async function searchNotesLocal(userId: string, q: string): Promise<Note[]> {
      LIMIT 50`,
     [userId, pattern, pattern],
   );
-  return rows.map(rowToNote);
+  const seen = new Set<string>();
+  const merged: NoteRow[] = [];
+  for (const r of [...titleRows, ...rows]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    merged.push(r);
+  }
+  return merged.map(rowToNote);
+}
+
+/**
+ * Candidate rows for a keyword search. Runs two passes so that title matches are
+ * always part of the candidate set: a title-only pass (short titles first, so an
+ * exactly-titled note is never truncated away) and the broad title+content pass.
+ */
+async function fetchKeywordCandidates(
+  userId: string,
+  q: string,
+  terms: string[],
+): Promise<Note[]> {
+  const titleFilters = [
+    `title.ilike.${pgOrValue(escapeLikeFilter(q))}`, // exact title
+    ilikeContains("title", q),
+    ...terms.map((t) => ilikeContains("title", t)),
+  ];
+  // A sentence question ("how does Nadia want to hear bad news") has no
+  // literal substring match, so we OR the phrase with its meaningful terms
+  // and rank the union locally: title hits first, then most terms matched.
+  const broadFilters = [
+    ilikeContains("title", q),
+    ilikeContains("content", q),
+    ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
+  ];
+
+  const [titleRes, broadRes] = await Promise.all([
+    supabase
+      .from("notes" as any)
+      .select(NOTE_COLUMNS)
+      .eq("user_id", userId)
+      .eq("is_trashed", false)
+      .or(titleFilters.join(","))
+      .limit(30),
+    supabase
+      .from("notes" as any)
+      .select(NOTE_COLUMNS)
+      .eq("user_id", userId)
+      .eq("is_trashed", false)
+      .or(broadFilters.join(","))
+      .order("updated_at", { ascending: false })
+      .limit(50),
+  ]);
+  if (broadRes.error) throw broadRes.error;
+
+  const byId = new Map<string, Note>();
+  for (const n of [
+    ...((titleRes.data as unknown as Note[]) || []),
+    ...((broadRes.data as unknown as Note[]) || []),
+  ]) {
+    if (!byId.has(n.id)) byId.set(n.id, n);
+  }
+  return [...byId.values()];
 }
 
 /** ILIKE-based instant search (no AI cost) */
@@ -560,33 +631,17 @@ export function useIlikeSearch() {
   return useMutation({
     mutationFn: async (query: string): Promise<SemanticSearchResult[]> => {
       const q = query.toLowerCase();
-      if (isLocalFirstActive()) {
-        const notes = await searchNotesLocal(user!.id, q);
-        return notes.map((n) => ({ ...n, similarity: null }));
-      }
-      // A sentence question ("how does Nadia want to hear bad news") has no
-      // literal substring match, so we OR the phrase with its meaningful terms
-      // and rank the union locally: phrase hits first, then most terms matched.
       const terms = extractSearchTerms(query);
-      const filters = [
-        ilikeContains("title", q),
-        ilikeContains("content", q),
-        ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
-      ];
-      const { data, error } = await supabase
-        .from("notes" as any)
-        .select(NOTE_COLUMNS)
-        .eq("user_id", user!.id)
-        .eq("is_trashed", false)
-        .or(filters.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      const notes = (data as unknown as Note[]) || [];
+      if (isLocalFirstActive()) {
+        const notes = await searchNotesLocal(user!.id, q, terms);
+        return rankNotesByTerms(notes, q, terms).map((n) => ({ ...n, similarity: null }));
+      }
+      const notes = await fetchKeywordCandidates(user!.id, q, terms);
       return rankNotesByTerms(notes, q, terms).map((n) => ({ ...n, similarity: null }));
     },
   });
 }
+
 
 
 /** Semantic vector search via edge function */
@@ -623,25 +678,13 @@ export function useSearchNotes() {
   return useMutation({
     mutationFn: async (query: string) => {
       const q = query.toLowerCase();
-      if (isLocalFirstActive()) {
-        return searchNotesLocal(user!.id, q);
-      }
       const terms = extractSearchTerms(query);
-      const filters = [
-        ilikeContains("title", q),
-        ilikeContains("content", q),
-        ...terms.flatMap((t) => [ilikeContains("title", t), ilikeContains("content", t)]),
-      ];
-      const { data, error } = await supabase
-        .from("notes" as any)
-        .select(NOTE_COLUMNS)
-        .eq("user_id", user!.id)
-        .eq("is_trashed", false)
-        .or(filters.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return rankNotesByTerms((data as unknown as Note[]) || [], q, terms);
+      if (isLocalFirstActive()) {
+        return rankNotesByTerms(await searchNotesLocal(user!.id, q, terms), q, terms);
+      }
+      const notes = await fetchKeywordCandidates(user!.id, q, terms);
+      return rankNotesByTerms(notes, q, terms);
+
 
     },
   });

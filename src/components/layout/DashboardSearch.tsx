@@ -4,6 +4,7 @@ import { Search, FileText, Loader2, Sparkles, Image } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIlikeSearch, useSemanticSearch, type SemanticSearchResult } from "@/hooks/useNotes";
+import { extractSearchTerms, isTitleHit } from "@/lib/search-terms";
 
 /**
  * Merge incoming results into the existing list WITHOUT reordering.
@@ -34,7 +35,25 @@ function mergeStable(
   return merged.slice(0, max);
 }
 
+/**
+ * A note whose TITLE is what the user typed must be visible, and first. Body
+ * matches — however recent or semantically similar — come after it.
+ */
+function pinTitleHits(
+  rows: SemanticSearchResult[],
+  query: string
+): SemanticSearchResult[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  const terms = extractSearchTerms(query);
+  const titleHits = rows.filter((r) => isTitleHit(r, q, terms));
+  if (titleHits.length === 0 || titleHits.length === rows.length) return rows;
+  const rest = rows.filter((r) => !titleHits.includes(r));
+  return [...titleHits, ...rest];
+}
+
 const MAX_RESULTS = 8;
+
 
 type SearchStatus = "idle" | "pending" | "running" | "done";
 
@@ -109,13 +128,13 @@ export function DashboardSearch() {
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
         if (requestIdRef.current !== reqId) return;
-        commit((prev) => mergeStable(prev, ilike, MAX_RESULTS));
+        commit((prev) => pinTitleHits(mergeStable(prev, ilike, MAX_RESULTS), query));
       } catch { /* ignore */ }
 
       try {
         const res = await semanticSearch.mutateAsync({ query, limit: MAX_RESULTS, threshold: 0.25 });
         if (requestIdRef.current !== reqId) return;
-        commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
+        commit((prev) => pinTitleHits(mergeStable(prev, res.results, MAX_RESULTS), query));
       } catch { /* ignore */ }
 
       if (requestIdRef.current === reqId) setStatus("done");

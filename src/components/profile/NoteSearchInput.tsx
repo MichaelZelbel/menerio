@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
 import { FileText, X } from "lucide-react";
+import { escapeLike } from "@/lib/postgrest";
+import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
 
 interface NoteSearchInputProps {
   selectedNoteId: string | null;
@@ -42,18 +44,21 @@ export function NoteSearchInput({ selectedNoteId, selectedNoteTitle, onSelect }:
       return;
     }
     const timer = setTimeout(async () => {
+      const q = query.trim().toLowerCase();
       const { data } = await supabase
         .from("notes")
-        .select("id, title")
+        .select("id, title, updated_at")
         .eq("user_id", user.id)
-        .ilike("title", `%${query}%`)
+        .ilike("title", `%${escapeLike(q)}%`)
         .eq("is_trashed", false)
-        .limit(8);
-      setResults(data ?? []);
+        .limit(40);
+      const ranked = rankNotesByTerms(data ?? [], q, extractSearchTerms(query));
+      setResults((ranked.length > 0 ? ranked : (data ?? [])).slice(0, 8));
       setOpen(true);
     }, 250);
     return () => clearTimeout(timer);
   }, [query, user?.id]);
+
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {

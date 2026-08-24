@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
+import { extractSearchTerms, isTitleHit, rankNotesByTerms } from "@/lib/search-terms";
 
 describe("extractSearchTerms", () => {
   it("keeps the meaningful terms of a sentence question", () => {
@@ -47,5 +47,35 @@ describe("rankNotesByTerms — sentence query never performs worse than its key 
       extractSearchTerms("how does Nadia want to hear bad news"),
     );
     expect(sentenceHits.length).toBeGreaterThanOrEqual(nounHits.length);
+  });
+});
+
+describe("title-first ranking", () => {
+  const olderTitleNote = {
+    title: "Ownward Studio",
+    content: "Company page.",
+    updated_at: "2026-08-17",
+  };
+  const recentBodyNotes = Array.from({ length: 5 }, (_, i) => ({
+    title: `2026-08-2${i} D-1${i} a diary entry`,
+    content: "Ownward Studio owns Menerio and Querino, the studio ships.",
+    updated_at: `2026-08-2${i}`,
+  }));
+
+  it("puts the exactly-titled note first, ahead of newer body matches", () => {
+    const query = "Ownward Studio";
+    const ranked = rankNotesByTerms(
+      [...recentBodyNotes, olderTitleNote],
+      query.toLowerCase(),
+      extractSearchTerms(query),
+    );
+    expect(ranked[0].title).toBe("Ownward Studio");
+  });
+
+  it("flags title hits and not body-only hits", () => {
+    const query = "ownward studio";
+    const terms = extractSearchTerms("Ownward Studio");
+    expect(isTitleHit(olderTitleNote, query, terms)).toBe(true);
+    expect(isTitleHit(recentBodyNotes[0], query, terms)).toBe(false);
   });
 });
