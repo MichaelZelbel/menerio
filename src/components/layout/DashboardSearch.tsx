@@ -128,7 +128,7 @@ export function DashboardSearch() {
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
         if (requestIdRef.current !== reqId) return;
-        commit((prev) => mergeStable(prev, ilike, MAX_RESULTS));
+        commit((prev) => pinTitleHits(mergeStable(prev, ilike, MAX_RESULTS), query));
       } catch { /* ignore */ }
 
       try {
