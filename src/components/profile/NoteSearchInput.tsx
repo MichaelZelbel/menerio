@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
 import { FileText, X } from "lucide-react";
+import { escapeLike } from "@/lib/postgrest";
+import { extractSearchTerms, rankNotesByTerms } from "@/lib/search-terms";
 
 interface NoteSearchInputProps {
   selectedNoteId: string | null;
