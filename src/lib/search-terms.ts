@@ -207,8 +207,16 @@ export function scoreNote<T extends RankableNote>(
         }),
       );
       const allWordStart = atWordStart.length === terms.length;
-      const base = frac === 1 ? (allWordStart ? 460 : 380) : 200 + frac * 120;
-      titleScore = base + coverage * 150 - Math.min(firstPos, 120) * 0.25;
+      if (frac === 1) {
+        const base = allWordStart ? 460 : 380;
+        titleScore = base + coverage * 150 - Math.min(firstPos, 120) * 0.25;
+      } else {
+        // Only some terms are in the title: how many terms the note answers
+        // *overall* matters more than how short its title happens to be.
+        const overallFrac =
+          terms.filter((t) => haystack.includes(t)).length / terms.length;
+        titleScore = 200 + overallFrac * 160 + coverage * 80 - Math.min(firstPos, 120) * 0.25;
+      }
     }
   }
 
