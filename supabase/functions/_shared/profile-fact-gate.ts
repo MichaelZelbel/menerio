@@ -177,9 +177,25 @@ export function splitToFacts(label: string, value: string): string[] {
   let { segments, separators, unbalanced } = scan(true);
   if (unbalanced) ({ segments, separators } = scan(false));
 
-  // One short "A, B" stays whole — it is usually a single qualified fact.
-  if (separators < 2 && v.length <= 60) return [v];
-  if (separators === 0) return [v];
+  const trimmed = segments.map((s) => s.trim()).filter((s) => s.length > 0);
+
+  // A run of same-typed strong values ("a@x.com, b@y.com", two URLs, two
+  // phone numbers) is always a list, never one qualified fact — split it even
+  // when it is short enough for the conservative rule below.
+  const STRONG: FactType[] = ["email", "url", "phone", "handle"];
+  const uniformStrong =
+    trimmed.length >= 2 &&
+    trimmed.every((s) => {
+      const t = typeOfValue(s);
+      return STRONG.includes(t) && t === typeOfValue(trimmed[0]);
+    });
+
+  if (!uniformStrong) {
+    // One short "A, B" stays whole — it is usually a single qualified fact.
+    if (separators < 2 && v.length <= 60) return [v];
+    if (separators === 0) return [v];
+  }
+
 
   const out: string[] = [];
   const seen = new Set<string>();
@@ -269,13 +285,62 @@ export function routeFact(input: {
   return { accepted: true, label: canonical, categorySlug, value, type };
 }
 
+/**
+ * Split a long legacy string at inline label boundaries:
+ * "Employer: Infosys Job title: Analyst" → ["Employer: Infosys", "Job title: Analyst"].
+ * Returns `[]` when the string carries fewer than two inline labels, so callers
+ * can fall back to their normal handling.
+ */
+export function splitEmbeddedLabelRuns(value: string): string[] {
+  const v = String(value || "").trim();
+  if (!v) return [];
+  const re = /(^|[\s,;])([\p{Lu}][\p{L} /-]{2,30}?):\s/gu;
+  const starts: number[] = [];
+  for (const m of v.matchAll(re)) {
+    starts.push((m.index ?? 0) + (m[1] ? m[1].length : 0));
+  }
+  if (starts.length < 2) return [];
+  const out: string[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const piece = v
+      .slice(starts[i], i + 1 < starts.length ? starts[i + 1] : undefined)
+      .trim()
+      .replace(/[,;]$/, "")
+      .trim();
+    if (piece) out.push(piece);
+  }
+  return out;
+}
+
 /** Convenience: split a stored bag and route every resulting fact. */
 export function gateStoredValue(input: {
   label: string;
   categorySlug: string;
   value: string;
 }): RoutedFact[] {
-  return splitToFacts(input.label, input.value).map((v) =>
+  const routed = splitToFacts(input.label, input.value).map((v) =>
     routeFact({ label: input.label, categorySlug: input.categorySlug, value: v }),
   );
+
+  // Rows too long to be one fact but carrying their own inline labels are
+  // legacy bags — re-split them instead of leaving them untouched forever.
+  const out: RoutedFact[] = [];
+  for (const fact of routed) {
+    if (fact.accepted || fact.reason !== "not_atomic") {
+      out.push(fact);
+      continue;
+    }
+    const pieces = splitEmbeddedLabelRuns(fact.value);
+    if (pieces.length < 2) {
+      out.push(fact);
+      continue;
+    }
+    for (const piece of pieces) {
+      for (const sub of splitToFacts(input.label, piece)) {
+        out.push(routeFact({ label: input.label, categorySlug: input.categorySlug, value: sub }));
+      }
+    }
+  }
+  return out;
+
 }
