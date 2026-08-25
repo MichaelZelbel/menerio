@@ -401,7 +401,11 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
       if (!res.ok || (j?.ok !== true && j?.resolved !== true)) {
         throw new Error(`normalize-profile apply failed (${res.status}): ${String(j?.reason || j?.error || "unknown")}`);
       }
-      return j?.resolved === true ? { kind: "already_satisfied", reason: String(j?.reason || "resolved") } : { kind: "applied" };
+      if (j?.resolved === true || j?.outcome === "already_exists") {
+        return { kind: "already_satisfied", reason: String(j?.reason || "normalization already satisfied") };
+      }
+      if (j?.outcome === "rejected_duplicate") return skip(String(j?.reason || "normalization rejected"));
+      return { kind: "applied" };
     }
 
     case "add_contact": {
@@ -415,15 +419,22 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
     case "add_alias": {
       const contactId = p.contact_id as string | undefined;
       const alias = String(p.alias || "").trim();
+      let alreadyPresent = false;
       if (contactId && alias) {
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+        const { data: c, error } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (error) throw error;
+        if (!c) return skip("contact not found");
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        if (!cur.some((a) => a.toLowerCase() === alias.toLowerCase())) {
-          await db.from("contacts").update({ aliases: [...cur, alias] }).eq("id", contactId);
+        alreadyPresent = cur.some((a) => a.toLowerCase() === alias.toLowerCase());
+        if (!alreadyPresent) {
+          const { error: updateError } = await db.from("contacts").update({ aliases: [...cur, alias] }).eq("id", contactId).eq("user_id", userId);
+          if (updateError) throw updateError;
         }
+      } else {
+        return skip("missing contact or alias");
       }
       await markKept();
-      return { kind: "applied" };
+      return alreadyPresent ? { kind: "already_satisfied", reason: "alias exists" } : { kind: "applied" };
     }
     case "add_moment": {
       const title = String(p.title || "").trim();
