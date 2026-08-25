@@ -876,14 +876,23 @@ export default function ReviewQueue() {
       const verb = j.action === "keep" ? "kept" : j.action === "rollback" ? "rolled back" : "blocked";
       const okCount = Math.max(0, Number(j.done) || 0);
       const failCount = Math.max(0, Number(j.failed) || 0);
-      const why = j.last_error ? ` — ${j.last_error}` : "";
-      if (failCount === 0) showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
-      else if (okCount === 0)
-        showToast.error(`${failCount.toLocaleString()} changes could not be applied and stay in the queue${why}`);
-      else
-        showToast.error(
-          `${okCount.toLocaleString()} changes ${verb} · ${failCount.toLocaleString()} could not be applied and stay in the queue${why}`,
-        );
+      const outcomeParts = String(j.last_error || "").split("; ").filter(Boolean);
+      const alreadyPresent = Number(outcomeParts.find((part) => part.endsWith(" already_present"))?.split(" ")[0] || 0);
+      const skippedPart = outcomeParts.find((part) => part.includes(" skipped"));
+      const skipped = Number(skippedPart?.split(" ")[0] || 0);
+      const applied = Math.max(0, okCount - alreadyPresent - skipped);
+      if (j.action === "keep" && (alreadyPresent > 0 || skipped > 0)) {
+        const summary = [
+          applied > 0 ? `${applied.toLocaleString()} changes applied` : "",
+          alreadyPresent > 0 ? `${alreadyPresent.toLocaleString()} ${alreadyPresent === 1 ? "was" : "were"} already in the profile` : "",
+          skipped > 0 ? `${skipped.toLocaleString()} skipped${skippedPart?.includes("(") ? ` — ${skippedPart.slice(skippedPart.indexOf("(") + 1, -1)}` : ""}` : "",
+        ].filter(Boolean).join(" · ");
+        if (skipped > 0) showToast.info(summary); else showToast.success(summary);
+      } else if (failCount === 0) {
+        showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
+      } else {
+        showToast.error(`Bulk action failed before all changes could be processed${j.last_error ? ` — ${j.last_error}` : ""}`);
+      }
 
     }
     setBulkJobId(null);
