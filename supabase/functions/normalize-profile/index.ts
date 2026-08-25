@@ -565,12 +565,93 @@ async function writeRunState(db: any, userId: string, contactId: string | null, 
   return data?.id;
 }
 
+type ExplodeStats = { examined: number; exploded: number; rerouted: number; unfiled: number; skipped: number };
+
+/**
+ * Re-file stored profile rows through the admission gate so every row holds
+ * exactly one fact under the label its TYPE belongs to. Shared by the manual
+ * "Tidy up profile" action and the nightly sweep.
+ */
+async function explodeBags(
+  db: any,
+  userId: string,
+  subjects: Array<string | null>,
+  stats: ExplodeStats,
+): Promise<ExplodeStats> {
+  for (const subj of subjects) {
+    const q = db
+      .from("profile_entries")
+      .select("id, category_id, label, value, origin, evidence_quote, linked_note_id, sort_order")
+      .eq("user_id", userId)
+      .limit(2000);
+    const { data: rows } = subj ? await q.eq("contact_id", subj) : await q.is("contact_id", null);
+
+    const catIds = [...new Set((rows || []).map((r: any) => r.category_id).filter(Boolean))];
+    const slugById = new Map<string, string>();
+    if (catIds.length > 0) {
+      const { data: cats } = await db.from("profile_categories").select("id, slug").in("id", catIds);
+      for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
+    }
+
+    for (const row of (rows || []) as any[]) {
+      stats.examined++;
+      const slug = slugById.get(row.category_id) || "other";
+      const facts = gateStoredValue({ label: row.label, categorySlug: slug, value: row.value });
+
+      const unchanged =
+        facts.length === 1 &&
+        facts[0].accepted &&
+        facts[0].value === String(row.value || "").trim() &&
+        facts[0].label === row.label;
+      if (unchanged) { stats.skipped++; continue; }
+      if (facts.length === 1 && !facts[0].accepted && facts[0].reason === "not_atomic") {
+        stats.skipped++;
+        continue;
+      }
+
+      const writes: Array<{ label: string; slug: string; value: string }> = [];
+      for (const f of facts) {
+        if (f.accepted) {
+          if (f.reason === "rerouted_by_type") stats.rerouted++;
+          writes.push({ label: f.label, slug: f.categorySlug, value: f.value });
+        } else if (f.reason?.startsWith("type_mismatch")) {
+          stats.unfiled++;
+          writes.push({ label: "Unfiled note", slug, value: f.value });
+        }
+      }
+      if (writes.length === 0) { stats.skipped++; continue; }
+
+      await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
+      for (const w of writes) {
+        const categoryId =
+          w.slug === slug ? row.category_id : await resolveCategoryId(db, userId, subj, w.slug);
+        if (!categoryId) continue;
+        const { error: insErr } = await db.from("profile_entries").insert({
+          user_id: userId,
+          contact_id: subj,
+          category_id: categoryId,
+          label: w.label,
+          value: w.value,
+          origin: row.origin,
+          evidence_quote: row.evidence_quote,
+          linked_note_id: row.linked_note_id,
+          sort_order: row.sort_order ?? 0,
+        } as any);
+        // A blocked insert means the fact already exists elsewhere in a
+        // cleaner form — the dedup guard is the authority, not this job.
+        if (!insErr) stats.exploded++;
+      }
+    }
+  }
+  return stats;
+}
+
 serve(async (req) => {
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -580,6 +661,33 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "");
+
+    // Nightly sweep: pg_cron presents a shared key (never the service role key)
+    // and re-files bags for every user's own profile and contacts, so profiles
+    // cannot silently drift back into comma text walls.
+    const cronKey = Deno.env.get("PROFILE_LINT_CRON_KEY") || "";
+    const presentedCron = req.headers.get("x-cron-key") || "";
+    if (cronKey && presentedCron === cronKey) {
+      if (action !== "explode_bags") return json({ error: "cron supports explode_bags only" }, 400);
+      const { data: owners } = await db
+        .from("profile_entries")
+        .select("user_id")
+        .limit(5000);
+      const userIds = [...new Set((owners || []).map((r: any) => r.user_id))];
+      const stats: ExplodeStats = { examined: 0, exploded: 0, rerouted: 0, unfiled: 0, skipped: 0 };
+      for (const uid of userIds) {
+        const subjects: Array<string | null> = [null];
+        const { data: contacts } = await db
+          .from("contacts").select("id").eq("user_id", uid).is("merged_into", null).limit(500);
+        for (const c of (contacts || []) as any[]) subjects.push(c.id);
+        await explodeBags(db, uid, subjects, stats);
+      }
+      return json({ ok: true, users: userIds.length, ...stats });
+    }
+
+    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+
+
 
     // Trusted server-to-server calls (e.g. review-queue-bulk) authenticate with
     // the service-role key, which is NOT a user JWT — auth.getUser() would fail
@@ -634,76 +742,11 @@ serve(async (req) => {
 
       const stats = { examined: 0, exploded: 0, rerouted: 0, unfiled: 0, skipped: 0 };
 
-      for (const subj of subjects) {
-        const q = db
-          .from("profile_entries")
-          .select("id, category_id, label, value, origin, evidence_quote, linked_note_id, sort_order")
-          .eq("user_id", userId)
-          .limit(2000);
-        const { data: rows } = subj ? await q.eq("contact_id", subj) : await q.is("contact_id", null);
-
-        const catIds = [...new Set((rows || []).map((r: any) => r.category_id).filter(Boolean))];
-        const slugById = new Map<string, string>();
-        if (catIds.length > 0) {
-          const { data: cats } = await db.from("profile_categories").select("id, slug").in("id", catIds);
-          for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
-        }
-
-        for (const row of (rows || []) as any[]) {
-          stats.examined++;
-          const slug = slugById.get(row.category_id) || "other";
-          const facts = gateStoredValue({ label: row.label, categorySlug: slug, value: row.value });
-
-          const unchanged =
-            facts.length === 1 &&
-            facts[0].accepted &&
-            facts[0].value === String(row.value || "").trim() &&
-            facts[0].label === row.label;
-          if (unchanged) { stats.skipped++; continue; }
-          if (facts.length === 1 && !facts[0].accepted && facts[0].reason === "not_atomic") {
-            stats.skipped++;
-            continue;
-          }
-
-          const writes: Array<{ label: string; slug: string; value: string }> = [];
-          for (const f of facts) {
-            if (f.accepted) {
-              if (f.reason === "rerouted_by_type") stats.rerouted++;
-              writes.push({ label: f.label, slug: f.categorySlug, value: f.value });
-            } else if (f.reason?.startsWith("type_mismatch")) {
-              stats.unfiled++;
-              writes.push({ label: "Unfiled note", slug, value: f.value });
-            }
-          }
-          if (writes.length === 0) { stats.skipped++; continue; }
-
-          await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
-          for (const w of writes) {
-            const categoryId =
-              w.slug === slug
-                ? row.category_id
-                : await resolveCategoryId(db, userId, subj, w.slug);
-            if (!categoryId) continue;
-            const { error: insErr } = await db.from("profile_entries").insert({
-              user_id: userId,
-              contact_id: subj,
-              category_id: categoryId,
-              label: w.label,
-              value: w.value,
-              origin: row.origin,
-              evidence_quote: row.evidence_quote,
-              linked_note_id: row.linked_note_id,
-              sort_order: row.sort_order ?? 0,
-            } as any);
-            // A blocked insert means the fact already exists elsewhere in a
-            // cleaner form — the dedup guard is the authority, not this job.
-            if (!insErr) stats.exploded++;
-          }
-        }
-      }
+      await explodeBags(db, userId, subjects, stats);
 
       return json({ ok: true, ...stats });
     }
+
 
     if (action === "plan") {
       const scope = String(body?.scope || "owner");
