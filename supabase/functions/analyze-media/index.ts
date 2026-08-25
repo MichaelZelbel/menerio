@@ -501,6 +501,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    // The note-attachments bucket is partitioned by owner id (`${userId}/<uuid>`),
+    // and processMedia downloads, upserts, and deletes media_analysis rows keyed
+    // only on storage_path/note_id with no user filter. Without this check a
+    // caller could pass another user's storage_path to read that user's file and
+    // clobber their analysis rows. Confining the path to the caller's own prefix
+    // closes that cross-user access.
+    if (typeof storage_path !== "string" || !storage_path.startsWith(`${user.id}/`)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
     EdgeRuntime.waitUntil(
       processMedia(

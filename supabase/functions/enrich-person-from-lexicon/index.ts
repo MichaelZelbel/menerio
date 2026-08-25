@@ -26,6 +26,7 @@ import {
 } from "../_shared/profile-normalization.ts";
 import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
+import { ilikeContains } from "../_shared/postgrest-filters.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -91,7 +92,7 @@ async function loadEvidence(userId: string, contactId: string) {
     .select("title, page_type, summary, content")
     .eq("user_id", userId)
     .or(`page_type.eq.person,page_type.eq.entity`)
-    .or(names.map((n: string) => `title.ilike.%${n}%`).join(","))
+    .or(names.map((n: string) => ilikeContains("title", n)).join(","))
     .limit(5);
 
   // Other lexicon pages mentioning the name
@@ -99,7 +100,7 @@ async function loadEvidence(userId: string, contactId: string) {
     .from("wiki_pages")
     .select("title, page_type, summary, content")
     .eq("user_id", userId)
-    .or(names.map((n: string) => `content.ilike.%${n}%`).join(","))
+    .or(names.map((n: string) => ilikeContains("content", n)).join(","))
     .limit(10);
 
   // Timeline moments where they participate
@@ -126,8 +127,8 @@ async function loadEvidence(userId: string, contactId: string) {
   // like "Marriage Papers Xihui and Michael" where matched_people was never
   // populated by the metadata pass at ingest time.
   const orClauses = names.flatMap((n: string) => [
-    `title.ilike.%${n}%`,
-    `content.ilike.%${n}%`,
+    ilikeContains("title", n),
+    ilikeContains("content", n),
   ]).join(",");
   const { data: nameMatchedNotes } = await supabase
     .from("notes")

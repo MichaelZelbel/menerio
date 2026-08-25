@@ -15,6 +15,12 @@ describe("typeOfValue", () => {
     expect(typeOfValue("Yumei")).toBe("person_name");
     expect(typeOfValue("Wakes up around 5 AM and cleans the whole house")).toBe("sentence");
   });
+
+  it("classifies dates as dates, not phone numbers", () => {
+    expect(typeOfValue("1985-03-12")).toBe("date");
+    expect(typeOfValue("12.03.1985")).toBe("date");
+    expect(typeOfValue("12/03/1985")).toBe("date");
+  });
 });
 
 describe("splitToFacts", () => {
@@ -86,6 +92,25 @@ describe("routeFact", () => {
     const r = routeFact({ label: "Traits", categorySlug: "personality", value: "x".repeat(300) });
     expect(r.accepted).toBe(false);
     expect(r.reason).toBe("not_atomic");
+  });
+
+  it("keeps a date of birth as a date instead of filing it as a phone number", () => {
+    const r = routeFact({ label: "Date of birth", categorySlug: "identity", value: "1985-03-12" });
+    expect(r.type).toBe("date");
+    expect(r.accepted).toBe(true);
+    expect(r.label).not.toBe("Phone");
+    expect(r.value).toBe("1985-03-12");
+  });
+
+  it("does not mistake a URL scheme for an inline label", () => {
+    const r = routeFact({ label: "Website", categorySlug: "communication", value: "https://menerio.app" });
+    expect(r.value).toBe("https://menerio.app");
+    expect(r.label.toLowerCase()).not.toBe("https");
+  });
+
+  it("still honours a real inline label whose value is a URL", () => {
+    const r = routeFact({ label: "Full name", categorySlug: "identity", value: "Website: https://menerio.app" });
+    expect(r.value).toBe("https://menerio.app");
   });
 });
 

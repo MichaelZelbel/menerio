@@ -1502,7 +1502,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                     tags: note.tags || [],
                   });
                   showToast.success("Duplicated to a local note");
-                  navigate(`/notes?id=${newNote.id}`);
+                  navigate(`/dashboard/notes/${newNote.id}`);
                 } catch {
                   showToast.error("Failed to duplicate note");
                 }

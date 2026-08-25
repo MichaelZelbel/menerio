@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { ilikeContains } from "@/lib/postgrest";
 
 /**
  * Non-person things in a user's life: places, organizations, projects,
@@ -171,7 +172,9 @@ export function useEntityNotes(entity: Entity | null) {
     queryFn: async () => {
       const names = [entity!.name, ...(entity!.aliases || [])].filter(Boolean);
       if (names.length === 0) return [] as Array<{ id: string; title: string | null; created_at: string }>;
-      const filter = names.map((n) => `title.ilike.%${n}%,content.ilike.%${n}%`).join(",");
+      // Names/aliases can contain PostgREST filter metacharacters (`,` `(` `)`)
+      // and LIKE wildcards (`%` `_`); ilikeContains quotes and escapes both.
+      const filter = names.flatMap((n) => [ilikeContains("title", n), ilikeContains("content", n)]).join(",");
       const { data, error } = await db
         .from("notes")
         .select("id, title, created_at")

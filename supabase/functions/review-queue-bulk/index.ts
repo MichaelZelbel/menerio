@@ -452,7 +452,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
         confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
         person_id: firstContact?.contact_id || null,
         source: "note_auto",
-        status: "happened",
+        status: "past_fact",
       } as any).select("id").single();
       if (error) throw error;
       if (inserted?.id) {
@@ -658,19 +658,25 @@ async function runRollback(
   }
 
   // Revert side-effects per row (only where a target_entity_id exists).
+  const revertFailed = new Set<string>();
   for (const r of rows) {
     try {
       await revertOne(db, userId, r);
       bump(1, 0);
     } catch (e) {
       console.warn("rollback failed", r.id, e);
+      revertFailed.add(r.id);
       bump(0, 1);
     }
     await flush();
   }
 
-  // Bulk flip status in one UPDATE per page.
-  const ids = rows.map((r) => r.id);
+  // Bulk flip status in one UPDATE per page — but only for rows whose revert
+  // succeeded. Closing a row whose revert threw would leave the AI-created
+  // entity in the brain while the queue reports a clean success; leaving it
+  // active instead lets countOutstanding() surface the failure and keeps the
+  // row available for retry.
+  const ids = rows.filter((r) => !revertFailed.has(r.id)).map((r) => r.id);
   for (let i = 0; i < ids.length; i += PAGE) {
     const chunk = ids.slice(i, i + PAGE);
     const patch: Record<string, unknown> = { status: finalStatus, reviewed_at: now };

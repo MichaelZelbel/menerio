@@ -119,9 +119,13 @@ export function SyncConflictsPanel() {
   const resolveAllMutation = useMutation({
     mutationFn: async (resolution: string) => {
       for (const conflict of conflicts) {
-        await supabase.functions.invoke("github-sync-pull", {
+        // invoke() resolves with { error } instead of throwing, so a failed
+        // call must be surfaced explicitly — otherwise onSuccess reports "All
+        // conflicts resolved" while conflicts remain unresolved.
+        const { error } = await supabase.functions.invoke("github-sync-pull", {
           body: { action: "resolve-conflict", note_id: conflict.note_id, resolution },
         });
+        if (error) throw error;
       }
     },
     onSuccess: () => {

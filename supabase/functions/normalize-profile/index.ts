@@ -610,6 +610,7 @@ async function explodeBags(
       }
 
       const writes: Array<{ label: string; slug: string; value: string }> = [];
+      let hasUnrepresentable = false;
       for (const f of facts) {
         if (f.accepted) {
           if (f.reason === "rerouted_by_type") stats.rerouted++;
@@ -617,8 +618,15 @@ async function explodeBags(
         } else if (f.reason?.startsWith("type_mismatch")) {
           stats.unfiled++;
           writes.push({ label: "Unfiled note", slug, value: f.value });
+        } else {
+          // not_atomic / empty / any other non-routable segment cannot be
+          // re-filed. The source row is deleted below before the writes are
+          // re-inserted, so if even one segment lands here, deleting the row
+          // would permanently lose that content — leave the whole row intact.
+          hasUnrepresentable = true;
         }
       }
+      if (hasUnrepresentable) { stats.skipped++; continue; }
       if (writes.length === 0) { stats.skipped++; continue; }
 
       await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);

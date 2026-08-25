@@ -28,7 +28,10 @@ interface ImportResult {
 function splitIntoItems(text: string): string[] {
   return text
     .split(/\n/)
-    .map((line) => line.replace(/^[\s•\-*\d+.]+/, "").trim())
+    // Strip only a genuine list marker (bullet, or an ordered "1." / "1)"
+    // followed by whitespace). The old character class ate every leading
+    // digit, so "1984 is my favorite novel" imported as "is my favorite novel".
+    .map((line) => line.replace(/^\s*(?:[•\-*]+|\d+[.)])\s+/, "").trim())
     .filter((line) => line.length > 5);
 }
 

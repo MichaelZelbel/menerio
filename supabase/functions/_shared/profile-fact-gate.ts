@@ -62,13 +62,18 @@ export function typeOfValue(raw: string): FactType {
   const v = String(raw || "").trim();
   if (!v) return "phrase";
   if (EMAIL_RE.test(v)) return "email";
+  // Date shapes must be tested before URL/domain and phone: a dotted date
+  // (12.03.1985) also satisfies DOMAIN_RE, and an ISO/dotted date also
+  // satisfies PHONE_RE, so a birthday would otherwise be typed as a website or
+  // a phone number and refiled under "Website"/"Phone". Real domains and phone
+  // numbers are not date-shaped, so ordering date first is safe.
+  if (DATE_RE.test(v)) return "date";
   if (URL_RE.test(v) || DOMAIN_RE.test(v)) return "url";
   if (HANDLE_RE.test(v)) return "handle";
   if (UUID_RE.test(v) || SNOWFLAKE_RE.test(v)) return "identifier";
   if (PHONE_RE.test(v)) return "phone";
   if (MEASURE_RE.test(v)) return "measure";
   if (MONEY_RE.test(v)) return "money";
-  if (DATE_RE.test(v)) return "date";
   const words = v.split(/\s+/).length;
   if (words > 6 || /[.!?;:]\s/.test(v)) return "sentence";
   if (PERSON_NAME_RE.test(v) && words <= 4) return "person_name";
@@ -174,8 +179,9 @@ export function splitToFacts(label: string, value: string): string[] {
   // Legacy bags are frequently truncated mid-parenthesis ("… Happy Meal
   // (nuggets"). An unclosed bracket must not swallow the rest of the value,
   // so fall back to a bracket-blind scan in that case.
-  let { segments, separators, unbalanced } = scan(true);
-  if (unbalanced) ({ segments, separators } = scan(false));
+  const initial = scan(true);
+  let { segments, separators } = initial;
+  if (initial.unbalanced) ({ segments, separators } = scan(false));
 
   const trimmed = segments.map((s) => s.trim()).filter((s) => s.length > 0);
 
@@ -240,7 +246,13 @@ export function routeFact(input: {
 
   // "Occupation: System Analyst" carries its own label — trust it over the
   // bag it happened to be stored in.
-  const embedded = EMBEDDED_LABEL_RE.exec(value);
+  // A bare URI ("https://menerio.app") is not a labelled value: its scheme
+  // ("https") satisfies EMBEDDED_LABEL_RE and would otherwise be split into
+  // label "https", value "//menerio.app", corrupting every URL fact. A real
+  // "Label: value" (even "Website: https://…") has the colon separated from
+  // any "//", so this only excludes the scheme-colon case.
+  const isBareUri = /^\s*[a-z][a-z0-9+.-]*:\/\//i.test(value);
+  const embedded = isBareUri ? null : EMBEDDED_LABEL_RE.exec(value);
   if (embedded) {
     const embeddedLabel = embedded[1].trim();
     const embeddedValue = embedded[2].trim();

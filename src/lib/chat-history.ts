@@ -75,11 +75,14 @@ export function saveChatState(
     const trimmed: PersistedChatState = {
       ...state,
       messages: state.messages.slice(-MAX_STORED_MESSAGES),
-      // If we trimmed, reset the summarizedUpTo offset accordingly.
-      summarizedUpTo: Math.min(
-        state.summarizedUpTo,
-        Math.max(0, state.messages.length - MAX_STORED_MESSAGES) +
-          state.summarizedUpTo,
+      // summarizedUpTo is an index from the start of the messages array. When
+      // we drop the oldest `dropped` messages, that index must shift down by
+      // the same amount, or already-summarized offsets would point at newer,
+      // never-summarized turns (which the summarizer would then skip and lose).
+      summarizedUpTo: Math.max(
+        0,
+        state.summarizedUpTo -
+          Math.max(0, state.messages.length - MAX_STORED_MESSAGES),
       ),
     };
     window.localStorage.setItem(
