@@ -45,6 +45,28 @@ type ReviewRow = {
   status: string;
 };
 
+type KeepOutcome =
+  | { kind: "applied" }
+  | { kind: "already_satisfied"; reason?: string }
+  | { kind: "skipped"; reason: string };
+
+type KeepStats = { applied: number; alreadySatisfied: number; skipped: number; skipReasons: Map<string, number> };
+
+const emptyKeepStats = (): KeepStats => ({ applied: 0, alreadySatisfied: 0, skipped: 0, skipReasons: new Map() });
+
+function recordKeepOutcome(stats: KeepStats, outcome: KeepOutcome) {
+  if (outcome.kind === "applied") stats.applied += 1;
+  else if (outcome.kind === "already_satisfied") stats.alreadySatisfied += 1;
+  else {
+    stats.skipped += 1;
+    stats.skipReasons.set(outcome.reason, (stats.skipReasons.get(outcome.reason) || 0) + 1);
+  }
+}
+
+function humanizeReason(reason: string) {
+  return reason.replaceAll("_", " ");
+}
+
 async function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -167,6 +189,7 @@ async function runJob(
   let done = 0;
   let failed = 0;
   let lastError: string | null = null;
+  const keepStats = emptyKeepStats();
   let lastFlush = 0;
   const note = (msg: string) => { lastError = msg; };
   const flush = async (force = false) => {
@@ -176,36 +199,37 @@ async function runJob(
     await db.from("review_queue_bulk_jobs").update({ done, failed }).eq("id", jobId);
   };
 
-  try {
-    if (body.action === "keep") {
-      await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, note);
-    } else if (body.action === "rollback") {
-      await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false);
-    } else {
-      await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ true);
-    }
-  } finally {
-    // Reconcile against reality: whatever is still outstanding failed, the
-    // rest succeeded. Never additive, never negative.
-    try {
-      const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id), wikiIds);
-      failed = Math.min(total, outstanding);
-      done = Math.max(0, total - failed);
-      if (failed > 0 && !lastError) {
-        lastError = `${failed} item(s) could not be applied and remain in the queue`;
-      }
-      if (failed === 0) lastError = null;
-    } catch (e) {
-      console.warn("review-queue-bulk reconcile failed", e);
-    }
-    await db.from("review_queue_bulk_jobs").update({
-      status: "done",
-      done,
-      failed,
-      ...(lastError ? { last_error: lastError } : {}),
-      finished_at: new Date().toISOString(),
-    }).eq("id", jobId);
+  if (body.action === "keep") {
+    await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, note, keepStats);
+  } else if (body.action === "rollback") {
+    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false);
+  } else {
+    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ true);
   }
+
+  // A completed Keep is terminal. Any remaining active row means an
+  // unexpected backend failure, so fail the job instead of claiming success.
+  const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id), wikiIds);
+  if (outstanding > 0) throw new Error(`${outstanding} item(s) were not resolved`);
+  failed = 0;
+  done = total;
+  if (body.action === "keep") {
+    const parts: string[] = [];
+    if (keepStats.alreadySatisfied > 0) parts.push(`${keepStats.alreadySatisfied} already_present`);
+    if (keepStats.skipped > 0) {
+      const reasons = [...keepStats.skipReasons.entries()].map(([reason, count]) => `${count} ${humanizeReason(reason)}`).join(", ");
+      parts.push(`${keepStats.skipped} skipped${reasons ? ` (${reasons})` : ""}`);
+    }
+    lastError = parts.join("; ") || null;
+  }
+  const { error: finishError } = await db.from("review_queue_bulk_jobs").update({
+    status: "done",
+    done,
+    failed,
+    last_error: lastError,
+    finished_at: new Date().toISOString(),
+  }).eq("id", jobId);
+  if (finishError) throw finishError;
 }
 
 
@@ -219,6 +243,7 @@ async function runKeep(
   bump: (ok: number, fail: number) => void,
   flush: (force?: boolean) => Promise<void>,
   note: (msg: string) => void,
+  stats: KeepStats,
 ) {
   // Split by whether they already have side effects (applied_at) or not.
   const applied: ReviewRow[] = [];
@@ -235,8 +260,9 @@ async function runKeep(
     const { error } = await db.from("review_queue")
       .update({ status: "kept", reviewed_at: new Date().toISOString() })
       .in("id", ids);
-    if (error) { bump(0, chunk.length); }
-    else { bump(chunk.length, 0); }
+    if (error) throw error;
+    bump(chunk.length, 0);
+    stats.applied += chunk.length;
     await flush();
   }
 
@@ -255,20 +281,24 @@ async function runKeep(
         body: JSON.stringify({ action: "bulk_profile_reviews", decision: "keep", review_ids: chunk, user_id: userId }),
       });
       const j = await res.json().catch(() => ({} as any));
-      if (!res.ok || !j?.summary) {
-        // A transport/auth failure applies to nothing in the chunk — never
-        // report these rows as kept, they are still sitting in the queue.
-        console.warn("bulk_profile_reviews failed", res.status, JSON.stringify(j).slice(0, 300));
-        bump(0, chunk.length);
-      } else {
-        // rejected_duplicate rows are left untouched server-side, so they are
-        // failures from the queue's point of view, not successes.
-        const failedCount = Number(j.summary.failed || 0) + Number(j.summary.rejected_duplicate || 0);
-        bump(Math.max(0, chunk.length - failedCount), Math.min(chunk.length, failedCount));
+      if (!res.ok || !j?.summary) throw new Error(`profile review service failed (${res.status})`);
+      if (Number(j.summary.failed || 0) > 0) throw new Error(`${j.summary.failed} profile review write(s) failed unexpectedly`);
+      stats.applied += Number(j.summary.inserted || 0) + Number(j.summary.merged_list || 0);
+      stats.alreadySatisfied += Number(j.summary.already_exists || 0);
+
+      // Deterministic validation rejections are terminal: archive the rows the
+      // profile service intentionally left active and preserve the reason.
+      const { data: rejected, error: rejectedError } = await db.from("review_queue")
+        .select("id,payload").in("id", chunk).in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+      if (rejectedError) throw rejectedError;
+      for (const rejectedRow of rejected || []) {
+        await archiveSkipped(db, rejectedRow as Pick<ReviewRow, "id" | "payload">, "profile validation rejected the suggestion");
+        recordKeepOutcome(stats, { kind: "skipped", reason: "profile_validation" });
       }
+      bump(chunk.length, 0);
     } catch (e) {
       console.warn("bulk_profile_reviews threw", e);
-      bump(0, chunk.length);
+      throw e;
     }
     await flush();
   }
@@ -277,11 +307,12 @@ async function runKeep(
   const others = pending.filter((r) => r.suggestion_type !== "add_profile_entry");
   for (const r of others) {
     try {
-      await keepPending(db, userId, r);
+      const outcome = await keepPending(db, userId, r);
+      recordKeepOutcome(stats, outcome);
       bump(1, 0);
     } catch (e) {
       console.warn("keep failed", r.id, e);
-      bump(0, 1);
+      throw e;
     }
     await flush();
   }
@@ -293,7 +324,9 @@ async function runKeep(
     const { error } = await db.from("wiki_revisions")
       .update({ status: "reviewed", reviewed_at: new Date().toISOString() })
       .in("id", chunk);
-    if (error) bump(0, chunk.length); else bump(chunk.length, 0);
+    if (error) throw error;
+    bump(chunk.length, 0);
+    stats.applied += chunk.length;
     await flush();
   }
 
@@ -334,11 +367,27 @@ async function countOutstanding(
 
 
 
-async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
+async function archiveSkipped(db: SupabaseClient, r: Pick<ReviewRow, "id" | "payload">, reason: string) {
+  const payload = { ...(r.payload || {}), review_resolution: { outcome: "skipped", reason } };
+  const { error } = await db.from("review_queue").update({
+    status: "removed",
+    reviewed_at: new Date().toISOString(),
+    payload,
+  }).eq("id", r.id);
+  if (error) throw error;
+}
+
+async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Promise<KeepOutcome> {
   const p = (r.payload || {}) as any;
   const now = new Date().toISOString();
-  const markKept = (extra?: Record<string, unknown>) =>
-    db.from("review_queue").update({ status: "kept", reviewed_at: now, ...(extra || {}) }).eq("id", r.id);
+  const markKept = async (extra?: Record<string, unknown>) => {
+    const { error } = await db.from("review_queue").update({ status: "kept", reviewed_at: now, ...(extra || {}) }).eq("id", r.id);
+    if (error) throw error;
+  };
+  const skip = async (reason: string): Promise<KeepOutcome> => {
+    await archiveSkipped(db, r, reason);
+    return { kind: "skipped", reason };
+  };
 
   switch (r.suggestion_type) {
     case "normalize_profile_entry": {
@@ -352,36 +401,48 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       if (!res.ok || (j?.ok !== true && j?.resolved !== true)) {
         throw new Error(`normalize-profile apply failed (${res.status}): ${String(j?.reason || j?.error || "unknown")}`);
       }
-      return;
+      if (j?.resolved === true || j?.outcome === "already_exists") {
+        return { kind: "already_satisfied", reason: String(j?.reason || "normalization already satisfied") };
+      }
+      if (j?.outcome === "rejected_duplicate") return skip(String(j?.reason || "normalization rejected"));
+      return { kind: "applied" };
     }
 
     case "add_contact": {
       const name = String(p.name || "").trim();
-      if (!name) return void await markKept();
-      const { data } = await db.from("contacts").insert({ user_id: userId, name }).select("id").single();
+      if (!name) return skip("missing contact name");
+      const { data, error } = await db.from("contacts").insert({ user_id: userId, name }).select("id").single();
+      if (error) throw error;
       await markKept(data?.id ? { target_entity_type: "contact", target_entity_id: data.id, applied_at: now } : undefined);
-      return;
+      return { kind: "applied" };
     }
     case "add_alias": {
       const contactId = p.contact_id as string | undefined;
       const alias = String(p.alias || "").trim();
+      let alreadyPresent = false;
       if (contactId && alias) {
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+        const { data: c, error } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (error) throw error;
+        if (!c) return skip("contact not found");
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        if (!cur.some((a) => a.toLowerCase() === alias.toLowerCase())) {
-          await db.from("contacts").update({ aliases: [...cur, alias] }).eq("id", contactId);
+        alreadyPresent = cur.some((a) => a.toLowerCase() === alias.toLowerCase());
+        if (!alreadyPresent) {
+          const { error: updateError } = await db.from("contacts").update({ aliases: [...cur, alias] }).eq("id", contactId).eq("user_id", userId);
+          if (updateError) throw updateError;
         }
+      } else {
+        return skip("missing contact or alias");
       }
       await markKept();
-      return;
+      return alreadyPresent ? { kind: "already_satisfied", reason: "alias exists" } : { kind: "applied" };
     }
     case "add_moment": {
       const title = String(p.title || "").trim();
       const happenedAt = String(p.happened_at || "").trim();
-      if (!title || !happenedAt) return void await markKept();
+      if (!title || !happenedAt) return skip("missing moment title or date");
       const participants: Array<any> = Array.isArray(p.participants) ? p.participants : [];
       const firstContact = participants.find((x) => x?.contact_id);
-      const { data: inserted } = await db.from("moments").insert({
+      const { data: inserted, error } = await db.from("moments").insert({
         user_id: userId,
         title,
         description: p.description || null,
@@ -393,12 +454,13 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         source: "note_auto",
         status: "happened",
       } as any).select("id").single();
+      if (error) throw error;
       if (inserted?.id) {
         const partRows = participants.filter((x) => x?.contact_id).map((x) => ({ moment_id: inserted.id, person_id: x.contact_id }));
         if (partRows.length > 0) await db.from("moment_participants").insert(partRows as any);
       }
       await markKept(inserted?.id ? { target_entity_type: "moment", target_entity_id: inserted.id, applied_at: now } : undefined);
-      return;
+      return { kind: "applied" };
     }
     case "add_relationship": {
       const label = String(p.label || "").trim();
@@ -411,8 +473,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         label,
       });
       if (relationshipDecision.ok === false) {
-        await markKept();
-        return;
+        return skip(relationshipDecision.reason);
       }
       // A bulk "keep" is a human confirmation, so it is exempt from the
       // evidence gate — but it may NEVER masquerade as something it is not:
@@ -434,8 +495,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
           },
         });
         if (verdict.outcome !== "keep") {
-          await markKept();
-          return;
+          return skip(`relationship ${verdict.outcome}`);
         }
       }
       const { data: inserted, error } = await db.from("contact_relationships").insert({
@@ -454,28 +514,29 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       if (!inserted) {
         // A deterministic guard (dedup / rejection ledger) absorbed the write.
         await markKept();
-        return;
+        return { kind: "already_satisfied", reason: "relationship guard" };
       }
       await markKept(inserted?.id ? { target_entity_type: "relationship", target_entity_id: inserted.id, applied_at: now } : undefined);
-      return;
+      return { kind: "applied" };
     }
     case "group_member_suggestion": {
       const groupId = p.group_id as string | undefined;
       const contactId = p.contact_id as string | undefined;
-      if (!groupId || !contactId) return void await markKept();
+      if (!groupId || !contactId) return skip("missing group or contact");
       const { data: existing } = await db.from("contact_group_memberships")
         .select("id").eq("group_id", groupId).eq("contact_id", contactId).is("archived_at", null).maybeSingle();
       let membershipId = existing?.id || r.target_entity_id || null;
       if (!membershipId) {
-        const { data } = await db.from("contact_group_memberships").insert({
+        const { data, error } = await db.from("contact_group_memberships").insert({
           user_id: userId, group_id: groupId, contact_id: contactId,
           status: p.default_status || null,
           reason: r.title || null,
         }).select("id").single();
+        if (error) throw error;
         membershipId = data?.id || null;
       }
       await markKept(membershipId ? { target_entity_type: "contact_group_membership", target_entity_id: membershipId, applied_at: r.applied_at || now } : undefined);
-      return;
+      return existing?.id ? { kind: "already_satisfied", reason: "membership exists" } : { kind: "applied" };
     }
     case "unknown_profile_field": {
       const categorySlug = String(p.category_slug || "").trim();
@@ -483,19 +544,40 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
       const value = String(p.value || "").trim();
       const categoryId = p.category_id as string | undefined;
       if (!categorySlug || !canonicalLabel || !value || !categoryId) {
-        await markKept();
-        return;
+        return skip("missing required profile data");
       }
-      await db.from("profile_fields").insert({
-        user_id: userId,
-        category_slug: categorySlug,
-        canonical_label: canonicalLabel,
-        cardinality: "list",
-        value_type: "text",
-        aliases: [],
-        is_system: false,
-        is_active: true,
-      }).select("id").single();
+      const { data: existingField, error: fieldLookupError } = await db.from("profile_fields")
+        .select("id").eq("category_slug", categorySlug).ilike("canonical_label", canonicalLabel)
+        .or(`user_id.eq.${userId},is_system.eq.true`).limit(1).maybeSingle();
+      if (fieldLookupError) throw fieldLookupError;
+      if (!existingField) {
+        const { error: fieldInsertError } = await db.from("profile_fields").insert({
+          user_id: userId,
+          category_slug: categorySlug,
+          canonical_label: canonicalLabel,
+          cardinality: "list",
+          value_type: "text",
+          aliases: [],
+          is_system: false,
+          is_active: true,
+        }).select("id").maybeSingle();
+        if (fieldInsertError && fieldInsertError.code !== "23505") throw fieldInsertError;
+      }
+
+      let existingQuery = db.from("profile_entries").select("id,value")
+        .eq("user_id", userId).eq("category_id", categoryId).ilike("label", canonicalLabel);
+      existingQuery = p.contact_id ? existingQuery.eq("contact_id", p.contact_id) : existingQuery.is("contact_id", null);
+      const { data: existingEntries, error: existingError } = await existingQuery;
+      if (existingError) throw existingError;
+      const comparableValue = normalizeComparableValue(value);
+      const absorbing = (existingEntries || []).find((entry: { id: string; value: string }) => {
+        const current = normalizeComparableValue(entry.value);
+        return current === comparableValue || current.includes(comparableValue);
+      });
+      if (absorbing?.id) {
+        await markKept({ target_entity_type: "profile_entry", target_entity_id: absorbing.id, applied_at: now });
+        return { kind: "already_satisfied", reason: "fact already present" };
+      }
       const { data: entry, error } = await db.from("profile_entries").insert({
         user_id: userId,
         contact_id: p.contact_id || null,
@@ -505,16 +587,32 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow) {
         origin: r.source_note_id ? "review_queue" : "user_manual",
         evidence_quote: p.evidence_quote || null,
         linked_note_id: p.linked_note_id || r.source_note_id || null,
-      }).select("id").single();
+      }).select("id").maybeSingle();
       if (error) throw error;
+      if (!entry?.id) {
+        const { data: after, error: afterError } = await existingQuery;
+        if (afterError) throw afterError;
+        const survivor = (after || []).find((candidate: { id: string; value: string }) =>
+          normalizeComparableValue(candidate.value).includes(comparableValue)
+        );
+        if (survivor?.id) {
+          await markKept({ target_entity_type: "profile_entry", target_entity_id: survivor.id, applied_at: now });
+          return { kind: "already_satisfied", reason: "fact absorbed by existing entry" };
+        }
+        return skip("profile integrity guard rejected the fact");
+      }
       await markKept(entry?.id ? { target_entity_type: "profile_entry", target_entity_id: entry.id, applied_at: now } : undefined);
-      return;
+      return { kind: "applied" };
     }
     default: {
       await markKept();
-      return;
+      return { kind: "already_satisfied", reason: "no application required" };
     }
   }
+}
+
+function normalizeComparableValue(value: unknown) {
+  return String(value || "").normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 // ---------------- ROLLBACK / NEVER AGAIN ----------------
