@@ -3,6 +3,7 @@
 // JWT. Never expose this key to the frontend.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 import {
   applyNormalization,
   createNormalizationSuggestions,
@@ -140,46 +141,27 @@ serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const ANON_KEY =
-      Deno.env.get("SUPABASE_ANON_KEY") ||
-      Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
-      Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ||
-      // Publishable project key fallback for pg_cron calls. This is not a
-      // private credential; it only unlocks the narrow cron queue route below.
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqZWFwZWx2amxtYnhhZnNtamVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MTk3MDUsImV4cCI6MjA4ODQ5NTcwNX0.xzux7CmiNNDdtcjaPvuJRqs8_ZtiljbDjim4Mdm4siU";
     const adminKey = Deno.env.get("MCP_ACCESS_KEY") || "";
     const provided = req.headers.get("x-admin-key") || "";
-    const apiKey = req.headers.get("apikey") || "";
     const authHeader = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     const body = await req.json().catch(() => ({}));
-    const isAnonJwt = (() => {
-      try {
-        const [, payload] = apiKey.split(".");
-        if (!payload) return false;
-        const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-        const decoded = JSON.parse(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")));
-        return decoded?.iss === "supabase" && decoded?.ref === "tjeapelvjlmbxafsmjef" && decoded?.role === "anon";
-      } catch {
-        return false;
-      }
-    })();
+    // Accept the MCP shared secret (dev/curl), the service-role key
+    // (server-side callers), or the scheduler's shared key (x-cron-key, held
+    // only in the database — _shared/cron-auth.ts). Never accept anon or user
+    // JWTs here. Scheduled queue runs are intentionally narrow: they can only
+    // process already-queued normalization jobs for BRAIN_OWNER_USER_ID, never
+    // a caller-supplied user/contact/full sweep.
     const isScheduledQueueRun =
-      (apiKey === ANON_KEY || isAnonJwt) &&
       body?.cron === "profile-normalization" &&
       !body?.user_id &&
       !body?.contact_id &&
-      !body?.scope;
-    // Accept either the MCP shared secret (dev/curl) or the service-role key
-    // (pg_cron / server-side callers). Never accept anon or user JWTs here.
-    // Scheduled queue runs are intentionally narrow: they can only process
-    // already-queued normalization jobs for BRAIN_OWNER_USER_ID, never a caller
-    // supplied user/contact/full sweep. This avoids relying on unavailable
-    // Postgres service-role settings while keeping arbitrary admin access closed.
+      !body?.scope &&
+      (await isValidCronRequest(req));
     if (!isScheduledQueueRun && !(provided && provided === adminKey) && !(authHeader && authHeader === SERVICE_ROLE)) {
       console.warn("[admin-normalize] forbidden request", {
         hasAdminKey: Boolean(provided),
         hasAuthorization: Boolean(authHeader),
-        hasApiKey: Boolean(apiKey),
+        hasCronKey: Boolean(req.headers.get("x-cron-key")),
       });
       return json({ error: "forbidden" }, 403);
     }

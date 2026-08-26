@@ -13,6 +13,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 import { z } from "npm:zod@3.23.8";
 import { runChat } from "../_shared/llm-router.ts";
 import { CALL_SITE_DEFAULTS } from "../_shared/llm-defaults.ts";
@@ -284,8 +285,11 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "run");
 
-    // Scheduled sweep: pg_cron posts with the anon key and a signed body marker.
+    // Scheduled sweep: pg_cron authenticates with the scheduler's shared key
+    // (x-cron-key, held only in the database — _shared/cron-auth.ts). The body
+    // marker only routes the request; it grants nothing by itself.
     if (body?.cron === "profile-audit") {
+      if (!(await isValidCronRequest(req))) return json({ error: "Unauthorized" }, 401);
       const limit = Math.min(Number(body?.limit ?? 25), 200);
       // @ts-ignore Deno runtime global
       EdgeRuntime.waitUntil(sweepDirty(db, limit));

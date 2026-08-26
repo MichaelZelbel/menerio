@@ -163,3 +163,13 @@ verify_jwt = false
 
 [functions.powersync-keepalive]
 verify_jwt = false
+
+# The scheduler calls these without a user JWT; the functions authenticate the
+# x-cron-key header themselves (_shared/cron-auth.ts). Without these entries a
+# redeploy could flip them to verify_jwt = true and the gateway would reject
+# every scheduled run before the function even sees it.
+[functions.profile-audit]
+verify_jwt = false
+
+[functions.wiki-restructure]
+verify_jwt = false

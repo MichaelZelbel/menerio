@@ -26,6 +26,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 import {
   canonicalLabel,
   inverseLabel,
@@ -454,11 +455,14 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const scope = body?.scope === "all" ? "all" : "me";
-    // The scheduled sweep is triggered by pg_cron with the anon key and a body
-    // marker — the same trust model the other Menerio sweeps use. The endpoint
-    // is idempotent and only enforces the profile rules, so triggering it early
-    // is harmless.
-    const isServiceCall = authHeader.includes(SUPABASE_SERVICE_ROLE_KEY) || body?.cron === "profile-reconcile";
+    // The scheduled sweep authenticates with the scheduler's shared key
+    // (x-cron-key, held only in the database — _shared/cron-auth.ts). The
+    // body's {"cron": ...} marker is routing information and grants nothing:
+    // this endpoint deletes contacts and relationships, so service trust must
+    // never hinge on anything a stranger can type into a request body.
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isServiceCall = (!!SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY) ||
+      (body?.cron === "profile-reconcile" && (await isValidCronRequest(req)));
 
     /** Run one user in the background and record the outcome. */
     const runTracked = async (targetUserId: string) => {

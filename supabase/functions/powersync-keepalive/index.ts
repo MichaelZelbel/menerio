@@ -10,6 +10,7 @@
 // minting a short-lived session for one keepalive identity.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 
 const DEFAULT_POWERSYNC_URL =
   "https://6a5158557f33bac37ef5cf80.powersync.journeyapps.com";
@@ -149,10 +150,24 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const powersyncUrl =
-    Deno.env.get("POWERSYNC_URL")?.trim() || DEFAULT_POWERSYNC_URL;
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  // Only the pg_cron scheduler (x-cron-key, held in the database —
+  // _shared/cron-auth.ts) or a service-role caller may run this. It mints a
+  // real user session via auth.admin, so an open door here hands out
+  // unlimited magic-link generation to anyone with the URL.
+  const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const isService = !!serviceKey && bearer === serviceKey;
+  if (!isService && !(await isValidCronRequest(req))) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const powersyncUrl =
+    Deno.env.get("POWERSYNC_URL")?.trim() || DEFAULT_POWERSYNC_URL;
 
   const result: Result = {
     ok: false,

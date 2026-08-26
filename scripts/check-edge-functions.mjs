@@ -9,9 +9,17 @@
  * error, and nothing in the repo noticed until the Supabase bundler rejected
  * the deploy. This closes that gap in about a second.
  *
- * Two checks, both aimed at what actually breaks a deploy:
+ * Three checks, all aimed at what actually breaks a deploy or reopens a hole:
  *   1. every .ts file parses
  *   2. every relative import points at a file that exists
+ *   3. scheduler-triggered functions keep their cron authentication
+ *
+ * Check 3 exists because on 2026-08-26 five functions were found accepting a
+ * plaintext body marker ({"cron": ...}) as full service trust — replayable by
+ * anyone with the URL. They now verify the x-cron-key header via
+ * _shared/cron-auth.ts, and this check fails the build if that call ever
+ * disappears again (agent-driven edits regress exactly this way), or if a
+ * hardcoded anon JWT sneaks back in as an auth fallback.
  *
  * It deliberately does NOT typecheck. That needs Deno, because these modules
  * import from https://esm.sh/... and use the Deno global. This runs anywhere
@@ -60,10 +68,34 @@ for (const file of files) {
   }
 }
 
+// 3. scheduler-triggered functions must authenticate the scheduler.
+const CRON_GATED = [
+  "profile-reconcile",
+  "profile-audit",
+  "wiki-restructure",
+  "powersync-keepalive",
+  "admin-normalize",
+];
+for (const fn of CRON_GATED) {
+  const file = join(ROOT, fn, "index.ts");
+  const src = readFileSync(file, "utf8");
+  if (!/\bisValidCronRequest\s*\(/.test(src)) {
+    problems.push(`${file}  cron auth missing: must call isValidCronRequest() from _shared/cron-auth.ts`);
+  }
+}
+for (const file of files) {
+  const src = readFileSync(file, "utf8");
+  // The anon key is public, but as an AUTH input it is worthless; a committed
+  // anon JWT literal only ever shows up as a fake cron credential.
+  if (/eyJ[A-Za-z0-9_-]{80,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(src)) {
+    problems.push(`${file}  hardcoded JWT literal: never embed project keys in function code`);
+  }
+}
+
 if (problems.length) {
   console.error(`\nedge-function check FAILED (${problems.length} problem(s)):\n`);
   for (const p of problems) console.error("  " + p);
   console.error("");
   process.exit(1);
 }
-console.log(`edge-function check passed: ${files.length} files parsed, imports resolve`);
+console.log(`edge-function check passed: ${files.length} files parsed, imports resolve, cron gates present`);

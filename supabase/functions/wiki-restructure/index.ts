@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 import { runChat } from "../_shared/llm-router.ts";
 import { WIKI_RESTRUCTURE_PROMPT } from "../_shared/llm-defaults.ts";
 import {
@@ -365,9 +366,12 @@ serve(async (req) => {
     const slugs: string[] = Array.isArray(body.slugs) ? body.slugs.filter((slug: unknown) => typeof slug === "string") : [];
     const force = body.force === true;
 
-    // Narrow scheduled sweep (pg_cron): no user/slug targeting allowed, it can
+    // Narrow scheduled sweep (pg_cron): authenticated by the scheduler's
+    // shared key (x-cron-key, held only in the database — _shared/cron-auth.ts);
+    // the body marker only routes. No user/slug targeting allowed, it can
     // only reformat pages that already fail the readability contract.
-    const isCronSweep = body.cron === "wiki-restructure" && !body.user_id && slugs.length === 0 && !force;
+    const isCronSweep = body.cron === "wiki-restructure" && !body.user_id && slugs.length === 0 &&
+      !force && (await isValidCronRequest(req));
     if (!token && !isCronSweep) return jsonResponse({ error: "Unauthenticated" }, 401);
 
     const isServiceCall = isCronSweep || token === SUPABASE_SERVICE_ROLE_KEY;

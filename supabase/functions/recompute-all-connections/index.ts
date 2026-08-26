@@ -52,7 +52,6 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // This runs as a scheduled job, no auth needed — but only callable by cron
     const body = await req.json().catch(() => ({}));
     const batchSize = body.batch_size || 50;
     const minStrength = body.min_strength || 0.65;
