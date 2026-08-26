@@ -14,7 +14,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Plus, Search, User, Users, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, Plus, Search, Trash2, User, Users, X } from "lucide-react";
 
 import { PeopleTree } from "@/components/people/PeopleTree";
 import { PersonDetail } from "@/components/people/PersonDetail";
@@ -46,6 +56,7 @@ export default function People() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [mergeTreeId, setMergeTreeId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   // Consume deep-link params from other surfaces (global "+", command palette,
   // relationships panel). ?contact=<id> normalizes to the path form; ?action=create
@@ -148,15 +159,24 @@ export default function People() {
     }
   };
 
-  const handleDeletePerson = (personId: string) => {
+  // Deleting a person is a hard delete that cascades their notes links,
+  // interactions, relationships and group memberships, with no undo — so the
+  // tree's menu item asks first instead of firing the mutation directly.
+  const handleDeletePerson = (personId: string) => setDeleteTargetId(personId);
+
+  const confirmDeletePerson = () => {
+    const personId = deleteTargetId;
+    if (!personId) return;
     deletePerson.mutate(personId, {
       onSuccess: () => {
         if (personId === selectedPersonId) closePerson();
       },
     });
+    setDeleteTargetId(null);
   };
 
   const mergeSource = mergeTreeId ? people.find((p) => p.id === mergeTreeId) ?? null : null;
+  const deleteTarget = deleteTargetId ? people.find((p) => p.id === deleteTargetId) ?? null : null;
 
   return (
     <div className="flex h-[calc(100dvh-56px)] overflow-hidden">
@@ -297,6 +317,34 @@ export default function People() {
           }}
         />
       )}
+
+      {/* Delete confirmation — hard delete, cascades, no undo */}
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => { if (!open) setDeleteTargetId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this person?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                <strong>{deleteTarget?.name ?? "This person"}</strong> will be permanently deleted.
+              </span>
+              <span className="block">
+                Their note links, logged interactions, relationships, and group memberships are
+                removed with them. Notes themselves are kept.
+              </span>
+              <span className="block font-medium text-destructive">This cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeletePerson}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -138,11 +138,14 @@ export function useDeletePerson() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      // Remove the mirrored vault file first — the sync log still knows its
-      // path. Best-effort; the sweep's retire pass is the backstop.
-      const affectedGroupIds = await deleteEntityFile("person", id);
+      // Delete the row first: if this fails the person still exists, so the
+      // mirrored vault file must still exist too. Removing the file first
+      // (as this once did) orphaned the mirror whenever the DB delete threw.
       const { error } = await supabase.from("contacts").delete().eq("id", id);
       if (error) throw error;
+      // Now retire the mirrored vault file — the sync log still knows its
+      // path. Best-effort; the sweep's retire pass is the backstop.
+      const affectedGroupIds = await deleteEntityFile("person", id);
       return affectedGroupIds;
     },
     onSuccess: (affectedGroupIds) => {

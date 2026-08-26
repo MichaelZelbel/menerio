@@ -166,7 +166,13 @@ const emptyLinkValidity = (): LinkValidity => ({
 });
 
 const PAGE_SIZE = 50;
-const FILTER_FETCH_LIMIT = 500;
+// The whole matching set is fetched (in chunks) and then sorted, filtered and
+// paginated in the browser, so a sort or filter always sees every item, not
+// just the first page. FETCH_CHUNK is one PostgREST request; MAX_CLIENT_ROWS
+// caps how many rows are ever pulled so a runaway collection cannot exhaust
+// memory — past that the UI says so instead of silently hiding the rest.
+const FETCH_CHUNK = 1000;
+const MAX_CLIENT_ROWS = 5000;
 const TITLE_KEY = "__title__";
 const UPDATED_KEY = "__updated__";
 
@@ -2336,6 +2342,9 @@ export default function CollectionDetail() {
   const navigate = useNavigate();
   const [collection, setCollection] = useState<Collection | null>(null);
   const [items, setItems] = useState<CollectionItem[]>([]);
+  // The full matching set after search/filter/sort; `items` is the current
+  // page sliced from it. Kept as state so the page can turn without refetching.
+  const [workingSet, setWorkingSet] = useState<CollectionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
@@ -2395,6 +2404,7 @@ export default function CollectionDetail() {
   );
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [tableDeleteTarget, setTableDeleteTarget] = useState<CollectionItem | null>(null);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -2520,7 +2530,7 @@ export default function CollectionDetail() {
   useEffect(() => {
     setCursorStack([]);
     setNextCursor(null);
-  }, [query, sort, slug, clientSideMode]);
+  }, [query, sort, slug, clientSideMode, columnSort, columnFilters]);
 
   const toggleColumnSort = (key: string) => {
     setColumnSort((current) => {
@@ -2563,48 +2573,58 @@ export default function CollectionDetail() {
         .eq("user_id", user.id)
         .order("name");
       if (!cancelled) setAllCollections(collectionRows ?? [current]);
-      let request = supabase
-        .from("collection_items")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("collection_id", current.id)
-        .limit(
-          clientSideMode
-            ? FILTER_FETCH_LIMIT
-            : query.trim()
-              ? 200
-              : PAGE_SIZE + 1,
-        );
-      const cursor = cursorStack.at(-1);
-      if (sort === "updated")
-        request = request
-          .order("updated_at", { ascending: false })
-          .order("id", { ascending: false });
-      if (sort === "created")
-        request = request
-          .order("created_at", { ascending: false })
-          .order("id", { ascending: false });
-      if (sort === "alpha")
-        request = request
-          .order("title", { ascending: true, nullsFirst: false })
-          .order("id", { ascending: true });
-      if (!clientSideMode && cursor && sort === "updated" && !query.trim())
-        request = request.or(
-          `updated_at.lt.${cursor.updated_at},and(updated_at.eq.${cursor.updated_at},id.lt.${cursor.id})`,
-        );
-      const { data: rows, error: itemsError } = await request;
-      if (cancelled) return;
+
+      // Pull the whole collection in chunks, ordered by the chosen base sort,
+      // up to the safety cap. Fetching everything is what lets the sort and
+      // filters below be correct: the previous code sorted only the first page
+      // (or the first 500 in filter mode) and silently dropped the rest.
+      const rows: CollectionItem[] = [];
+      let truncated = false;
+      let itemsError: { message: string } | null = null;
+      for (let from = 0; from < MAX_CLIENT_ROWS; from += FETCH_CHUNK) {
+        let request = supabase
+          .from("collection_items")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("collection_id", current.id)
+          .range(from, from + FETCH_CHUNK - 1);
+        if (sort === "updated")
+          request = request
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: false });
+        if (sort === "created")
+          request = request
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false });
+        if (sort === "alpha")
+          request = request
+            .order("title", { ascending: true, nullsFirst: false })
+            .order("id", { ascending: true });
+        const { data: chunk, error } = await request;
+        if (cancelled) return;
+        if (error) {
+          itemsError = error;
+          break;
+        }
+        rows.push(...((chunk ?? []) as CollectionItem[]));
+        if (!chunk || chunk.length < FETCH_CHUNK) break;
+        if (rows.length >= MAX_CLIENT_ROWS) {
+          truncated = true;
+          break;
+        }
+      }
       if (itemsError)
         toast.error("Could not load items", {
           description: itemsError.message,
         });
+
       const schema = parseSchema(current.field_schema);
       const searchableFields = schema.filter((field) =>
         ["text", "longtext"].includes(field.type),
       );
       const needle = query.trim().toLowerCase();
       let filtered: CollectionItem[] = needle
-        ? (rows ?? []).filter((item) =>
+        ? rows.filter((item) =>
             [
               item.title,
               ...searchableFields.map((field) => asData(item.data)[field.key]),
@@ -2614,7 +2634,7 @@ export default function CollectionDetail() {
                 .includes(needle),
             ),
           )
-        : (rows ?? []);
+        : rows;
 
       if (clientSideMode) {
         // Apply column filters
@@ -2663,29 +2683,29 @@ export default function CollectionDetail() {
             return sign * compareValues(av, bv, fieldType);
           });
         }
-        setItems(filtered);
-        setNextCursor(null);
-        setTruncatedByLimit((rows ?? []).length >= FILTER_FETCH_LIMIT);
-      } else {
-        const page = filtered.slice(0, PAGE_SIZE);
-        setItems(page);
-        setNextCursor(
-          !needle && sort === "updated" && filtered.length > PAGE_SIZE
-            ? {
-                updated_at: page.at(-1)?.updated_at ?? "",
-                id: page.at(-1)?.id ?? "",
-              }
-            : null,
-        );
-        setTruncatedByLimit(false);
       }
+
+      setWorkingSet(filtered);
+      setTruncatedByLimit(truncated);
       setIsLoading(false);
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, cursorStack, clientSideMode, columnSort, columnFilters, reloadTick]);
+  }, [user, slug, query, sort, clientSideMode, columnSort, columnFilters, reloadTick]);
+
+  // Cheap client-side pagination over the working set. cursorStack length is
+  // the page index, so Previous/Next just push/pop and no refetch happens on a
+  // page turn. nextCursor is a presence sentinel: only its existence matters.
+  useEffect(() => {
+    const pageIndex = cursorStack.length;
+    const start = pageIndex * PAGE_SIZE;
+    setItems(workingSet.slice(start, start + PAGE_SIZE));
+    setNextCursor(
+      workingSet.length > start + PAGE_SIZE ? { updated_at: "", id: "" } : null,
+    );
+  }, [workingSet, cursorStack]);
 
 
   useEffect(() => {
@@ -2817,6 +2837,7 @@ export default function CollectionDetail() {
       return toast.error("Could not delete item", {
         description: error.message,
       });
+    setWorkingSet((current) => current.filter((row) => row.id !== item.id));
     setItems((current) => current.filter((row) => row.id !== item.id));
     toast.success("Item deleted");
   };
@@ -3183,14 +3204,16 @@ export default function CollectionDetail() {
             if (!open) closeItem();
           }}
           onSaved={(savedItem) => {
-            setItems((current) => {
+            const upsert = (current: CollectionItem[]) => {
               const exists = current.some((row) => row.id === savedItem.id);
               return exists
                 ? current.map((row) =>
                     row.id === savedItem.id ? savedItem : row,
                   )
-                : [savedItem, ...current].slice(0, PAGE_SIZE);
-            });
+                : [savedItem, ...current];
+            };
+            setWorkingSet(upsert);
+            setItems((current) => upsert(current).slice(0, PAGE_SIZE));
             // If this was a create, route to the newly created item so the AI
             // FAB can prime item context and further edits happen in place.
             if (selectedItem?.id === "new") {
@@ -3200,6 +3223,7 @@ export default function CollectionDetail() {
             }
           }}
           onDeleted={(id) => {
+            setWorkingSet((current) => current.filter((row) => row.id !== id));
             setItems((current) => current.filter((row) => row.id !== id));
             closeItem();
           }}
@@ -3361,9 +3385,11 @@ export default function CollectionDetail() {
               )}
             </div>
           </div>
-          {clientSideMode && truncatedByLimit && (
+          {truncatedByLimit && (
             <p className="text-xs text-muted-foreground">
-              Showing first {FILTER_FETCH_LIMIT} items matching your filters / sort.
+              This collection has more than {MAX_CLIENT_ROWS.toLocaleString()} items; only the
+              first {MAX_CLIENT_ROWS.toLocaleString()} are loaded here. Narrow with search or a
+              filter to reach the rest.
             </p>
           )}
           <div className="overflow-hidden rounded-md border">
@@ -3493,7 +3519,7 @@ export default function CollectionDetail() {
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="text-destructive"
-                                onClick={() => deleteItem(item)}
+                                onClick={() => setTableDeleteTarget(item)}
                               >
                                 Delete
                               </DropdownMenuItem>
@@ -3556,6 +3582,35 @@ export default function CollectionDetail() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={deleteCollection}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* Table-row delete confirmation — the tree and item sheet already
+          confirm; the table row was the one hard-delete path that did not. */}
+      <AlertDialog
+        open={!!tableDeleteTarget}
+        onOpenChange={(open) => { if (!open) setTableDeleteTarget(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes
+              {tableDeleteTarget?.title ? ` "${tableDeleteTarget.title}"` : " this item"}.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (tableDeleteTarget) deleteItem(tableDeleteTarget);
+                setTableDeleteTarget(null);
+              }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

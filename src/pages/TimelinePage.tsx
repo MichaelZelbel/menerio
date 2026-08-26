@@ -152,6 +152,15 @@ export default function TimelinePage() {
   };
 
   const openEditDialog = (moment: TimelineMoment) => {
+    // The context menu passes a moment straight from the list, where
+    // select("*") never includes participants, so moment.participants is
+    // undefined there. Falling back to that meant the edit dialog opened with
+    // an empty participant list and the save wiped everyone off the moment.
+    // participantMap already holds every moment's participants, so read from it
+    // whenever the moment itself was not hydrated (e.g. from the drawer).
+    const participantIds = moment.participants
+      ? moment.participants.map((p) => p.id)
+      : (participantMap[moment.id] || []);
     setEditMomentData({
       id: moment.id,
       title: moment.title,
@@ -162,7 +171,7 @@ export default function TimelinePage() {
       impact_level: moment.impact_level,
       confidence_date: moment.confidence_date,
       confidence_truth: moment.confidence_truth,
-      participantIds: (moment.participants || []).map((p) => p.id),
+      participantIds,
     });
     setDrawerOpen(false);
     setEditDialogOpen(true);

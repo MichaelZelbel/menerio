@@ -216,7 +216,6 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
       if (isEditMode && momentId) {
         const { error } = await supabase.from("moments" as any).update(momentPayload).eq("id", momentId);
         if (error) throw error;
-        await supabase.from("moment_participants" as any).delete().eq("moment_id", momentId);
       } else {
         const { data, error } = await supabase.from("moments" as any).insert({ ...momentPayload, source: "manual" }).select("id").single();
         if (error || !data) throw error || new Error("Moment was not created");
@@ -229,10 +228,26 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         if (data) newPeopleIds.push(data.id);
       }
 
-      const participantIds = Array.from(new Set([...matchedPeople, ...newPeopleIds]));
-      if (participantIds.length > 0 && momentId) {
-        const { error } = await supabase.from("moment_participants" as any).insert(participantIds.map((person_id) => ({ moment_id: momentId, person_id })));
-        if (error) throw error;
+      const desiredIds = Array.from(new Set([...matchedPeople, ...newPeopleIds]));
+      if (momentId) {
+        // Diff against what the moment already has instead of the old
+        // delete-everything-then-reinsert. That pattern permanently lost every
+        // participant whenever the dialog opened without them loaded, and even
+        // in the normal flow a throw between the delete and the insert wiped
+        // them with no recovery. Now an unchanged edit touches nothing.
+        const existingIds = isEditMode
+          ? (((await supabase.from("moment_participants" as any).select("person_id").eq("moment_id", momentId)).data || []) as any[]).map((r) => r.person_id)
+          : [];
+        const toAdd = desiredIds.filter((id) => !existingIds.includes(id));
+        const toRemove = existingIds.filter((id) => !desiredIds.includes(id));
+        if (toRemove.length > 0) {
+          const { error } = await supabase.from("moment_participants" as any).delete().eq("moment_id", momentId).in("person_id", toRemove);
+          if (error) throw error;
+        }
+        if (toAdd.length > 0) {
+          const { error } = await supabase.from("moment_participants" as any).insert(toAdd.map((person_id) => ({ moment_id: momentId, person_id })));
+          if (error) throw error;
+        }
       }
 
       // Fire-and-forget: extract profile facts about participants from this moment.

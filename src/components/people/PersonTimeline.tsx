@@ -76,8 +76,12 @@ export function PersonTimeline({ personId, personName, people, onAskMira }: Pers
   useEffect(() => { loadTimeline(); }, [loadTimeline]);
 
   const deleteMoment = async (entry: MomentEntry) => {
-    if (!confirm(`Delete "${entry.title}"? This cannot be undone.`)) return;
-    const { error } = await supabase.from("moments" as any).delete().eq("id", entry.id);
+    if (!confirm(`Delete "${entry.title}"?`)) return;
+    // Soft delete: this table's own read filters on deleted_at IS NULL, so a
+    // hard delete threw away recoverable history (and cascaded the moment's
+    // participants and provenance) for no reason. Setting deleted_at hides it
+    // the same way while leaving the row intact.
+    const { error } = await supabase.from("moments" as any).update({ deleted_at: new Date().toISOString() }).eq("id", entry.id);
     if (error) return toast({ variant: "destructive", title: "Failed to delete", description: error.message });
     toast({ title: "Deleted" });
     loadTimeline();
