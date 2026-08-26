@@ -108,6 +108,54 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 
 ---
 
+## P1 — Correctness follow-ups (surfaced 2026-08-26 review, deferred)
+
+These are real but were left out of the 2026-08-26 fix pass because each needs
+a data check or a schema change, not just a UI edit.
+
+### 19. 🟥 PersonDetail "related notes" is wrong past 50 notes · M · ★★★
+- **Bereich:** People / PersonDetail
+- **Problem:** `PersonDetail.tsx:74-93` fetches the 50 most recent notes globally
+  and then filters client-side by `metadata.people`. Any user with >50 notes
+  sees wrong (usually empty) related notes with no signal. Same shape as the
+  collection-sort bug that was fixed.
+- **Akzeptanz:** Query filters by person server-side (metadata contains person id)
+  before the limit, or paginates; result reflects all of the person's notes.
+
+### 20. 🟥 Collection tree fetch is unbounded and unordered · S · ★★
+- **Bereich:** Collections / CollectionItemsTree
+- **Problem:** `CollectionDetail.tsx` tree item fetch has no `.limit()` and no
+  `.order()`, so it inherits PostgREST's max-rows cap in nondeterministic order.
+  Large collections silently lose tree entries.
+- **Akzeptanz:** Explicit order; chunked fetch or an honest cap like the table view.
+
+### 21. 🟥 moment_participants has no FK to contacts · M · ★★★
+- **Bereich:** Timeline / data integrity
+- **Problem:** `moment_participants.person_id` has no `REFERENCES contacts`, so
+  deleting a person leaves dangling participant rows that never resolve to a name.
+- **Akzeptanz:** Add FK with `ON DELETE CASCADE` after cleaning existing orphans.
+  Needs a data check first (count orphans), then a migration.
+
+### 22. 🟥 Archive group has no confirmation · S · ★
+- **Bereich:** People / groups
+- **Problem:** `People.tsx handleArchiveGroup` archives with no confirm and no
+  visible undo affordance.
+- **Akzeptanz:** AlertDialog (or a toast with Undo).
+
+### 23. 🟥 Normalise remaining window.confirm to AlertDialog · S · ★
+- **Bereich:** Collections, Wiki, Notes
+- **Problem:** Several genuinely destructive actions still use native
+  `window.confirm` (e.g. `CollectionDetail` tree/note deletes, `WikiLintPlaceholder`
+  strip-wikilinks, `StagesEditor`) while the app's own AlertDialog convention exists.
+- **Akzeptanz:** Consistent destructive AlertDialog, matching the people/collection pattern.
+
+### 24. 🟥 ModerationPanel caps at 50 with no pagination · S · ★
+- **Bereich:** Admin / ModerationPanel
+- **Problem:** `moderation_review_queue` fetch capped at 50, no pager.
+- **Akzeptanz:** Pagination or an explicit "showing first 50" note.
+
+---
+
 ## Workflow
 
 1. Pick top 🟥 → setze 🟧 → öffne PR-artigen Commit-Scope.
