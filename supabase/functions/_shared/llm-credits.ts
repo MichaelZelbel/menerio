@@ -16,7 +16,27 @@ export interface CreditInfo {
   remaining_credits: number;
   tokens_deducted: number;
   tokens_per_credit?: number;
+  /**
+   * The call cost more than the allowance had left. The provider was already
+   * paid, so the true cost is recorded and the balance is landed on exactly
+   * zero, which is what makes the next pre-check refuse. See the migration
+   * `20260827101500_deduct_ai_tokens_charge_and_land_on_zero.sql`.
+   */
+  capped?: boolean;
+  /** How far the call went past the allowance, in tokens. Only set when capped. */
+  overdraft_tokens?: number;
 }
+
+/**
+ * The balance a call site must have before a provider is contacted.
+ *
+ * `remaining > 0` was the old bar, and it is what turned an exhausted account
+ * into a money pump: with 127 tokens left, every pre-check passed, every call
+ * cost thousands, every deduction was refused, and the balance never moved off
+ * 127. Requiring a realistic single call's worth means an account close to empty
+ * stops before it spends, not after.
+ */
+export const MIN_CALL_RESERVE_TOKENS = 1_000;
 
 export interface BalanceCheck {
   allowed: boolean;
@@ -54,10 +74,17 @@ export interface BalanceCheck {
  * inside background sweeps where an exception would abandon a whole batch rather
  * than skip one optional step. Throwing belongs at {@link openRouterWithCredits},
  * which already runs inside a caller's try/catch.
+ *
+ * `minTokens` is the bar the balance must clear, defaulting to
+ * {@link MIN_CALL_RESERVE_TOKENS}. It used to be "more than nothing", which is
+ * how an account with 127 tokens left kept passing while every call it let
+ * through cost thousands. Pass a larger figure at a call site that is known to be
+ * expensive.
  */
 export async function checkBalance(
   db: any,
-  userId: string
+  userId: string,
+  minTokens: number = MIN_CALL_RESERVE_TOKENS
 ): Promise<BalanceCheck> {
   // Tolerate stray duplicate rows (one per period_start) by ordering and taking the first.
   const { data, error } = await db
@@ -91,7 +118,13 @@ export async function checkBalance(
   }
   const rt = Number(row.remaining_tokens) || 0;
   const rc = Number(row.remaining_credits) || 0;
-  return { allowed: rt > 0, remaining_tokens: rt, remaining_credits: rc };
+  if (rt < minTokens) {
+    console.warn(
+      `[llm-credits] allowance too low for user=${userId}: ${rt} tokens left, ` +
+        `${minTokens} needed before contacting a provider.`
+    );
+  }
+  return { allowed: rt >= minTokens, remaining_tokens: rt, remaining_credits: rc };
 }
 
 /**
@@ -137,11 +170,22 @@ export async function deductTokens(
     throw err;
   }
 
+  if (data.capped) {
+    console.warn(
+      `[llm-credits] allowance EXHAUSTED by ${p.feature} (user=${p.userId}, ` +
+        `model=${p.model}): call cost ${p.tokens} tokens, ` +
+        `${data.overdraft_tokens} of them past the allowance. Recorded in full, ` +
+        `balance is now zero, further calls are refused until it is topped up.`
+    );
+  }
+
   return {
     remaining_tokens: data.remaining_tokens,
     remaining_credits: data.remaining_credits,
     tokens_deducted: data.tokens_deducted,
     tokens_per_credit: data.tokens_per_credit,
+    capped: data.capped === true,
+    overdraft_tokens: data.overdraft_tokens,
   };
 }
 

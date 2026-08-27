@@ -525,14 +525,28 @@ export async function runChat(args: {
         completionTokens: ct,
         usageSource,
       });
-      // Best-effort tagging of the usage event with the call_site
+      // Best-effort tagging of the usage event with the call_site.
+      //
+      // This used to be one UPDATE ... eq(user_id) with .order().limit(1) hung off
+      // it. PostgREST does not scope an UPDATE that way, so every call rewrote
+      // the call_site of EVERY row the user had, and the whole ledger ended up
+      // stamped with whichever call site wrote last. On 2026-08-27 all 7 days of
+      // rows read `profile-audit.main`, which made the ledger useless for finding
+      // out what was actually spending. Read the id first, then update that row.
       try {
-        await args.db
+        const { data: newest } = await args.db
           .from("llm_usage_events")
-          .update({ call_site: args.callSite, config_source: source })
+          .select("id")
           .eq("user_id", args.userId)
           .order("created_at", { ascending: false })
-          .limit(1);
+          .limit(1)
+          .maybeSingle();
+        if (newest?.id) {
+          await args.db
+            .from("llm_usage_events")
+            .update({ call_site: args.callSite, config_source: source })
+            .eq("id", newest.id);
+        }
       } catch {
         // non-fatal
       }
