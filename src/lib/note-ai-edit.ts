@@ -29,6 +29,9 @@ export function hashNoteContent(content: string | null | undefined): string {
 export const FLUSH_REQUEST_EVENT = "menerio:flush-note-save";
 export const FLUSH_DONE_EVENT = "menerio:flush-note-save-done";
 export const NOTE_UPDATED_EVENT = "menerio:note-updated";
+/** The editor answers every NOTE_UPDATED_EVENT that carries an `ackId`. */
+export const NOTE_UPDATE_ACK_EVENT = "menerio:note-updated-ack";
+
 
 export interface NoteEditPayload {
   note_id: string;
@@ -94,3 +97,89 @@ export function applyNoteEdit(
     }),
   );
 }
+
+export type NoteEditApplyStatus = "applied" | "no-editor" | "failed";
+
+export interface NoteEditApplyResult {
+  status: NoteEditApplyStatus;
+  error?: string;
+}
+
+interface AckDetail {
+  ackId?: string;
+  applied?: boolean;
+  error?: string;
+}
+
+/**
+ * Dispatch one apply attempt and wait for the editor's acknowledgement.
+ * Resolves `null` when no editor answered (note not open) — that is not a
+ * failure, there is simply nothing on screen to converge.
+ */
+function dispatchApply(
+  noteId: string,
+  content: string | null | undefined,
+  updatedAt: string | null | undefined,
+  force: boolean,
+  timeoutMs: number,
+): Promise<{ applied: boolean; error?: string } | null> {
+  const ackId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value: { applied: boolean; error?: string } | null) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener(NOTE_UPDATE_ACK_EVENT, handler as EventListener);
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<AckDetail>).detail;
+      if (detail?.ackId !== ackId) return;
+      done({ applied: !!detail.applied, error: detail.error });
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    window.addEventListener(NOTE_UPDATE_ACK_EVENT, handler as EventListener);
+    window.dispatchEvent(
+      new CustomEvent(NOTE_UPDATED_EVENT, {
+        detail: {
+          noteId,
+          content: content ?? undefined,
+          updatedAt: updatedAt ?? undefined,
+          ackId,
+          force,
+        },
+      }),
+    );
+  });
+}
+
+/**
+ * Apply an AI edit to the open editor and *verify* that it landed.
+ *
+ * A single fire-and-forget event was not enough: when the editor dropped the
+ * update (stale prop race, silent throw) the chat still reported success while
+ * the note looked unchanged — and the next keystroke could save the stale text
+ * back over the AI's work. So we ask, check the answer, and on a mismatch make
+ * the editor re-read the row from the database and force the content in.
+ */
+export async function applyNoteEditVerified(
+  noteId: string,
+  content: string | null,
+  updatedAt: string | null,
+): Promise<NoteEditApplyResult> {
+  if (typeof window === "undefined" || !noteId) return { status: "no-editor" };
+
+  const first = await dispatchApply(noteId, content, updatedAt, false, 2500);
+  if (!first) return { status: "no-editor" };
+  if (first.applied) return { status: "applied" };
+
+  // Second pass: no content hint, so the editor refetches the authoritative
+  // row, and `force` bypasses every "looks unchanged / busy" shortcut.
+  await new Promise((r) => setTimeout(r, 500));
+  const second = await dispatchApply(noteId, undefined, undefined, true, 5000);
+  if (!second) return { status: "no-editor" };
+  if (second.applied) return { status: "applied" };
+  return { status: "failed", error: second.error ?? first.error };
+}
+
