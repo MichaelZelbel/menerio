@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
-import { FileText } from "lucide-react";
+import { Link } from "react-router-dom";
+import { FilePlus2, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
 import { BRAND } from "@/lib/brand";
@@ -8,6 +9,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   attachments?: { name: string; size: number }[];
+  /** Notes this turn created, rendered as links to the new note. */
+  notesCreated?: { id: string; title: string; folder_path: string }[];
 }
 
 interface ChatMessagesProps {
@@ -40,6 +43,23 @@ export function ChatMessages({ messages, loading, loadingHistory }: ChatMessages
               </div>
             ) : (
               <p className="whitespace-pre-wrap">{message.content}</p>
+            )}
+            {message.notesCreated && message.notesCreated.length > 0 && (
+              <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
+                {message.notesCreated.map((note) => (
+                  <Link
+                    key={note.id}
+                    to={`/dashboard/notes/${note.id}`}
+                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
+                    <FilePlus2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      {note.title || "Untitled"}
+                      {note.folder_path ? ` · ${note.folder_path}` : ""}
+                    </span>
+                  </Link>
+                ))}
+              </div>
             )}
           </div>
         </div>

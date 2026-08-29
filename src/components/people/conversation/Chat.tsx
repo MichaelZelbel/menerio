@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, Sparkles } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ interface ChatProps {
 
 export function Chat({ personId, personName, conversationContext }: ChatProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -67,7 +69,23 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
         body: { message: userMessage, personId, conversationContext, attachments: currentAttachments.map(({ name, content }) => ({ name, content })), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
       });
       if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || `${BRAND.personaName} could not reply.`);
-      setMessages((prev) => [...prev, { role: "assistant", content: (data as any).reply }]);
+      const notesCreated = Array.isArray((data as any).notes_created)
+        ? (data as any).notes_created
+        : undefined;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: (data as any).reply,
+          ...(notesCreated?.length ? { notesCreated } : {}),
+        },
+      ]);
+      // A new note (and possibly a new folder) exists now, so the notes screen
+      // must not serve a stale list when the user navigates back to it.
+      if (notesCreated?.length) {
+        queryClient.invalidateQueries({ queryKey: ["notes"] });
+        queryClient.invalidateQueries({ queryKey: ["note-folders"] });
+      }
     } catch (error: any) {
       toast({ variant: "destructive", title: "Chat failed", description: error?.message || "Please try again." });
     } finally {

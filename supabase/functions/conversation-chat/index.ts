@@ -14,6 +14,13 @@ import { loadUserMcpTools, type LoadedMcpTools } from "../_shared/mcp-client.ts"
 import { runAgentLoop } from "../_shared/agent-loop.ts";
 import { READ_TOOL_SCHEMAS, READ_TOOL_NAMES, executeReadTool } from "../_shared/read-tools.ts";
 import { readUrlTool, createUrlReadSession, runReadUrl } from "../_shared/read-url-tool.ts";
+import {
+  NOTE_CREATE_TOOL_SCHEMAS,
+  NOTE_CREATE_TOOL_NAMES,
+  NOTE_CREATE_CONTRACT,
+  createNoteCreateSession,
+  executeNoteCreateTool,
+} from "../_shared/note-create-tools.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +36,27 @@ type ConversationContext = { context?: string; intent?: string; presetTone?: str
 
 function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+/**
+ * Kick off the process-note pipeline for a freshly created note.
+ * Fire-and-forget, matching note-chat and the MCP capture path.
+ */
+function triggerProcessNote(noteId: string): void {
+  try {
+    fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({ note_id: noteId }),
+    }).catch((e) =>
+      console.warn("process-note trigger failed (mira create):", (e as Error).message)
+    );
+  } catch (e) {
+    console.warn("process-note trigger failed (mira create):", (e as Error).message);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -112,10 +140,15 @@ Deno.serve(async (req) => {
     } catch (e) {
       console.warn("conversation-chat: profile load failed:", (e as Error)?.message);
     }
-    systemPrompt += buildAwarenessContext(typeof timezone === "string" ? timezone : undefined) + profileDigest;
+    systemPrompt +=
+      buildAwarenessContext(typeof timezone === "string" ? timezone : undefined) +
+      profileDigest +
+      NOTE_CREATE_CONTRACT;
 
-    // Model (configurable) + tools. Mira gets read/lookup tools + web search +
-    // the user's MCP servers — no note-mutating tools (there's no current note).
+    // Model (configurable) + tools. Mira gets read/lookup tools, web search,
+    // page reading, the create-only note tools, and the user's MCP servers.
+    // No tool here can change or delete an existing note: there is no current
+    // note on a person page, and creating is additive (see note-create-tools).
     const { effective: cfg } = await resolveConfig(supabase, "conversation-chat.main", {
       provider: "openrouter",
       model: CONVERSATION_CHAT_DEFAULT_MODEL,
@@ -126,14 +159,27 @@ Deno.serve(async (req) => {
     } catch (e) {
       console.warn("conversation-chat: MCP load failed:", (e as Error)?.message);
     }
-    const tools = [...READ_TOOL_SCHEMAS, webSearchTool, readUrlTool, ...(mcp?.tools ?? [])];
+    const tools = [
+      ...READ_TOOL_SCHEMAS,
+      ...NOTE_CREATE_TOOL_SCHEMAS,
+      webSearchTool,
+      readUrlTool,
+      ...(mcp?.tools ?? []),
+    ];
 
-    // Per-turn URL read session: fetch cap plus a per-URL cache.
+    // Per-turn sessions: URL fetch cap plus per-URL cache, and the note-create
+    // dedupe map plus the per-turn note cap.
     const urlSession = createUrlReadSession();
+    const createSession = createNoteCreateSession();
 
     const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
       if (name === "web_search") return runWebSearch(supabase, openRouterKey, user.id, String(args.query ?? ""));
       if (name === "read_url") return runReadUrl(urlSession, args.url);
+      if (NOTE_CREATE_TOOL_NAMES.includes(name)) {
+        return executeNoteCreateTool(supabase, user.id, createSession, name, args, {
+          onCreated: triggerProcessNote,
+        });
+      }
       if (mcp && mcp.hasTool(name)) return mcp.call(name, args);
       if (READ_TOOL_NAMES.includes(name)) return executeReadTool(supabase, openRouterKey, user.id, name, args);
       return JSON.stringify({ error: `Unknown tool: ${name}` });
@@ -168,7 +214,7 @@ Deno.serve(async (req) => {
       ]);
     }
 
-    return json({ reply });
+    return json({ reply, notes_created: createSession.created });
   } catch (error) {
     console.error("conversation-chat error:", error);
     return json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);

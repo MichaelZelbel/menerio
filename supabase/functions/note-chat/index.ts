@@ -32,6 +32,7 @@ import {
 import {
   NOTE_CREATE_TOOL_SCHEMAS,
   NOTE_CREATE_TOOL_NAMES,
+  NOTE_CREATE_CONTRACT,
   createNoteCreateSession,
   executeNoteCreateTool,
   type NoteCreateSession,
@@ -157,20 +158,6 @@ EDITING CONTRACT (non-negotiable):
 - On an error (stale, not_found, ambiguous, anchor_not_found, deletion_blocked) do not improvise a workaround; fix the argument if it is clearly safe, otherwise tell the user what happened.
 - After editing, briefly state what you added or changed.`;
 
-/**
- * Rules for creating notes. Appended in code for the same reason as the edit
- * contract: the system prompt is overridable from `llm_call_configs`, and these
- * limits must not be switchable from an admin panel.
- */
-const NOTE_CREATE_CONTRACT = `
-
-CREATING NOTES (non-negotiable):
-- When the user asks you to save, capture, write or make a note, call create_note immediately in the same turn. Do not ask permission first, and do not paste the note body into the chat and wait.
-- If the user names a folder, call list_note_folders FIRST and reuse their existing folder path verbatim, capitalisation included. Only use a new folder name when nothing close exists.
-- Put the content in the note, not in your reply. After creating, say in one line what you saved and which folder it went to. Never repeat the note body back.
-- Create exactly what was asked for: one note unless the user asked for several.
-- You can ONLY create. You cannot edit, move, rename or delete an existing note from here. If the user asks for that, say so plainly and tell them to open the note, where you can edit it with them.
-- If a tool result says duplicate_call or limit_reached, the work is done or capped. Do not retry it in another form.`;
 
 
 
