@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { flushNoteSave, applyNoteEdit, hashNoteContent } from "@/lib/note-ai-edit";
+import { flushNoteSave, applyNoteEdit, applyNoteEditVerified, hashNoteContent } from "@/lib/note-ai-edit";
+import { toast } from "sonner";
+
 
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
