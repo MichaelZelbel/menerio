@@ -176,8 +176,18 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool))
       ) {
         onNoteChanged();
-        applyNoteEdit(note.id, noteEdit?.content ?? null, noteEdit?.updated_at ?? null);
+        const applyResult = await applyNoteEditVerified(
+          note.id,
+          noteEdit?.content ?? null,
+          noteEdit?.updated_at ?? null,
+        );
+        if (applyResult.status === "failed") {
+          setError(
+            "The note was saved, but the editor did not refresh. Reload the note to see the change.",
+          );
+        }
       }
+
 
       // Roll the summary forward when needed.
       updated = await refreshSummaryIfNeeded(updated);
