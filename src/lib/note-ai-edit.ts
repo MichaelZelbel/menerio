@@ -29,6 +29,9 @@ export function hashNoteContent(content: string | null | undefined): string {
 export const FLUSH_REQUEST_EVENT = "menerio:flush-note-save";
 export const FLUSH_DONE_EVENT = "menerio:flush-note-save-done";
 export const NOTE_UPDATED_EVENT = "menerio:note-updated";
+/** The editor answers every NOTE_UPDATED_EVENT that carries an `ackId`. */
+export const NOTE_UPDATE_ACK_EVENT = "menerio:note-updated-ack";
+
 
 export interface NoteEditPayload {
   note_id: string;
