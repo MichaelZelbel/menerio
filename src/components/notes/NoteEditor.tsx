@@ -920,8 +920,18 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // edit (that is how AI edits used to disappear).
   useEffect(() => {
     const handler = async (e: Event) => {
-      const detail = (e as CustomEvent<{ noteId?: string; content?: string; updatedAt?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{
+          noteId?: string;
+          content?: string;
+          updatedAt?: string;
+          ackId?: string;
+          force?: boolean;
+        }>
+      ).detail;
       if (!detail?.noteId || detail.noteId !== note.id) return;
+      let applied = false;
+      let ackError: string | undefined;
       try {
         let content = detail.content;
         let updatedAt = detail.updatedAt;
@@ -931,12 +941,14 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             .select("content, updated_at, tags, metadata")
             .eq("id", note.id)
             .single();
-          if (error || !data) return;
+          if (error || !data) throw error ?? new Error("note row not found");
           content = ((data as any).content || "") as string;
           updatedAt = (data as any).updated_at;
         }
         const html = resolveWikilinks(contentToEditorHtml(content, note));
-        if (editor && normalizeEditorHtml(html) !== normalizeEditorHtml(editor.getHTML())) {
+        if (!editor) throw new Error("editor not ready");
+        const alreadyShowing = normalizeEditorHtml(html) === normalizeEditorHtml(editor.getHTML());
+        if (!alreadyShowing || detail.force) {
           const wasFocused = editor.isFocused;
           const caret = editor.state.selection.from;
           // Drop any queued autosave of the pre-edit text — it is stale now.
@@ -958,18 +970,35 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             editor.commands.focus(Math.min(caret, Math.max(0, max - 1)));
           }
           setSaveStatus("saved");
+          setLastSavedAt(Date.now());
         }
+        // Verify what the editor is actually showing now — the whole point of
+        // the acknowledgement is that "we called setContent" is not proof.
+        applied = normalizeEditorHtml(html) === normalizeEditorHtml(editor.getHTML());
+        if (!applied) ackError = "editor content did not converge";
         // Refresh the cached note in React Query so list/sidebar update too.
         queryClient.invalidateQueries({ queryKey: ["note", note.id] });
         queryClient.invalidateQueries({ queryKey: ["notes"] });
         queryClient.invalidateQueries({ queryKey: ["backlinks"] });
-      } catch {
-        // ignore
+      } catch (err: any) {
+        // Never swallow this: a dropped AI edit used to fail completely
+        // silently while the chat reported success.
+        ackError = err?.message || String(err);
+        console.error("[NoteEditor] failed to apply AI note update", err);
+      } finally {
+        if (detail.ackId) {
+          window.dispatchEvent(
+            new CustomEvent(NOTE_UPDATE_ACK_EVENT, {
+              detail: { ackId: detail.ackId, applied, error: ackError },
+            }),
+          );
+        }
       }
     };
     window.addEventListener(NOTE_UPDATED_EVENT, handler as EventListener);
     return () => window.removeEventListener(NOTE_UPDATED_EVENT, handler as EventListener);
   }, [note.id, note.is_external, note.title, editor, queryClient, setEditorContentWithAttachments]);
+
 
 
   // One-shot attachment resolution on editor mount. Replaces the previous
