@@ -20,6 +20,8 @@ import {
   flushNoteSave,
   hashNoteContent,
   applyNoteEdit,
+  applyNoteEditVerified,
+
   type NoteEditPayload,
 } from "@/lib/note-ai-edit";
 import {
