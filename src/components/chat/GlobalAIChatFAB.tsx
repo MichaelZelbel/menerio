@@ -303,8 +303,25 @@ export function GlobalAIChatFAB() {
           data.tool_results?.some((tr: any) => NOTE_MODIFYING_TOOLS.includes(tr.tool)))
       ) {
         queryClient.invalidateQueries({ queryKey: ["notes"] });
-        applyNoteEdit(noteId, data.note_edit?.content ?? null, data.note_edit?.updated_at ?? null);
+        const result = await applyNoteEditVerified(
+          noteId,
+          data.note_edit?.content ?? null,
+          data.note_edit?.updated_at ?? null,
+        );
+        if (result.status === "failed") {
+          toast.error("The note was saved, but the open editor did not refresh.", {
+            description: "Reload the note to see the change.",
+            action: {
+              label: "Reload note",
+              onClick: () => {
+                queryClient.invalidateQueries({ queryKey: ["note", noteId] });
+                applyNoteEdit(noteId, null, null);
+              },
+            },
+          });
+        }
       }
+
 
 
       // If a collection-modifying tool ran, dispatch a refresh event
