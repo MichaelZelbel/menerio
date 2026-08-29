@@ -29,6 +29,18 @@ import {
   executeNoteEditTool,
   type NoteEditSession,
 } from "../_shared/note-edit-tools.ts";
+import {
+  NOTE_CREATE_TOOL_SCHEMAS,
+  NOTE_CREATE_TOOL_NAMES,
+  createNoteCreateSession,
+  executeNoteCreateTool,
+  type NoteCreateSession,
+} from "../_shared/note-create-tools.ts";
+import {
+  readUrlTool,
+  createUrlReadSession,
+  runReadUrl,
+} from "../_shared/read-url-tool.ts";
 
 
 // Fallback model for the in-note agent. Overridable per environment via the
@@ -128,6 +140,11 @@ const WRITE_TOOLS = [
 // metadata/tag/link write tools.
 const TOOLS = [...READ_TOOL_SCHEMAS, ...NOTE_EDIT_TOOL_SCHEMAS, ...WRITE_TOOLS];
 
+// What the general assistant (no note open) gets: read tools plus the
+// create-only tools. Deliberately NO edit or trash tools for notes the user is
+// not looking at — see the header of _shared/note-create-tools.ts.
+const GENERAL_TOOLS = [...READ_TOOL_SCHEMAS, ...NOTE_CREATE_TOOL_SCHEMAS];
+
 /** Non-negotiable editing rules, appended to whatever prompt is configured. */
 const NOTE_EDIT_CONTRACT = `
 
@@ -140,11 +157,48 @@ EDITING CONTRACT (non-negotiable):
 - On an error (stale, not_found, ambiguous, anchor_not_found, deletion_blocked) do not improvise a workaround; fix the argument if it is clearly safe, otherwise tell the user what happened.
 - After editing, briefly state what you added or changed.`;
 
+/**
+ * Rules for creating notes. Appended in code for the same reason as the edit
+ * contract: the system prompt is overridable from `llm_call_configs`, and these
+ * limits must not be switchable from an admin panel.
+ */
+const NOTE_CREATE_CONTRACT = `
+
+CREATING NOTES (non-negotiable):
+- When the user asks you to save, capture, write or make a note, call create_note immediately in the same turn. Do not ask permission first, and do not paste the note body into the chat and wait.
+- If the user names a folder, call list_note_folders FIRST and reuse their existing folder path verbatim, capitalisation included. Only use a new folder name when nothing close exists.
+- Put the content in the note, not in your reply. After creating, say in one line what you saved and which folder it went to. Never repeat the note body back.
+- Create exactly what was asked for: one note unless the user asked for several.
+- You can ONLY create. You cannot edit, move, rename or delete an existing note from here. If the user asks for that, say so plainly and tell them to open the note, where you can edit it with them.
+- If a tool result says duplicate_call or limit_reached, the work is done or capped. Do not retry it in another form.`;
+
 
 
 // System prompts now resolved at runtime from llm_call_configs
 // (call_sites: "note-chat.main" with {{noteContext}}, "note-chat.general", "note-chat.summarize").
 // Falls back to constants in llm-defaults.ts.
+
+/**
+ * Kick off the process-note pipeline (chunk embeddings, metadata extraction,
+ * profile facts, connections) for a freshly created note. Fire-and-forget, the
+ * same way receive-note and the MCP capture path do it.
+ */
+function triggerProcessNote(noteId: string): void {
+  try {
+    fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ note_id: noteId }),
+    }).catch((e) =>
+      console.warn("process-note trigger failed (create):", (e as Error).message)
+    );
+  } catch (e) {
+    console.warn("process-note trigger failed (create):", (e as Error).message);
+  }
+}
 
 // Execute tool calls
 async function executeTool(
@@ -152,12 +206,21 @@ async function executeTool(
   args: Record<string, unknown>,
   userId: string,
   noteId: string,
-  editSession: NoteEditSession | null
+  editSession: NoteEditSession | null,
+  createSession: NoteCreateSession
 ): Promise<string> {
   // Read/lookup tools (note search, media search, person profile) are shared
   // with conversation-chat via _shared/read-tools.ts.
   if (READ_TOOL_NAMES.includes(name)) {
     return executeReadTool(db, OPENROUTER_API_KEY, userId, name, args);
+  }
+
+  // Creating a NEW note. Available in both modes: it is additive, so it is safe
+  // even when the user has another note open.
+  if (NOTE_CREATE_TOOL_NAMES.includes(name)) {
+    return executeNoteCreateTool(db, userId, createSession, name, args, {
+      onCreated: triggerProcessNote,
+    });
   }
 
   // Content edits go through the safe, idempotent, non-destructive editor.
@@ -325,7 +388,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Determine mode: note-specific or general knowledge base
     const isNoteMode = !!note_id;
     let systemMessage: { role: string; content: string };
-    let activeTools: typeof TOOLS;
+    // Heterogeneous OpenAI-style tool schemas from several modules.
+    // deno-lint-ignore no-explicit-any
+    let activeTools: any[];
 
     if (isNoteMode) {
       // Fetch current note for context
@@ -383,9 +448,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         // llm_call_configs. The user's writing must never be lost.
         content:
           (await resolveSystemPrompt(db, "note-chat.main", NOTE_CHAT_NOTE_MODE_PROMPT, { noteContext })) +
-          NOTE_EDIT_CONTRACT,
+          NOTE_EDIT_CONTRACT +
+          NOTE_CREATE_CONTRACT,
       };
-      activeTools = TOOLS;
+      // Editing the open note, plus creating brand new ones.
+      activeTools = [...TOOLS, ...NOTE_CREATE_TOOL_SCHEMAS];
 
     } else {
       // General assistant mode — read tools over notes, media, and people.
@@ -408,10 +475,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
       }
 
-      systemMessage = { role: "system", content: systemContent };
+      systemMessage = { role: "system", content: systemContent + NOTE_CREATE_CONTRACT };
 
-      // General mode: read/lookup tools only (no note-mutating tools).
-      activeTools = TOOLS.filter((t) => READ_TOOL_NAMES.includes(t.function.name));
+      // General mode: read/lookup tools plus create-only tools. No tool here
+      // can change or delete a note the user is not looking at.
+      activeTools = GENERAL_TOOLS;
     }
 
     // Real-time awareness (date/time) + who-the-user-is context, injected once
@@ -443,7 +511,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       console.warn("note-chat: MCP load failed:", (e as Error)?.message);
     }
-    const loopTools = [...activeTools, webSearchTool, ...(mcp?.tools ?? [])];
+    const loopTools = [...activeTools, webSearchTool, readUrlTool, ...(mcp?.tools ?? [])];
 
     // Per-turn edit session: carries the client's `base_updated_at` (optimistic
     // concurrency), the dedupe map, and the before/after content so the client
@@ -451,6 +519,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const editSession: NoteEditSession | null = isNoteMode
       ? createNoteEditSession(note_id, base_updated_at, base_content_hash)
       : null;
+
+    // Per-turn create session (dedupe map + the per-turn note cap) and URL read
+    // session (fetch cap + per-URL cache). Both exist in either mode.
+    const createSession = createNoteCreateSession();
+    const urlSession = createUrlReadSession();
 
     // Tool executor closure: web search + MCP passthrough + existing note tools.
     const runTool = async (
@@ -460,10 +533,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (name === "web_search") {
         return runWebSearch(db, OPENROUTER_API_KEY, user.id, String(args.query ?? ""));
       }
+      if (name === "read_url") {
+        return runReadUrl(urlSession, args.url);
+      }
       if (mcp && mcp.hasTool(name)) {
         return mcp.call(name, args);
       }
-      return executeTool(name, args, user.id, note_id, editSession);
+      return executeTool(name, args, user.id, note_id, editSession, createSession);
     };
 
     try {
@@ -490,6 +566,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
               updated_at: editSession.finalUpdatedAt,
             }
           : null,
+        notes_created: createSession.created,
+        folders_created: createSession.foldersCreated,
         credits: c
           ? { remaining_tokens: c.remaining_tokens, remaining_credits: c.remaining_credits }
           : null,

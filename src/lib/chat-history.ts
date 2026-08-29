@@ -21,6 +21,12 @@ export interface PersistedChatMessage {
     noteId: string;
     previousContent: string | null;
   };
+  /** Notes this turn created, so the links survive a reload. */
+  notesCreated?: Array<{
+    id: string;
+    title: string;
+    folder_path: string;
+  }>;
 }
 
 
@@ -140,6 +146,9 @@ export const NOTE_MODIFYING_TOOLS = [
   "add_wikilink",
 ];
 
+
+/** Note-creating tools. These add a note, they never change an existing one. */
+export const NOTE_CREATING_TOOLS = ["create_note"];
 
 /** Collection-modifying tools (create/update/delete items) — used by CollectionChatPanel. */
 export const COLLECTION_MODIFYING_TOOLS = [

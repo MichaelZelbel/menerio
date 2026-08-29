@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { Link } from "react-router-dom";
 import { Note } from "@/hooks/useNotes";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   CHAT_WINDOW_SIZE,
   SUMMARY_THRESHOLD,
   NOTE_MODIFYING_TOOLS,
+  NOTE_CREATING_TOOLS,
   type PersistedChatMessage,
   type PersistedChatState,
 } from "@/lib/chat-history";
@@ -34,6 +36,7 @@ import {
   AlertCircle,
   Trash2,
   Undo2,
+  FilePlus2,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
@@ -152,10 +155,14 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       }
 
       const noteEdit: NoteEditPayload | null = data.note_edit ?? null;
+      const notesCreated: ChatMessage["notesCreated"] = Array.isArray(data.notes_created)
+        ? data.notes_created
+        : undefined;
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: data.reply || "",
         toolResults: data.tool_results,
+        ...(notesCreated?.length ? { notesCreated } : {}),
         ...(noteEdit
           ? {
               noteEdit: {
@@ -190,6 +197,16 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         }
       }
 
+
+      // A note created from here is a different note than the open one, so the
+      // list and folder tree need to refetch even though the editor is fine.
+      if (
+        notesCreated?.length ||
+        data.folders_created?.length ||
+        data.tool_results?.some((tr: any) => NOTE_CREATING_TOOLS.includes(tr.tool))
+      ) {
+        onNoteChanged();
+      }
 
       // Roll the summary forward when needed.
       updated = await refreshSummaryIfNeeded(updated);
@@ -323,6 +340,24 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
                         <span className="text-primary">✓</span>
                       )}
                     </div>
+                  ))}
+                </div>
+              )}
+
+              {msg.notesCreated && msg.notesCreated.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                  {msg.notesCreated.map((n) => (
+                    <Link
+                      key={n.id}
+                      to={`/dashboard/notes/${n.id}`}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <FilePlus2 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {n.title || "Untitled"}
+                        {n.folder_path ? ` · ${n.folder_path}` : ""}
+                      </span>
+                    </Link>
                   ))}
                 </div>
               )}

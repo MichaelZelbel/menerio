@@ -21,6 +21,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
+import {
+  decodeEntities,
+  extractCanonicalUrl,
+  extractHtmlTitle,
+  extractMetaDescription,
+  htmlToPlainText,
+  safeHostname,
+} from "../_shared/html-text.ts";
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB — matches note-attachments policy
 const HTML_MIME_TYPES = new Set([
@@ -46,48 +54,6 @@ function err(message: string, status: number) {
   return json({ ok: false, error: message }, status);
 }
 
-/** Decode common HTML entities used in <title>/meta. */
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-}
-
-/** Extract <title>…</title>. */
-function extractHtmlTitle(html: string): string | null {
-  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!m) return null;
-  const t = decodeEntities(m[1]).replace(/\s+/g, " ").trim();
-  return t || null;
-}
-
-/** Extract <meta name="description"> or og:description. */
-function extractMetaDescription(html: string): string | null {
-  const re =
-    /<meta\s+(?:[^>]*?\s)?(?:name|property)\s*=\s*["'](?:description|og:description)["'][^>]*?content\s*=\s*["']([^"']*)["']/i;
-  const m = html.match(re);
-  if (!m) return null;
-  const t = decodeEntities(m[1]).replace(/\s+/g, " ").trim();
-  return t || null;
-}
-
-/** Extract canonical URL from <link rel="canonical"> or og:url. */
-function extractCanonicalUrl(html: string): string | null {
-  const linkRe =
-    /<link\s+[^>]*rel\s*=\s*["']canonical["'][^>]*href\s*=\s*["']([^"']+)["']/i;
-  const ogRe =
-    /<meta\s+[^>]*property\s*=\s*["']og:url["'][^>]*content\s*=\s*["']([^"']+)["']/i;
-  const m = html.match(linkRe) || html.match(ogRe);
-  return m ? decodeEntities(m[1]).trim() : null;
-}
-
 /** SingleFile injects this comment when saving with metadata. Try to parse it. */
 function extractSingleFileComment(html: string): { url?: string; title?: string } {
   // Format: <!-- Page saved with SingleFile / url: https://... / saved date: ... -->
@@ -96,37 +62,6 @@ function extractSingleFileComment(html: string): { url?: string; title?: string 
   const block = m[0];
   const urlMatch = block.match(/url:\s*(\S+)/i);
   return { url: urlMatch ? urlMatch[1].trim() : undefined };
-}
-
-/**
- * Strip <script>, <style>, <noscript>, comments and tags to extract
- * readable text. Conservative — we just need a search-indexable plain
- * text body, not perfect article extraction.
- */
-function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
-    .replace(/<head[\s\S]*?<\/head>/gi, " ")
-    .replace(/<\/?(p|div|br|li|h[1-6]|tr|article|section)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .split("\n")
-    .map((line) => decodeEntities(line).replace(/[ \t]+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n")
-    .slice(0, 50_000); // cap to keep notes a sane size
-}
-
-function safeHostname(url: string | undefined | null): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
 }
 
 function sanitizeFilename(name: string, fallback: string): string {

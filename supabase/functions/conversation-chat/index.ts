@@ -13,6 +13,7 @@ import { webSearchTool, runWebSearch } from "../_shared/web-search.ts";
 import { loadUserMcpTools, type LoadedMcpTools } from "../_shared/mcp-client.ts";
 import { runAgentLoop } from "../_shared/agent-loop.ts";
 import { READ_TOOL_SCHEMAS, READ_TOOL_NAMES, executeReadTool } from "../_shared/read-tools.ts";
+import { readUrlTool, createUrlReadSession, runReadUrl } from "../_shared/read-url-tool.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,10 +126,14 @@ Deno.serve(async (req) => {
     } catch (e) {
       console.warn("conversation-chat: MCP load failed:", (e as Error)?.message);
     }
-    const tools = [...READ_TOOL_SCHEMAS, webSearchTool, ...(mcp?.tools ?? [])];
+    const tools = [...READ_TOOL_SCHEMAS, webSearchTool, readUrlTool, ...(mcp?.tools ?? [])];
+
+    // Per-turn URL read session: fetch cap plus a per-URL cache.
+    const urlSession = createUrlReadSession();
 
     const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
       if (name === "web_search") return runWebSearch(supabase, openRouterKey, user.id, String(args.query ?? ""));
+      if (name === "read_url") return runReadUrl(urlSession, args.url);
       if (mcp && mcp.hasTool(name)) return mcp.call(name, args);
       if (READ_TOOL_NAMES.includes(name)) return executeReadTool(supabase, openRouterKey, user.id, name, args);
       return JSON.stringify({ error: `Unknown tool: ${name}` });

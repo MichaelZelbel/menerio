@@ -3,7 +3,7 @@ import { flushNoteSave, applyNoteEdit, applyNoteEditVerified, hashNoteContent } 
 import { toast } from "sonner";
 
 
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +17,7 @@ import {
   CHAT_WINDOW_SIZE,
   SUMMARY_THRESHOLD,
   NOTE_MODIFYING_TOOLS,
+  NOTE_CREATING_TOOLS,
   COLLECTION_MODIFYING_TOOLS,
   type PersistedChatMessage,
   type PersistedChatState,
@@ -33,6 +34,7 @@ import {
   Wrench,
   AlertCircle,
   Trash2,
+  FilePlus2,
   Maximize2,
   Minimize2,
   Expand,
@@ -286,10 +288,14 @@ export function GlobalAIChatFAB() {
         return;
       }
 
+      const notesCreated: ChatMessage["notesCreated"] = Array.isArray(data.notes_created)
+        ? data.notes_created
+        : undefined;
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: data.reply || "",
         toolResults: data.tool_results,
+        ...(notesCreated?.length ? { notesCreated } : {}),
       };
       let updated: PersistedChatState = {
         ...nextState,
@@ -325,6 +331,18 @@ export function GlobalAIChatFAB() {
       }
 
 
+
+      // A created note is a new row and possibly a new folder, so both the note
+      // list and the folder tree need to refetch. This is independent of
+      // `noteId`: the general assistant creates notes with no note open.
+      if (
+        notesCreated?.length ||
+        data.folders_created?.length ||
+        data.tool_results?.some((tr: any) => NOTE_CREATING_TOOLS.includes(tr.tool))
+      ) {
+        queryClient.invalidateQueries({ queryKey: ["notes"] });
+        queryClient.invalidateQueries({ queryKey: ["note-folders"] });
+      }
 
       // If a collection-modifying tool ran, dispatch a refresh event
       if (
@@ -510,7 +528,8 @@ export function GlobalAIChatFAB() {
                   <Bot className="h-8 w-8 mx-auto opacity-40" />
                   <p>{emptyText}</p>
                   <p className="text-[10px]">
-                    I can search your notes and media, and look up people's profiles.
+                    I can search your notes and media, look up people's profiles, read a
+                    web page you link to, and create new notes.
                   </p>
                 </div>
               )}
@@ -554,6 +573,25 @@ export function GlobalAIChatFAB() {
                               <span className="text-primary">✓</span>
                             )}
                           </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.notesCreated && msg.notesCreated.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                        {msg.notesCreated.map((n) => (
+                          <Link
+                            key={n.id}
+                            to={`/dashboard/notes/${n.id}`}
+                            onClick={() => isMobile && setOpen(false)}
+                            className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                          >
+                            <FilePlus2 className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                              {n.title || "Untitled"}
+                              {n.folder_path ? ` · ${n.folder_path}` : ""}
+                            </span>
+                          </Link>
                         ))}
                       </div>
                     )}
