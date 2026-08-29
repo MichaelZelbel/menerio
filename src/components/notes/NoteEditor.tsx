@@ -117,6 +117,8 @@ import {
   FLUSH_REQUEST_EVENT,
   FLUSH_DONE_EVENT,
   NOTE_UPDATED_EVENT,
+  NOTE_UPDATE_ACK_EVENT,
+
 } from "@/lib/note-ai-edit";
 
 import { useNavigate } from "react-router-dom";
