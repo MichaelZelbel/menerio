@@ -185,6 +185,45 @@ function editorToMarkdown(editor: { getJSON: () => any }): string {
   return tiptapJsonToMarkdown(editor.getJSON()).trimEnd();
 }
 
+/**
+ * Visible text of a Markdown string: syntax stripped, whitespace collapsed.
+ * Used as the tolerant fallback when checking that an AI edit is on screen.
+ */
+function visibleTextOfMarkdown(md: string): string {
+  return (md ?? "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 $2")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[`*_>#~|-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Does the editor currently show `content`?
+ *
+ * Deliberately NOT an HTML string comparison: `editor.getHTML()` is Tiptap's
+ * re-serialization of the parsed document, so it legitimately differs from the
+ * HTML we fed in (autolink marks, attribute order, empty paragraphs, the async
+ * attachment resolver rewriting image srcs) even when the document is exactly
+ * right. Comparing the canonical Markdown — the form we actually persist —
+ * avoids those false negatives, with a visible-text fallback for round-trip
+ * formatting drift.
+ */
+function editorShowsContent(
+  editor: { getJSON: () => any; getText: () => string },
+  content: string,
+): boolean {
+  const target = normalizeSavedMarkdown(content);
+  if (normalizeSavedMarkdown(editorToMarkdown(editor)) === target) return true;
+  const shown = editor.getText().replace(/\s+/g, " ").trim();
+  const expected = visibleTextOfMarkdown(target);
+  if (!expected) return shown.length === 0;
+  return shown === expected || shown.includes(expected);
+}
+
+
 function formatRelativeSaved(ts: number): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
   if (diffSec < 5) return "just now";
