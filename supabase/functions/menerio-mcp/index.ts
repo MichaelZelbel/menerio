@@ -2609,9 +2609,11 @@ server.registerTool(
       categories: z.array(z.string()).optional().describe("Only return these category slugs"),
       include_notes: z.boolean().optional().default(false).describe("Include linked note content"),
       include_instructions: z.boolean().optional().default(true).describe("Include agent instructions"),
+      detail: z.enum(["curated", "full"]).optional().default("curated")
+        .describe("curated = the few facts meant to reach every prompt unasked. full = the whole record. Everything left out of 'curated' stays searchable through search_brain and through detail:'full'; it just stops arriving unasked."),
     },
   },
-  async ({ scope, categories: catSlugs, include_notes, include_instructions }) => {
+  async ({ scope, categories: catSlugs, include_notes, include_instructions, detail }) => {
     try {
       // Always compute derived relationships — they're the single most useful
       // self-knowledge surface and must show up even when the user hasn't yet
@@ -2658,13 +2660,38 @@ server.registerTool(
         return emptyProfileResponse();
       }
 
-      const { data: entries } = await supabase
-        .from("profile_entries")
-        .select("category_id, label, value, linked_note_id, sort_order")
-        .eq("user_id", getCurrentUserId())
-        .is("contact_id", null)
-        .in("category_id", catIds)
-        .order("sort_order");
+      const entryColumns = "category_id, label, value, linked_note_id, sort_order, show_to_agent";
+      const baseEntryQuery = () =>
+        supabase
+          .from("profile_entries")
+          .select(entryColumns)
+          .eq("user_id", getCurrentUserId())
+          .is("contact_id", null)
+          .in("category_id", catIds)
+          .order("sort_order");
+
+      // Measured 2026-08-30: the uncurated call returns 51 items at equal
+      // weight, so a question about a book arrives with a calorie tracking app
+      // and a Telegram thread id attached. 'curated' is the few Michael chose
+      // on 2026-08-31: identity, work, contact. Not tooling.
+      let entries: any[] | null = null;
+      let curationApplied = detail === "curated";
+
+      if (curationApplied) {
+        const { data } = await baseEntryQuery().eq("show_to_agent", true);
+        entries = data ?? null;
+        // Fail safe. If nothing is flagged yet, an empty profile is worse than
+        // a long one, so fall back to the whole record and SAY that it happened
+        // rather than quietly handing back silence.
+        if (!entries?.length) {
+          curationApplied = false;
+          const { data: all } = await baseEntryQuery();
+          entries = all ?? null;
+        }
+      } else {
+        const { data } = await baseEntryQuery();
+        entries = data ?? null;
+      }
 
       // Check if there are any entries at all
       if (!entries?.length) {
@@ -2779,6 +2806,15 @@ server.registerTool(
         if (filtered.length > 0) {
           (result.profile as any).agent_instructions = filtered.map((i: any) => i.instruction);
         }
+      }
+
+      // Say which set came back. A caller that asked for the curated few and
+      // silently got all 51 would have no way to tell, and the fallback would
+      // hide the fact that nothing has been flagged yet.
+      (result.profile as any).detail = curationApplied ? "curated" : "full";
+      if (detail === "curated" && !curationApplied) {
+        (result.profile as any).detail_note =
+          "Asked for the curated set, but no profile entry is flagged show_to_agent yet, so this is the full record. Flag the few that should reach every prompt.";
       }
 
       return {
@@ -3642,9 +3678,15 @@ server.registerTool(
       valid_to: z.string().optional().describe("YYYY-MM-DD when this stopped being true"),
       confidence: z.enum(["certain", "likely", "unsure"]).optional().default("likely"),
       source_note_id: z.string().optional(),
+      evidence_quote: z.string().optional()
+        .describe("The exact sentence this fact came from. Give search something to match on: 'employer: Acme' is three words and matches badly."),
+      cardinality: z.enum(["one", "many"]).optional()
+        .describe("one = a second live value is a contradiction and supersedes the first. many = several live values are normal and nothing is closed. Defaults from the attribute."),
+      review_by: z.string().optional()
+        .describe("YYYY-MM-DD when this should be re-checked. Defaults from the attribute: a counter needs weeks, a birth date never."),
     },
   },
-  async ({ subject_type, subject_name, subject_id, attribute, value, valid_from, valid_to, confidence, source_note_id }) => {
+  async ({ subject_type, subject_name, subject_id, attribute, value, valid_from, valid_to, confidence, source_note_id, evidence_quote, cardinality, review_by }) => {
     try {
       if (isReservedAttribute(attribute)) {
         return jsonTool({
@@ -3679,6 +3721,12 @@ server.registerTool(
         valid_from: valid_from ?? null,
         valid_to: valid_to ?? null,
         confidence,
+        // Both default from the attribute inside addClaimWithSupersede when
+        // omitted, so a caller that knows nothing about either still gets
+        // correct supersede behaviour and a sensible review date.
+        cardinality,
+        evidence_quote: evidence_quote ?? null,
+        review_by: review_by ?? undefined,
         source_type: source_note_id ? "note" : "ai",
         source_id: source_note_id ?? null,
       });
