@@ -988,7 +988,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
         const html = resolveWikilinks(contentToEditorHtml(content, note));
         if (!editor) throw new Error("editor not ready");
-        const alreadyShowing = normalizeEditorHtml(html) === normalizeEditorHtml(editor.getHTML());
+        const alreadyShowing = editorShowsContent(editor, content);
         if (!alreadyShowing || detail.force) {
           const wasFocused = editor.isFocused;
           const caret = editor.state.selection.from;
@@ -1015,8 +1015,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
         // Verify what the editor is actually showing now — the whole point of
         // the acknowledgement is that "we called setContent" is not proof.
-        applied = normalizeEditorHtml(html) === normalizeEditorHtml(editor.getHTML());
+        applied = editorShowsContent(editor, content);
+        if (!applied) {
+          // The attachment resolver finishes a tick after setContent; give it
+          // one beat before calling this a failure.
+          await new Promise((r) => setTimeout(r, 60));
+          applied = !editor.isDestroyed && editorShowsContent(editor, content);
+        }
         if (!applied) ackError = "editor content did not converge";
+
         // Refresh the cached note in React Query so list/sidebar update too.
         queryClient.invalidateQueries({ queryKey: ["note", note.id] });
         queryClient.invalidateQueries({ queryKey: ["notes"] });
