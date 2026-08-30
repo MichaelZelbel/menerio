@@ -211,7 +211,7 @@ function visibleTextOfMarkdown(md: string): string {
  * avoids those false negatives, with a visible-text fallback for round-trip
  * formatting drift.
  */
-function editorShowsContent(
+export function editorShowsContent(
   editor: { getJSON: () => any; getText: () => string },
   content: string,
 ): boolean {
