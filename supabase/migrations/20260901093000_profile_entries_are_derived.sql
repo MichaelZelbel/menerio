@@ -39,14 +39,21 @@ CREATE INDEX IF NOT EXISTS profile_entries_show_to_agent_idx
 -- gender, location), work (the book, the product, the business), and contact
 -- (primary website, email). Deliberately NOT tooling.
 --
--- Matched on label so it survives a reordering, and scoped to labels that
--- actually exist. Everything left out stays fully searchable through
--- get_user_profile scope:"full" and through search_brain; it just stops
--- arriving unasked.
+-- Matched on label so it survives a reordering. Everything left out stays
+-- fully searchable through get_user_profile detail:"full" and through
+-- search_brain; it just stops arriving unasked.
+--
+-- `contact_id IS NULL` is the important half and it is easy to miss.
+-- profile_entries holds rows for CONTACTS as well as for the owner, so the
+-- same labels ("Full name", "Gender", "Email") exist many times over. Without
+-- this clause the first run of it flagged 17 rows instead of 8, six of them
+-- other people's names. get_user_profile filters on contact_id itself so
+-- nothing leaked, but the flag was wrong on rows another reader would trust.
 UPDATE public.profile_entries
 SET show_to_agent = true
-WHERE lower(btrim(label)) IN (
-  'full name', 'gender', 'location',
-  'book', 'product', 'limited partner',
-  'website', 'email'
-);
+WHERE contact_id IS NULL
+  AND lower(btrim(label)) IN (
+    'full name', 'gender', 'location',
+    'book', 'product', 'limited partner',
+    'website', 'email'
+  );

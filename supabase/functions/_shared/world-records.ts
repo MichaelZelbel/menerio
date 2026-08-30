@@ -46,6 +46,16 @@ export interface WorldClaim {
   rank: string;
   written_by: "human" | "machine";
   evidence_quote: string | null;
+  /** certain | likely | unsure. */
+  confidence: string | null;
+  /** one = a second live value is a contradiction. many = several are normal. */
+  cardinality: string | null;
+  /** When to DOUBT this fact, as opposed to when it stopped being true. */
+  review_by: string | null;
+  /** note | moment | manual | ai. Says what source_ref points at. */
+  source_kind: string | null;
+  /** The id of the note this fact came from, when source_kind is 'note'. */
+  source_ref: string | null;
   updated_at: string;
 }
 
@@ -143,6 +153,15 @@ export function toWorldClaim(row: Record<string, any>): WorldClaim {
     rank: row.rank ?? "normal",
     written_by: writtenBy(row.origin),
     evidence_quote: row.evidence_quote ?? null,
+    // The three fields the 2026-09-01 widening added. This mapper is an
+    // allowlist, so a column added to world_claims reaches the hub only when
+    // it is named here: the view carried cardinality for a day before anyone
+    // noticed the mirror still had none.
+    confidence: row.confidence ?? null,
+    cardinality: row.cardinality ?? null,
+    review_by: dateOnly(row.review_by),
+    source_kind: row.source_kind ?? null,
+    source_ref: row.source_ref ?? null,
     updated_at: row.updated_at ?? row.created_at ?? "",
   };
 }
