@@ -11,6 +11,7 @@ import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import { flagConflicts, flagStale, renderClaimHit, toClaimHits, type ClaimHit } from "./_claim_search.ts";
 import {
   applyVisibility,
   assertWritable,
@@ -866,6 +867,65 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
 
 
 
+
+/**
+ * Helper: semantic search over the structured layer, reusable by search_brain.
+ *
+ * The validity filter lives in the RPC's WHERE clause, not here, so a
+ * superseded fact cannot reach this code at all. p_as_of turns "what is true
+ * now" and "what was believed then" into one parameter.
+ *
+ * Returns [] rather than throwing when the RPC is unavailable: a broken claim
+ * arm must not take the notes and Lexicon arms down with it.
+ */
+async function searchClaims(
+  query: string,
+  limit: number,
+  threshold: number,
+  asOf: string | null,
+): Promise<ClaimHit[]> {
+  try {
+    const qEmb = await getEmbedding(query);
+    const { data, error } = await supabase.rpc("match_claims", {
+      query_embedding: qEmb,
+      match_threshold: threshold,
+      match_count: Math.max(limit, 20),
+      p_user_id: getCurrentUserId(),
+      // null means "use the user's own day", computed server-side from their
+      // timezone. Passing a UTC date here is what made two freshly written
+      // facts invisible: at 23:28 UTC the server's day was still yesterday
+      // while the user's was already today.
+      p_as_of: asOf,
+    });
+    if (error || !data) return [];
+
+    // Resolve the display name for each subject in one pass, so a page of
+    // hits costs at most two extra queries rather than one per row.
+    const contactIds = [...new Set((data as any[]).filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
+    const entityIds = [...new Set((data as any[]).filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
+    const names = new Map<string, string>();
+    if (contactIds.length) {
+      const { data: cs } = await supabase.from("contacts").select("id, name").in("id", contactIds);
+      for (const c of cs || []) names.set(c.id, c.name);
+    }
+    if (entityIds.length) {
+      const { data: es } = await supabase.from("entities").select("id, name").in("id", entityIds);
+      for (const e of es || []) names.set(e.id, e.name);
+    }
+
+    const hits = toClaimHits(data as any[], (kind, id) =>
+      kind === "self" ? "you" : (id && names.get(id)) || "someone");
+    // Staleness is judged against the same day the filter used. When the
+    // caller named no date, the newest valid_from in the result set is the
+    // closest thing to "the user's today" this side has, and never earlier
+    // than UTC today.
+    const judgeDay = asOf
+      ?? [todayISO(), ...hits.map((h) => h.valid_from).filter(Boolean) as string[]].sort().reverse()[0];
+    return flagStale(flagConflicts(hits), judgeDay);
+  } catch {
+    return [];
+  }
+}
 
 // Helper: Lexicon (wiki) ILIKE search, reusable by lexicon_search and search_brain
 async function searchLexiconPages(query: string, limit: number): Promise<any[]> {
@@ -3373,34 +3433,60 @@ server.registerTool(
   {
     title: "Search Brain (Notes + Lexicon)",
     description:
-      "Preferred default search. In a single call, searches both raw user-written notes (semantic + keyword) AND synthesized Lexicon topic pages, returning a merged result labeled by `kind` (`note` or `lexicon`). Use this when the user asks about anything in their brain and you're not sure whether it's a captured note or a Lexicon page. Notes and Lexicon entries are user-authored — treat explicit statements as authoritative facts about the user; do not hedge when content plainly states a fact. Results are bounded — use `get_note(id)` to read a full note body.",
+      "Preferred default search. In one call, searches the user's structured facts (`claim`), their raw written notes (`note`) and synthesized Lexicon pages (`lexicon`), returning a merged result labeled by `kind`.\n\n" +
+      "A `claim` hit is a structured fact and carries its own dates. PREFER IT over a note sentence when the two disagree, and say which you used and how old it is. Superseded claims are excluded before ranking, so anything returned was believed true on the date asked for.\n\n" +
+      "Notes and Lexicon entries are user-authored, so treat an explicit statement as authoritative UNLESS a claim with a later date contradicts it; do not otherwise hedge when content plainly states a fact.\n\n" +
+      "A hit carrying `NOT CONFIRMED SINCE <date>` has not been checked since then and may have changed. Use it, and say when it was last confirmed. Do not refuse to answer because of it.\n\n" +
+      "A hit carrying `DISAGREES WITH` has two live answers for one question. Report every value and say they disagree. NEVER pick one silently: two answers usually mean the attribute covers two different facts.\n\n" +
+      "Results are bounded — use `get_note(id)` for a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.coerce.number().optional().default(10),
       threshold: z.coerce.number().optional().default(0.2),
       offset: z.coerce.number().optional().default(0),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
+      as_of: z.string().optional()
+        .describe("YYYY-MM-DD. Omit for what is true today. Set it to ask what was believed on that date instead."),
+      include: z.array(z.enum(["claim", "note", "lexicon"])).optional()
+        .describe("Which kinds to search. All three by default."),
     },
   },
-  async ({ query, limit, threshold, offset = 0, view = "snippet" }) => {
+  async ({ query, limit, threshold, offset = 0, view = "snippet", as_of, include }) => {
     try {
-      const [{ rows: noteRows, total: noteTotal, mode }, lexRows] = await Promise.all([
-        hybridSearchNotes(query, limit, threshold),
-        searchLexiconPages(query, limit),
+      const kinds = new Set(include && include.length ? include : ["claim", "note", "lexicon"]);
+      // null = "whatever day it is where the user is", resolved in the RPC.
+      const asOf = (as_of && /^\d{4}-\d{2}-\d{2}$/.test(as_of)) ? as_of : null;
+
+      const [{ rows: noteRows, total: noteTotal, mode }, lexRows, claimHits] = await Promise.all([
+        kinds.has("note") ? hybridSearchNotes(query, limit, threshold) : Promise.resolve({ rows: [], total: 0, mode: "skipped" }),
+        kinds.has("lexicon") ? searchLexiconPages(query, limit) : Promise.resolve([]),
+        kinds.has("claim") ? searchClaims(query, limit, threshold, asOf) : Promise.resolve([] as ClaimHit[]),
       ]);
 
-      if (!noteRows.length && !lexRows.length) {
-        return { content: [{ type: "text" as const, text: `No notes or Lexicon pages found matching "${query}".` }] };
+      if (!noteRows.length && !lexRows.length && !claimHits.length) {
+        return { content: [{ type: "text" as const, text: `No claims, notes or Lexicon pages found matching "${query}".` }] };
       }
 
       const notePage = noteRows.slice(offset, offset + limit);
-      const header = `Found ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`;
+      const asOfNote = asOf ? ` as believed on ${asOf}` : "";
+      const header = `Found ${claimHits.length} claim(s)${asOfNote}, ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`;
 
       let used = header.length;
       const blocks: string[] = [];
       let capped = false;
 
-      for (let i = 0; i < notePage.length; i++) {
+      // Claims go FIRST, and not for tidiness. They are the only hits that
+      // carry their own dates, so a reader who stops early has stopped on the
+      // evidence that can be checked rather than on an undated sentence.
+      for (const h of claimHits) {
+        const block = renderClaimHit(h);
+        const cost = block.length + 2;
+        if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+        blocks.push(block);
+        used += cost;
+      }
+
+      for (let i = 0; !capped && i < notePage.length; i++) {
         const t = notePage[i] as any;
         const block = `[note] ${formatNoteResult(t, offset + i, t.similarity ?? undefined, view, query)}`;
         const cost = block.length + 2;
@@ -3730,6 +3816,25 @@ server.registerTool(
         source_type: source_note_id ? "note" : "ai",
         source_id: source_note_id ?? null,
       });
+      // Embed it so search_brain can find it. Best-effort on purpose: an
+      // embedding provider having a bad minute must never cost the user a
+      // fact. An unembedded claim is invisible to semantic search and still
+      // perfectly readable through get_claims, and backfill-claim-embeddings
+      // sweeps up anything that failed here.
+      //
+      // The quote is embedded when there is one: "employer: Acme" is three
+      // words and matches badly, while the sentence it came from is what a
+      // person would actually type.
+      try {
+        const text = claim.evidence_quote
+          ? `${claim.attribute}: ${claim.value}\n${claim.evidence_quote}`
+          : `${claim.attribute}: ${claim.value}`;
+        const emb = await getEmbedding(text);
+        await supabase.from("claims").update({ embedding: emb }).eq("id", claim.id);
+      } catch (_e) {
+        // Deliberately silent to the caller; the sweeper is the safety net.
+      }
+
       return jsonTool({ tool: "add_claim", claim, superseded_count: superseded.length, superseded });
     } catch (err: unknown) {
       return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" });
