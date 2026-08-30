@@ -192,8 +192,9 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         );
         if (applyResult.status === "failed") {
           setError(
-            "The note was saved, but the editor did not refresh. Reload the note to see the change.",
+            "Saved. The editor view may be out of date — reload the note to see the change.",
           );
+
         }
       }
 

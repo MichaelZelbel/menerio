@@ -317,8 +317,9 @@ export function GlobalAIChatFAB() {
           data.note_edit?.updated_at ?? null,
         );
         if (result.status === "failed") {
-          toast.error("The note was saved, but the open editor did not refresh.", {
+          toast.warning("Saved. The editor view may be out of date.", {
             description: "Reload the note to see the change.",
+
             action: {
               label: "Reload note",
               onClick: () => {
