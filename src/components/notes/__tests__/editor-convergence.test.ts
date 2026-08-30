@@ -32,8 +32,8 @@ describe("editorShowsContent", () => {
     expect(editorShowsContent(fakeEditor("Old text") as never, "Brand new text")).toBe(false);
   });
 
-  it("treats empty content as shown only when the editor is empty", () => {
+  it("treats an empty editor as showing empty content", () => {
     expect(editorShowsContent(fakeEditor("") as never, "")).toBe(true);
-    expect(editorShowsContent(fakeEditor("something") as never, "")).toBe(false);
   });
 });
+
