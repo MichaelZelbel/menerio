@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   changedRecently,
   formatValidityRange,
+  isStale,
   humanizeAttribute,
   isCurrentClaim,
   isReservedAttribute,
@@ -118,7 +120,30 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
                 <Sparkles className="h-3 w-3" /> AI
               </span>
             )}
+            {/* The rot no contradiction check can see: one value, nothing
+                disagreeing with it, quietly out of date. */}
+            {!superseded && isStale(claim) && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/60 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
+              >
+                not checked since {claim.review_by}
+              </Badge>
+            )}
           </div>
+          {claim.evidence_quote && (
+            <blockquote className="mt-1 border-l-2 border-muted pl-2 text-[11px] italic text-muted-foreground">
+              {claim.evidence_quote}
+            </blockquote>
+          )}
+          {claim.source_type === "note" && claim.source_id && (
+            <Link
+              to={`/dashboard/notes/${claim.source_id}`}
+              className="mt-0.5 inline-block text-[11px] text-primary underline underline-offset-2"
+            >
+              open the note this came from
+            </Link>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           {!superseded && (

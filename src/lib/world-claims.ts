@@ -23,6 +23,31 @@ export interface ClaimRow {
   evidence_quote?: string | null;
   updated_at?: string | null;
   source_table?: string;
+  /** one = a second live value is a contradiction. many = several are normal. */
+  cardinality?: string | null;
+  /** When to DOUBT this fact, as opposed to when it stopped being true. */
+  review_by?: string | null;
+  /** note | moment | manual | ai. Says what source_ref points at. */
+  source_kind?: string | null;
+  /** The note this fact came from, when source_kind is 'note'. */
+  source_ref?: string | null;
+}
+
+/**
+ * A fact nobody has checked since its review date passed.
+ *
+ * This is the rot no contradiction check can see: one value, nothing
+ * disagreeing with it, quietly out of date. A closed claim is history rather
+ * than rot, so it never counts.
+ */
+export function isStale(
+  row: Pick<ClaimRow, "review_by" | "valid_to">,
+  today = new Date(),
+): boolean {
+  if (!row.review_by) return false;
+  const day = today.toISOString().slice(0, 10);
+  if (row.valid_to && row.valid_to <= day) return false;
+  return row.review_by <= day;
 }
 
 export interface ClaimGroup {

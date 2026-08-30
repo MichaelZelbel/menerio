@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { SEOHead } from "@/components/SEOHead";
 import { EntityDetail } from "@/components/world/EntityDetail";
 import { ENTITY_TYPE_SUGGESTIONS, useCreateEntity, useEntities } from "@/hooks/useEntities";
 import { useWorldClaims, useWorldEntities, useWorldEvents } from "@/hooks/useWorld";
-import { groupClaims, isHumanWritten } from "@/lib/world-claims";
+import { groupClaims, isHumanWritten, isStale } from "@/lib/world-claims";
 
 /**
  * World: everything in your life as three lists. A thing that exists (entity),
@@ -294,7 +294,30 @@ export default function World() {
                           {group.top.valid_from || "always"} to {group.top.valid_to || "now"}
                         </span>
                       )}
+                      {isStale(group.top) && (
+                        <Badge variant="outline" className="border-amber-500/60 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400">
+                          not checked since {group.top.review_by}
+                        </Badge>
+                      )}
                     </div>
+
+                    {/* The sentence this fact came from, and a way back to it.
+                        Without these a fact is an assertion you cannot check,
+                        which is exactly what makes a second brain stop being
+                        trustworthy. */}
+                    {group.top.evidence_quote && (
+                      <blockquote className="mt-1.5 border-l-2 border-muted pl-3 text-xs italic text-muted-foreground">
+                        {group.top.evidence_quote}
+                      </blockquote>
+                    )}
+                    {group.top.source_kind === "note" && group.top.source_ref && (
+                      <Link
+                        to={`/dashboard/notes/${group.top.source_ref}`}
+                        className="mt-1 inline-block text-xs text-primary underline underline-offset-2"
+                      >
+                        open the note this came from
+                      </Link>
+                    )}
 
                     {group.others.length > 0 && (
                       <div className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
