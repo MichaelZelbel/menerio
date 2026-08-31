@@ -2762,6 +2762,47 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     // Generate timeline-moment suggestions from past events documented in the note.
     await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
 
+    // Promote whatever facts this note just produced into dated claims.
+    //
+    // THE LAST HOP, and it was missing until 2026-08-31. Extraction from a note
+    // was never the gap: generateProfileSuggestions above writes a fact into
+    // profile_entries with origin 'ai_note', the sentence it came from, and
+    // linked_note_id pointing back here. But profile_entries stopped being a
+    // fact store in migration 093000 and became a display layer over `claims`,
+    // and nothing carried a row across. So a fact extracted from a note reached
+    // the display layer and stopped there: undated, with no cardinality and no
+    // review date, invisible to search_claims and to the hub mirror's dated arm.
+    // That is rot type 3a in SPEC.md — the value exists in a note and was never
+    // promoted — and this call is what closes it for every new fact.
+    //
+    // Idempotent and cheap in the steady state: the promotion skips every entry
+    // that already has a claim, so a note that produced no new fact costs one
+    // scan and zero embeddings. Fire-and-forget, because a claim is a
+    // convenience over rows that already exist and must never fail the note.
+    //
+    // Logged the way compute-connections is, and for the same reason: fetch()
+    // only rejects on a transport error, so a 4xx/5xx would otherwise vanish.
+    fetch(`${SUPABASE_URL}/functions/v1/promote-profile-entries`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        dry_run: false,
+        include_contacts: true,
+        target_user_id: note.user_id,
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          console.error(
+            `promote-profile-entries rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
+          );
+        }
+      })
+      .catch((err) => console.error("promote-profile-entries trigger error:", err));
+
     // Trigger connection computation (fire-and-forget, but never silent).
     //
     // fetch() only rejects on a transport error, so an HTTP 4xx/5xx from the

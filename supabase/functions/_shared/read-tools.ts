@@ -1,27 +1,100 @@
 /**
- * Shared read-only tools for the chat agents (note-chat + conversation-chat).
+ * Shared read-only tools for the chat agents (note-chat, conversation-chat,
+ * collection-chat).
  *
- * These four tools let an agent look things up across the user's brain without
- * mutating anything: semantic note search, text note search, media/OCR search,
- * and structured person-profile lookup. Ported out of note-chat so Mira
- * (conversation-chat) can use the exact same implementations.
+ * These tools let an agent look things up across the user's brain without
+ * mutating anything: dated facts, semantic note search, text note search,
+ * media/OCR search, and structured person-profile lookup. Ported out of
+ * note-chat so Mira (conversation-chat) can use the exact same
+ * implementations.
  *
  * Read-only by design — the note-mutating tools (append/update/wikilink) stay
  * local to note-chat, which is the only agent with a "current note".
+ *
+ * `search_claims` is first in the list on purpose. The assistant used to see
+ * notes and media and nothing else, so it answered "I don't have your street
+ * address on file" while the address sat in the claims table, dated, quoted
+ * and embedded. A fact store the app cannot read is a fact store the app does
+ * not have.
  */
 import { openRouterWithCredits } from "./llm-credits.ts";
 import { ilikeAnyColumn } from "./postgrest-filters.ts";
+import {
+  flagConflicts,
+  flagStale,
+  judgeDayFor,
+  renderClaimHit,
+  toClaimHits,
+  type ClaimHit,
+} from "./claim-search.ts";
+import { todayISO } from "./claims.ts";
 
 const SEMANTIC_EMBED_MODEL = "openai/text-embedding-3-small";
+
+/**
+ * The three rules a caller must follow once it can see dated facts.
+ *
+ * Appended to every chat agent's system prompt in code rather than only in the
+ * default prompt text, so an admin overriding a prompt in `llm_call_configs`
+ * cannot silently remove them. The MCP tool description already carries the
+ * same three; this is the in-app half of the same contract.
+ */
+export const CLAIMS_CONTRACT = `
+
+--- DATED FACTS ---
+The user's facts live in two places, and they are not equal. A CLAIM is a
+structured fact with a date, a confidence and the sentence it came from. A note
+is prose that may contain a fact somewhere in it.
+
+1. Prefer a dated claim over a sentence in a note, and say which one you used.
+   Call \`search_claims\` before answering any question about a fact of the
+   user's life — an address, a phone number, a job, a count, a preference, who
+   someone is to them. If a claim answers it, answer from the claim and name it
+   as a dated fact. Do not say you have nothing on file before you have called
+   that tool.
+2. A stale fact is still usable, and you must report its date. When a claim
+   comes back marked NOT CONFIRMED SINCE, give the value AND say when it was
+   last confirmed. Do not refuse it, and do not present it as current.
+3. Two live answers are both reported, never silently resolved. When a claim
+   comes back marked DISAGREES WITH, give every value and say they disagree.
+   Two live answers usually mean one name covers two different facts, not that
+   one of them is wrong. Picking a winner is how a real fact disappears.
+--- END DATED FACTS ---`;
 
 /** OpenAI-style tool schemas for the read tools. */
 export const READ_TOOL_SCHEMAS = [
   {
     type: "function",
     function: {
+      name: "search_claims",
+      description:
+        "Search the user's DATED FACTS by meaning. This is the structured fact store: each hit carries a value, the dates it is believed between, a confidence, and the sentence it came from. " +
+        "CALL THIS FIRST for any question about a fact of the user's own life — their address, phone number, email, employer, job, where they live, a count or streak, a preference, a possession, who someone is to them. " +
+        "These facts are NOT in the notes index and note search cannot see them, so answering 'I don't have that on file' without calling this tool is wrong. " +
+        "Superseded facts are filtered out in the database, so anything returned is believed true today. " +
+        "A hit marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. " +
+        "A hit marked DISAGREES WITH has more than one live answer — report every value, never pick one.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "What you want to know, in the user's own words (e.g. 'street address', 'duolingo streak', 'who is my manager')",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_notes_semantic",
       description:
-        "Search the user's notes by meaning using vector similarity. Best for conceptual or fuzzy queries.",
+        "Search the user's notes by meaning using vector similarity. Best for conceptual or fuzzy queries. " +
+        "For a plain fact about the user's life, prefer `search_claims` — a dated fact beats a sentence in a note. " +
+        "This tool returns any matching dated facts above the notes for that reason.",
       parameters: {
         type: "object",
         properties: {
@@ -140,6 +213,79 @@ export async function loadPersonProfile(db: any, userId: string, contactId: stri
 }
 
 /**
+ * Embed a query with the model claims and note chunks BOTH use.
+ *
+ * One model, one dimension, so a single vector can be pushed at
+ * `match_note_chunks` and `match_claims` in the same turn. That is why
+ * `search_notes_semantic` can return claims without paying for a second
+ * embedding.
+ */
+async function embedQuery(db: any, apiKey: string, userId: string, query: string): Promise<string> {
+  const embResult = await openRouterWithCredits(
+    db,
+    apiKey,
+    userId,
+    "chat:tool:semantic-search",
+    "embeddings",
+    { model: SEMANTIC_EMBED_MODEL, input: query }
+  );
+  return `[${embResult.result.data[0].embedding.join(",")}]`;
+}
+
+/**
+ * The claim arm, shared by the `search_claims` tool and by
+ * `search_notes_semantic`.
+ *
+ * `p_as_of` is null on purpose: that makes the RPC resolve the user's OWN day
+ * from their timezone. Passing a UTC date here is the bug that made two
+ * freshly written facts invisible — at 23:28 UTC the server's day was still
+ * yesterday while the user's was already today, and for a user at UTC+2 every
+ * fact recorded after 22:00 local vanished for two hours with no error
+ * anywhere.
+ *
+ * Returns [] on any failure. A claim search that throws must not take the note
+ * search down with it.
+ */
+export async function searchClaims(
+  db: any,
+  userId: string,
+  embedding: string,
+  limit = 12
+): Promise<ClaimHit[]> {
+  try {
+    const { data, error } = await db.rpc("match_claims", {
+      query_embedding: embedding,
+      match_threshold: 0.2,
+      match_count: Math.max(limit, 20),
+      p_user_id: userId,
+      p_as_of: null,
+    });
+    if (error || !data) return [];
+
+    // Resolve every subject's display name in at most two extra queries, not
+    // one per row.
+    const rows = data as any[];
+    const contactIds = [...new Set(rows.filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
+    const entityIds = [...new Set(rows.filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
+    const names = new Map<string, string>();
+    if (contactIds.length) {
+      const { data: cs } = await db.from("contacts").select("id, name").in("id", contactIds);
+      for (const c of cs || []) names.set(c.id, c.name);
+    }
+    if (entityIds.length) {
+      const { data: es } = await db.from("entities").select("id, name").in("id", entityIds);
+      for (const e of es || []) names.set(e.id, e.name);
+    }
+
+    const hits = toClaimHits(rows, (kind, id) =>
+      kind === "self" ? "you" : (id && names.get(id)) || "someone");
+    return flagStale(flagConflicts(hits), judgeDayFor(null, hits, todayISO())).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Execute one of the read tools. Returns a JSON string for the agent loop.
  * `apiKey` is the OpenRouter key (for the semantic-search embedding).
  */
@@ -151,19 +297,44 @@ export async function executeReadTool(
   args: Record<string, unknown>
 ): Promise<string> {
   switch (name) {
+    case "search_claims": {
+      const query = String(args.query || "").trim();
+      if (!query) return JSON.stringify({ error: "query required" });
+      let embeddingStr: string;
+      try {
+        embeddingStr = await embedQuery(db, apiKey, userId, query);
+      } catch (e) {
+        return JSON.stringify({ error: `Could not embed the query: ${(e as Error)?.message}` });
+      }
+      const claims = await searchClaims(db, userId, embeddingStr);
+      if (claims.length === 0) {
+        return JSON.stringify({
+          found: false,
+          count: 0,
+          message:
+            `No dated fact matches "${query}". The fact may still be in a note — try search_notes_semantic before telling the user you have nothing.`,
+        });
+      }
+      // Rendered as text, not as raw rows: the dates, the NOT CONFIRMED SINCE
+      // line and the DISAGREES WITH line are the entire advantage a claim has
+      // over a sentence in a note, and a model reads them far more reliably
+      // as prose than as JSON fields it has to remember to look at.
+      return JSON.stringify({
+        found: true,
+        count: claims.length,
+        facts: claims.map(renderClaimHit).join("\n"),
+      });
+    }
+
     case "search_notes_semantic": {
       const query = args.query as string;
       try {
-        const embResult = await openRouterWithCredits(
-          db,
-          apiKey,
-          userId,
-          "chat:tool:semantic-search",
-          "embeddings",
-          { model: SEMANTIC_EMBED_MODEL, input: query }
-        );
-        const embedding = embResult.result.data[0].embedding;
-        const embeddingStr = `[${embedding.join(",")}]`;
+        const embeddingStr = await embedQuery(db, apiKey, userId, query);
+        // The same vector answers both stores, so the dated facts cost no
+        // extra embedding call. They are returned ABOVE the notes because a
+        // dated fact beats a sentence in a note, and because an agent that
+        // only ever reaches for note search must still see them.
+        const claims = await searchClaims(db, userId, embeddingStr, 8);
         const { data, error } = await db.rpc("match_note_chunks", {
           query_embedding: embeddingStr,
           match_threshold: 0.5,
@@ -197,7 +368,17 @@ export async function executeReadTool(
           }
         }
         const results = Array.from(byNote.values()).slice(0, 10);
-        return JSON.stringify({ results, count: results.length });
+        return JSON.stringify({
+          ...(claims.length
+            ? {
+                dated_facts: claims.map(renderClaimHit).join("\n"),
+                dated_facts_note:
+                  "These are dated facts from the structured store. Prefer them over the note snippets below, and say the answer came from a dated fact.",
+              }
+            : {}),
+          results,
+          count: results.length,
+        });
       } catch {
         return executeReadTool(db, apiKey, userId, "search_notes_text", args);
       }

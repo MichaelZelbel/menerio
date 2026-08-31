@@ -1,9 +1,19 @@
 /**
  * Searching the structured layer.
  *
- * index.ts is ~3,900 lines already, so the claim arm of search_brain lives
- * here. Everything in this file is a pure function over rows the RPC returned,
- * which is what makes it testable without a database.
+ * Everything in this file is a pure function over rows `match_claims`
+ * returned, which is what makes it testable without a database.
+ *
+ * Two callers, and they must behave identically:
+ *   - menerio-mcp `search_brain`, which is what an outside agent sees
+ *   - _shared/read-tools.ts `search_claims`, which is what the in-app
+ *     assistant sees
+ *
+ * They were not identical once, and that is the reason this file moved here.
+ * The MCP could answer "what is my street address" from a dated claim while
+ * the assistant in the app said it had no address on file, because the app's
+ * chat functions queried notes and media and nothing else. The same fact
+ * store has to answer both, or the app is lying about what it knows.
  *
  * Mirrors nothing: this has no frontend twin.
  */
@@ -75,6 +85,25 @@ export function flagStale(hits: ClaimHit[], today: string): ClaimHit[] {
     h.stale_since = !closed && h.review_by && h.review_by <= today ? h.review_by : null;
   }
   return hits;
+}
+
+/**
+ * The day staleness is judged against.
+ *
+ * `match_claims` filters validity in SQL against the user's OWN day, computed
+ * from their timezone, and it does that whenever `p_as_of` is null. This side
+ * has to agree with it or a fact can be live in the WHERE clause and stale in
+ * the badge on the same row.
+ *
+ * When the caller named a date, that date is the answer. When it did not, the
+ * newest `valid_from` in the result set is the closest thing this side has to
+ * the user's today, and never earlier than UTC today: a user at UTC+2 who
+ * states a fact at 00:30 local is on tomorrow's date while the server is not.
+ */
+export function judgeDayFor(asOf: string | null, hits: ClaimHit[], utcToday: string): string {
+  if (asOf) return asOf;
+  const candidates = [utcToday, ...hits.map((h) => h.valid_from).filter((d): d is string => !!d)];
+  return candidates.sort().reverse()[0];
 }
 
 /** Rows as match_claims returns them, plus the subject's display name. */

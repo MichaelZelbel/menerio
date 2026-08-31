@@ -12,7 +12,7 @@ import { buildAwarenessContext } from "../_shared/awareness.ts";
 import { webSearchTool, runWebSearch } from "../_shared/web-search.ts";
 import { loadUserMcpTools, type LoadedMcpTools } from "../_shared/mcp-client.ts";
 import { runAgentLoop } from "../_shared/agent-loop.ts";
-import { READ_TOOL_SCHEMAS, READ_TOOL_NAMES, executeReadTool } from "../_shared/read-tools.ts";
+import { READ_TOOL_SCHEMAS, READ_TOOL_NAMES, CLAIMS_CONTRACT, executeReadTool } from "../_shared/read-tools.ts";
 import { readUrlTool, createUrlReadSession, runReadUrl } from "../_shared/read-url-tool.ts";
 import {
   NOTE_CREATE_TOOL_SCHEMAS,
@@ -143,7 +143,8 @@ Deno.serve(async (req) => {
     systemPrompt +=
       buildAwarenessContext(typeof timezone === "string" ? timezone : undefined) +
       profileDigest +
-      NOTE_CREATE_CONTRACT;
+      NOTE_CREATE_CONTRACT +
+      CLAIMS_CONTRACT;
 
     // Model (configurable) + tools. Mira gets read/lookup tools, web search,
     // page reading, the create-only note tools, and the user's MCP servers.

@@ -21,6 +21,7 @@ import { runAgentLoop } from "../_shared/agent-loop.ts";
 import {
   READ_TOOL_SCHEMAS,
   READ_TOOL_NAMES,
+  CLAIMS_CONTRACT,
   executeReadTool,
 } from "../_shared/read-tools.ts";
 import {
@@ -452,6 +453,10 @@ Guidelines:
     } catch (e) {
       console.warn("collection-chat: profile load failed:", (e as Error)?.message);
     }
+    // A collection question is still often a question about the user's own
+    // life ("which of my restaurants is nearest home"), so this agent needs
+    // the dated facts and the rules for reading them too.
+    systemContent += CLAIMS_CONTRACT;
 
     const { effective: cfg } = await resolveConfig(db, "collection-chat.main", {
       provider: "openrouter",

@@ -19,6 +19,7 @@ import { runAgentLoop } from "../_shared/agent-loop.ts";
 import {
   READ_TOOL_SCHEMAS,
   READ_TOOL_NAMES,
+  CLAIMS_CONTRACT,
   loadPersonProfile,
   executeReadTool,
 } from "../_shared/read-tools.ts";
@@ -480,7 +481,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       console.warn("note-chat: profile load failed:", (e as Error)?.message);
     }
-    systemMessage.content += awareness + profileDigest;
+    // The dated-facts contract goes in for BOTH modes: the note-mode agent
+    // answers questions about the user just as often as the general one, and
+    // it was equally blind to the claims table.
+    systemMessage.content += awareness + profileDigest + CLAIMS_CONTRACT;
 
     // Resolve the (configurable) model for this call site — admin LLM panel
     // rows for "note-chat.main"/"note-chat.general" override the default.

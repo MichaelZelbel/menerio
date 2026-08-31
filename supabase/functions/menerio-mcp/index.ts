@@ -11,7 +11,7 @@ import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
-import { flagConflicts, flagStale, renderClaimHit, toClaimHits, type ClaimHit } from "./_claim_search.ts";
+import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
   applyVisibility,
   assertWritable,
@@ -915,13 +915,9 @@ async function searchClaims(
 
     const hits = toClaimHits(data as any[], (kind, id) =>
       kind === "self" ? "you" : (id && names.get(id)) || "someone");
-    // Staleness is judged against the same day the filter used. When the
-    // caller named no date, the newest valid_from in the result set is the
-    // closest thing to "the user's today" this side has, and never earlier
-    // than UTC today.
-    const judgeDay = asOf
-      ?? [todayISO(), ...hits.map((h) => h.valid_from).filter(Boolean) as string[]].sort().reverse()[0];
-    return flagStale(flagConflicts(hits), judgeDay);
+    // Staleness is judged against the same day the filter used, by the same
+    // function the in-app assistant uses, so the two cannot drift apart.
+    return flagStale(flagConflicts(hits), judgeDayFor(asOf, hits, todayISO()));
   } catch {
     return [];
   }
@@ -1825,13 +1821,16 @@ server.registerTool(
   {
     title: "Get Contact Profile",
     description:
-      "Return a specific contact's structured profile facts (birthday, nicknames, favorite foods, aliases, ethnicity, location, job, …). Use this when the user asks about a specific person's attributes and `get_contact_context` doesn't include enough profile detail. Provide either `name` (fuzzy) or `contact_id`.",
+      "Return a specific contact's structured profile facts (birthday, nicknames, favorite foods, aliases, ethnicity, location, job, …) together with their DATED CLAIMS, which carry validity dates, a confidence and the sentence the fact came from. Use this when the user asks about a specific person's attributes and `get_contact_context` doesn't include enough profile detail. Provide either `name` (fuzzy) or `contact_id`. " +
+      "Prefer a dated claim over a plain profile row and say which you used. A claim marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. A claim marked DISAGREES WITH has more than one live answer: report every value, never pick one.",
     inputSchema: {
       name: z.string().optional().describe("Contact name (fuzzy, case-insensitive)"),
       contact_id: z.string().uuid().optional().describe("Exact contact UUID"),
+      detail: z.enum(["curated", "full"]).optional().default("curated")
+        .describe("curated = the facts flagged to reach an agent unasked, plus every dated claim. full = every profile row as well. Nothing is hidden by 'curated': what it leaves out stays reachable through detail:'full' and through search_brain."),
     },
   },
-  async ({ name, contact_id }) => {
+  async ({ name, contact_id, detail }) => {
     try {
       if (!name && !contact_id) {
         return { content: [{ type: "text" as const, text: "Provide either `name` or `contact_id`." }], isError: true };
@@ -1861,13 +1860,57 @@ server.registerTool(
       if (ids.length === 0) {
         return { content: [{ type: "text" as const, text: `# ${c.name}\nNo structured profile facts recorded yet.` }] };
       }
-      const { data: entries } = await supabase
-        .from("profile_entries")
-        .select("category_id, label, value, sort_order")
+      // Curation, the same treatment get_user_profile got on 2026-08-31 and
+      // for the same reason: an uncurated dump arrives at equal weight, so a
+      // question about someone's birthday comes back with every note-derived
+      // trivium attached. Measured 2026-08-31: the largest contact here held
+      // 38 rows. Fail safe — if nothing is flagged, hand back the whole record
+      // and SAY so, because an empty profile is worse than a long one.
+      const baseEntryQuery = () =>
+        supabase
+          .from("profile_entries")
+          .select("category_id, label, value, sort_order")
+          .eq("user_id", getCurrentUserId())
+          .eq("contact_id", c.id)
+          .in("category_id", ids)
+          .order("sort_order");
+
+      let entries: any[] | null = null;
+      let curationApplied = detail === "curated";
+      if (curationApplied) {
+        const { data } = await baseEntryQuery().eq("show_to_agent", true);
+        entries = data ?? null;
+        if (!entries?.length) {
+          curationApplied = false;
+          const { data: all } = await baseEntryQuery();
+          entries = all ?? null;
+        }
+      } else {
+        const { data } = await baseEntryQuery();
+        entries = data ?? null;
+      }
+
+      // The dated facts about this person. They were invisible here until
+      // 2026-08-31: this tool is described in the code as get_user_profile's
+      // mirror for a named contact, and it had no idea the claims table
+      // existed. A claim carries dates, a confidence and the sentence it came
+      // from, so it is strictly better than the row beside it.
+      const { data: claimRows } = await supabase
+        .from("claims")
+        .select("id, subject_type, subject_id, attribute, value, valid_from, valid_to, confidence, cardinality, review_by, evidence_quote, source_type, source_id")
         .eq("user_id", getCurrentUserId())
-        .eq("contact_id", c.id)
-        .in("category_id", ids)
-        .order("sort_order");
+        .eq("subject_type", "contact")
+        .eq("subject_id", c.id)
+        .order("valid_from", { ascending: false, nullsFirst: false });
+
+      const today = todayISO();
+      const allHits = toClaimHits(
+        ((claimRows || []) as any[]).map((r) => ({ ...r, similarity: 1 })),
+        () => c.name,
+      );
+      const liveHits = allHits.filter((h) => !h.valid_to || h.valid_to > today);
+      const dated = flagStale(flagConflicts(liveHits), judgeDayFor(null, liveHits, today));
+
       const byCat = new Map<string, any[]>();
       for (const e of (entries || []) as any[]) {
         const arr = byCat.get(e.category_id) || [];
@@ -1875,6 +1918,14 @@ server.registerTool(
         byCat.set(e.category_id, arr);
       }
       const out: string[] = [`# ${c.name} — Profile`];
+
+      if (dated.length) {
+        out.push(`\n## Dated facts (prefer these over the rows below)`);
+        // The similarity percentage is meaningless here — nothing was searched
+        // for — so it is stripped rather than printed as a fake 100%.
+        for (const h of dated) out.push(renderClaimHit(h).replace(/ · \d+% match/, ""));
+      }
+
       for (const cat of (cats || []) as any[]) {
         const es = byCat.get(cat.id);
         if (!es?.length) continue;
@@ -1882,6 +1933,11 @@ server.registerTool(
         for (const e of es) out.push(`- ${e.label}: ${e.value}`);
       }
       if (out.length === 1) out.push("No entries.");
+      if (detail === "curated" && !curationApplied && (entries?.length ?? 0) > 0) {
+        out.push(`\n(No fact on ${c.name} is flagged for agents yet, so this is the whole record.)`);
+      } else if (curationApplied) {
+        out.push(`\n(Curated view. Ask again with detail:"full" for every profile row.)`);
+      }
       return { content: [{ type: "text" as const, text: out.join("\n") }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
