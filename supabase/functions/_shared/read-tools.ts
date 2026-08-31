@@ -32,6 +32,35 @@ import { todayISO } from "./claims.ts";
 const SEMANTIC_EMBED_MODEL = "openai/text-embedding-3-small";
 
 /**
+ * The B arm of the doubt-date measurement (Plan 4 Task 4).
+ *
+ * Set the function secret CLAIMS_STALE_LABELS=off and the assistant still sees
+ * every claim, with the same dates in the same data, and is simply not told
+ * which ones are past their re-check date. That is the ONE variable the
+ * measurement moves, and moving it in the deployed function is what keeps the
+ * measurement honest: both arms are the real in-app assistant, not a harness
+ * that resembles it.
+ *
+ * Deliberately an environment secret rather than a request field. A request
+ * field is product surface that has to be authorised, documented and defended
+ * for ever, for the sake of one experiment; a secret is flipped for the length
+ * of a run and unset afterwards, and no caller can reach it.
+ *
+ * Absent means ON, so an unconfigured deployment always labels.
+ */
+const STALE_LABELS_ON =
+  (typeof Deno !== "undefined" ? Deno.env.get("CLAIMS_STALE_LABELS") : undefined) !== "off";
+
+/** Rule 2. Lifted out so the B arm of the measurement can drop exactly it. */
+const CLAIMS_CONTRACT_STALE_RULE = `2. A stale fact is still usable, and you must report its date. When a claim
+   comes back marked NOT CONFIRMED SINCE, give the value AND say when it was
+   last confirmed. Do not refuse it, and do not present it as current.`;
+
+/** What rule 2 becomes when labels are off: nothing, not a mention of absence. */
+const CLAIMS_CONTRACT_NO_STALE_RULE =
+  `2. Every fact you are shown is the value currently on file. Answer from it.`;
+
+/**
  * The three rules a caller must follow once it can see dated facts.
  *
  * Appended to every chat agent's system prompt in code rather than only in the
@@ -52,9 +81,7 @@ is prose that may contain a fact somewhere in it.
    someone is to them. If a claim answers it, answer from the claim and name it
    as a dated fact. Do not say you have nothing on file before you have called
    that tool.
-2. A stale fact is still usable, and you must report its date. When a claim
-   comes back marked NOT CONFIRMED SINCE, give the value AND say when it was
-   last confirmed. Do not refuse it, and do not present it as current.
+${STALE_LABELS_ON ? CLAIMS_CONTRACT_STALE_RULE : CLAIMS_CONTRACT_NO_STALE_RULE}
 3. Two live answers are both reported, never silently resolved. When a claim
    comes back marked DISAGREES WITH, give every value and say they disagree.
    Two live answers usually mean one name covers two different facts, not that
@@ -72,7 +99,9 @@ export const READ_TOOL_SCHEMAS = [
         "CALL THIS FIRST for any question about a fact of the user's own life — their address, phone number, email, employer, job, where they live, a count or streak, a preference, a possession, who someone is to them. " +
         "These facts are NOT in the notes index and note search cannot see them, so answering 'I don't have that on file' without calling this tool is wrong. " +
         "Superseded facts are filtered out in the database, so anything returned is believed true today. " +
-        "A hit marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. " +
+        (STALE_LABELS_ON
+          ? "A hit marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. "
+          : "") +
         "A hit marked DISAGREES WITH has more than one live answer — report every value, never pick one.",
       parameters: {
         type: "object",
@@ -279,7 +308,11 @@ export async function searchClaims(
 
     const hits = toClaimHits(rows, (kind, id) =>
       kind === "self" ? "you" : (id && names.get(id)) || "someone");
-    return flagStale(flagConflicts(hits), judgeDayFor(null, hits, todayISO())).slice(0, limit);
+    const flagged = flagStale(flagConflicts(hits), judgeDayFor(null, hits, todayISO()));
+    // The B arm keeps every fact and every date. Only the "this is old" signal
+    // is withheld, which is the single variable the measurement moves.
+    if (!STALE_LABELS_ON) for (const h of flagged) h.stale_since = null;
+    return flagged.slice(0, limit);
   } catch {
     return [];
   }
