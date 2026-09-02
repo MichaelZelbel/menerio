@@ -280,12 +280,38 @@ export type Database = {
         }
         Relationships: []
       }
+      attribute_rules: {
+        Row: {
+          attribute: string
+          cardinality: string
+          created_at: string
+          review_days: number | null
+        }
+        Insert: {
+          attribute: string
+          cardinality?: string
+          created_at?: string
+          review_days?: number | null
+        }
+        Update: {
+          attribute?: string
+          cardinality?: string
+          created_at?: string
+          review_days?: number | null
+        }
+        Relationships: []
+      }
       claims: {
         Row: {
           attribute: string
+          cardinality: string
           confidence: string
           created_at: string
+          embedding: string | null
+          evidence_quote: string | null
           id: string
+          origin: string
+          review_by: string | null
           source_id: string | null
           source_type: string | null
           subject_id: string | null
@@ -299,9 +325,14 @@ export type Database = {
         }
         Insert: {
           attribute: string
+          cardinality?: string
           confidence?: string
           created_at?: string
+          embedding?: string | null
+          evidence_quote?: string | null
           id?: string
+          origin?: string
+          review_by?: string | null
           source_id?: string | null
           source_type?: string | null
           subject_id?: string | null
@@ -315,9 +346,14 @@ export type Database = {
         }
         Update: {
           attribute?: string
+          cardinality?: string
           confidence?: string
           created_at?: string
+          embedding?: string | null
+          evidence_quote?: string | null
           id?: string
+          origin?: string
+          review_by?: string | null
           source_id?: string | null
           source_type?: string | null
           subject_id?: string | null
@@ -2697,6 +2733,7 @@ export type Database = {
           category_id: string
           contact_id: string | null
           created_at: string | null
+          derived_from_claim_id: string | null
           evidence_quote: string | null
           id: string
           is_pinned: boolean
@@ -2704,6 +2741,7 @@ export type Database = {
           linked_note_id: string | null
           origin: string
           rank: string
+          show_to_agent: boolean
           sort_order: number | null
           updated_at: string | null
           user_id: string
@@ -2713,6 +2751,7 @@ export type Database = {
           category_id: string
           contact_id?: string | null
           created_at?: string | null
+          derived_from_claim_id?: string | null
           evidence_quote?: string | null
           id?: string
           is_pinned?: boolean
@@ -2720,6 +2759,7 @@ export type Database = {
           linked_note_id?: string | null
           origin?: string
           rank?: string
+          show_to_agent?: boolean
           sort_order?: number | null
           updated_at?: string | null
           user_id: string
@@ -2729,6 +2769,7 @@ export type Database = {
           category_id?: string
           contact_id?: string | null
           created_at?: string | null
+          derived_from_claim_id?: string | null
           evidence_quote?: string | null
           id?: string
           is_pinned?: boolean
@@ -2736,6 +2777,7 @@ export type Database = {
           linked_note_id?: string | null
           origin?: string
           rank?: string
+          show_to_agent?: boolean
           sort_order?: number | null
           updated_at?: string | null
           user_id?: string
@@ -2754,6 +2796,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_entries_derived_from_claim_id_fkey"
+            columns: ["derived_from_claim_id"]
+            isOneToOne: false
+            referencedRelation: "claims"
             referencedColumns: ["id"]
           },
           {
@@ -2983,6 +3032,7 @@ export type Database = {
           display_name: string | null
           id: string
           self_matching_enabled: boolean
+          timezone: string
           updated_at: string
           website: string | null
         }
@@ -2993,6 +3043,7 @@ export type Database = {
           display_name?: string | null
           id: string
           self_matching_enabled?: boolean
+          timezone?: string
           updated_at?: string
           website?: string | null
         }
@@ -3003,6 +3054,7 @@ export type Database = {
           display_name?: string | null
           id?: string
           self_matching_enabled?: boolean
+          timezone?: string
           updated_at?: string
           website?: string | null
         }
@@ -3914,13 +3966,18 @@ export type Database = {
       world_claims: {
         Row: {
           attribute: string | null
+          cardinality: string | null
           category: string | null
+          confidence: string | null
           created_at: string | null
           evidence_quote: string | null
           id: string | null
           object_id: string | null
           origin: string | null
           rank: string | null
+          review_by: string | null
+          source_kind: string | null
+          source_ref: string | null
           source_table: string | null
           subject_id: string | null
           subject_kind: string | null
@@ -4078,6 +4135,31 @@ export type Database = {
           id: string
           revoked_at: string
           user_id: string
+        }[]
+      }
+      match_claims: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_as_of?: string
+          p_user_id?: string
+          query_embedding: string
+        }
+        Returns: {
+          attribute: string
+          cardinality: string
+          confidence: string
+          evidence_quote: string
+          id: string
+          review_by: string
+          similarity: number
+          source_id: string
+          source_type: string
+          subject_id: string
+          subject_type: string
+          valid_from: string
+          valid_to: string
+          value: string
         }[]
       }
       match_media: {
@@ -4341,6 +4423,7 @@ export type Database = {
         Args: { p_force?: boolean; p_group_id: string }
         Returns: Json
       }
+      user_today: { Args: { p_user_id: string }; Returns: string }
       wiki_apply_ingest: {
         Args: { p_actions: Json; p_note_id: string; p_source_links: Json }
         Returns: Json
@@ -4365,12 +4448,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4394,11 +4477,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4419,11 +4502,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4444,11 +4527,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4461,11 +4544,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
