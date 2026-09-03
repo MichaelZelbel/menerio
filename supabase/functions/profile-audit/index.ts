@@ -19,6 +19,7 @@ import { runChat } from "../_shared/llm-router.ts";
 import { CALL_SITE_DEFAULTS } from "../_shared/llm-defaults.ts";
 import {
   buildAuditUserMessage,
+  entriesFingerprint,
   parseAuditResponse,
   planExactDuplicates,
   planMerges,
@@ -54,7 +55,11 @@ function auditDefaults() {
 async function loadEntries(db: any, userId: string, contactId: string | null): Promise<AuditEntry[]> {
   let q = db
     .from("profile_entries")
-    .select("id, label, value, is_pinned, created_at, origin, category_id, profile_categories(slug)")
+    // `rank` is not decoration. A row with rank='preferred' cannot be deleted or
+    // reworded by a background job, and without it here the planner proposes
+    // merges the database will always refuse, which is the loop this function
+    // spent 52 hours in.
+    .select("id, label, value, is_pinned, rank, created_at, origin, category_id, profile_categories(slug)")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   q = contactId ? q.eq("contact_id", contactId) : q.is("contact_id", null);
@@ -65,6 +70,7 @@ async function loadEntries(db: any, userId: string, contactId: string | null): P
     label: r.label,
     value: r.value,
     is_pinned: !!r.is_pinned,
+    rank: r.rank,
     created_at: r.created_at,
     origin: r.origin,
     category_slug: r.profile_categories?.slug || "other",
@@ -103,6 +109,19 @@ async function applyPlan(
     if (data?.applied) {
       applied += 1;
       removed += Number(data.removed || 0);
+      if (data.partial) {
+        console.warn(
+          `[profile-audit] partial merge on keep=${item.keepId}: ` +
+            `${data.removed} of ${data.intended} rows removed, the rest are hand-typed.`,
+        );
+      }
+    } else if (data?.reason === "delete_vetoed" || data?.reason === "update_vetoed") {
+      // Since 20260903100000 the RPC says so instead of claiming success. Never
+      // count this as progress: doing so is what created the 52-hour loop.
+      console.warn(
+        `[profile-audit] apply refused (${data.reason}) on keep=${item.keepId}: ` +
+          `the database protects a hand-typed row here. Not counted as progress.`,
+      );
     }
   }
   return { applied, removed };
@@ -152,6 +171,8 @@ async function auditScope(
     let rejectedNotes: string[] = [];
     let clean = false;
     let lastRoundApplied = 0;
+    let noProgress = false;
+    let lastFingerprint: string | null = null;
 
     while (rounds < MAX_ROUNDS) {
       rounds += 1;
@@ -161,6 +182,25 @@ async function auditScope(
         clean = true;
         break;
       }
+
+      // Defence in depth. Every guard below this line assumes the database tells
+      // the truth about what it changed; this one does not. If a round leaves the
+      // entry list byte-identical, the next model call would be the same question
+      // with the same answer, so stop. On 2026-08-30 the absence of this check
+      // turned one lying RPC into six identical calls per sweep, forever.
+      const fingerprint = entriesFingerprint(entries);
+      if (fingerprint === lastFingerprint) {
+        console.error(
+          `[profile-audit] NO PROGRESS for user=${userId} contact=${contactId ?? "self"}: ` +
+            `round ${rounds - 1} changed nothing, so round ${rounds} would ask the model the ` +
+            `identical question. Stopping instead of spending. This means an apply reported ` +
+            `success without changing a row.`,
+        );
+        noProgress = true;
+        rounds -= 1;
+        break;
+      }
+      lastFingerprint = fingerprint;
 
       // Deterministic pre-pass — never depends on a model call.
       const exact = planExactDuplicates(entries);
@@ -217,7 +257,18 @@ async function auditScope(
 
     // Rounds exhausted while still making progress → keep the scope dirty so the
     // next sweep continues instead of falsely reporting a conflict.
-    const status = clean ? "clean" : lastRoundApplied > 0 ? "dirty" : "conflict";
+    //
+    // `noProgress` must never land on "dirty". "dirty" is what sweepDirty picks
+    // up, so marking an unchangeable scope dirty is precisely the instruction
+    // that made the sweep re-run it every 15 minutes for two days. It is a
+    // conflict: something here cannot be resolved without a human.
+    const status = clean
+      ? "clean"
+      : noProgress
+      ? "conflict"
+      : lastRoundApplied > 0
+      ? "dirty"
+      : "conflict";
 
     return await finish(db, runId, userId, contactId, {
       status,

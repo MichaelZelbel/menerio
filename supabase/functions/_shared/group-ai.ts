@@ -128,8 +128,10 @@ export function sanitizePromptData<T>(value: T, key = ""): T {
 }
 
 export function taggedPrompt(sections: Record<string, unknown>) {
+  // Compact JSON. Indentation is billed per token and no human reads this
+  // string; see the note on the same change in `profile-normalization.ts`.
   return Object.entries(sections)
-    .map(([tag, value]) => `<${tag}>\n${JSON.stringify(sanitizePromptData(value), null, 2)}\n</${tag}>`)
+    .map(([tag, value]) => `<${tag}>\n${JSON.stringify(sanitizePromptData(value))}\n</${tag}>`)
     .join("\n\n");
 }
 

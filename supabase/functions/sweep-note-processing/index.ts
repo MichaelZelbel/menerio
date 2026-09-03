@@ -31,6 +31,15 @@ const json = (body: unknown, status = 200) =>
 const SETTLE_MS = 90_000;
 /** A run marked "processing" that never finished is retried after this long. */
 const STUCK_MS = 10 * 60_000;
+/**
+ * How many failed attempts a note gets before the sweep leaves it alone.
+ *
+ * Until 2026-09-03 there was no cap and no counter anywhere in the repo: a note
+ * whose processing could never succeed was re-triggered on every single sweep,
+ * paying for a metadata extraction each time. One account had 42 notes sitting
+ * in exactly that state. Editing the note resets the count.
+ */
+const MAX_ATTEMPTS = 3;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -54,7 +63,7 @@ Deno.serve(async (req) => {
     const cutoff = new Date(Date.now() - SETTLE_MS).toISOString();
     const { data: candidates, error: selErr } = await admin
       .from("notes")
-      .select("id, updated_at, processing_status, embedding")
+      .select("id, updated_at, processing_status, embedding, processing_attempts")
       .eq("user_id", userId)
       .eq("is_trashed", false)
       .not("content", "is", null)
@@ -69,13 +78,24 @@ Deno.serve(async (req) => {
     const needsWork = (row: any): boolean => {
       const status = row.processing_status as string | null;
       const age = now - new Date(row.updated_at).getTime();
-      if (status === "processing") return age > STUCK_MS;
-      if (status === "failed") return true;
+      const attempts = Number(row.processing_attempts) || 0;
+      // Three strikes. Every branch below that retries a note pays for a
+      // metadata extraction before it can discover the note still fails, so an
+      // unbounded retry is an unbounded bill. `process-note` counts the attempt
+      // when it claims the note and resets it to 0 on success, so a note a human
+      // has since edited gets a fresh three.
+      const retriable = attempts < MAX_ATTEMPTS;
+
+      if (status === "processing") return age > STUCK_MS && retriable;
+      if (status === "failed") return retriable;
       if (status === "skipped_short" || status === "skipped_empty") return false;
+      // Not capped, and correctly so: `process-note` turns this away on its own
+      // balance check before contacting a provider, so a retry here costs no
+      // tokens, and the note must come back the moment the allowance is topped up.
       if (status === "skipped_no_credits") return true;
-      if (status === "processed") return !row.embedding;
+      if (status === "processed") return !row.embedding && retriable;
       // null / unknown status: legacy note — process when it has no embedding.
-      return !row.embedding;
+      return !row.embedding && retriable;
     };
 
     const targets = (candidates || []).filter(needsWork).slice(0, limit);

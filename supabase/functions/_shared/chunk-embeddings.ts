@@ -3,14 +3,47 @@
 
 import { smartChunkMarkdown, buildEmbeddingInput, type NoteChunk } from "./chunking.ts";
 import { getEmbeddingWithCredits } from "./llm-credits.ts";
+import { sha256Hex } from "./sha256.ts";
 
 const MAX_CHUNKS_PER_NOTE = 50;
+
+/**
+ * A pgvector column comes back from PostgREST as a string ("[0.1,0.2,...]"),
+ * not an array. Both callers write the result into a vector column too, but
+ * `firstChunkEmbedding` is typed `number[]` and is compared against elsewhere,
+ * so normalise on the way in rather than leaking the wire format.
+ *
+ * Returns null on anything that does not parse, which simply forces a re-embed.
+ */
+function toVector(raw: unknown): number[] | null {
+  if (Array.isArray(raw)) {
+    return raw.every((n) => typeof n === "number" && Number.isFinite(n))
+      ? (raw as number[])
+      : null;
+  }
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed.every((n) => typeof n === "number" && Number.isFinite(n))
+      ? (parsed as number[])
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ChunkEmbedResult {
   /** Rows actually written to note_chunks. Zero when nothing was replaced. */
   chunkCount: number;
-  /** Chunks we tried to embed, whether or not they succeeded. */
+  /**
+   * Chunks actually SENT to the provider, whether or not they succeeded.
+   * Excludes chunks whose vector was reused unchanged, so this is the figure
+   * that tracks spend.
+   */
   attempted: number;
+  /** Chunks whose embedding input was unchanged, so no call was made for them. */
+  reused?: number;
   /** True only when the note's chunks were swapped for a complete new set. */
   replaced: boolean;
   truncated: boolean;
@@ -56,20 +89,53 @@ export async function embedAndStoreNoteChunks(
   // embedding floats is well under a megabyte.
   let failures = 0;
   let attempted = 0;
+  let reused = 0;
   let remainingCredits: number | null = null;
   let insufficientCredits = false;
   let balanceUnavailable = false;
-  const embedded: Array<{ chunk: NoteChunk; embedding: number[] }> = [];
+  const embedded: Array<{ chunk: NoteChunk; embedding: number[]; hash: string }> = [];
+
+  // Vectors this note already has, keyed by the exact string that produced them.
+  //
+  // Read BEFORE the delete below, which is the whole trick: the delete-then-
+  // reinsert shape means the old vectors are gone by the time they could be
+  // reused, so they have to be in memory first. A chunk whose embedding input is
+  // unchanged does not need to be embedded again, and editing one paragraph of a
+  // 50-chunk note used to pay for all 50.
+  const priorByHash = new Map<string, number[]>();
+  try {
+    const { data: priorRows } = await admin
+      .from("note_chunks")
+      .select("content_hash, embedding")
+      .eq("note_id", noteId)
+      .not("content_hash", "is", null);
+    for (const row of priorRows || []) {
+      const vec = toVector(row.embedding);
+      if (row.content_hash && vec) priorByHash.set(row.content_hash as string, vec);
+    }
+  } catch (err) {
+    // Cache miss is always safe: every chunk is simply embedded as before.
+    console.warn("note_chunks prior-hash lookup failed", noteId, (err as Error).message);
+  }
 
   for (const chunk of limited) {
-    attempted += 1;
     const input = buildEmbeddingInput(noteTitle, chunk);
+    const hash = await sha256Hex(input);
+
+    const cached = priorByHash.get(hash);
+    if (cached) {
+      reused += 1;
+      embedded.push({ chunk, embedding: cached, hash });
+      continue;
+    }
+
+    attempted += 1;
     try {
       const { embedding, credits } = await getEmbeddingWithCredits(
         admin, openrouterApiKey, userId, feature, input,
       );
       remainingCredits = credits?.remaining_credits ?? remainingCredits;
-      embedded.push({ chunk, embedding });
+      embedded.push({ chunk, embedding, hash });
     } catch (err) {
       const msg = (err as Error).message || String(err);
       console.warn("chunk embedding failed", noteId, chunk.index, msg);
@@ -103,6 +169,7 @@ export async function embedAndStoreNoteChunks(
     return {
       chunkCount: 0,
       attempted,
+      reused,
       replaced: false,
       truncated,
       failures,
@@ -116,10 +183,17 @@ export async function embedAndStoreNoteChunks(
   const firstChunkEmbedding =
     embedded.find((e) => e.chunk.index === 0)?.embedding ?? null;
 
+  if (reused > 0) {
+    console.log(
+      `note_chunks ${noteId}: ${reused}/${limited.length} chunks unchanged, ` +
+        `${attempted} embedded.`,
+    );
+  }
+
   await admin.from("note_chunks").delete().eq("note_id", noteId);
   let inserted = 0;
   let writeFailures = 0;
-  for (const { chunk, embedding } of embedded) {
+  for (const { chunk, embedding, hash } of embedded) {
     const { error } = await admin.from("note_chunks").insert({
       note_id: noteId,
       user_id: userId,
@@ -128,6 +202,7 @@ export async function embedAndStoreNoteChunks(
       content: chunk.content,
       token_count: chunk.tokenCount,
       embedding,
+      content_hash: hash,
     });
     if (error) {
       console.warn("note_chunks insert error", noteId, chunk.index, error.message);
@@ -143,6 +218,7 @@ export async function embedAndStoreNoteChunks(
     // loop broke early, so a run that stored nothing could report 39 chunks.
     chunkCount: inserted,
     attempted,
+    reused,
     replaced: true,
     truncated,
     failures: failures + writeFailures,

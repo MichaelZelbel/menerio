@@ -7,7 +7,13 @@
  * current behaviour. If the DB row is missing or disabled, defaults win.
  */
 
-import { checkBalance, deductTokens, type CreditInfo } from "./llm-credits.ts";
+import {
+  assertNotRepeatCall,
+  checkBalance,
+  deductTokens,
+  type CreditInfo,
+} from "./llm-credits.ts";
+import { sha256Hex } from "./sha256.ts";
 
 export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
@@ -375,6 +381,13 @@ export async function runChat(args: {
    * language setting became a no-op. Put invariants here, not in the default.
    */
   systemSuffix?: string;
+  /**
+   * The note this call is about, stamped onto the usage row. Optional, and only
+   * meaningful for note-scoped call sites. Without it the ledger can say how
+   * many extractions ran but not how many notes they covered, which is what
+   * left "107 extractions across at most 24 notes" an inference on 2026-09-03.
+   */
+  noteId?: string | null;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
 
@@ -409,6 +422,21 @@ export async function runChat(args: {
     : interpolated;
   const messages = buildMessagesWithSystem(args.messages, suffixed);
   const extra = { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) };
+
+  // Loop guard. The balance check above answers "can this user afford a call";
+  // this one answers "has this call already been made, repeatedly, to no effect".
+  // Nothing asked the second question until 2026-09-03, which is how one call
+  // site spent 2.27 million tokens asking one question 1,733 times.
+  //
+  // Hashed after interpolation and the suffix, so it is the prompt the provider
+  // would actually receive. `skipDeduct` skips it: that is the admin test-run,
+  // which exists to fire the same call site repeatedly on purpose.
+  if (!args.skipDeduct) {
+    const promptHash = await sha256Hex(
+      `${effective.model}\n${JSON.stringify(messages)}\n${JSON.stringify(extra)}`,
+    );
+    await assertNotRepeatCall(args.db, args.userId, args.callSite, promptHash);
+  }
 
   let result: any;
   const provider = effective.provider;
@@ -542,10 +570,12 @@ export async function runChat(args: {
           .limit(1)
           .maybeSingle();
         if (newest?.id) {
-          await args.db
-            .from("llm_usage_events")
-            .update({ call_site: args.callSite, config_source: source })
-            .eq("id", newest.id);
+          const tag: Record<string, unknown> = {
+            call_site: args.callSite,
+            config_source: source,
+          };
+          if (args.noteId) tag.note_id = args.noteId;
+          await args.db.from("llm_usage_events").update(tag).eq("id", newest.id);
         }
       } catch {
         // non-fatal
@@ -649,13 +679,25 @@ export async function runOcr(args: {
       completionTokens: 0,
       usageSource: "fallback",
     });
+    // Same fix `runChat` got on 2026-08-27, which this copy never received.
+    // PostgREST does not scope an UPDATE with order/limit, so the old version
+    // here relabelled EVERY usage row the user had with the OCR call site,
+    // destroying the record of what was actually spending. Read the id first,
+    // then update that one row.
     try {
-      await args.db
+      const { data: newest } = await args.db
         .from("llm_usage_events")
-        .update({ call_site: args.callSite, config_source: source })
+        .select("id")
         .eq("user_id", args.userId)
         .order("created_at", { ascending: false })
-        .limit(1);
+        .limit(1)
+        .maybeSingle();
+      if (newest?.id) {
+        await args.db
+          .from("llm_usage_events")
+          .update({ call_site: args.callSite, config_source: source })
+          .eq("id", newest.id);
+      }
     } catch {
       // non-fatal
     }

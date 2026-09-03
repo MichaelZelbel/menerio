@@ -3,6 +3,8 @@
  * Provides balance checks, atomic token deduction, and credit-aware LLM wrappers.
  */
 
+import { sha256Hex } from "./sha256.ts";
+
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const FALLBACK_TOKENS: Record<string, number> = {
@@ -128,6 +130,101 @@ export async function checkBalance(
 }
 
 /**
+ * How many times the same question may be asked before we stop paying for the
+ * answer. See the migration `20260903102000_llm_repeat_call_breaker.sql`.
+ */
+export const REPEAT_CALL_LIMIT = 5;
+
+/**
+ * Refuse a prompt this call site has already sent, for this user, this hour.
+ *
+ * The bug on 2026-08-30 was not one bad call, it was one call repeated 1,733
+ * times. Every existing guard passed it: the balance was healthy, the deduction
+ * was honest, the ledger grew. Nothing was watching for repetition, so nothing
+ * stopped it until an allowance hit zero 52 hours later.
+ *
+ * Fails OPEN, unlike the balance check. If this cannot be evaluated the call
+ * proceeds, because a broken loop detector must not become an outage: the
+ * downside of a missed repeat is bounded by the balance check behind it, while
+ * the downside of blocking every call is the whole product.
+ *
+ * Do not call for embeddings: they average 452 tokens and a user searching the
+ * same term repeatedly is normal. Do not call when `skipDeduct` is set: that is
+ * the admin test-run, whose entire purpose is repeating one call site.
+ */
+export async function assertNotRepeatCall(
+  db: any,
+  userId: string,
+  callSite: string,
+  promptHash: string,
+  limit: number = REPEAT_CALL_LIMIT,
+): Promise<void> {
+  let verdict: { allowed?: boolean; seen?: number; limit?: number } | null = null;
+  try {
+    const { data, error } = await db.rpc("llm_note_call_fingerprint", {
+      _user_id: userId,
+      _call_site: callSite,
+      _prompt_hash: promptHash,
+      _limit: limit,
+    });
+    if (error) {
+      console.warn(
+        `[llm-credits] repeat-call check unavailable for ${callSite}: ${error.message}. ` +
+          `Allowing the call; the balance check still applies.`,
+      );
+      return;
+    }
+    verdict = data;
+  } catch (err) {
+    console.warn(
+      `[llm-credits] repeat-call check threw for ${callSite}: ${(err as Error).message}. ` +
+        `Allowing the call.`,
+    );
+    return;
+  }
+
+  if (verdict && verdict.allowed === false) {
+    console.error(
+      `[llm-router] REPEAT BLOCKED for ${callSite} (user=${userId}, ` +
+        `prompt_hash=${promptHash.slice(0, 12)}): this exact prompt has already run ` +
+        `${verdict.seen} times in the last hour, at or over the limit of ${verdict.limit}. ` +
+        `Refusing to spend again. This is a loop, not a workload: something upstream ` +
+        `believes it is making progress when it is not.`,
+    );
+    const err: any = new Error("REPEAT_CALL_BLOCKED");
+    err.repeatInfo = verdict;
+    throw err;
+  }
+}
+
+/**
+ * True when a thrown error means "this exact prompt already ran, repeatedly".
+ * Not a quota problem and not an outage, so it gets neither 402 nor 503.
+ */
+export function isRepeatBlocked(err: unknown): boolean {
+  return (err as { message?: string } | null)?.message === "REPEAT_CALL_BLOCKED";
+}
+
+/**
+ * The answer for a refused repeat. 429: the caller asked too often, and the
+ * honest instruction is to stop rather than to retry.
+ */
+export function repeatBlockedResponse(corsHeaders: Record<string, string>) {
+  return new Response(
+    JSON.stringify({
+      error:
+        "This exact request has already run several times in the last hour and produced " +
+        "the same result, so it was stopped instead of charged again.",
+      code: "REPEAT_CALL_BLOCKED",
+    }),
+    {
+      status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    },
+  );
+}
+
+/**
  * Atomically deduct tokens from the user's active period.
  * Uses FOR UPDATE row lock to prevent race conditions.
  * Throws on insufficient balance or missing period.
@@ -212,6 +309,16 @@ export async function openRouterWithCredits(
     );
     err.creditInfo = balance;
     throw err;
+  }
+
+  // Loop guard, chat only. An embedding of the same text is cheap and often
+  // legitimate (a user re-running a search); a chat completion repeated with the
+  // identical prompt is the signature of a job that thinks it is progressing.
+  if (endpoint === "chat/completions") {
+    const promptHash = await sha256Hex(
+      `${String(body.model ?? "")}\n${JSON.stringify(body.messages ?? [])}`,
+    );
+    await assertNotRepeatCall(db, userId, feature, promptHash);
   }
 
   const url = `${OPENROUTER_BASE}/${endpoint}`;

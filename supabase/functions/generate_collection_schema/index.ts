@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { runChat } from "../_shared/llm-router.ts";
+import {
+  balanceUnavailableResponse,
+  insufficientCreditsResponse,
+  isBalanceUnavailable,
+  isRepeatBlocked,
+  repeatBlockedResponse,
+} from "../_shared/llm-credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +17,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
+// The key itself is read by _shared/llm-router.ts now, not here.
 const MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-4-20250514";
 
 const SYSTEM_PROMPT = `You are a schema designer for Menerio, a personal knowledge management system. The user describes something they want to track. Your job is to produce a JSON object with three keys: "collection", "field_schema", and "agent_instructions".
@@ -147,26 +155,41 @@ async function getUserId(req: Request) {
   return data.claims.sub as string;
 }
 
-async function callAnthropic(userMessage: string) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+/**
+ * The one AI call in Menerio that used to spend money without recording it.
+ *
+ * Until 2026-09-03 this was a bare `fetch` to Anthropic: no balance check, no
+ * deduction, no ledger row. It was the only call site that bypassed billing
+ * entirely, found in the spend audit of that day. Impact was nil in practice
+ * (one use, on 2026-05-01, and the 20-per-hour `generation_logs` cap above), but
+ * it was an uncapped hole.
+ *
+ * Routing it through `runChat` gives it what every other call site already had:
+ * the pre-flight balance check, the honest deduction and the repeat-call guard.
+ *
+ * Deliberately NO row in `CALL_SITE_DEFAULTS`. The prompt below is 60 lines and
+ * lives here; a defaults row carrying `system_prompt: null` would be written to
+ * `llm_call_configs` by `syncDefaults`, and an enabled DB row beats the code
+ * default, so the model would silently lose its whole instruction set. That is
+ * the exact trap `runChat`'s own comment warns about. With no row, `resolveConfig`
+ * returns `fallback-default` and the prompt below is what runs. Give this call
+ * site an admin row only by first moving SYSTEM_PROMPT into a shared module.
+ */
+async function callAnthropic(db: any, userId: string, userMessage: string) {
+  const result = await runChat({
+    db,
+    userId,
+    callSite: "generate-collection-schema.main",
+    messages: [{ role: "user", content: userMessage }],
+    defaults: {
+      provider: "anthropic",
       model: MODEL,
-      max_tokens: 2400,
+      systemPrompt: SYSTEM_PROMPT,
       temperature: 0.2,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    }),
+      maxTokens: 2400,
+    },
   });
-
-  if (!response.ok) throw new Error(`Anthropic API error ${response.status}: ${await response.text().catch(() => "")}`);
-  const data = await response.json();
-  const text = data?.content?.find((part: { type?: string }) => part.type === "text")?.text;
+  const text = result.content;
   if (typeof text !== "string" || !text.trim()) throw new Error("Anthropic returned no text");
   return text;
 }
@@ -214,7 +237,7 @@ serve(async (req) => {
         const message = attempt === 0
           ? baseMessage
           : `${baseMessage}\n\nStrict reminder: Return ONLY a parseable JSON object with collection.name, collection.icon, field_schema as a non-empty array where every field has key, label, and type, exactly one primary:true field, and non-empty agent_instructions. Previous validation error: ${lastValidationError}`;
-        normalized = validateAndNormalize(extractJson(await callAnthropic(message)));
+        normalized = validateAndNormalize(extractJson(await callAnthropic(admin, userId, message)));
         break;
       } catch (error) {
         lastValidationError = error instanceof Error ? error.message : "Invalid response";
@@ -229,6 +252,14 @@ serve(async (req) => {
     console.error("generate_collection_schema failed", error);
     if (logId) {
       await admin.from("generation_logs").update({ response: { error: error instanceof Error ? error.message : "Unknown error" } }).eq("id", logId);
+    }
+    // Credit and loop outcomes are not "generation failed", and must not be
+    // reported as a server fault. 402 you are out, 503 we cannot check, 429 you
+    // already asked this.
+    if (isBalanceUnavailable(error)) return balanceUnavailableResponse(corsHeaders);
+    if (isRepeatBlocked(error)) return repeatBlockedResponse(corsHeaders);
+    if ((error as { message?: string })?.message === "INSUFFICIENT_CREDITS") {
+      return insufficientCreditsResponse(corsHeaders);
     }
     const status = (error as { status?: number })?.status || 500;
     if (status === 401) return jsonResponse({ error: "Unauthorized" }, 401);

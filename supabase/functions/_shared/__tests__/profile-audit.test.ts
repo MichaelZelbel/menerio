@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAuditUserMessage,
+  entriesFingerprint,
+  isProtected,
   parseAuditResponse,
   planExactDuplicates,
   planMerges,
@@ -127,7 +129,125 @@ describe("planMerges — guards", () => {
       { ids: ["a", "b"], label: "Nickname", value: "x" },
     ]);
     expect(merges).toEqual([]);
-    expect(rejected[0].reason).toBe("all_pinned");
+    expect(rejected[0].reason).toBe("all_protected");
+  });
+});
+
+// The 2026-08-30 loop. `rank: "preferred"` means a human typed the row, and the
+// database silently refuses a background job's DELETE of it and silently restores
+// its wording on UPDATE. The planner used to be blind to that, so it proposed the
+// same impossible merge 1,049 times over 52 hours and the RPC reported success
+// every time. These tests are what stop that returning.
+describe("planMerges — hand-typed rows the database will not let a job touch", () => {
+  it("never puts a preferred entry in removeIds", () => {
+    const entries = [
+      entry({ id: "keep", label: "Favorite restaurants", value: "anything in kfc", rank: "preferred" }),
+      entry({ id: "dupe", label: "Favorite restaurants", value: "kfc" }),
+    ];
+    const { merges, rejected } = planMerges(entries, [
+      { ids: ["keep", "dupe"], label: "Favorite restaurants", value: "anything in kfc" },
+    ]);
+    expect(rejected).toEqual([]);
+    expect(merges).toHaveLength(1);
+    expect(merges[0].keepId).toBe("keep");
+    expect(merges[0].removeIds).toEqual(["dupe"]);
+  });
+
+  it("rejects a group where every entry is protected", () => {
+    const entries = [
+      entry({ id: "a", value: "one", rank: "preferred" }),
+      entry({ id: "b", label: "Aka", value: "one", rank: "preferred" }),
+    ];
+    const { merges, rejected } = planMerges(entries, [
+      { ids: ["a", "b"], label: "Nickname", value: "one" },
+    ]);
+    expect(merges).toEqual([]);
+    expect(rejected[0].reason).toBe("all_protected");
+  });
+
+  // The exact production case: the merged value carries "fast food lover", which
+  // the hand-typed keeper does not say and a machine cannot add to it. Applying
+  // it would delete the only row holding that detail.
+  it("rejects a merge whose value a protected keeper can never carry", () => {
+    const entries = [
+      entry({ id: "pref", label: "Favorite restaurants", value: "anything in kfc", rank: "preferred" }),
+      entry({ id: "norm", label: "Dietary style", value: "fast food lover, anything in kfc" }),
+    ];
+    const { merges, rejected } = planMerges(entries, [
+      {
+        ids: ["pref", "norm"],
+        label: "Dietary style",
+        value: "fast food lover, anything in kfc",
+      },
+    ]);
+    expect(merges).toEqual([]);
+    expect(rejected[0].reason).toBe("protected_value_immutable");
+  });
+
+  it("still merges when the protected keeper's own wording already covers the group", () => {
+    const entries = [
+      entry({ id: "pref", label: "Employer", value: "Zelbel Ltd London", rank: "preferred" }),
+      entry({ id: "norm", label: "Employer", value: "Zelbel Ltd" }),
+    ];
+    const { merges, rejected } = planMerges(entries, [
+      { ids: ["pref", "norm"], label: "Employer", value: "Zelbel Ltd London office" },
+    ]);
+    expect(rejected).toEqual([]);
+    expect(merges).toHaveLength(1);
+    // The keeper's existing words win, because a job cannot rewrite them.
+    expect(merges[0].keepId).toBe("pref");
+    expect(merges[0].value).toBe("Zelbel Ltd London");
+    expect(merges[0].removeIds).toEqual(["norm"]);
+  });
+
+  it("planExactDuplicates keeps the preferred row and removes the machine copy", () => {
+    const plan = planExactDuplicates([
+      entry({ id: "machine", label: "Nickname", value: "Chocola", created_at: "2026-01-01T00:00:00Z" }),
+      entry({ id: "human", label: "nickname", value: "chocola.", created_at: "2026-05-01T00:00:00Z", rank: "preferred" }),
+    ]);
+    expect(plan).toHaveLength(1);
+    expect(plan[0].keepId).toBe("human");
+    expect(plan[0].removeIds).toEqual(["machine"]);
+  });
+
+  it("marks only protected entries in the prompt, so the model can avoid them", () => {
+    const msg = buildAuditUserMessage("Michael", [
+      entry({ id: "a", value: "plain" }),
+      entry({ id: "b", value: "typed", rank: "preferred" }),
+      entry({ id: "c", value: "held", is_pinned: true }),
+    ]);
+    expect(msg).toContain("id=a | category=identity | label=Nickname | value=plain\n");
+    expect(msg).toContain("id=b | category=identity | label=Nickname | value=typed | protected");
+    expect(msg).toContain("id=c | category=identity | label=Nickname | value=held | protected");
+  });
+});
+
+describe("entriesFingerprint", () => {
+  it("is unchanged by read order", () => {
+    const a = entry({ id: "a", value: "one" });
+    const b = entry({ id: "b", value: "two" });
+    expect(entriesFingerprint([a, b])).toBe(entriesFingerprint([b, a]));
+  });
+
+  it("changes when a value changes", () => {
+    const before = [entry({ id: "a", value: "one" })];
+    const after = [entry({ id: "a", value: "two" })];
+    expect(entriesFingerprint(before)).not.toBe(entriesFingerprint(after));
+  });
+
+  it("changes when a row is removed, which is what real progress looks like", () => {
+    const before = [entry({ id: "a", value: "one" }), entry({ id: "b", value: "two" })];
+    const after = [entry({ id: "a", value: "one" })];
+    expect(entriesFingerprint(before)).not.toBe(entriesFingerprint(after));
+  });
+});
+
+describe("isProtected", () => {
+  it("covers both the explicit pin and the automatic hand-typed rank", () => {
+    expect(isProtected(entry({ id: "a" }))).toBe(false);
+    expect(isProtected(entry({ id: "a", is_pinned: true }))).toBe(true);
+    expect(isProtected(entry({ id: "a", rank: "preferred" }))).toBe(true);
+    expect(isProtected(entry({ id: "a", rank: "normal" }))).toBe(false);
   });
 });
 

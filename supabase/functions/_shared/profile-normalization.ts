@@ -560,7 +560,13 @@ export async function planSubjectNormalization(args: {
     }
   }
 
-  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON, includes created_at):\n${JSON.stringify(llmEntries, null, 2)}${evidenceBlock}\n\nReturn ONLY groups that require a change.`;
+  // Compact JSON, not pretty-printed. `JSON.stringify(x, null, 2)` adds a
+  // newline and two to six spaces of indentation per field, and this is the most
+  // expensive call site in the app at roughly 14,250 tokens a call (992K tokens
+  // in the 7 days to 2026-09-03). The indentation bought nothing: no human reads
+  // this string, and a model parses compact JSON identically. Measured in the
+  // spend audit of 2026-09-03.
+  const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON, includes created_at):\n${JSON.stringify(llmEntries)}${evidenceBlock}\n\nReturn ONLY groups that require a change.`;
 
   let parsed: any = null;
   try {

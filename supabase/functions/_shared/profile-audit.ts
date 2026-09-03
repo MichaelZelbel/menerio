@@ -18,7 +18,40 @@ export type AuditEntry = {
   is_pinned?: boolean;
   created_at?: string;
   origin?: string;
+  /**
+   * `preferred` means a human typed this row. The database refuses a machine's
+   * DELETE of it (`world_preferred_survives_delete`) and silently restores its
+   * label and value on a machine's UPDATE (`world_preferred_wins`), both without
+   * raising. Loading this field is what stops the planner proposing work the
+   * database will always refuse; leaving it out is what let the audit ask the
+   * same impossible question 1,049 times over 52 hours.
+   */
+  rank?: string;
 };
+
+/**
+ * True when nothing a background job does can remove or reword this entry.
+ *
+ * `is_pinned` is the user's explicit "leave this alone". `rank === 'preferred'`
+ * is the same protection applied automatically to anything a human typed. The
+ * audit runs as the service role on every path, including the user-triggered
+ * `run` action, so the machine rules always apply here.
+ */
+export function isProtected(e: AuditEntry): boolean {
+  return Boolean(e.is_pinned) || e.rank === "preferred";
+}
+
+/**
+ * A stable signature of the entry list, used by the caller to notice that a
+ * round changed nothing and stop before paying for another identical model
+ * call. Sorted, so a reordered read of the same rows is the same fingerprint.
+ */
+export function entriesFingerprint(entries: AuditEntry[]): string {
+  return entries
+    .map((e) => `${e.id}${e.label}${e.value}`)
+    .sort()
+    .join("");
+}
 
 export type LlmGroup = {
   ids: string[];
@@ -73,6 +106,11 @@ Rules for the merged entry:
 - "value" MUST preserve every piece of information from all grouped entries. If you cannot express all of it in one value, do not group them.
 - Give a one-sentence "reason".
 
+Entries marked "protected" were typed by the person themselves and are fixed. You may not remove one, and you may not reword one:
+- A group MAY contain a protected entry, but only if the single correct entry is that protected entry with its value UNCHANGED, and every other entry in the group is unprotected.
+- Never propose a group in which every entry is protected.
+- Never propose a "value" for a protected entry that differs from the value it already has, even to add detail. If the full fact needs wording the protected entry does not have, leave the group alone.
+
 Return STRICT JSON only:
 {"groups":[{"ids":["<id>","<id>"],"label":"<label>","value":"<merged value>","reason":"<why>"}],"none":false}
 If there are no duplicates at all, return {"groups":[],"none":true}.`;
@@ -83,8 +121,10 @@ export function buildAuditUserMessage(
   entries: AuditEntry[],
   rejectedNotes: string[] = [],
 ): string {
+  // The marker is appended only when true, so the common case costs no tokens.
   const lines = entries.map((e) =>
-    `- id=${e.id} | category=${e.category_slug} | label=${e.label} | value=${e.value}`
+    `- id=${e.id} | category=${e.category_slug} | label=${e.label} | value=${e.value}` +
+    (isProtected(e) ? " | protected" : "")
   );
   const rejectedBlock = rejectedNotes.length > 0
     ? [
@@ -173,7 +213,9 @@ export function parseAuditResponse(raw: string): LlmAuditResponse {
  *  - an id is claimed by more than one group
  *  - the proposed label is not one of the labels already used by the group
  *  - the proposed value would drop information from any group member
- *  - every member is pinned (nothing may be removed)
+ *  - every member is protected, pinned or hand-typed (nothing may be removed)
+ *  - the keeper must be a protected row whose wording cannot carry the merged
+ *    value, so applying it would lose what the other rows said
  */
 export function planMerges(entries: AuditEntry[], groups: LlmGroup[]): MergePlan {
   const byId = new Map(entries.map((e) => [e.id, e]));
@@ -217,11 +259,13 @@ export function planMerges(entries: AuditEntry[], groups: LlmGroup[]): MergePlan
       continue;
     }
 
-    // Deterministic keep choice: pinned first, then the label that matches the
-    // resolved label, then the oldest row, then id order for stability.
+    // Deterministic keep choice: protected first, then the label that matches
+    // the resolved label, then the oldest row, then id order for stability.
+    // Protected must sort first because it is the one row that cannot be
+    // removed, so it is the only row that can survive as the keeper.
     const sorted = [...rows].sort((a, b) => {
-      const pin = Number(b.is_pinned || false) - Number(a.is_pinned || false);
-      if (pin !== 0) return pin;
+      const prot = Number(isProtected(b)) - Number(isProtected(a));
+      if (prot !== 0) return prot;
       const lab = Number(labelKey(b.label) === labelKey(resolvedLabel)) -
         Number(labelKey(a.label) === labelKey(resolvedLabel));
       if (lab !== 0) return lab;
@@ -232,18 +276,38 @@ export function planMerges(entries: AuditEntry[], groups: LlmGroup[]): MergePlan
     });
 
     const keep = sorted[0];
-    const removeIds = sorted.slice(1).filter((r) => !r.is_pinned).map((r) => r.id);
+    const removeIds = sorted.slice(1).filter((r) => !isProtected(r)).map((r) => r.id);
     if (removeIds.length === 0) {
-      rejected.push({ ids, reason: "all_pinned" });
+      rejected.push({ ids, reason: "all_protected" });
       continue;
+    }
+
+    // A protected keeper's words are immutable to a background job, so the
+    // merged value can only be applied if the keeper already says it. When it
+    // does not, applying the merge would delete the other rows and silently
+    // drop what they carried, which is the information loss `valueCovers`
+    // exists to prevent. Reject instead, and let a human resolve it: they can
+    // edit a preferred row, a machine cannot.
+    let effectiveLabel = resolvedLabel;
+    let effectiveValue = proposedValue;
+    if (isProtected(keep) && normalizeText(proposedValue) !== normalizeText(keep.value)) {
+      const stillLossy = rows.find((r) => !valueCovers(keep.value, r.value));
+      if (stillLossy) {
+        rejected.push({ ids, reason: "protected_value_immutable" });
+        continue;
+      }
+      // The keeper's existing wording already covers every value in the group,
+      // so the duplicates can go and nothing is lost.
+      effectiveLabel = keep.label;
+      effectiveValue = keep.value;
     }
 
     for (const id of ids) claimed.add(id);
     merges.push({
       keepId: keep.id,
       removeIds,
-      label: resolvedLabel,
-      value: proposedValue,
+      label: effectiveLabel,
+      value: effectiveValue,
       reason: String(group?.reason || "duplicate fact"),
     });
   }
@@ -267,15 +331,15 @@ export function planExactDuplicates(entries: AuditEntry[]): MergePlanItem[] {
   for (const rows of clusters.values()) {
     if (rows.length < 2) continue;
     const sorted = [...rows].sort((a, b) => {
-      const pin = Number(b.is_pinned || false) - Number(a.is_pinned || false);
-      if (pin !== 0) return pin;
+      const prot = Number(isProtected(b)) - Number(isProtected(a));
+      if (prot !== 0) return prot;
       const at = String(a.created_at || "");
       const bt = String(b.created_at || "");
       if (at !== bt) return at < bt ? -1 : 1;
       return a.id < b.id ? -1 : 1;
     });
     const keep = sorted[0];
-    const removeIds = sorted.slice(1).filter((r) => !r.is_pinned).map((r) => r.id);
+    const removeIds = sorted.slice(1).filter((r) => !isProtected(r)).map((r) => r.id);
     if (removeIds.length === 0) continue;
     plan.push({
       keepId: keep.id,

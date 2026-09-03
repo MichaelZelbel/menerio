@@ -983,6 +983,7 @@ async function verifyRealPeopleWithLLM(
   noteTitle: string,
   noteText: string,
   candidates: string[],
+  noteId: string | null,
 ): Promise<Set<string>> {
   const allowAll = new Set(candidates.map((n) => n.toLowerCase()));
   if (candidates.length === 0) return allowAll;
@@ -996,6 +997,7 @@ async function verifyRealPeopleWithLLM(
       db: supabase,
       userId,
       callSite: "process-note.fiction_guard",
+      noteId,
       messages: [{ role: "user", content: userPrompt }],
       defaults: {
         provider: "openrouter",
@@ -1210,7 +1212,7 @@ async function generateReviewItems(
       // batched call per note, only when there is at least one candidate.
       if (newContactCandidates.length > 0) {
         const names = newContactCandidates.map((s) => String(s.extracted_value || ""));
-        const verifiedReal = await verifyRealPeopleWithLLM(userId, noteTitle, fullText, names);
+        const verifiedReal = await verifyRealPeopleWithLLM(userId, noteTitle, fullText, names, noteId);
         for (const cand of newContactCandidates) {
           const key = String(cand.extracted_value || "").toLowerCase();
           if (verifiedReal.has(key)) {
@@ -1353,6 +1355,7 @@ async function generateProfileSuggestions(
         db: supabase,
         userId,
         callSite: "process-note.profile_extraction",
+        noteId,
         messages: [{ role: "user", content: userPrompt }],
         defaults: {
           provider: "openrouter",
@@ -2141,6 +2144,7 @@ async function generateMomentSuggestions(
         db: supabase,
         userId,
         callSite: "process-note.moment_extraction",
+        noteId,
         messages: [{ role: "user", content: userPrompt }],
         defaults: {
           provider: "openrouter",
@@ -2363,11 +2367,22 @@ const CLAIM_STALE_MS = 10 * 60_000;
  * `is.null` is in there because a legacy note has no status at all, and in SQL
  * `NULL <> 'processing'` is NULL rather than true, so neq alone would skip it.
  */
-async function claimNoteForProcessing(noteId: string): Promise<boolean> {
+async function claimNoteForProcessing(
+  noteId: string,
+  attemptsSoFar: number,
+): Promise<boolean> {
   const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
   const { data, error } = await supabase
     .from("notes")
-    .update({ processing_status: "processing", processing_error: null })
+    // The attempt is counted here, at the moment the note is claimed, because
+    // this is the last point before money is spent. It is reset to 0 on success
+    // below. `sweep-note-processing` stops re-triggering at 3, so a note that can
+    // never be processed stops costing an extraction on every sweep forever.
+    .update({
+      processing_status: "processing",
+      processing_error: null,
+      processing_attempts: attemptsSoFar + 1,
+    })
     .eq("id", noteId)
     .or(
       `processing_status.is.null,processing_status.neq.processing,updated_at.lt.${staleBefore}`,
@@ -2388,7 +2403,7 @@ async function processInBackground(noteId: string, authHeader: string, force = f
   try {
     const { data: note, error: fetchErr } = await supabase
       .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at, processing_status, processed_hash, embedding")
+      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at, processing_status, processed_hash, embedding, processing_attempts")
       .eq("id", noteId)
       .single();
 
@@ -2427,8 +2442,13 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     // Claim it before spending. `force` is the deliberate admin re-run and
     // keeps its existing override.
     if (force) {
-      await setProcessingState(noteId, "processing", { processing_error: null });
-    } else if (!(await claimNoteForProcessing(noteId))) {
+      // The deliberate admin re-run is never capped, and resets the count so a
+      // note a human has just fixed gets a clean slate.
+      await setProcessingState(noteId, "processing", {
+        processing_error: null,
+        processing_attempts: 0,
+      });
+    } else if (!(await claimNoteForProcessing(noteId, Number((note as any).processing_attempts) || 0))) {
       return;
     }
 
@@ -2470,6 +2490,7 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         db: supabase,
         userId: note.user_id,
         callSite: "process-note.metadata",
+        noteId,
         messages: [{ role: "user", content: fullText.slice(0, 24000) }],
         defaults: {
           provider: "openrouter",
@@ -2716,6 +2737,8 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       `${aiTitle || note.title || ""}\n\n${note.content ?? ""}`,
     );
     updatePayload.processing_error = null;
+    // Succeeded, so the strike count goes back to zero.
+    updatePayload.processing_attempts = 0;
 
     const { error: updateErr } = await supabase
       .from("notes")
