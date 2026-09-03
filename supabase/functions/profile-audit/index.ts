@@ -279,8 +279,27 @@ async function auditScope(
 
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error("[profile-audit] scope failed", userId, contactId, message);
-    await upsertRun(db, userId, contactId, { status: "dirty", last_error: message });
+    // Three of these are "not now", not "broken": the loop breaker refused a
+    // prompt it has already answered, the allowance is spent, or the allowance
+    // could not be read. All three leave the scope dirty on purpose, because
+    // dirty means "come back to this" and a later sweep should. Say which, so
+    // the status screen shows a reason a human can act on rather than a code.
+    const notNow: Record<string, string> = {
+      REPEAT_CALL_BLOCKED:
+        "Skipped: this profile was already audited with the identical entries in the last hour. Waiting rather than paying for the same answer again.",
+      INSUFFICIENT_CREDITS: "Skipped: no AI credits left this period.",
+      BALANCE_UNAVAILABLE: "Skipped: the AI allowance could not be read. Not a spent quota.",
+    };
+    const friendly = notNow[message];
+    if (friendly) {
+      console.log(`[profile-audit] ${message} for ${userId}/${contactId ?? "self"}, will retry later.`);
+    } else {
+      console.error("[profile-audit] scope failed", userId, contactId, message);
+    }
+    await upsertRun(db, userId, contactId, {
+      status: "dirty",
+      last_error: friendly ?? message,
+    });
     return { ok: false, error: message };
   }
 }
