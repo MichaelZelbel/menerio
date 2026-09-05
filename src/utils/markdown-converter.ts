@@ -539,7 +539,9 @@ function serializeListItem(node: TiptapNode, depth: number): string {
 function serializeTaskItem(node: TiptapNode, depth: number): string {
   const checked = node.attrs?.checked === true ? "x" : " ";
   const body = serializeListItem(node, depth + 1);
-  return `${"  ".repeat(depth)}- [${checked}] ${body}`;
+  // Empty items must not keep a trailing space: `- [ ] ` gets trimmed by other
+  // pipelines and would come back as a literal "[ ]" bullet.
+  return `${"  ".repeat(depth)}- [${checked}]${body ? ` ${body}` : ""}`;
 }
 
 function serializeText(node: TiptapNode): string {
