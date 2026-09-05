@@ -588,3 +588,54 @@ describe("wikilink titles containing a stray ]", () => {
     expect(html).toContain('data-display-text="Alias"');
   });
 });
+
+describe("checkbox lists with `--` dividers", () => {
+  it("keeps an empty checkbox as a task item instead of a literal [ ] bullet", () => {
+    const html = markdownToHtml("- [ ]\n- [x] done");
+    expect(html).toContain('data-type="taskList"');
+    expect(html).not.toContain("<p>[ ]</p>");
+    expect(html.match(/data-type="taskItem"/g)?.length).toBe(2);
+    expect(html).toContain("done");
+  });
+
+  it("does not drop items after a list-type change", () => {
+    const html = markdownToHtml("- plain\n- [ ] task");
+    expect(html).toContain("plain");
+    expect(html).toContain("task");
+  });
+
+  it("keeps text and a `--` divider that precede a list in the same block", () => {
+    const html = markdownToHtml("Intro\n--\n- [ ] alpha");
+    expect(html).toContain("Intro");
+    expect(html).toContain("--");
+    expect(html).toContain("alpha");
+  });
+
+  it("does not pull a `--` divider into the previous task item", () => {
+    const html = markdownToHtml("- [ ] alpha\n--\n- [ ] beta");
+    expect(html).toContain("<p>--</p>");
+    expect(html).toContain("alpha");
+    expect(html).toContain("beta");
+  });
+
+  it("serializes an empty task item without a trailing space", () => {
+    const md = tiptapJsonToMarkdown({
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph" }] },
+            {
+              type: "taskItem",
+              attrs: { checked: false },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "beta" }] }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(md.split("\n")[0]).toBe("- [ ]");
+    expect(md).toContain("- [ ] beta");
+  });
+});
