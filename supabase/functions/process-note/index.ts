@@ -13,6 +13,7 @@ import {
 } from "../_shared/llm-defaults.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { shouldExtractFacts } from "../_shared/hub-source.ts";
+import { findOrCreateContact } from "../_shared/find-or-create-contact.ts";
 import {
   canonicalLabel,
   inverseLabel,
@@ -515,13 +516,13 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
     if (suggestion.suggestion_type === "add_contact") {
       const name = String(suggestion.payload.name || "").trim();
       if (!name) return { ...suggestion, status: "pending_review" };
-      const { data, error } = await supabase
-        .from("contacts")
-        .insert({ user_id: suggestion.user_id, name })
-        .select("id")
-        .single();
-      if (error || !data) return { ...suggestion, status: "pending_review" };
-      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+      let found: { id: string; created: boolean };
+      try {
+        found = await findOrCreateContact(supabase, suggestion.user_id, name);
+      } catch {
+        return { ...suggestion, status: "pending_review" };
+      }
+      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: found.id, applied_at: new Date().toISOString() };
     }
 
     if (suggestion.suggestion_type === "add_alias") {

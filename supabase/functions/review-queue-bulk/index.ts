@@ -11,6 +11,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
+import { findOrCreateContact } from "../_shared/find-or-create-contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "npm:zod@3.23.8";
 
@@ -411,10 +412,12 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
     case "add_contact": {
       const name = String(p.name || "").trim();
       if (!name) return skip("missing contact name");
-      const { data, error } = await db.from("contacts").insert({ user_id: userId, name }).select("id").single();
-      if (error) throw error;
-      await markKept(data?.id ? { target_entity_type: "contact", target_entity_id: data.id, applied_at: now } : undefined);
-      return { kind: "applied" };
+      // Two notes can each propose the same new person, and a bulk keep used
+      // to create one contact per suggestion: twelve people existed twice on
+      // 2026-09-04. The second keep now lands on the person the first made.
+      const found = await findOrCreateContact(db, userId, name);
+      await markKept({ target_entity_type: "contact", target_entity_id: found.id, applied_at: now });
+      return found.created ? { kind: "applied" } : { kind: "already_satisfied", reason: `"${name}" is already in People` };
     }
     case "add_alias": {
       const contactId = p.contact_id as string | undefined;

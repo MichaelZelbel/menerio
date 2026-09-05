@@ -224,6 +224,18 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
 
       const newPeopleIds: string[] = [];
       for (const name of selectedNewPeople) {
+        // A name typed as new may already be in People under another case.
+        const { data: existing } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("user_id", user.id)
+          .is("merged_into", null)
+          .ilike("name", name.replace(/[%_\\]/g, (ch) => "\\" + ch))
+          .limit(1);
+        if (existing && existing.length > 0) {
+          newPeopleIds.push(existing[0].id);
+          continue;
+        }
         const { data } = await supabase.from("contacts").insert({ user_id: user.id, name }).select("id").single();
         if (data) newPeopleIds.push(data.id);
       }

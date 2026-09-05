@@ -780,6 +780,19 @@ export default function ReviewQueue() {
         showToast.error("No name found in suggestion");
         return;
       }
+      // The same person can be proposed from two notes. Land on the one that
+      // already exists instead of making a twin (twelve twins on 2026-09-04).
+      const { data: existing } = await supabase
+        .from("contacts")
+        .select("id")
+        .is("merged_into", null)
+        .ilike("name", name.replace(/[%_\\]/g, (ch) => "\\" + ch))
+        .limit(1);
+      if (existing && existing.length > 0) {
+        updateStatus.mutate({ id: item.id, status: "kept" });
+        showToast.success(`"${name}" is already in your People`);
+        return;
+      }
       const { error } = await supabase.from("contacts").insert({ name });
       if (error) {
         showToast.error("Failed to add contact: " + error.message);
