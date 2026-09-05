@@ -1610,6 +1610,30 @@ export type Database = {
         }
         Relationships: []
       }
+      llm_call_fingerprints: {
+        Row: {
+          call_site: string
+          created_at: string
+          id: number
+          prompt_hash: string
+          user_id: string
+        }
+        Insert: {
+          call_site: string
+          created_at?: string
+          id?: number
+          prompt_hash: string
+          user_id: string
+        }
+        Update: {
+          call_site?: string
+          created_at?: string
+          id?: number
+          prompt_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       llm_usage_events: {
         Row: {
           call_site: string | null
@@ -1622,6 +1646,7 @@ export type Database = {
           idempotency_key: string | null
           metadata: Json | null
           model: string | null
+          note_id: string | null
           prompt_tokens: number
           provider: string | null
           total_tokens: number
@@ -1638,6 +1663,7 @@ export type Database = {
           idempotency_key?: string | null
           metadata?: Json | null
           model?: string | null
+          note_id?: string | null
           prompt_tokens?: number
           provider?: string | null
           total_tokens?: number
@@ -1654,6 +1680,7 @@ export type Database = {
           idempotency_key?: string | null
           metadata?: Json | null
           model?: string | null
+          note_id?: string | null
           prompt_tokens?: number
           provider?: string | null
           total_tokens?: number
@@ -2229,6 +2256,7 @@ export type Database = {
         Row: {
           chunk_index: number
           content: string
+          content_hash: string | null
           created_at: string
           embedding: string | null
           heading_path: string | null
@@ -2240,6 +2268,7 @@ export type Database = {
         Insert: {
           chunk_index: number
           content: string
+          content_hash?: string | null
           created_at?: string
           embedding?: string | null
           heading_path?: string | null
@@ -2251,6 +2280,7 @@ export type Database = {
         Update: {
           chunk_index?: number
           content?: string
+          content_hash?: string | null
           created_at?: string
           embedding?: string | null
           heading_path?: string | null
@@ -2369,6 +2399,7 @@ export type Database = {
           metadata: Json | null
           processed_at: string | null
           processed_hash: string | null
+          processing_attempts: number
           processing_error: string | null
           processing_status: string | null
           related: Json | null
@@ -2398,6 +2429,7 @@ export type Database = {
           metadata?: Json | null
           processed_at?: string | null
           processed_hash?: string | null
+          processing_attempts?: number
           processing_error?: string | null
           processing_status?: string | null
           related?: Json | null
@@ -2427,6 +2459,7 @@ export type Database = {
           metadata?: Json | null
           processed_at?: string | null
           processed_hash?: string | null
+          processing_attempts?: number
           processing_error?: string | null
           processing_status?: string | null
           related?: Json | null
@@ -4128,6 +4161,16 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_premium_user: { Args: { _user_id: string }; Returns: boolean }
+      llm_note_call_fingerprint: {
+        Args: {
+          _call_site: string
+          _limit?: number
+          _prompt_hash: string
+          _user_id: string
+          _window?: string
+        }
+        Returns: Json
+      }
       lookup_mcp_token: {
         Args: { _token_hash: string }
         Returns: {
