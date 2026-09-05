@@ -315,42 +315,41 @@ export function markdownToHtml(md: string): string {
   return result;
 }
 
+const LIST_LINE_PATTERN = /^(\s*)(?:(- \[([ xX])\](?:\s+|$))|([-*+])(?:\s+|$)|(\d+)\.(?:\s+|$))(.*)$/;
+
 function isListBlock(block: string): boolean {
-  return /^\s*(?:[-*+]\s+|\d+\.\s+|- \[[ xX]\]\s+)/m.test(block);
+  return /^\s*(?:[-*+](?:\s+|$)|\d+\.(?:\s+|$)|- \[[ xX]\](?:\s+|$))/m.test(block);
 }
 
-function markdownListToHtml(block: string): string {
-  type ListLine = {
-    indent: number;
-    ordered: boolean;
-    task: boolean;
-    checked: boolean;
-    content: string;
+type ListLine = {
+  indent: number;
+  ordered: boolean;
+  task: boolean;
+  checked: boolean;
+  content: string;
+};
+
+function parseListLine(line: string): ListLine | null {
+  const match = line.match(LIST_LINE_PATTERN);
+  if (!match) return null;
+  return {
+    indent: match[1].replace(/\t/g, "  ").length,
+    ordered: Boolean(match[5]),
+    task: Boolean(match[2]),
+    checked: String(match[3] || "").toLowerCase() === "x",
+    content: match[6] || "",
   };
+}
 
-  const rawLines = block.split("\n");
-  const lines: ListLine[] = [];
-  for (const line of rawLines) {
-    const match = line.match(/^(\s*)(?:(- \[([ xX])\]\s+)|([-*+])\s+|(\d+)\.\s+)(.*)$/);
-    if (match) {
-      lines.push({
-        indent: match[1].replace(/\t/g, "  ").length,
-        ordered: Boolean(match[5]),
-        task: Boolean(match[2]),
-        checked: String(match[3] || "").toLowerCase() === "x",
-        content: match[6] || "",
-      });
-    } else if (lines.length > 0 && line.trim().length > 0) {
-      // Continuation line for the previous list item — preserve it instead of dropping.
-      // Append as a soft break inside the same item's content.
-      const prev = lines[lines.length - 1];
-      prev.content = `${prev.content}<br>${line.trim()}`;
-    }
-  }
-
+/**
+ * Renders one contiguous run of list lines. Sibling lists (a type change such as
+ * bullets → checkboxes) are emitted one after another instead of dropping the
+ * remaining lines, which previously deleted content on the next autosave.
+ */
+function renderListLines(lines: ListLine[]): string {
   const render = (start: number, indent: number): { html: string; next: number } => {
     const listType = lines[start]?.ordered ? "ol" : "ul";
-    const isTaskList = lines[start]?.task && listType === "ul";
+    const isTaskList = Boolean(lines[start]?.task) && listType === "ul";
     let html = isTaskList ? '<ul data-type="taskList">' : `<${listType}>`;
     let index = start;
 
@@ -385,8 +384,57 @@ function markdownListToHtml(block: string): string {
     return { html, next: index };
   };
 
-  return lines.length ? render(0, lines[0].indent).html : "";
+  let html = "";
+  let cursor = 0;
+  while (cursor < lines.length) {
+    const { html: part, next } = render(cursor, lines[cursor].indent);
+    html += part;
+    cursor = next > cursor ? next : cursor + 1;
+  }
+  return html;
 }
+
+function markdownListToHtml(block: string): string {
+  const rawLines = block.split("\n");
+  let html = "";
+  let pendingList: ListLine[] = [];
+  let pendingText: string[] = [];
+
+  const flushText = () => {
+    if (!pendingText.length) return;
+    html += `<p>${pendingText.map((l) => inlineMarkdown(l)).join("<br>")}</p>`;
+    pendingText = [];
+  };
+  const flushList = () => {
+    if (!pendingList.length) return;
+    html += renderListLines(pendingList);
+    pendingList = [];
+  };
+
+  for (const line of rawLines) {
+    const parsed = parseListLine(line);
+    if (parsed) {
+      flushText();
+      pendingList.push(parsed);
+      continue;
+    }
+    if (line.trim().length === 0) continue;
+    // Indented continuation of the previous item — keep it inside that item.
+    if (pendingList.length > 0 && /^\s+/.test(line)) {
+      const prev = pendingList[pendingList.length - 1];
+      prev.content = `${prev.content}<br>${line.trim()}`;
+      continue;
+    }
+    // Non-indented prose (e.g. a `--` divider) — its own paragraph, never swallowed.
+    flushList();
+    pendingText.push(line.trim());
+  }
+
+  flushList();
+  flushText();
+  return html;
+}
+
 
 function serializeBlock(node: TiptapNode, depth: number): string {
   const children = () => serializeInlineChildren(node);
