@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Archive, Check, Flag, History, Pencil, Repeat, RotateCcw } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Archive, Check, History, MoreHorizontal, Pencil, Repeat, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContactTopicHistory } from './ContactTopicHistory';
 import { topicModeLabels, topicPriorityLabels, type ContactTopic, type TopicCommand, type TopicPriority, type TopicMode } from '@/lib/contact-topics';
 
@@ -13,9 +14,15 @@ export function ContactTopicRow({ topic, pending, onCommand, onEditingChange }: 
   const [priority, setPriority] = useState(topic.priority);
   const [mode, setMode] = useState(topic.mode);
   const [editVersion, setEditVersion] = useState(topic.version);
+  const openingEditor = useRef(false);
   const base = { topic_id: topic.id, expected_version: topic.version };
-  return <li className="min-w-0 space-y-3 py-4" aria-label={topic.title}>
-    {editing ? <form className="space-y-3" onSubmit={async e => {
+  const startEditing = () => {
+    openingEditor.current = true;
+    setTitle(topic.title); setPriority(topic.priority); setMode(topic.mode);
+    setEditVersion(topic.version); setEditing(true); onEditingChange?.(true);
+  };
+  return <li className="min-w-0" aria-label={topic.title}>
+    {editing ? <form className="my-1 space-y-2 rounded-lg bg-muted/40 p-3" onSubmit={async e => {
       e.preventDefault();
       if (await onCommand({ action: 'update', topic_id: topic.id, expected_version: editVersion, patch: { title: title.trim(), priority, mode } })) { setEditing(false); onEditingChange?.(false); }
     }}>
@@ -30,28 +37,32 @@ export function ContactTopicRow({ topic, pending, onCommand, onEditingChange }: 
         <Button className="min-h-11" disabled={pending || !title.trim()}>Save</Button>
         <Button type="button" variant="ghost" className="min-h-11" disabled={pending} onClick={() => { setEditing(false); onEditingChange?.(false); }}>Cancel</Button>
       </div>
-    </form> : <>
-      <div className="flex min-w-0 items-start gap-2">
-        {topic.mode === 'one_off' && topic.status !== 'archived' && <label className="flex min-h-11 min-w-11 shrink-0 items-center justify-center -my-2">
-          <input type="checkbox" className="h-5 w-5 accent-primary" aria-label={`Discussed: ${topic.title}`} checked={topic.status === 'completed'} disabled={pending || topic.status === 'completed'} onChange={() => void onCommand({ action: 'discuss', ...base })} />
-        </label>}
-        <p className="min-w-0 break-words text-sm font-medium leading-relaxed">{topic.title}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1"><Flag aria-hidden="true" className="h-3.5 w-3.5" />{topicPriorityLabels[topic.priority]} priority</span>
-        <span className="inline-flex items-center gap-1"><Repeat aria-hidden="true" className="h-3.5 w-3.5" />{topicModeLabels[topic.mode]}</span>
-        {topic.last_discussed_at && <span>Last discussed <time dateTime={topic.last_discussed_at}>{new Date(topic.last_discussed_at).toLocaleDateString()}</time></span>}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {topic.status === 'active' ? <>
-          {topic.mode === 'recurring' && <Button variant="secondary" className="min-h-11 gap-1.5" disabled={pending} onClick={() => void onCommand({ action: 'discuss', ...base })}><Check aria-hidden="true" className="h-4 w-4" />Discussed today</Button>}
-          {topic.mode === 'recurring' && <Button variant="outline" className="min-h-11" disabled={pending} onClick={() => void onCommand({ action: 'discuss', ...base, close_after: true })}>Discuss and finish</Button>}
-        </> : <Button variant="secondary" className="min-h-11 gap-1.5" disabled={pending} onClick={() => void onCommand({ action: 'reopen', ...base })}><RotateCcw aria-hidden="true" className="h-4 w-4" />Reopen</Button>}
-        <Button variant="ghost" className="min-h-11 gap-1.5" disabled={pending} onClick={() => { setTitle(topic.title); setPriority(topic.priority); setMode(topic.mode); setEditVersion(topic.version); setEditing(true); onEditingChange?.(true); }}><Pencil aria-hidden="true" className="h-3.5 w-3.5" />Edit</Button>
-        {topic.status === 'active' && <Button variant="ghost" className="min-h-11 gap-1.5" disabled={pending} onClick={() => void onCommand({ action: 'archive', ...base })}><Archive aria-hidden="true" className="h-3.5 w-3.5" />Archive</Button>}
-        <Button variant="ghost" className="min-h-11 gap-1.5" aria-expanded={history} onClick={() => setHistory(!history)}><History aria-hidden="true" className="h-3.5 w-3.5" />History</Button>
-      </div>
-    </>}
-    {history && <ContactTopicHistory topicId={topic.id} />}
+    </form> : <div className="flex min-w-0 items-start gap-1">
+      <label className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-start gap-2.5">
+        <span className="flex h-11 w-5 shrink-0 items-center justify-center">
+          <input type="checkbox" className="h-4 w-4 rounded border-input accent-primary" aria-label={`${topic.mode === 'recurring' ? 'Discussed today' : 'Discussed'}: ${topic.title}`} checked={topic.status === 'completed'} disabled={pending || topic.status === 'archived'} onChange={() => void onCommand({ action: topic.status === 'completed' ? 'reopen' : 'discuss', ...base })} />
+        </span>
+        <span className="min-w-0 py-3">
+          <span className={`block break-words text-sm leading-5 ${topic.status === 'completed' ? 'text-muted-foreground line-through decoration-muted-foreground/40' : 'text-foreground'}`}>{topic.title}
+            {topic.mode === 'recurring' && <span className="ml-1.5 inline-flex align-middle text-muted-foreground" title="Recurring"><Repeat aria-hidden="true" className="h-3 w-3" /><span className="sr-only">Recurring</span></span>}
+            {topic.priority !== 'normal' && <span aria-label={`${topicPriorityLabels[topic.priority]} priority`} className="ml-2 inline-block align-middle text-[10px] font-medium text-muted-foreground no-underline">{topicPriorityLabels[topic.priority]}</span>}
+            {topic.last_discussed_at && <span className="ml-2 inline-block align-middle text-[10px] text-muted-foreground" title={`Last discussed ${new Date(topic.last_discussed_at).toLocaleDateString()}`}><span className="sr-only">Last discussed </span><time dateTime={topic.last_discussed_at}>{new Date(topic.last_discussed_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time></span>}
+          </span>
+        </span>
+      </label>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 text-muted-foreground/70 hover:text-foreground" aria-label={`Topic options: ${topic.title}`} disabled={pending}><MoreHorizontal aria-hidden="true" className="h-4 w-4" /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52" onCloseAutoFocus={event => { if (openingEditor.current) { event.preventDefault(); openingEditor.current = false; } }}>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{topicPriorityLabels[topic.priority]} priority · {topicModeLabels[topic.mode]}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="min-h-11 gap-2" onSelect={startEditing}><Pencil aria-hidden="true" className="h-4 w-4" />Edit</DropdownMenuItem>
+          <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => setHistory(!history)}><History aria-hidden="true" className="h-4 w-4" />{history ? 'Hide history' : 'History'}</DropdownMenuItem>
+          {topic.status === 'active' && topic.mode === 'recurring' && <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => void onCommand({ action: 'discuss', ...base, close_after: true })}><Check aria-hidden="true" className="h-4 w-4" />Discuss and finish</DropdownMenuItem>}
+          {topic.status === 'active' ? <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => void onCommand({ action: 'archive', ...base })}><Archive aria-hidden="true" className="h-4 w-4" />Archive</DropdownMenuItem>
+            : <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => void onCommand({ action: 'reopen', ...base })}><RotateCcw aria-hidden="true" className="h-4 w-4" />Reopen</DropdownMenuItem>}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>}
+    {history && <div className="pb-3 pl-7"><ContactTopicHistory topicId={topic.id} /></div>}
   </li>;
 }

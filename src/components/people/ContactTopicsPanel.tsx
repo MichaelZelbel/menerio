@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { MessageCircle, Plus, RotateCcw } from 'lucide-react';
+import { Plus, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useContactTopics, useContactTopicCommand } from '@/hooks/useContactTopics';
 import { compareContactTopics, topicPriorityLabels, topicStatusLabels, type ContactTopic, type TopicCommand, type TopicCommandResult, type TopicPriority, type TopicStatus } from '@/lib/contact-topics';
@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ContactTopicRow, topicSelectClass } from './ContactTopicRow';
+type TopicView = TopicStatus | 'checklist';
+const viewLabels: Record<TopicView, string> = { checklist: 'Checklist', active: 'To discuss', completed: topicStatusLabels.completed, archived: topicStatusLabels.archived };
 
 export function ContactTopicsPanel({ contactId, contactName }: { contactId: string; contactName: string }) {
   const { user } = useAuth();
@@ -19,8 +21,9 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TopicPriority>('normal');
   const [recurring, setRecurring] = useState(false);
-  const [status, setStatus] = useState<TopicStatus>('active');
+  const [status, setStatus] = useState<TopicView>('checklist');
   const [expanded, setExpanded] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const [failure, setFailure] = useState('');
   const [failedCommand, setFailedCommand] = useState<TopicCommand | null>(null);
@@ -29,11 +32,15 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
   const submitting = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const topics = (query.data ?? []).filter(topic => topic.status === status).sort(status === 'completed'
-    ? (a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id.localeCompare(a.id)
-    : compareContactTopics);
+  const topics = (query.data ?? []).filter(topic => status === 'checklist' ? topic.status !== 'archived' : topic.status === status).sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+    return a.status === 'completed' ? (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id.localeCompare(a.id) : compareContactTopics(a, b);
+  });
   // Keep open editors mounted when refresh changes priority, status or ownership.
-  const visibleTopics = expanded ? [...topics] : topics.slice(0, 5);
+  const recentCompleted = status === 'checklist' ? topics.find(topic => topic.status === 'completed') : undefined;
+  const activePreview = topics.filter(topic => topic.status === 'active').slice(0, 4);
+  const preview = recentCompleted ? [...activePreview, ...topics.filter(topic => topic.status === 'completed').slice(0, 5 - activePreview.length)] : topics.slice(0, 5);
+  const visibleTopics = expanded ? [...topics] : preview;
   for (const [id, snapshot] of editingTopics) {
     if (!visibleTopics.some(topic => topic.id === id)) visibleTopics.push(query.data?.find(topic => topic.id === id) ?? snapshot);
   }
@@ -62,46 +69,46 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
       return false;
     } finally { submitting.current = false; }
   };
-  return <Card className="mb-6 min-w-0 overflow-hidden" aria-label={`Topics to talk about with ${contactName}`}>
-    <div className="space-y-4 p-4 sm:p-5">
-      <div className="flex items-start gap-3">
-        <MessageCircle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-        <div className="min-w-0"><h2 ref={heading} tabIndex={-1} className="text-base font-semibold tracking-tight">Topics to talk about</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Keep a few things in mind for your next conversation.</p></div>
+  return <Card className="mb-5 min-w-0 overflow-hidden border-border/70 shadow-none" aria-label={`Topics to talk about with ${contactName}`}>
+    <div className="px-4 py-3 sm:px-5">
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+        <h2 ref={heading} tabIndex={-1} className="min-w-0 text-sm font-semibold tracking-tight">Topics to talk about</h2>
+        <select aria-label="Topic view" value={status} onChange={e => { setStatus(e.target.value as TopicView); setExpanded(false); }} className="min-h-11 max-w-[45%] shrink-0 rounded-md border-0 bg-transparent pl-2 pr-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {(Object.keys(viewLabels) as TopicView[]).map(value => <option key={value} value={value}>{viewLabels[value]} ({(query.data ?? []).filter(t => value === 'checklist' ? t.status !== 'archived' : t.status === value).length})</option>)}
+        </select>
       </div>
-      <form className="space-y-2" onSubmit={async e => {
-        e.preventDefault();
-        if (!title.trim()) return;
-        if (await run({ action: 'create', contact_id: contactId, title: title.trim(), priority, mode: recurring ? 'recurring' : 'one_off' })) {
-          setTitle(''); setPriority('normal'); setRecurring(false); setStatus('active'); input.current?.focus();
-        }
-      }}>
-        <label htmlFor={`topic-title-${contactId}`} className="sr-only">New topic</label>
-        <Input ref={input} id={`topic-title-${contactId}`} placeholder="What would you like to talk about?" maxLength={300} required className="min-h-11" value={title} disabled={mutation.isPending} onChange={e => setTitle(e.target.value)} />
-        <div className="flex flex-wrap items-center gap-2">
-          <select aria-label="New topic priority" className={topicSelectClass} value={priority} disabled={mutation.isPending} onChange={e => setPriority(e.target.value as TopicPriority)}>
-            {Object.entries(topicPriorityLabels).map(([value, label]) => <option key={value} value={value}>{label} priority</option>)}
-          </select>
-          <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={recurring} disabled={mutation.isPending} onChange={e => setRecurring(e.target.checked)} />Recurring</label>
-          <Button className="min-h-11 gap-1.5 sm:ml-auto" disabled={mutation.isPending || !title.trim()}><Plus aria-hidden="true" className="h-4 w-4" />{mutation.isPending ? 'Saving...' : 'Add topic'}</Button>
-        </div>
-      </form>
-      {failure && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{failure} Your input is still here.</p>}
-      {failedCommand?.action === 'update' && <p className="text-sm text-muted-foreground">Use Save in the editor to retry the draft shown there.</p>}
-      {failedCommand && failedCommand.action !== 'create' && failedCommand.action !== 'update' && <Button variant="outline" className="min-h-11" disabled={mutation.isPending} onClick={() => void run(failedCommand)}>Retry unsaved change</Button>}
-      {(!query.online || (query.isError && query.data)) && <p role="status" className="text-sm text-muted-foreground">{!query.online ? 'Offline. Showing the last loaded topics. Changes need a connection.' : 'Topics may be out of date. Refresh to try again.'}</p>}
-      <div className="flex flex-wrap gap-1 border-b border-border pb-2" aria-label="Topic views">
-        {(Object.keys(topicStatusLabels) as TopicStatus[]).map(value => <Button key={value} variant={status === value ? 'secondary' : 'ghost'} className="min-h-11" aria-pressed={status === value} onClick={() => { setStatus(value); setExpanded(false); }}>{value === 'active' ? 'To discuss' : topicStatusLabels[value]} <span className="ml-1.5 text-xs text-muted-foreground">{(query.data ?? []).filter(t => t.status === value).length}</span></Button>)}
-      </div>
-      {query.isPending ? <p role="status" className="py-4 text-sm text-muted-foreground">Loading topics...</p> : query.isError && !query.data ? <p role="alert" className="text-sm text-destructive">Topics could not be loaded.</p> : visibleTopics.length === 0 ? <p className="py-4 text-sm text-muted-foreground">{status === 'active' ? 'No topics yet. Add something you want to bring up.' : status === 'completed' ? 'Discussed topics will appear here.' : 'Archived topics will appear here.'}</p> : <ul className="divide-y divide-border">{visibleTopics.map(topic => <ContactTopicRow key={topic.id} topic={topic} pending={mutation.isPending} onCommand={run} onEditingChange={editing => setEditingTopics(current => {
+      {(!query.online || (query.isError && query.data)) && <p role="status" className="pb-2 text-xs text-muted-foreground">{!query.online ? 'Offline. Showing the last loaded topics. Changes need a connection.' : 'Topics may be out of date. Refresh to try again.'}</p>}
+      {query.isPending ? <p role="status" className="py-3 text-sm text-muted-foreground">Loading topics...</p> : query.isError && !query.data ? <p role="alert" className="py-3 text-sm text-destructive">Topics could not be loaded.</p> : visibleTopics.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{status === 'active' || status === 'checklist' ? 'Nothing to bring up yet.' : status === 'completed' ? 'No discussed topics yet.' : 'No archived topics.'}</p> : <ul>{visibleTopics.map(topic => <ContactTopicRow key={topic.id} topic={topic} pending={mutation.isPending} onCommand={run} onEditingChange={editing => setEditingTopics(current => {
         const next = new Map(current);
         if (editing) next.set(topic.id, topic); else next.delete(topic.id);
         return next;
       })} />)}</ul>}
-      {topics.length > 5 && <Button variant="outline" className="min-h-11 w-full" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer' : `Show all ${topics.length} topics`}</Button>}
-      {query.isError && <Button variant="outline" className="min-h-11" onClick={() => void query.refetch()}>Refresh topics</Button>}
-      <div role="status" aria-live="polite" className="text-sm text-muted-foreground">{announcement}</div>
-      {undo && <Button variant="outline" className="min-h-11 gap-1.5" disabled={mutation.isPending} onClick={() => void run({ action: 'undo', topic_id: undo.topic.id, expected_version: undo.topic.version, event_id: undo.event_id })}><RotateCcw aria-hidden="true" className="h-4 w-4" />Undo last change</Button>}
+      {topics.length > 5 && <Button variant="ghost" className="min-h-11 px-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer' : `Show all ${topics.length} topics`}</Button>}
+      <form className="mt-1 border-t border-border/50 pt-1" onSubmit={async e => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        if (await run({ action: 'create', contact_id: contactId, title: title.trim(), priority, mode: recurring ? 'recurring' : 'one_off' })) {
+          setTitle(''); setPriority('normal'); setRecurring(false); setStatus('checklist'); setOptionsOpen(false); input.current?.focus();
+        }
+      }}>
+        <div className="flex min-w-0 items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-11 w-11 -ml-3 shrink-0 text-muted-foreground" aria-label={mutation.isPending ? 'Saving...' : 'Add topic'} disabled={mutation.isPending || !title.trim()}><Plus aria-hidden="true" className="h-4 w-4" /></Button>
+          <label htmlFor={`topic-title-${contactId}`} className="sr-only">New topic</label>
+          <Input ref={input} id={`topic-title-${contactId}`} placeholder="Add a topic..." maxLength={300} required className="h-11 min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0" value={title} disabled={mutation.isPending} onChange={e => setTitle(e.target.value)} />
+          <Button type="button" variant="ghost" size="icon" className="h-11 w-11 shrink-0 text-muted-foreground/70" aria-label="New topic options" aria-expanded={optionsOpen} onClick={() => setOptionsOpen(!optionsOpen)}><SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" /></Button>
+        </div>
+        {optionsOpen && <div className="flex flex-wrap items-center gap-2 pb-2 pl-7">
+          <select aria-label="New topic priority" className={topicSelectClass} value={priority} disabled={mutation.isPending} onChange={e => setPriority(e.target.value as TopicPriority)}>
+            {Object.entries(topicPriorityLabels).map(([value, label]) => <option key={value} value={value}>{label} priority</option>)}
+          </select>
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={recurring} disabled={mutation.isPending} onChange={e => setRecurring(e.target.checked)} />Recurring</label>
+        </div>}
+      </form>
+      {failure && <p role="alert" className="mt-2 rounded-md bg-destructive/10 p-3 text-xs text-destructive">{failure} Your input is still here.</p>}
+      {failedCommand?.action === 'update' && <p className="mt-2 text-xs text-muted-foreground">Use Save in the editor to retry the draft shown there.</p>}
+      {failedCommand && failedCommand.action !== 'create' && failedCommand.action !== 'update' && <Button variant="ghost" className="min-h-11 text-xs" disabled={mutation.isPending} onClick={() => void run(failedCommand)}>Retry unsaved change</Button>}
+      {query.isError && <Button variant="ghost" className="min-h-11 text-xs" onClick={() => void query.refetch()}>Refresh topics</Button>}
+      <div role="status" aria-live="polite" className={undo ? 'flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground' : 'sr-only'}><span>{announcement}</span>{undo && <Button variant="ghost" className="min-h-11 gap-1 px-1 text-xs" aria-label="Undo last change" disabled={mutation.isPending} onClick={() => void run({ action: 'undo', topic_id: undo.topic.id, expected_version: undo.topic.version, event_id: undo.event_id })}><RotateCcw aria-hidden="true" className="h-3 w-3" />Undo</Button>}</div>
     </div>
   </Card>;
 }

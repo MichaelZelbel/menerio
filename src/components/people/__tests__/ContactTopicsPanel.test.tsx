@@ -44,13 +44,49 @@ vi.mock('@/hooks/useContactTopics', async () => {
 const makeTopic = (id: string, extras: Partial<ContactTopic> = {}): ContactTopic => ({ id, title: id, user_id: 'u1', contact_id: 'p1', mode: 'one_off', priority: 'normal', status: 'active', version: 1, created_at: '2026-09-07', updated_at: '2026-09-07', last_discussed_at: null, completed_at: null, archived_at: null, ...extras });
 const panel = () => render(<ContactTopicsPanel contactId="p1" contactName="Alex" />);
 const topicRow = (name: string) => screen.getByRole('listitem', { name });
+const topicAction = (title: string, action: string) => {
+  fireEvent.keyDown(within(topicRow(title)).getByRole('button', { name: `Topic options: ${title}` }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name: action }));
+};
+const topicView = (value: string) => fireEvent.change(screen.getByRole('combobox', { name: 'Topic view' }), { target: { value } });
 beforeEach(() => { state.rows = []; state.commands = []; state.fail = false; state.wait = null; state.user = 'u1'; state.previous = null; });
 afterEach(cleanup);
 
 describe('topics panel', () => {
+  it('keeps rows compact and exposes secondary actions through a keyboard-accessible menu', () => {
+    state.rows = [makeTopic('A simple topic')]; panel();
+    const row = topicRow('A simple topic');
+    expect(within(row).getAllByRole('button')).toHaveLength(1);
+    expect(within(row).getByRole('checkbox')).not.toBeChecked();
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+    topicAction('A simple topic', 'Edit');
+    expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveFocus();
+  });
+  it('shows recent completed topics checked in the default checklist and reopens them by checkbox', async () => {
+    state.rows = [makeTopic('Next conversation'), makeTopic('Already discussed', { status: 'completed', completed_at: '2026-09-07' })]; panel();
+    expect(screen.getByRole('combobox', { name: 'Topic view' })).toHaveValue('checklist');
+    const checkbox = within(topicRow('Already discussed')).getByRole('checkbox');
+    expect(checkbox).toBeChecked(); expect(checkbox).toBeEnabled();
+    fireEvent.click(checkbox);
+    await screen.findByText('Topic reopened.');
+    expect(within(topicRow('Already discussed')).getByRole('checkbox')).not.toBeChecked();
+    expect(state.commands.at(-1)).toMatchObject({ action: 'reopen', expected_version: 1 });
+  });
+  it('keeps capture options tucked away until requested and saves selected options', async () => {
+    panel();
+    expect(screen.queryByRole('combobox', { name: 'New topic priority' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New topic options' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'New topic priority' }), { target: { value: 'high' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Recurring' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'New topic' }), { target: { value: 'Weekly check-in' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add topic' }));
+    await screen.findByText('Topic added.');
+    expect(state.commands.at(-1)).toMatchObject({ title: 'Weekly check-in', priority: 'high', mode: 'recurring' });
+    expect(screen.queryByRole('combobox', { name: 'New topic priority' })).not.toBeInTheDocument();
+  });
   it('shows completed topics newest first regardless of priority', () => {
     state.rows = [makeTopic('Older', { status: 'completed', priority: 'high', completed_at: '2026-09-06' }), makeTopic('Newest', { status: 'completed', priority: 'low', completed_at: '2026-09-07' })];
-    panel(); fireEvent.click(screen.getByRole('button', { name: /^Discussed 2/ }));
+    panel(); topicView('completed');
     expect(screen.getAllByRole('listitem')[0]).toHaveAccessibleName('Newest');
   });
   it('shows five rows ordered by priority and expands the full list', () => {
@@ -77,26 +113,26 @@ describe('topics panel', () => {
   it('completes one-off topics, preserves recurring topics, and shows history', async () => {
     state.rows = [makeTopic('One time'), makeTopic('Check in', { mode: 'recurring' })]; panel();
     fireEvent.click(within(topicRow('One time')).getByRole('checkbox', { name: 'Discussed: One time' }));
-    await waitFor(() => expect(screen.queryByRole('listitem', { name: 'One time' })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(topicRow('One time')).getByRole('checkbox')).toBeChecked());
     expect(screen.getByRole('heading', { name: 'Topics to talk about' })).toHaveFocus();
-    fireEvent.click(within(topicRow('Check in')).getByRole('button', { name: 'Discussed today' }));
+    fireEvent.click(within(topicRow('Check in')).getByRole('checkbox', { name: 'Discussed today: Check in' }));
     await screen.findByText(/This recurring topic stays/);
-    expect(topicRow('Check in')).toBeInTheDocument(); expect(screen.getByText(/Last discussed/)).toBeInTheDocument();
-    fireEvent.click(within(topicRow('Check in')).getByRole('button', { name: 'History' }));
+    expect(topicRow('Check in')).toBeInTheDocument(); expect(within(topicRow('Check in')).getByText(/Last discussed/)).toBeInTheDocument();
+    topicAction('Check in', 'History');
     expect(screen.getByRole('list', { name: 'Topic history' })).toBeInTheDocument();
     expect(screen.getByText('Original discussion wording')).toBeInTheDocument();
     expect(screen.getByText(/Discussed \(undone\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Discussed 1/ }));
+    topicView('completed');
     expect(topicRow('One time')).toBeInTheDocument();
     expect(within(topicRow('One time')).getByRole('checkbox')).toBeChecked();
     expect(within(topicRow('One time')).queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument();
   });
   it('archives, reopens, and undoes the acknowledged latest change', async () => {
     state.rows = [makeTopic('Plan')]; panel();
-    fireEvent.click(within(topicRow('Plan')).getByRole('button', { name: 'Archive' }));
+    topicAction('Plan', 'Archive');
     await screen.findByText('Topic archived.');
-    fireEvent.click(screen.getByRole('button', { name: /^Archived 1/ }));
-    fireEvent.click(within(topicRow('Plan')).getByRole('button', { name: 'Reopen' }));
+    topicView('archived');
+    topicAction('Plan', 'Reopen');
     await screen.findByText('Topic reopened.');
     fireEvent.click(screen.getByRole('button', { name: 'Undo last change' }));
     await screen.findByText('Change undone.'); expect(topicRow('Plan')).toBeInTheDocument();
@@ -119,25 +155,25 @@ describe('topics panel', () => {
   });
   it('edits title, priority, and repetition without losing failed edits', async () => {
     state.rows = [makeTopic('Original')]; panel();
-    fireEvent.click(within(topicRow('Original')).getByRole('button', { name: 'Edit' }));
+    topicAction('Original', 'Edit');
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'Updated' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit priority' }), { target: { value: 'high' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit repetition' }), { target: { value: 'recurring' } });
     state.fail = true; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await screen.findByRole('alert'); expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveValue('Updated');
     state.fail = false; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
-    await screen.findByText('Topic saved.'); expect(topicRow('Updated')).toHaveTextContent('High priority');
+    await screen.findByText('Topic saved.'); expect(within(topicRow('Updated')).getByLabelText('High priority')).toBeInTheDocument();
     expect(state.commands.at(-1)).toMatchObject({ action: 'update', expected_version: 1, patch: { title: 'Updated', priority: 'high', mode: 'recurring' } });
   });
   it('can finish a recurring topic explicitly', async () => {
     state.rows = [makeTopic('Ongoing', { mode: 'recurring' })]; panel();
-    fireEvent.click(screen.getByRole('button', { name: 'Discuss and finish' }));
+    topicAction('Ongoing', 'Discuss and finish');
     await screen.findByText('Discussion saved. Topic moved to Discussed.');
     expect(state.commands.at(-1)).toMatchObject({ action: 'discuss', close_after: true });
   });
   it('rejects a stale edit after an external refresh and retains its original draft until reopened', async () => {
     state.rows = [makeTopic('Original')]; const view = panel();
-    fireEvent.click(within(topicRow('Original')).getByRole('button', { name: 'Edit' }));
+    topicAction('Original', 'Edit');
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'My draft' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit priority' }), { target: { value: 'high' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit repetition' }), { target: { value: 'recurring' } });
@@ -152,7 +188,7 @@ describe('topics panel', () => {
     expect(screen.getByRole('combobox', { name: 'Edit repetition' })).toHaveValue('recurring');
     expect(state.rows[0]).toMatchObject({ title: 'External update', priority: 'low', mode: 'one_off', version: 2 });
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
-    fireEvent.click(within(topicRow('External update')).getByRole('button', { name: 'Edit' }));
+    topicAction('External update', 'Edit');
     expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveValue('External update');
     expect(screen.getByRole('combobox', { name: 'Edit priority' })).toHaveValue('low');
     expect(screen.getByRole('combobox', { name: 'Edit repetition' })).toHaveValue('one_off');
@@ -162,7 +198,7 @@ describe('topics panel', () => {
   });
   it('retries the visible edited draft through Save instead of an earlier failed draft', async () => {
     state.rows = [makeTopic('Original')]; panel();
-    fireEvent.click(within(topicRow('Original')).getByRole('button', { name: 'Edit' }));
+    topicAction('Original', 'Edit');
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'Draft A' } });
     state.fail = true; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await screen.findByRole('alert');
@@ -177,7 +213,7 @@ describe('topics panel', () => {
   it.each(['priority', 'status'] as const)('keeps an open edit mounted after an external %s change moves it out of the preview', async change => {
     state.rows = Array.from({ length: 5 }, (_, i) => makeTopic(`Topic ${i}`));
     const view = panel();
-    fireEvent.click(within(topicRow('Topic 4')).getByRole('button', { name: 'Edit' }));
+    topicAction('Topic 4', 'Edit');
     const editor = screen.getByRole('textbox', { name: 'Edit topic title' });
     fireEvent.change(editor, { target: { value: 'Keep my draft' } });
     if (change === 'priority') state.rows = [...state.rows, makeTopic('External high priority', { priority: 'high' })];
