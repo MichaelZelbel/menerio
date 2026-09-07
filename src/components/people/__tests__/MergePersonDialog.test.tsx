@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MergePersonDialog } from "../MergePersonDialog";
 
@@ -16,6 +16,10 @@ const invokeMock = vi.fn(async (..._args: unknown[]) => ({ data: { success: true
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     functions: { invoke: (...args: unknown[]) => invokeMock(...args) },
+    from: () => {
+      const query = { select: () => query, eq: () => query, abortSignal: async () => ({ count: 0, error: null }) };
+      return query;
+    },
   },
 }));
 
@@ -48,6 +52,7 @@ describe("MergePersonDialog — cache invalidation (regression: ghost membership
     // Pick "Me (my own profile)" as the merge target.
     fireEvent.click(screen.getByText("Me (my own profile)").closest("button")!);
     // Confirmation dialog opens; confirm the merge.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Merge" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Merge" }));
 
     // Wait for the mutation's onSuccess to have run.

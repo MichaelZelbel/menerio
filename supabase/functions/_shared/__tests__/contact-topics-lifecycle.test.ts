@@ -2,14 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
-function mergeFixture(topicCount: number, lateTopic = false) {
+function mergeFixture(topicCount: number, failAfterReservation = false) {
   const writes: string[] = [];
   const db = {
     auth: { getUser: async () => ({ data: { user: { id: 'synthetic-owner' } }, error: null }) },
     from(table: string) {
+      if (failAfterReservation && table === 'profile_categories') throw new Error('Synthetic interruption');
       const query: any = {
         select: () => query, eq: () => query, is: () => query,
-        single: async () => writes.length ? { data: null, error: new Error('Topic appeared before reservation') } : { data: { id: 'synthetic-source', name: 'Synthetic source' }, error: null },
+        single: async () => writes.length && !failAfterReservation ? { data: null, error: new Error('Topic appeared before reservation') } : { data: { id: 'synthetic-source', name: 'Synthetic source' }, error: null },
         update: () => { writes.push(table); return query; },
         insert: () => { writes.push(table); return query; },
         delete: () => { writes.push(table); return query; },
@@ -43,10 +44,17 @@ describe('contact topic merge preflight',()=>{
     expect(f.writes).toEqual([]);
   });
   it('reserves self merge atomically before profile writes and refuses a late topic',async()=>{
-    const f=mergeFixture(0,true);
+    const f=mergeFixture(0);
     const response=await f.run({source_contact_id:'synthetic-source',merge_into_self:true});
     expect(response.status).toBe(500);
     expect((await response.json()).error).toContain('Topic appeared');
+    expect(f.writes).toEqual(['contacts']);
+  });
+  it('keeps the visible reservation after failure so an overlapping merge cannot admit topics',async()=>{
+    const f=mergeFixture(0,true);
+    const response=await f.run({source_contact_id:'synthetic-source',merge_into_self:true});
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toBe('Synthetic interruption');
     expect(f.writes).toEqual(['contacts']);
   });
 });

@@ -68,7 +68,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  let selfReservation: { userId: string; contactId: string } | null = null;
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -165,7 +164,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .select("id").single();
       if (reserveError) throw reserveError;
       if (!reserved) throw new Error("Source contact changed before merge");
-      selfReservation = { userId, contactId: source_contact_id };
     } else {
       // Verify target contact belongs to user and is not merged
       const { data: target, error: tgtErr } = await supabase
@@ -470,15 +468,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
-    if (selfReservation) {
-      // Restore source availability after a reported failure. Topic records
-      // cannot have been created while its reservation was active.
-      const recovery = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      const { error: recoveryError } = await recovery.from("contacts")
-        .update({ topic_self_merge_pending: false } as any).eq("id", selfReservation.contactId)
-        .eq("user_id", selfReservation.userId).is("merged_into", null);
-      if (recoveryError) console.error("merge reservation recovery failed", recoveryError);
-    }
+    // Keep the visible reservation on failure so retries can resume safely.
+    // Another overlapping attempt may still be moving profile data.
     console.error("merge-contacts error:", err);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
