@@ -79,6 +79,26 @@ database and caches wiped: the client connected, `currentStatus.connected` went
 true, 64 rows streamed back down into an empty replica, and no false "not
 syncing" alarm was raised. The healthy path and the alarm are both exercised.
 
+## The free plan sleeps, and a short keepalive does not wake it (2026-09-07)
+
+PowerSync deprovisions a Free-plan instance after 7 days with "no deploys or client
+connections". The `powersync-keepalive` edge function (2026-08-16) opened a real
+authenticated sync stream for four seconds every six hours and reported `ok: true`
+each time; the instance was still deprovisioned on 2026-07-18 and again on
+2026-09-07 01:06 UTC, one hour after a successful run. Short connections do not
+count. Long-lived desktop sessions and sync-config deploys are what kept it alive
+between those dates.
+
+**What runs now:** a job on Michael's hub VPS (`vps/hub/powersync-keepalive.sh` in
+the hub repo) checks every six hours through the PowerSync CLI and redeploys the
+unchanged sync config only when the instance is deprovisioned or the last deploy is
+five days old. A deploy restarts a deprovisioned instance without anyone touching the
+dashboard. Measured cost: PowerSync Cloud treats an unchanged deploy as a new sync
+rules version (new replication slot, about 1.5 minutes), after which every client
+re-downloads its own notes. The pg_cron job 14 here is inactive since the same day
+(`docs/CRON_JOBS.md`). A request for a free-plan exception went to PowerSync in
+parallel; if granted, the VPS job can stop.
+
 ## PowerSync Cloud instance (provisioned 2026-07-10, E2E verified, still live)
 
 Live setup: project **Menerio**, instance **Production** (EU) under Michael's

@@ -37,7 +37,7 @@ literal reappears in function code.
 | 11 | profile-lint-nightly | 20 3 * * * | profile-lint | x-cron-key (own env key, predates call_edge) |
 | 12 | profile-reconcile-sweep | 17 */2 * * * | profile-reconcile | x-cron-key via call_edge |
 | 13 | profile-audit-sweep | */15 * * * * | profile-audit | x-cron-key via call_edge |
-| 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge |
+| 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge; **inactive since 2026-09-07**, see runbook |
 | 15 | profile-explode-bags-nightly | 40 3 * * * | normalize-profile (explode_bags) | x-cron-key (own env key, predates call_edge) |
 
 The three "own env key" jobs (gdrive, profile-lint, explode-bags) use secrets
@@ -46,6 +46,24 @@ command. They work and stay as they are; migrating them onto `call_edge` is
 optional cleanup, not a security fix.
 
 ## Runbooks
+
+### PowerSync keepalive (job 14, inactive since 2026-09-07)
+
+The six-hourly `powersync-keepalive` function opened a real authenticated
+`/sync/stream` connection for four seconds and reported `ok: true` on every run.
+PowerSync still deprovisioned the free-plan instance on 2026-09-07 01:06 UTC, one
+hour after such a run: short connections are not what their inactivity counter
+sees. Their rule is "no deploys or client connections for over 7 days", and a
+deploy is what demonstrably counts and what restarts a deprovisioned instance.
+
+The keepalive therefore moved to Michael's hub VPS as a scheduled deploy of the
+unchanged sync config (`vps/hub/powersync-keepalive.sh` in the hub repo, root
+cron every 6 h, deploys only when the instance is deprovisioned or five days have
+passed since the last deploy). An unchanged deploy still creates a new sync rules
+version and makes every client re-download its notes, so it deploys as rarely as
+the window allows. Job 14 was set `active = false` the same day
+(`20260907190000_powersync_keepalive_inactive.sql`); the function stays deployed
+and can be re-enabled with `cron.alter_job(14, active := true)`.
 
 ### Deferred note worker (local implementation, not yet deployed)
 
