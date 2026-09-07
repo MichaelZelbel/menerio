@@ -68,6 +68,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  let selfReservation: { userId: string; contactId: string } | null = null;
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -145,6 +146,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
+    if ((source as any).topic_self_merge_pending && !merge_into_self) {
+      throw new Error("Finish this person's interrupted merge into yourself before choosing another target");
+    }
     let targetContactId: string | null = target_contact_id || null;
     let targetName: string;
 
@@ -152,11 +156,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Merging into user profile — no target contact
       targetContactId = null;
       targetName = "yourself";
+      // Reserve this visible source before moving any profile data. The topic
+      // trigger checks atomically that no topic appeared after the preflight;
+      // once reserved, new captures refuse it. A retry can resume after interruption.
+      const { data: reserved, error: reserveError } = await supabase.from("contacts")
+        .update({ topic_self_merge_pending: true } as any)
+        .eq("id", source_contact_id).eq("user_id", userId).is("merged_into", null)
+        .select("id").single();
+      if (reserveError) throw reserveError;
+      if (!reserved) throw new Error("Source contact changed before merge");
+      selfReservation = { userId, contactId: source_contact_id };
     } else {
       // Verify target contact belongs to user and is not merged
       const { data: target, error: tgtErr } = await supabase
         .from("contacts")
-        .select("id, name, aliases, app_mappings")
+        .select("id, name, aliases, app_mappings, topic_self_merge_pending")
         .eq("id", target_contact_id)
         .eq("user_id", userId)
         .is("merged_into", null)
@@ -168,6 +182,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if ((target as any).topic_self_merge_pending) throw new Error("Finish the target person's interrupted self merge first");
       targetName = target.name;
 
       // a) Merge aliases: add source name + aliases to target aliases
@@ -436,6 +451,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .update({
         merged_into: merge_into_self ? source_contact_id : targetContactId,
         merged_at: new Date().toISOString(),
+        topic_self_merge_pending: false,
       } as any)
       .eq("id", source_contact_id);
     if (mergeError) throw mergeError;
@@ -454,6 +470,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
+    if (selfReservation) {
+      // Restore source availability after a reported failure. Topic records
+      // cannot have been created while its reservation was active.
+      const recovery = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      const { error: recoveryError } = await recovery.from("contacts")
+        .update({ topic_self_merge_pending: false } as any).eq("id", selfReservation.contactId)
+        .eq("user_id", selfReservation.userId).is("merged_into", null);
+      if (recoveryError) console.error("merge reservation recovery failed", recoveryError);
+    }
     console.error("merge-contacts error:", err);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,

@@ -41,6 +41,15 @@ try {
   if(!content.includes(anchor))throw new Error(`Missing ${kind} anchor`);
   content=content.replace(anchor,anchor+start+block+end);
  }
+ const {rows:[pending]}=await db.query("select t.typname type,a.attnotnull required from pg_attribute a join pg_type t on t.oid=a.atttypid where a.attrelid='public.contacts'::regclass and a.attname='topic_self_merge_pending'");
+ if(pending){
+  const start=content.indexOf('      contacts: {\n'),next=content.indexOf('\n      ',start+20);
+  // Work inside the existing contacts block only, preserving all its other fields.
+  const end=content.indexOf('\n      }\n',start)+9;
+  let block=content.slice(start,end).replace(/^          topic_self_merge_pending\??: boolean\n/gm,'');
+  for(const mode of ['Row','Insert','Update'])block=block.replace(`        ${mode}: {\n`,`        ${mode}: {\n          topic_self_merge_pending${mode==='Row'?'':'?'}: ${tsType(pending.type)}\n`);
+  content=content.slice(0,start)+block+content.slice(end);
+ }
  await writeFile(path,content);
  console.log('Regenerated contact topic tables and RPC declarations from local PostgreSQL catalog.');
 } finally { await db.end(); }

@@ -36,6 +36,14 @@ try {
  try { await assert.rejects(command(a,randomUUID(),{action:'archive',topic_id:topic.id,expected_version:2}),/Synthetic insert failure/); }
  finally { await db.query('drop trigger contact_topics_test_fail on public.contact_topic_events; drop function public.contact_topics_test_fail()'); }
  assert.deepEqual((await db.query('select version,status from public.contact_topics where id=$1',[topic.id])).rows[0],{version:2,status:'active'});
+ // Pause exactly between lifecycle/owner locks and the service contact lock.
+ // Merge must wait at its statement gate before acquiring the source tuple.
+ await a.query('begin'); await b.query('begin');
+ await a.query("select pg_advisory_xact_lock_shared(hashtextextended('contact-topics-lifecycle',0)),pg_advisory_xact_lock(hashtextextended('contact-topics:'||$1::text,0))",[owner]);
+ const waitingMerge = b.query('update public.contacts set merged_into=$1 where id=$2',[destination,source]);
+ await new Promise(resolve=>setTimeout(resolve,100));
+ await command(a,randomUUID(),{...create,title:'Synthetic lock-order interleaving'});
+ await a.query('commit'); await waitingMerge; await b.query('rollback');
  // Create acquires the owner lock first; merge waits then transfers the committed row.
  await a.query('begin');
  const racing = await command(a,randomUUID(),{...create,title:'Synthetic create before merge'});

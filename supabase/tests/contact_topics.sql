@@ -75,5 +75,13 @@ select is((select version from public.contact_topics where id=(select (result#>>
 select lives_ok($$update public.contacts set merged_into=id where id='71000000-0000-0000-0000-000000000001'$$,'self merge succeeds after explicit topic reassignment');
 select is((select count(*)::integer from public.contact_topic_events),2,'reassignment preserves original audit and appends transfer');
 reset role;
+insert into public.contacts(id,user_id,name) values('71000000-0000-0000-0000-000000000005','72000000-0000-0000-0000-000000000001','Synthetic resumable self merge');
+update public.contacts set topic_self_merge_pending=true where id='71000000-0000-0000-0000-000000000005';
+select ok((select merged_into is null from public.contacts where id='71000000-0000-0000-0000-000000000005'),'unfinished self merge keeps source visible');
+select throws_ok($$select public.apply_contact_topic_command_for_user('72000000-0000-0000-0000-000000000001',gen_random_uuid(),'{"action":"create","contact_id":"71000000-0000-0000-0000-000000000005","title":"During reservation"}')$$,'42501',null,'self reservation rejects concurrent capture');
+select lives_ok($$update public.contacts set topic_self_merge_pending=true where id='71000000-0000-0000-0000-000000000005'$$,'same self merge can resume reservation after interruption');
+update public.contacts set topic_self_merge_pending=false where id='71000000-0000-0000-0000-000000000005';
+select lives_ok($$select public.apply_contact_topic_command_for_user('72000000-0000-0000-0000-000000000001',gen_random_uuid(),'{"action":"create","contact_id":"71000000-0000-0000-0000-000000000005","title":"After recovery"}')$$,'cleared reservation permits capture');
+select throws_ok($$update public.contacts set topic_self_merge_pending=true where id='71000000-0000-0000-0000-000000000005'$$,'22023',null,'late topic prevents reservation before profile writes');
 select * from finish();
 rollback;

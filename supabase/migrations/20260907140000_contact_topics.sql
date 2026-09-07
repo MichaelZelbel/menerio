@@ -1,5 +1,6 @@
 -- Commands and contact merge markers share an owner lock. The row and its audit
 -- event always commit together. No direct browser writes are granted.
+alter table public.contacts add column topic_self_merge_pending boolean not null default false;
 alter table public.contacts add constraint contacts_owner_id_key unique (user_id, id);
 create table public.contact_topics (
  id uuid primary key default gen_random_uuid(), user_id uuid not null, contact_id uuid not null,
@@ -32,6 +33,7 @@ create policy contact_topics_owner_read on public.contact_topics for select to a
 create policy contact_topic_events_owner_read on public.contact_topic_events for select to authenticated using(user_id=auth.uid());
 revoke all on public.contact_topics,public.contact_topic_events from anon,authenticated;
 grant select on public.contact_topics,public.contact_topic_events to authenticated;
+grant select on public.contact_topics,public.contact_topic_events to service_role;
 
 create function public.apply_contact_topic_command_internal(p_user_id uuid,p_request_id uuid,p_command jsonb)
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -41,6 +43,7 @@ declare
 begin
  if p_user_id is null then raise exception 'Authentication required' using errcode='42501'; end if;
  if p_request_id is null or jsonb_typeof(p_command) is distinct from 'object' then raise exception 'Invalid command' using errcode='22023'; end if;
+ perform pg_advisory_xact_lock_shared(hashtextextended('contact-topics-lifecycle',0));
  perform pg_advisory_xact_lock(hashtextextended('contact-topics:'||p_user_id::text,0));
  select * into e from public.contact_topic_events where user_id=p_user_id and request_id=p_request_id;
  if found then
@@ -69,7 +72,7 @@ begin
    if t.version<>(p_command->>'expected_version')::integer then raise exception 'Topic version conflict' using errcode='40001',detail=jsonb_build_object('current_version',t.version)::text; end if;
    old_state:=to_jsonb(t); t.version:=t.version+1; t.updated_at:=event_time;
  end if;
- if not exists(select 1 from public.contacts where id=t.contact_id and user_id=p_user_id and merged_into is null) then raise exception 'Person not found or already merged' using errcode='42501'; end if;
+ if not exists(select 1 from public.contacts where id=t.contact_id and user_id=p_user_id and merged_into is null and not topic_self_merge_pending) then raise exception 'Person not found or already merged' using errcode='42501'; end if;
  if act='update' then
    patch:=p_command->'patch';
    if jsonb_typeof(patch) is distinct from 'object' or patch='{}'::jsonb then raise exception 'Nonempty patch required' using errcode='22023'; end if;
@@ -122,6 +125,7 @@ create function public.apply_contact_topic_command_for_user(p_user_id uuid,p_req
 language plpgsql security definer set search_path='' as $$
 declare person_id uuid; person public.contacts;
 begin
+ perform pg_advisory_xact_lock_shared(hashtextextended('contact-topics-lifecycle',0));
  perform pg_advisory_xact_lock(hashtextextended('contact-topics:'||p_user_id::text,0));
  -- A replay checks the topic's current person, even after a merge or transfer.
  select t.contact_id into person_id from public.contact_topic_events e join public.contact_topics t on t.id=e.topic_id and t.user_id=e.user_id
@@ -131,7 +135,7 @@ begin
    else select contact_id into person_id from public.contact_topics where id=(p_command->>'topic_id')::uuid and user_id=p_user_id; end if;
  end if;
  select * into person from public.contacts where id=person_id and user_id=p_user_id for share;
- if not found or person.merged_into is not null or person.is_sensitive is distinct from false or person.ai_visibility is distinct from 'visible'
+ if not found or person.merged_into is not null or person.topic_self_merge_pending or person.is_sensitive is distinct from false or person.ai_visibility is distinct from 'visible'
    or not coalesce(public.ai_can_see(p_user_id,'contact',person_id),false) then raise exception 'Person not available to AI' using errcode='42501'; end if;
  return public.apply_contact_topic_command_internal(p_user_id,p_request_id,p_command);
 end $$;
@@ -143,9 +147,10 @@ language plpgsql security definer set search_path='' as $$
 declare t public.contact_topics; before_json jsonb; n integer:=0;
 begin
  if p_user_id is null or p_source_contact_id=p_target_contact_id then raise exception 'Choose another person' using errcode='22023'; end if;
+ perform pg_advisory_xact_lock_shared(hashtextextended('contact-topics-lifecycle',0));
  perform pg_advisory_xact_lock(hashtextextended('contact-topics:'||p_user_id::text,0));
- if not exists(select 1 from public.contacts where id=p_source_contact_id and user_id=p_user_id and merged_into is null)
- or not exists(select 1 from public.contacts where id=p_target_contact_id and user_id=p_user_id and merged_into is null) then raise exception 'Person not found or already merged' using errcode='42501'; end if;
+ if not exists(select 1 from public.contacts where id=p_source_contact_id and user_id=p_user_id and merged_into is null and not topic_self_merge_pending)
+ or not exists(select 1 from public.contacts where id=p_target_contact_id and user_id=p_user_id and merged_into is null and not topic_self_merge_pending) then raise exception 'Person not found or already merged' using errcode='42501'; end if;
  for t in select * from public.contact_topics where user_id=p_user_id and contact_id=p_source_contact_id order by id for update loop
    before_json:=to_jsonb(t); t.contact_id:=p_target_contact_id; t.version:=t.version+1; t.updated_at:=clock_timestamp();
    update public.contact_topics set contact_id=t.contact_id,version=t.version,updated_at=t.updated_at where id=t.id;
@@ -163,7 +168,13 @@ grant execute on function public.reassign_contact_topics(uuid,uuid) to authentic
 
 create function public.contact_topics_merge_guard() returns trigger language plpgsql security definer set search_path='' as $$
 begin
+ if new.topic_self_merge_pending and not old.topic_self_merge_pending then
+   if exists(select 1 from public.contact_topics where contact_id=old.id and user_id=old.user_id) then
+     raise exception 'Reassign conversation topics before merging into yourself' using errcode='22023';
+   end if;
+ end if;
  if new.merged_into is not distinct from old.merged_into then return new; end if;
+ perform pg_advisory_xact_lock_shared(hashtextextended('contact-topics-lifecycle',0));
  perform pg_advisory_xact_lock(hashtextextended('contact-topics:'||old.user_id::text,0));
  -- ON DELETE SET NULL on the existing contact merge FK must remain possible.
  if new.merged_into is null then return new; end if;
@@ -178,9 +189,23 @@ begin
  return new;
 end $$;
 revoke all on function public.contact_topics_merge_guard() from public,anon,authenticated,service_role;
-create trigger contact_topics_merge_guard before update of merged_into on public.contacts for each row execute function public.contact_topics_merge_guard();
+create trigger contact_topics_merge_guard before update of merged_into,topic_self_merge_pending on public.contacts for each row execute function public.contact_topics_merge_guard();
 do $$ begin
  if exists(select 1 from pg_publication where pubname='supabase_realtime') then
    alter publication supabase_realtime add table public.contact_topics;
  end if;
 end $$;
+
+-- Acquire the lifecycle lock before a contact statement obtains tuple locks.
+-- The matching first lock in topic commands prevents an owner-lock/contact-row
+-- cycle with merge, privacy changes, or cascading person deletion.
+create function public.contact_topics_contact_statement_lock() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+ perform pg_advisory_xact_lock(hashtextextended('contact-topics-lifecycle',0));
+ return null;
+end $$;
+revoke all on function public.contact_topics_contact_statement_lock() from public,anon,authenticated,service_role;
+create trigger contact_topics_contact_statement_lock
+before update of merged_into,topic_self_merge_pending,ai_visibility,is_sensitive,user_id,id or delete on public.contacts
+for each statement execute function public.contact_topics_contact_statement_lock();

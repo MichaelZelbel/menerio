@@ -16,7 +16,14 @@ const failure = (error: unknown) => ({ ...success({ error: { code: error instanc
 /** Register after the application's scope wrapper so these share its authenticated call path. */
 export function registerContactTopicTools(server: McpServer, db: SupabaseClient, userId: () => string) {
   function register(shape: z.ZodRawShape, name: string, description: string, run: (args: any) => Promise<unknown>) {
-    server.registerTool(name, { description, inputSchema: shape }, async args => {
+    // Advertise the exact required fields and extra-key refusal. Defer the
+    // SDK's async parse to the handler's strict parse below, so malformed tool
+    // arguments receive our structured error instead of SDK plain text. Only
+    // this private schema instance uses the boundary adapter; sync parse and
+    // JSON-schema generation retain the original validators.
+    const boundary = z.object(shape).strict();
+    boundary.safeParseAsync = async input => ({ success: true, data: input as z.infer<typeof boundary> });
+    server.registerTool(name, { description, inputSchema: boundary }, async args => {
       try { return success(await run(z.object(shape).strict().parse(args))); } catch (error) { return failure(error); }
     });
   }

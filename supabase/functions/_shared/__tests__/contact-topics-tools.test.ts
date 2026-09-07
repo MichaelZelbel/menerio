@@ -16,13 +16,15 @@ function fakeDb() {
         select: () => q, eq: (key: string, value: unknown) => { rows = rows.filter(r => r[key] === value); return q; },
         is: (key: string, value: unknown) => q.eq(key, value),
         ilike: () => q, or: () => q, order: () => q,
-        limit: (n: number) => { max = n; return q; }, maybeSingle: () => { single = true; return q; },
+        limit: (n: number) => { max = n; return q; }, range: () => q, maybeSingle: () => { single = true; return q; },
         then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows.slice(0, max), count: rows.length, error: null })),
       }; return q;
     },
     async rpc(name: string, args: any) {
       calls.push({ name, args });
       if (name === "ai_can_see") return { data: visible, error: null };
+      const current = contacts.find(c => c.id === topics[0]?.contact_id && c.user_id === args.p_user_id);
+      if (!current || current.merged_into || current.ai_visibility !== "visible" || current.is_sensitive || !visible) return { data: null, error: { code: "42501", message: "Person not available to AI" } };
       return { data: rpcError ? null : { topic: { ...topics[0], version: 4 }, event_id: topicId, replayed: args.p_request_id.endsWith("99") }, error: rpcError };
     },
   } as any;
@@ -60,7 +62,7 @@ describe("registered topic MCP transport", () => {
     if (kind === "merged") contacts[0].merged_into = topicId;
     if (kind === "rpc-denied") visible = false;
     const r = await call("archive_contact_topic", { topic_id: topicId, expected_version: 3, request_id: topicId });
-    expect(decode(r).error.code).toBe("NOT_ACCESSIBLE"); expect(calls.some(c => c.name === "apply_contact_topic_command_for_user")).toBe(false);
+    expect(decode(r).error.code).toBe("NOT_ACCESSIBLE");
   });
   it("returns conflict details and never success on database failure", async () => {
     rpcError = { code: "40001", message: "Topic changed", details: '{"current_version":4}' };
@@ -74,7 +76,7 @@ describe("registered topic MCP transport", () => {
   });
   it("rejects invalid UUIDs before touching the database", async () => {
     const r = await call("create_contact_topic", { contact_id: "Alex", title: "Garden", request_id: topicId });
-    expect(r.isError).toBe(true); expect(calls).toEqual([]);
+    expect(r.isError).toBe(true); expect(decode(r).error.code).toBe("INVALID_INPUT"); expect(calls).toEqual([]);
   });
   it("refuses a cursor from a different topic list", async () => {
     const cursor = btoa(JSON.stringify({ contact: topicId, status: "active", query: "", priority: "normal", created: "2026-09-01T12:00:00Z", id: topicId }));
@@ -85,5 +87,11 @@ describe("registered topic MCP transport", () => {
     contacts.push({ ...contacts[0], id: topicId });
     expect((await resolveContextPerson(fakeDb(), owner, undefined, "Alex")).error).toBe("AMBIGUOUS_PERSON");
     expect((await resolveContextPerson(fakeDb(), owner, person)).contact.id).toBe(person);
+  });
+  it("resolves alias-only people and returns duplicate alias candidates", async () => {
+    contacts[0].aliases = ["Craft friend"];
+    expect((await resolveContextPerson(fakeDb(), owner, undefined, "craft FRIEND")).contact.id).toBe(person);
+    contacts.push({ ...contacts[0], id: topicId });
+    expect((await resolveContextPerson(fakeDb(), owner, undefined, "Craft friend")).error).toBe("AMBIGUOUS_PERSON");
   });
 });

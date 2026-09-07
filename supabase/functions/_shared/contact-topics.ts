@@ -16,12 +16,32 @@ export const personTopicUrl = (id: string) => `https://menerio.com/dashboard/peo
 export const encodeTopicCursor = (value: unknown) => btoa(Array.from(new TextEncoder().encode(JSON.stringify(value)), byte => String.fromCharCode(byte)).join(""));
 export const decodeTopicCursor = (value: string) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(value), char => char.charCodeAt(0))));
 
+export async function searchContextPeople(db: SupabaseClient, owner: string, name: string, limit = 21, relationship?: string) {
+  const needle = name.trim().toLocaleLowerCase();
+  const matches: Record<string, any>[] = [];
+  // Read stable bounded pages rather than silently dropping aliases after a
+  // server row cap. PostgREST cannot apply ILIKE to a text[] alias element.
+  for (let offset = 0; ; offset += 500) {
+    let q = db.from("contacts").select("*").eq("user_id", owner).is("merged_into", null).eq("ai_visibility", "visible");
+    if (relationship) q = q.eq("relationship", relationship);
+    const { data, error } = await q.order("id").range(offset, offset + 499);
+    checkTopicError(error);
+    for (const c of data ?? []) {
+      const values = c.is_sensitive ? [c.name] : [c.name, c.company, ...(c.aliases ?? [])];
+      if (values.some(v => String(v ?? "").toLocaleLowerCase().includes(needle))) matches.push(c);
+      if (matches.length >= limit) return matches;
+    }
+    if (!data || data.length < 500) return matches;
+  }
+}
+
 export async function resolveContextPerson(db: SupabaseClient, owner: string, contactId?: string, name?: string) {
   if (!contactId && !name?.trim()) throw new TopicError("INVALID_INPUT", "Provide a name or contact_id.");
-  let q = db.from("contacts").select("*").eq("user_id", owner).is("merged_into", null).eq("ai_visibility", "visible");
-  q = contactId ? q.eq("id", contactId) : q.ilike("name", `%${name!.trim().replace(/[\\%_]/g, c => `\\${c}`)}%`);
-  const { data, error } = await q.order("id").limit(21);
-  checkTopicError(error);
+  let data: Record<string, any>[];
+  if (contactId) {
+    const result = await db.from("contacts").select("*").eq("user_id", owner).is("merged_into", null).eq("ai_visibility", "visible").eq("id", contactId).limit(1);
+    checkTopicError(result.error); data = result.data ?? [];
+  } else data = await searchContextPeople(db, owner, name!, 21);
   if (!data?.length) return { error: "NOT_FOUND", message: "No contact found." };
   if (data.length > 1) return { error: "AMBIGUOUS_PERSON", message: "Choose a contact_id before continuing.", candidates: data.slice(0, 20).map(c => ({ id: c.id, name: c.name })), more_candidates: data.length > 20 };
   return { contact: data[0] };
@@ -85,12 +105,13 @@ export async function topicContext(db: SupabaseClient, owner: string, contactId:
 }
 
 export async function applyTopicCommand(db: SupabaseClient, owner: string, requestId: string, command: Record<string, unknown>) {
-  if (command.action === "create") await requireTopicPerson(db, owner, String(command.contact_id));
-  else await requireTopic(db, owner, String(command.topic_id));
+  // The service-only wrapper checks the current person under the same database
+  // lock as the mutation, including a replay after a merge. The original
+  // request/receipt can legitimately still name the merged-away person.
   const { data, error } = await db.rpc("apply_contact_topic_command_for_user", { p_user_id: owner, p_request_id: requestId, p_command: command });
   checkTopicError(error);
   if (!data?.topic || !data.event_id) throw new TopicError("DATABASE_ERROR", "Topic response was incomplete.");
   // A merge may have moved the record while the command waited on its database lock.
-  await requireTopicPerson(db, owner, data.topic.contact_id);
-  return { ...data, person_url: personTopicUrl(data.topic.contact_id) };
+  const current = await requireTopic(db, owner, data.topic.id);
+  return { ...data, person_url: personTopicUrl(current.contact_id) };
 }

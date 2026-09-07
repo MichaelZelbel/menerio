@@ -1051,6 +1051,7 @@ export type Database = {
       }
       contacts: {
         Row: {
+          topic_self_merge_pending: boolean
           ai_visibility: string
           aliases: string[] | null
           app_mappings: Json | null
@@ -1085,6 +1086,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          topic_self_merge_pending?: boolean
           ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null
@@ -1119,6 +1121,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          topic_self_merge_pending?: boolean
           ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null

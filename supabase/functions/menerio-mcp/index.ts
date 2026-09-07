@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { CONTACT_TOPIC_SCOPES, registerContactTopicTools } from "./contact-topics-tools.ts";
-import { resolveContextPerson, topicContext } from "../_shared/contact-topics.ts";
+import { resolveContextPerson, searchContextPeople, topicContext } from "../_shared/contact-topics.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
@@ -1609,30 +1609,14 @@ server.registerTool(
     title: "Search Contacts",
     description: "Search your personal CRM contacts by name, company, or relationship type. If a contact's relationship field is empty but notes about that person assert a relationship (spouse, sibling, parent, etc.), defer to the note content — the structured field is optional, not the source of truth.",
     inputSchema: {
-      query: z.string().optional().describe("Search by name or company"),
+      query: z.string().optional().describe("Search by name, saved alias, or company"),
       relationship: z.string().optional().describe("Filter by relationship type"),
       limit: z.number().optional().default(10),
     },
   },
   async ({ query, relationship, limit }) => {
     try {
-      let q = supabase
-        .from("contacts")
-        .select("id, name, relationship, company, role, email, last_contact_date, contact_frequency_days, notes, is_sensitive, ai_visibility")
-        .eq("user_id", getCurrentUserId())
-        .is("merged_into", null)
-        .order("name")
-        .limit(limit);
-
-      if (query) {
-        const qq = String(query).replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
-        q = q.or(ilikeAnyColumn(["name", "company"], qq));
-      }
-      if (relationship) q = q.eq("relationship", relationship);
-      q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
-
-      const { data, error } = await q;
-      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+      const data = await searchContextPeople(supabase, getCurrentUserId(), query ?? "", Math.min(Math.max(limit, 1), 100), relationship);
       const redacted = redactContactList(data || []);
       if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
