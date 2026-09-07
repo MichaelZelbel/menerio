@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { clearPersistedQueries } from "@/lib/query-persister";
 import { BRAND } from "@/lib/brand";
+import { useQueryClient } from "@tanstack/react-query";
 
 const LAST_USER_KEY = "menerio:last-user-id";
 
@@ -41,6 +42,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -84,6 +86,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
+        // Private topic data must leave memory as well as disk on session changes.
+        const topicQueries = { predicate: (query: { queryKey: readonly unknown[] }) =>
+          (query.queryKey[0] === 'contact-topics' || query.queryKey[0] === 'contact-topic-history') &&
+          (!newSession?.user || query.queryKey[1] !== newSession.user.id) };
+        void queryClient.cancelQueries(topicQueries);
+        queryClient.removeQueries(topicQueries);
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
@@ -135,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchProfile, fetchRole]);
+  }, [fetchProfile, fetchRole, queryClient]);
 
   const handleAuthError = (error: AuthError) => {
     const messages: Record<string, string> = {

@@ -18,6 +18,7 @@ import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { DuplicateHints } from "@/components/people/DuplicateHints";
 import { ConversationTab } from "@/components/people/ConversationTab";
 import { ProfileHealthChip } from "@/components/people/ProfileHealthChip";
+import { ContactTopicsPanel } from "@/components/people/ContactTopicsPanel";
 
 import { PersonTimeline } from "@/components/people/PersonTimeline";
 import { PersonDocuments } from "@/components/people/PersonDocuments";
@@ -284,6 +285,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
           </div>
 
 
+          <ContactTopicsPanel contactId={person.id} contactName={person.name} />
           <Tabs value={activePersonTab} onValueChange={setActivePersonTab} className="space-y-4">
             <TabsList className="flex flex-wrap h-auto">
               <TabsTrigger value="profile">Profile</TabsTrigger>
