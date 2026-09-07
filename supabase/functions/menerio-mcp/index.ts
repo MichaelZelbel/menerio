@@ -1,4 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { CONTACT_TOPIC_SCOPES, registerContactTopicTools } from "./contact-topics-tools.ts";
+import { resolveContextPerson, topicContext } from "../_shared/contact-topics.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
@@ -568,6 +570,7 @@ const SCOPE_LABELS: Record<string, string> = {
 };
 
 const TOOL_SCOPES: Record<string, string> = {
+  ...CONTACT_TOPIC_SCOPES,
   // notes
   search_notes: "notes",
   get_note: "notes",
@@ -668,6 +671,8 @@ function scopeRefusal(scope: string) {
     return registerToolUnscoped(name, meta as never, gated as never);
   };
 }
+
+registerContactTopicTools(server, supabase, getCurrentUserId);
 
 // Relationship synonyms — terms that, when present in a query, mark it as a
 // first-person personal-fact question. Used to boost exact-phrase hits and to
@@ -1688,23 +1693,15 @@ server.registerTool(
     title: "Get Contact Context",
     description: "Given a contact name, return their full details, recent interactions, and related notes.",
     inputSchema: {
-      name: z.string().describe("The contact's name"),
+      name: z.string().optional().describe("Contact name; ambiguous matches return candidates"),
+      contact_id: z.string().uuid().optional().describe("Exact contact ID"),
     },
   },
-  async ({ name }) => {
+  async ({ name, contact_id }) => {
     try {
-      const { data: contacts } = await supabase
-        .from("contacts")
-        .select("*")
-        .eq("user_id", getCurrentUserId())
-        .ilike("name", `%${name}%`)
-        .is("merged_into", null)
-        .eq("ai_visibility", "visible")
-        .limit(1);
-
-      if (!contacts?.length) return { content: [{ type: "text" as const, text: `No contact found matching "${name}".` }] };
-
-      const raw = contacts[0] as any;
+      const resolved = await resolveContextPerson(supabase, getCurrentUserId(), contact_id, name);
+      if (!resolved.contact) return { content: [{ type: "text" as const, text: JSON.stringify(resolved) }], isError: true };
+      const raw = resolved.contact;
       const contact = redactSensitiveContact(raw) as any;
 
       if (contact._redacted) {
@@ -1718,6 +1715,7 @@ server.registerTool(
         contact.role ? `Role: ${contact.role}` : "",
         contact.email ? `Email: ${contact.email}` : "",
         contact.phone ? `Phone: ${contact.phone}` : "",
+        await topicContext(supabase, getCurrentUserId(), contact.id),
         contact.notes ? `Notes: ${contact.notes}` : "",
       ].filter(Boolean);
 
@@ -1835,20 +1833,13 @@ server.registerTool(
       if (!name && !contact_id) {
         return { content: [{ type: "text" as const, text: "Provide either `name` or `contact_id`." }], isError: true };
       }
-      let cq = supabase
-        .from("contacts")
-        .select("id, name, is_sensitive, ai_visibility")
-        .eq("user_id", getCurrentUserId())
-        .is("merged_into", null)
-        .eq("ai_visibility", "visible")
-        .limit(1);
-      cq = contact_id ? cq.eq("id", contact_id) : cq.ilike("name", `%${name}%`);
-      const { data: cs } = await cq;
-      if (!cs?.length) return { content: [{ type: "text" as const, text: `No contact found.` }] };
-      const c = cs[0] as any;
+      const resolved = await resolveContextPerson(supabase, getCurrentUserId(), contact_id, name);
+      if (!resolved.contact) return { content: [{ type: "text" as const, text: JSON.stringify(resolved) }], isError: true };
+      const c = resolved.contact;
       if (c.is_sensitive) {
         return { content: [{ type: "text" as const, text: `# ${c.name}\n🔒 Marked sensitive — profile facts hidden from AI.` }] };
       }
+      const topicsSection = await topicContext(supabase, getCurrentUserId(), c.id);
       const { data: cats } = await supabase
         .from("profile_categories")
         .select("id, name, slug, sort_order")
@@ -1858,7 +1849,7 @@ server.registerTool(
         .order("sort_order");
       const ids = (cats || []).map((x: any) => x.id);
       if (ids.length === 0) {
-        return { content: [{ type: "text" as const, text: `# ${c.name}\nNo structured profile facts recorded yet.` }] };
+        return { content: [{ type: "text" as const, text: `# ${c.name}\n${topicsSection}\nNo structured profile facts recorded yet.` }] };
       }
       // Curation, the same treatment get_user_profile got on 2026-08-31 and
       // for the same reason: an uncurated dump arrives at equal weight, so a
@@ -1917,7 +1908,7 @@ server.registerTool(
         arr.push(e);
         byCat.set(e.category_id, arr);
       }
-      const out: string[] = [`# ${c.name} — Profile`];
+      const out: string[] = [`# ${c.name} — Profile`, topicsSection];
 
       if (dated.length) {
         out.push(`\n## Dated facts (prefer these over the rows below)`);
