@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { MessageCircle, Plus, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useContactTopics, useContactTopicCommand } from '@/hooks/useContactTopics';
-import { compareContactTopics, topicPriorityLabels, topicStatusLabels, type TopicCommand, type TopicCommandResult, type TopicPriority, type TopicStatus } from '@/lib/contact-topics';
+import { compareContactTopics, topicPriorityLabels, topicStatusLabels, type ContactTopic, type TopicCommand, type TopicCommandResult, type TopicPriority, type TopicStatus } from '@/lib/contact-topics';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -25,16 +25,23 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
   const [failure, setFailure] = useState('');
   const [failedCommand, setFailedCommand] = useState<TopicCommand | null>(null);
   const [undo, setUndo] = useState<TopicCommandResult | null>(null);
+  const [editingTopics, setEditingTopics] = useState(new Map<string, ContactTopic>());
   const submitting = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const topics = (query.data ?? []).filter(topic => topic.status === status).sort(status === 'completed'
     ? (a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id.localeCompare(a.id)
     : compareContactTopics);
+  // Keep open editors mounted when refresh changes priority, status or ownership.
+  const visibleTopics = expanded ? [...topics] : topics.slice(0, 5);
+  for (const [id, snapshot] of editingTopics) {
+    if (!visibleTopics.some(topic => topic.id === id)) visibleTopics.push(query.data?.find(topic => topic.id === id) ?? snapshot);
+  }
   const run = async (command: TopicCommand) => {
     if (submitting.current) return false;
     submitting.current = true;
     setFailure('');
+    setAnnouncement('');
     try {
       const result = await mutation.mutateAsync(command);
       setFailedCommand(null);
@@ -80,12 +87,17 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
         </div>
       </form>
       {failure && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{failure} Your input is still here.</p>}
-      {failedCommand && failedCommand.action !== 'create' && <Button variant="outline" className="min-h-11" disabled={mutation.isPending} onClick={() => void run(failedCommand)}>Retry unsaved change</Button>}
+      {failedCommand?.action === 'update' && <p className="text-sm text-muted-foreground">Use Save in the editor to retry the draft shown there.</p>}
+      {failedCommand && failedCommand.action !== 'create' && failedCommand.action !== 'update' && <Button variant="outline" className="min-h-11" disabled={mutation.isPending} onClick={() => void run(failedCommand)}>Retry unsaved change</Button>}
       {(!query.online || (query.isError && query.data)) && <p role="status" className="text-sm text-muted-foreground">{!query.online ? 'Offline. Showing the last loaded topics. Changes need a connection.' : 'Topics may be out of date. Refresh to try again.'}</p>}
       <div className="flex flex-wrap gap-1 border-b border-border pb-2" aria-label="Topic views">
         {(Object.keys(topicStatusLabels) as TopicStatus[]).map(value => <Button key={value} variant={status === value ? 'secondary' : 'ghost'} className="min-h-11" aria-pressed={status === value} onClick={() => { setStatus(value); setExpanded(false); }}>{value === 'active' ? 'To discuss' : topicStatusLabels[value]} <span className="ml-1.5 text-xs text-muted-foreground">{(query.data ?? []).filter(t => t.status === value).length}</span></Button>)}
       </div>
-      {query.isPending ? <p role="status" className="py-4 text-sm text-muted-foreground">Loading topics...</p> : query.isError && !query.data ? <p role="alert" className="text-sm text-destructive">Topics could not be loaded.</p> : topics.length === 0 ? <p className="py-4 text-sm text-muted-foreground">{status === 'active' ? 'No topics yet. Add something you want to bring up.' : status === 'completed' ? 'Discussed topics will appear here.' : 'Archived topics will appear here.'}</p> : <ul className="divide-y divide-border">{(expanded ? topics : topics.slice(0, 5)).map(topic => <ContactTopicRow key={topic.id} topic={topic} pending={mutation.isPending} onCommand={run} />)}</ul>}
+      {query.isPending ? <p role="status" className="py-4 text-sm text-muted-foreground">Loading topics...</p> : query.isError && !query.data ? <p role="alert" className="text-sm text-destructive">Topics could not be loaded.</p> : visibleTopics.length === 0 ? <p className="py-4 text-sm text-muted-foreground">{status === 'active' ? 'No topics yet. Add something you want to bring up.' : status === 'completed' ? 'Discussed topics will appear here.' : 'Archived topics will appear here.'}</p> : <ul className="divide-y divide-border">{visibleTopics.map(topic => <ContactTopicRow key={topic.id} topic={topic} pending={mutation.isPending} onCommand={run} onEditingChange={editing => setEditingTopics(current => {
+        const next = new Map(current);
+        if (editing) next.set(topic.id, topic); else next.delete(topic.id);
+        return next;
+      })} />)}</ul>}
       {topics.length > 5 && <Button variant="outline" className="min-h-11 w-full" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer' : `Show all ${topics.length} topics`}</Button>}
       {query.isError && <Button variant="outline" className="min-h-11" onClick={() => void query.refetch()}>Refresh topics</Button>}
       <div role="status" aria-live="polite" className="text-sm text-muted-foreground">{announcement}</div>

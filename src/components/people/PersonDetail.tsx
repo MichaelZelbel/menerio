@@ -170,9 +170,9 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
           <div className="sticky top-0 z-10 mb-4 space-y-4 bg-background pb-2">
             <Card>
               <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <CardTitle className="text-xl flex items-center gap-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 basis-48 space-y-2">
+                    <CardTitle className="min-w-0 text-xl flex items-center gap-2">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
                         <User className="h-5 w-5 text-primary" />
                       </div>
@@ -184,7 +184,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                           className="h-9 text-xl font-semibold"
                         />
                       ) : (
-                        person.name
+                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{person.name}</span>
                       )}
                     </CardTitle>
 
@@ -220,7 +220,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                     </div>
                   </div>
 
-                  <div className="flex gap-1 items-center">
+                  <div className="flex max-w-full flex-wrap gap-1 items-center [&>button]:min-h-11">
                     {!isEditing ? (
                       <>
                         <Button

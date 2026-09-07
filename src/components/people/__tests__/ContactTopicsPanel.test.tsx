@@ -23,6 +23,7 @@ vi.mock('@/hooks/useContactTopics', async () => {
             state.rows = [...state.rows, topic];
           } else {
             const existing = state.rows.find(row => row.id === command.topic_id)!;
+            if (command.expected_version !== existing.version) throw Object.assign(new Error('Topic version conflict'), { code: '40001' });
             topic = { ...existing, version: existing.version + 1 };
             if (command.action === 'undo') topic = { ...state.previous!, version: topic.version };
             else {
@@ -133,5 +134,64 @@ describe('topics panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discuss and finish' }));
     await screen.findByText('Discussion saved. Topic moved to Discussed.');
     expect(state.commands.at(-1)).toMatchObject({ action: 'discuss', close_after: true });
+  });
+  it('rejects a stale edit after an external refresh and retains its original draft until reopened', async () => {
+    state.rows = [makeTopic('Original')]; const view = panel();
+    fireEvent.click(within(topicRow('Original')).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'My draft' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Edit priority' }), { target: { value: 'high' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Edit repetition' }), { target: { value: 'recurring' } });
+    state.rows = [makeTopic('Original', { title: 'External update', priority: 'low', version: 2 })];
+    view.rerender(<ContactTopicsPanel contactId="p1" contactName="Alex" />);
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await waitFor(() => expect(state.commands.at(-1)).toMatchObject({ action: 'update', expected_version: 1 }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This topic changed elsewhere');
+    expect(screen.queryByText('Topic saved.')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveValue('My draft');
+    expect(screen.getByRole('combobox', { name: 'Edit priority' })).toHaveValue('high');
+    expect(screen.getByRole('combobox', { name: 'Edit repetition' })).toHaveValue('recurring');
+    expect(state.rows[0]).toMatchObject({ title: 'External update', priority: 'low', mode: 'one_off', version: 2 });
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
+    fireEvent.click(within(topicRow('External update')).getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveValue('External update');
+    expect(screen.getByRole('combobox', { name: 'Edit priority' })).toHaveValue('low');
+    expect(screen.getByRole('combobox', { name: 'Edit repetition' })).toHaveValue('one_off');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await screen.findByText('Topic saved.');
+    expect(state.commands.at(-1)).toMatchObject({ expected_version: 2 });
+  });
+  it('retries the visible edited draft through Save instead of an earlier failed draft', async () => {
+    state.rows = [makeTopic('Original')]; panel();
+    fireEvent.click(within(topicRow('Original')).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'Draft A' } });
+    state.fail = true; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await screen.findByRole('alert');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'Draft B' } });
+    expect(screen.queryByRole('button', { name: 'Retry unsaved change' })).not.toBeInTheDocument();
+    state.fail = false; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await screen.findByText('Topic saved.');
+    expect(state.commands.at(-1)).toMatchObject({ action: 'update', expected_version: 1, patch: { title: 'Draft B' } });
+    expect(screen.queryByRole('textbox', { name: 'Edit topic title' })).not.toBeInTheDocument();
+    expect(topicRow('Draft B')).toBeInTheDocument();
+  });
+  it.each(['priority', 'status'] as const)('keeps an open edit mounted after an external %s change moves it out of the preview', async change => {
+    state.rows = Array.from({ length: 5 }, (_, i) => makeTopic(`Topic ${i}`));
+    const view = panel();
+    fireEvent.click(within(topicRow('Topic 4')).getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit topic title' });
+    fireEvent.change(editor, { target: { value: 'Keep my draft' } });
+    if (change === 'priority') state.rows = [...state.rows, makeTopic('External high priority', { priority: 'high' })];
+    else state.rows = state.rows.map(topic => topic.id === 'Topic 4' ? { ...topic, status: 'archived', version: 2 } : topic);
+    view.rerender(<ContactTopicsPanel contactId="p1" contactName="Alex" />);
+    expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toBe(editor);
+    expect(editor).toHaveValue('Keep my draft');
+    if (change === 'priority') {
+      expect(screen.getAllByRole('listitem')).toHaveLength(6);
+      fireEvent.click(screen.getByRole('button', { name: 'Show all 6 topics' }));
+      expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toBe(editor);
+    }
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
+    expect(screen.queryByRole('textbox', { name: 'Edit topic title' })).not.toBeInTheDocument();
+    if (change === 'status') expect(screen.queryByRole('listitem', { name: 'Topic 4' })).not.toBeInTheDocument();
   });
 });
