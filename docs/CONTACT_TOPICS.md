@@ -16,9 +16,9 @@ The GitHub people mirror does **not** back up native topics or history. Its exis
 
 ## Release preparation
 
-Production migration and publication require Michael's approval. A feature-branch push does not deploy the database, functions, or frontend.
+This release was approved for live testing after the checklist refinement on 7 September 2026, and is now published. See the [release verification](CONTACT_TOPICS_VERIFICATION.md). A feature-branch push alone does not deploy the database, functions, or frontend.
 
-After approval:
+The release followed this order:
 
 1. Verify the feature commit, migration inventory, database backup, and existing function/frontend versions. Apply `supabase/migrations/20260907140000_contact_topics.sql`, then `supabase/migrations/20260907141000_contact_topic_conflict_http.sql` to project `tjeapelvjlmbxafsmjef` in a transaction. Record the migration in the project's migration history. Do not bulk-push unrelated pending migrations.
 2. Verify grants, ownership policies, command functions, composite keys, merge trigger, and `supabase_realtime` publication membership. Run a synthetic release check under two test owners.
