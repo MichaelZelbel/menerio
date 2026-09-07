@@ -122,9 +122,9 @@ describe('topics panel', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit topic title' }), { target: { value: 'Updated' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit priority' }), { target: { value: 'high' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Edit repetition' }), { target: { value: 'recurring' } });
-    state.fail = true; fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    state.fail = true; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await screen.findByRole('alert'); expect(screen.getByRole('textbox', { name: 'Edit topic title' })).toHaveValue('Updated');
-    state.fail = false; fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    state.fail = false; fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await screen.findByText('Topic saved.'); expect(topicRow('Updated')).toHaveTextContent('High priority');
     expect(state.commands.at(-1)).toMatchObject({ action: 'update', expected_version: 1, patch: { title: 'Updated', priority: 'high', mode: 'recurring' } });
   });
