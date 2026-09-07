@@ -2,7 +2,7 @@
 // Used by process-note (live capture) and backfill-embeddings (catch-up).
 
 import { smartChunkMarkdown, buildEmbeddingInput, type NoteChunk } from "./chunking.ts";
-import { getEmbeddingWithCredits } from "./llm-credits.ts";
+import { getEmbeddingWithCredits, type UsageAttribution } from "./llm-credits.ts";
 import { sha256Hex } from "./sha256.ts";
 
 const MAX_CHUNKS_PER_NOTE = 50;
@@ -63,6 +63,11 @@ export async function embedAndStoreNoteChunks(
   noteTitle: string | null,
   fullText: string,
   feature: string,
+  durable?: {
+    attribution?: UsageAttribution;
+    runPaid: <T>(key: string, produce: () => Promise<T>) => Promise<T>;
+    replaceChunks: (rows: Record<string, unknown>[]) => Promise<void>;
+  },
 ): Promise<ChunkEmbedResult> {
   const chunks = smartChunkMarkdown(fullText);
   const truncated = chunks.length > MAX_CHUNKS_PER_NOTE;
@@ -70,7 +75,8 @@ export async function embedAndStoreNoteChunks(
 
   if (limited.length === 0) {
     // The note really has no chunks now, so clearing them is the correct result.
-    await admin.from("note_chunks").delete().eq("note_id", noteId);
+    if (durable) await durable.replaceChunks([]);
+    else await admin.from("note_chunks").delete().eq("note_id", noteId);
     return {
       chunkCount: 0, attempted: 0, replaced: true,
       truncated: false, failures: 0, firstChunkEmbedding: null,
@@ -131,13 +137,14 @@ export async function embedAndStoreNoteChunks(
 
     attempted += 1;
     try {
-      const { embedding, credits } = await getEmbeddingWithCredits(
-        admin, openrouterApiKey, userId, feature, input,
-      );
+      const produce = () => getEmbeddingWithCredits(admin, openrouterApiKey, userId, feature, input,
+        durable ? {...durable.attribution, noteId, stage: `embedding:${hash}`} : {});
+      const { embedding, credits } = durable ? await durable.runPaid(hash, produce) : await produce();
       remainingCredits = credits?.remaining_credits ?? remainingCredits;
       embedded.push({ chunk, embedding, hash });
     } catch (err) {
-      const msg = (err as Error).message || String(err);
+      if (durable) throw err;
+      const msg = (err as Error).message
       console.warn("chunk embedding failed", noteId, chunk.index, msg);
       failures += 1;
       if (msg === "BALANCE_UNAVAILABLE") {
@@ -190,6 +197,15 @@ export async function embedAndStoreNoteChunks(
     );
   }
 
+  if (durable) {
+    await durable.replaceChunks(embedded.map(({chunk, embedding, hash}) => ({
+      note_id: noteId, user_id: userId, chunk_index: chunk.index,
+      heading_path: chunk.headingPath || null, content: chunk.content,
+      token_count: chunk.tokenCount, embedding, content_hash: hash,
+    })));
+    return {chunkCount: embedded.length, attempted, reused, replaced: true, truncated,
+      failures: 0, firstChunkEmbedding, remainingCredits, insufficientCredits, balanceUnavailable};
+  }
   await admin.from("note_chunks").delete().eq("note_id", noteId);
   let inserted = 0;
   let writeFailures = 0;

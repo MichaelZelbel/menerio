@@ -21,6 +21,7 @@
   "src/components/settings/TelegramIntegration.tsx": 2,
   "src/components/settings/UserMcpServersManager.tsx": 3,
   "src/content/docs/registry.tsx": 39,
+  "src/lib/__tests__/search-terms.test.ts": 1,
   "src/lib/flags.ts": 2,
   "src/pages/CollectionDetail.tsx": 1,
   "src/pages/Collections.tsx": 1,

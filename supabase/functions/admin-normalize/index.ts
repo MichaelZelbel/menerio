@@ -172,8 +172,9 @@ serve(async (req) => {
     const scope = String(isScheduledQueueRun ? "jobs" : body?.scope || "all");
     const includeNotesContext = body?.includeNotesContext !== false;
     const deterministicOnly = isScheduledQueueRun || body?.deterministic_only === true;
-    // Default: only touch subjects whose profile changed since last successful run.
-    // Pass changed_only:false to force a full sweep.
+    // Deterministic maintenance can skip unchanged profiles by timestamp.
+    // Paid runs always use the shared fingerprint; changed_only:false disables
+    // this maintenance optimization without forcing paid reevaluation.
     const changedOnly = isScheduledQueueRun ? true : body?.changed_only !== false;
     const processJobs = isScheduledQueueRun ? true : body?.process_jobs !== false;
     const jobLimit = Math.min(Math.max(Number(isScheduledQueueRun ? 100 : body?.job_limit || 100), 1), isScheduledQueueRun ? 100 : 500);
@@ -215,10 +216,11 @@ serve(async (req) => {
       for (const c of (contacts || []) as any[]) subjects.push(c.id);
     }
 
-    // Filter subjects to only those with profile_entries updated after their last completed run.
+    // Timestamp filtering is only a deterministic-maintenance optimization.
+    // Paid normalization must reach the shared input/config/schema fingerprint.
     // Subjects never run before are always included.
     let skippedUnchanged = 0;
-    if (changedOnly && scope !== "contact" && jobBySubject.size === 0) {
+    if (deterministicOnly && changedOnly && scope !== "contact" && jobBySubject.size === 0) {
       const { data: runs } = await db
         .from("profile_normalization_runs")
         .select("contact_id, subject_type, completed_at, status")

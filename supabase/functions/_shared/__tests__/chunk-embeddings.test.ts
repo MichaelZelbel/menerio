@@ -40,6 +40,16 @@ beforeEach(() => {
 });
 
 describe("embedAndStoreNoteChunks", () => {
+  it('checkpoints each paid vector before an atomic fenced replacement',async()=>{
+    const checkpoints=new Map<string,any>();let replacements=0;
+    getEmbedding.mockResolvedValue({embedding:[0.1],credits:{remaining_credits:5}});
+    const durable={attribution:{noteId:'n1',jobId:'job-fixture',revision:'sha-fixture',callSite:'process-note.embedding'},runPaid:async(key:string,produce:()=>Promise<any>)=>{if(!checkpoints.has(key))checkpoints.set(key,await produce());return checkpoints.get(key)},replaceChunks:async(rows:any[])=>{expect(checkpoints.size).toBe(rows.length);if(++replacements===1)throw Error('write fixture failure')}};
+    await expect(embedAndStoreNoteChunks(fakeAdmin(),'k','u1','n1','T',LONG,'f',durable)).rejects.toThrow('write fixture failure');
+    const count=getEmbedding.mock.calls.length;
+    expect(getEmbedding.mock.calls[0][5]).toMatchObject({...durable.attribution,stage:expect.stringMatching(/^embedding:/)});
+    await embedAndStoreNoteChunks(fakeAdmin(),'k','u1','n1','T',LONG,'f',durable);
+    expect(getEmbedding).toHaveBeenCalledTimes(count);expect(del).not.toHaveBeenCalled();expect(insert).not.toHaveBeenCalled();
+  });
   it("keeps the existing chunks when embedding stops part-way", async () => {
     getEmbedding
       .mockResolvedValueOnce({ embedding: [0.1], credits: { remaining_credits: 5 } })

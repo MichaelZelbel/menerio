@@ -24,7 +24,7 @@ import { AudioEmbed } from "./extensions/AudioEmbed";
 import { FileUploadHandler } from "./extensions/FileUploadHandler";
 import { WikilinkExtension } from "./extensions/WikilinkExtension";
 import { TaskListShortcut } from "./extensions/TaskListShortcut";
-import { Note, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote, useDuplicateNote } from "@/hooks/useNotes";
+import { Note, useNoteProcessingState, useUpdateNote, useDeleteNote, useProcessNote, useCreateNote, useDuplicateNote } from "@/hooks/useNotes";
 import { useSharedNote, useShareNote, useUnshareNote, useCopyShareLink, ShareNoteResult } from "@/hooks/useNoteSharing";
 import { ModerationResult } from "@/lib/moderateContent";
 import { ModerationBlockDialog } from "@/components/moderation/ModerationBlockDialog";
@@ -127,10 +127,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const AUTO_PROCESS_DELAY = 10_000;
-// Low floor on purpose: short notes still deserve an embedding and people
-// extraction. Anything below this is reported as "skipped (too short)".
-const MIN_WORDS_FOR_PROCESSING = 3;
+
 
 
 interface NoteEditorProps {
@@ -271,12 +268,15 @@ function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
 
 /** Per-note AI indexing state. Silence was the actual bug: users could not tell
  *  a processed note from one that was never indexed. */
-function ProcessingIndicator({ note }: { note: Pick<Note, "processing_status" | "processing_error" | "ai_visibility"> }) {
-  const status = note.processing_status;
+function ProcessingIndicator({ note }: { note: Pick<Note, "id" | "processing_status" | "processing_error" | "ai_visibility"> }) {
+  const { data: job } = useNoteProcessingState(note.id);
+  const status = job?.state === "completed" ? "processed" : (job?.state ?? note.processing_status);
   if (!status || status === "processed") return null;
   const map: Record<string, { label: string; className: string }> = {
     processing: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
-    pending: { label: "Indexing pending", className: "bg-muted text-muted-foreground" },
+    running: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
+    pending: { label: "Queued for indexing", className: "bg-muted text-muted-foreground" },
+    parked: { label: "Indexing needs attention", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
     skipped_short: { label: "Not indexed · too short", className: "bg-muted text-muted-foreground" },
     skipped_empty: { label: "Not indexed · empty", className: "bg-muted text-muted-foreground" },
     skipped_no_credits: { label: "Not indexed · no AI credits", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
@@ -286,7 +286,7 @@ function ProcessingIndicator({ note }: { note: Pick<Note, "processing_status" | 
   if (!entry) return null;
   return (
     <span
-      title={note.processing_error || entry.label}
+      title={job?.last_error || note.processing_error || entry.label}
       className={cn("text-[10px] shrink-0 rounded px-1.5 py-0.5", entry.className)}
     >
       {entry.label}
@@ -462,11 +462,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const processTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The note the pending auto-process timer belongs to, plus a ref-held flush
-  // so the []-dep unmount effect can fire it without a stale closure.
-  const pendingProcessNoteIdRef = useRef<string | null>(null);
-  const flushProcessingRef = useRef<() => void>(() => {});
+
 
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -476,6 +472,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const lastLocalTitleRef = useRef(note.title ?? "");
   const pendingSaveTitleRef = useRef<string | null>(null);
   const activeNoteIdRef = useRef(note.id);
+  const flushSavesRef = useRef<() => void>(() => {});
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -718,19 +715,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
         }
       }, 800);
 
-      // Schedule auto AI processing. The pending note id is tracked so the
-      // flush paths (note switch / unmount / tab hide) can still fire it.
-      if (processTimer.current) clearTimeout(processTimer.current);
-      pendingProcessNoteIdRef.current = note.id;
-      processTimer.current = setTimeout(() => {
-        processTimer.current = null;
-        pendingProcessNoteIdRef.current = null;
-        const text = e.getText();
-        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-        if (words >= MIN_WORDS_FOR_PROCESSING && !note.is_trashed && checkCredits()) {
-          processNote.mutate(note.id);
-        }
-      }, AUTO_PROCESS_DELAY);
+
     },
 
   });
@@ -739,37 +724,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
-  // FLUSH (never cancel) the pending auto-process timer. Cancelling it on note
-  // switch / unmount was the reason notes typed and left within 10s were saved
-  // but never AI-processed. `process-note` is idempotent per content version,
-  // so firing early can't double-spend credits.
-  const flushPendingProcessing = useCallback(() => {
-    if (!processTimer.current) return;
-    clearTimeout(processTimer.current);
-    processTimer.current = null;
-    const noteId = pendingProcessNoteIdRef.current;
-    pendingProcessNoteIdRef.current = null;
-    if (!noteId) return;
-    const text = lastLocalContentRef.current ?? "";
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-    if (words < MIN_WORDS_FOR_PROCESSING) return;
-    if (!checkCredits()) return;
-    processNote.mutate(noteId);
-  }, [checkCredits, processNote]);
 
-  useEffect(() => { flushProcessingRef.current = flushPendingProcessing; }, [flushPendingProcessing]);
-
-  // Tab close / app backgrounding: flush before the timer dies with the page.
-  useEffect(() => {
-    const onHide = () => flushProcessingRef.current();
-    const onVisibility = () => { if (document.visibilityState === "hidden") flushProcessingRef.current(); };
-    window.addEventListener("pagehide", onHide);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", onHide);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
 
 
 
@@ -798,24 +753,34 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   // clicked a wikilink within the debounce window. The pending payload lives
   // in the refs; firing updateNote.mutate persists it (the mutation runs on
   // the shared query client, so it completes after this instance is gone).
-  // We still cancel the process/sync timers — those are safe to drop.
+  // Only the unrelated export timer is cancelled; saved changes queue on the server.
   useEffect(() => {
-    return () => {
+    const flushSaves = () => {
+      const noteId = activeNoteIdRef.current;
       const pendingContent = queuedContentRef.current ?? pendingSaveContentRef.current;
       if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
-        updateNote.mutate({ id: note.id, content: pendingContent });
+        updateNote.mutate({ id: noteId, content: pendingContent });
         pendingSaveContentRef.current = null;
       }
       const pendingTitle = pendingSaveTitleRef.current;
       if (pendingTitle !== null) {
-        updateNote.mutate({ id: note.id, title: pendingTitle });
+        updateNote.mutate({ id: noteId, title: pendingTitle });
         pendingSaveTitleRef.current = null;
       }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
-      flushProcessingRef.current();
+
 
       if (syncTimer.current) clearTimeout(syncTimer.current);
+    };
+    flushSavesRef.current = flushSaves;
+    const onVisibility = () => { if (document.visibilityState === "hidden") flushSaves(); };
+    window.addEventListener("pagehide", flushSaves);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushSaves);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flushSaves();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -824,6 +789,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   useEffect(() => {
     const noteChanged = activeNoteIdRef.current !== note.id;
     if (noteChanged) {
+      flushSavesRef.current();
       activeNoteIdRef.current = note.id;
       pendingSaveContentRef.current = null;
       pendingSaveTitleRef.current = null;
@@ -839,14 +805,9 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setShowTagInput(false);
     setShowInfo(false);
     setSourceMode(false);
-    // Only cancel the pending auto-process timer when the note actually changes.
-    // Previously this ran unconditionally, but autosave's onSuccess writes the
-    // saved row back into the query cache (~1s after a keystroke), which changes
-    // the `note.content` prop and re-runs this effect — cancelling the 10s timer
-    // before it could ever fire. So auto-classification was effectively dead
-    // during normal editing.
+
     if (noteChanged) {
-      flushProcessingRef.current();
+
 
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
@@ -1161,6 +1122,41 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       navigate(`/dashboard/notes/${copy.id}`);
     } catch {
       // useDuplicateNote / useUpdateNote surface their own error toasts.
+    }
+  };
+
+  const processSavedNote = async () => {
+    if (!checkCredits()) return;
+    if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+    if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
+    try {
+      // Do not race an earlier autosave or buy work for the pre-edit revision.
+      for (let i = 0; i < 40 && savingRef.current; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (savingRef.current) throw new Error("Note is still saving");
+      const content = queuedContentRef.current ?? pendingSaveContentRef.current;
+      const pendingTitle = pendingSaveTitleRef.current;
+      if (content !== null || pendingTitle !== null) {
+        const saved = await updateNote.mutateAsync({
+          id: note.id,
+          ...(content !== null ? { content } : {}),
+          ...(pendingTitle !== null ? { title: pendingTitle } : {}),
+        });
+        if (content !== null) {
+          lastSavedContentRef.current = content;
+          if (pendingSaveContentRef.current === content) pendingSaveContentRef.current = null;
+          if (queuedContentRef.current === content) queuedContentRef.current = null;
+        }
+        if (pendingSaveTitleRef.current === pendingTitle) pendingSaveTitleRef.current = null;
+        if (saved?.updated_at) lastSavedUpdatedAtRef.current = Math.max(lastSavedUpdatedAtRef.current, new Date(saved.updated_at).getTime());
+        setSaveStatus("saved");
+        setLastSavedAt(Date.now());
+      }
+      processNote.mutate(note.id);
+    } catch {
+      setSaveStatus("error");
+      showToast.error("Save the latest changes before requesting AI processing");
     }
   };
 
@@ -1494,7 +1490,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onClick={() => { if (checkCredits()) processNote.mutate(note.id); }}
+                      onClick={processSavedNote}
                       disabled={processNote.isPending}
                     >
                       {processNote.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}

@@ -1,5 +1,9 @@
 project_id = "tjeapelvjlmbxafsmjef"
 
+# Authenticated by the database scheduler's x-cron-key, never a body flag.
+[functions.drain-note-ai-jobs]
+verify_jwt = false
+
 # Auth hook target: called by Supabase Auth with a standardwebhooks
 # signature, not a JWT.
 [functions.send-auth-email]

@@ -12,6 +12,7 @@ import { isLocalFirstActive, useLocalFirstActive } from "@/sync/sync-health";
 import { getDb } from "@/sync/db";
 import { rowToNote, toSqliteValue, type NoteRow } from "@/sync/notes-mapping";
 import { broadcastInvalidation } from "@/lib/query-sync";
+import { captureNoteWithLexicon } from "@/lib/note-ai-enrollment";
 import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 
 
@@ -98,38 +99,6 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-const wikiIngestTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const wikiIngestInFlight = new Set<string>();
-
-function invokeWikiIngest(noteId: string, changeType: "INSERT" | "UPDATE", delayMs = 12_000) {
-  const existingTimer = wikiIngestTimers.get(noteId);
-  if (existingTimer) clearTimeout(existingTimer);
-
-  const timer = setTimeout(() => {
-    wikiIngestTimers.delete(noteId);
-    if (wikiIngestInFlight.has(noteId)) return;
-    wikiIngestInFlight.add(noteId);
-
-    supabase.functions
-      .invoke("wiki-ingest", {
-        body: {
-          note_id: noteId,
-          change_type: changeType,
-        },
-      })
-      .then(({ error }) => {
-        if (error) console.warn("wiki-ingest invocation failed:", error);
-      })
-      .catch((err) => {
-        console.warn("wiki-ingest invocation failed:", err);
-      })
-      .finally(() => {
-        wikiIngestInFlight.delete(noteId);
-      });
-  }, delayMs);
-
-  wikiIngestTimers.set(noteId, timer);
-}
 
 function useNotesRemote(
   filter: "all" | "favorites" | "trash",
@@ -280,20 +249,12 @@ export function useCreateNote() {
   return useMutation({
     mutationFn: async (input: NoteInsert = {}) => {
       if (isLocalFirstActive()) return createNoteLocal(user!.id, input);
-      const { data, error } = await supabase
-        .from("notes" as any)
-        .insert({ ...input, user_id: user!.id })
-        .select()
-        .single();
-      if (error) throw error;
-      return data as unknown as Note;
+      return await captureNoteWithLexicon({ ...input, id: crypto.randomUUID(), user_id: user!.id }) as Note;
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
       broadcastInvalidation([["notes"]]);
-      if ((note.title || note.content || "").trim().length >= 20) {
-        invokeWikiIngest(note.id, "INSERT");
-      }
+
     },
 
     onError: () => {
@@ -355,6 +316,7 @@ export function useUpdateNote() {
       }
       // The open editor reads from ["note", id] — patch it directly.
       qc.setQueryData<Note | null>(["note", note.id], note);
+      qc.invalidateQueries({ queryKey: ["note-ai-state"] });
 
       // A content-only autosave must NOT invalidate the (expensive) notes list:
       // for large vaults that meant refetching every note body on every
@@ -380,9 +342,8 @@ export function useUpdateNote() {
         broadcastInvalidation([["note", note.id]]);
       }
 
-      if (variables.title !== undefined || variables.content !== undefined) {
-        invokeWikiIngest(note.id, "UPDATE");
-      }
+      // Relevant writes enqueue analysis and update enrolled Lexicon jobs in
+      // the same server transaction, including uploads from offline clients.
     },
   });
 }
@@ -498,22 +459,14 @@ export function useDuplicateNote() {
         is_trashed: false,
       };
 
-      const { data, error } = await supabase
-        .from("notes" as any)
-        .insert(insertRow)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as unknown as Note;
+      return await captureNoteWithLexicon({ ...insertRow, id: crypto.randomUUID() }) as Note;
     },
     onSuccess: (note) => {
       qc.invalidateQueries({ queryKey: ["notes"] });
       broadcastInvalidation([["notes"]]);
 
       showToast.success("Duplicated note");
-      if ((note.title || note.content || "").trim().length >= 20) {
-        invokeWikiIngest(note.id, "INSERT");
-      }
+
     },
     onError: () => {
       showToast.error("Failed to duplicate note");
@@ -521,18 +474,40 @@ export function useDuplicateNote() {
   });
 }
 
+/** Read-only queue polling: a successful enqueue is not a running model call. */
+export function useNoteProcessingState(noteId: string) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["note-ai-state", user?.id, noteId],
+    enabled: !!user && !!noteId,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("note_ai_jobs" as never)
+        .select("state, last_error")
+        .eq("user_id", user!.id)
+        .eq("note_id", noteId)
+        .eq("pipeline", "analysis")
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as { state: string; last_error: string | null } | null;
+    },
+  });
+}
+
 export function useProcessNote() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (noteId: string) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
       const res = await supabase.functions.invoke("process-note", {
-        body: { note_id: noteId },
+        body: { note_id: noteId, reason: "manual" },
       });
       if (res.error) throw res.error;
-      // Trigger credits refresh after AI processing
-      triggerCreditsRefresh();
+      // Read the durable state rather than optimistically claiming execution.
+      qc.invalidateQueries({ queryKey: ["note-ai-state"] });
       return res.data;
     },
   });

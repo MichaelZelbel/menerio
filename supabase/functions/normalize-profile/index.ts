@@ -801,21 +801,9 @@ serve(async (req) => {
       const runOne = async (subj: string | null): Promise<SubjectRunResult> => {
         const subjectLabel = subj ?? "owner";
         const inputHash = await getProfileInputHash(db, userId, subj);
-        const state = await readRunState(db, userId, subj);
-        if (!force && state?.status === "completed" && state.input_hash === inputHash) {
-          return {
-            subject: subjectLabel,
-            input_hash: inputHash,
-            completed_hash: inputHash,
-            status: "skipped",
-            created: 0,
-            autoApplied: 0,
-            planned: 0,
-            applied: 0,
-            review: 0,
-            skipped: 1,
-          };
-        }
+        // This legacy profile-only hash is progress metadata, not paid-work
+        // identity. The shared normalizer checks facts, pending suggestions,
+        // effective prompt/config and schema before claiming an evaluation.
 
         await writeRunState(db, userId, subj, {
           input_hash: inputHash,
@@ -839,6 +827,8 @@ serve(async (req) => {
               preferences,
               sourceNoteId: null,
               includeNotesContext,
+              // A deliberate rerun bypasses the cache once, not on follow-up passes.
+              manual: force && pass === 0,
               helpers,
             });
             aggregate.created += r.created;
@@ -923,7 +913,7 @@ serve(async (req) => {
       if (!parsed.success) return json({ error: parsed.error.flatten().fieldErrors }, 400);
       const result = await writeProfileEntrySafely({ db, userId, input: parsed.data });
       if (!result.ok) return json({ ok: false, reason: result.reason || result.outcome }, 409);
-      return json({ ok: true, ...result });
+      return json(result);
     }
 
     if (action === "accept_profile_entry") {
@@ -931,7 +921,7 @@ serve(async (req) => {
       if (!reviewId) return json({ error: "review_id required" }, 400);
       const result = await acceptProfileEntryReview(db, userId, reviewId);
       if (!result.ok) return json({ ok: false, reason: result.reason || result.outcome }, 409);
-      return json({ ok: true, ...result });
+      return json(result);
     }
 
     if (action === "bulk_profile_reviews") {

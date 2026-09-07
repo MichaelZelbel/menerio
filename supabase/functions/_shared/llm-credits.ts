@@ -14,6 +14,7 @@ const FALLBACK_TOKENS: Record<string, number> = {
 };
 
 export interface CreditInfo {
+  usage_event_id?: string;
   remaining_tokens: number;
   remaining_credits: number;
   tokens_deducted: number;
@@ -229,9 +230,18 @@ export function repeatBlockedResponse(corsHeaders: Record<string, string>) {
  * Uses FOR UPDATE row lock to prevent race conditions.
  * Throws on insufficient balance or missing period.
  */
+export interface UsageAttribution {
+  callSite?: string | null;
+  configSource?: string | null;
+  noteId?: string | null;
+  jobId?: string | null;
+  revision?: string | null;
+  stage?: string | null;
+}
+
 export async function deductTokens(
   db: any,
-  p: {
+  p: UsageAttribution & {
     userId: string;
     tokens: number;
     feature: string;
@@ -243,7 +253,7 @@ export async function deductTokens(
     usageSource?: "provider" | "fallback";
   }
 ): Promise<CreditInfo> {
-  const { data, error } = await db.rpc("deduct_ai_tokens", {
+  const { data, error } = await db.rpc("deduct_ai_tokens_attributed", {
     p_user_id: p.userId,
     p_tokens: p.tokens,
     p_feature: p.feature,
@@ -253,6 +263,12 @@ export async function deductTokens(
     p_completion_tokens: p.completionTokens ?? 0,
     p_idempotency_key: p.idempotencyKey ?? null,
     p_usage_source: p.usageSource ?? "unknown",
+    p_call_site: p.callSite ?? null,
+    p_config_source: p.configSource ?? null,
+    p_note_id: p.noteId ?? null,
+    p_job_id: p.jobId ?? null,
+    p_revision: p.revision ?? null,
+    p_stage: p.stage ?? null,
   });
 
   if (error) throw new Error(`Token deduction RPC failed: ${error.message}`);
@@ -278,6 +294,7 @@ export async function deductTokens(
 
   return {
     remaining_tokens: data.remaining_tokens,
+    usage_event_id: data.usage_event_id,
     remaining_credits: data.remaining_credits,
     tokens_deducted: data.tokens_deducted,
     tokens_per_credit: data.tokens_per_credit,
@@ -299,7 +316,8 @@ export async function openRouterWithCredits(
   userId: string,
   feature: string,
   endpoint: "chat/completions" | "embeddings",
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  attribution: UsageAttribution = {},
 ): Promise<{ result: any; credits: CreditInfo }> {
   // Pre-check balance
   const balance = await checkBalance(db, userId);
@@ -361,6 +379,7 @@ export async function openRouterWithCredits(
 
   // Deduct actual tokens
   const credits = await deductTokens(db, {
+    ...attribution,
     userId,
     tokens: totalTokens,
     feature,
@@ -382,11 +401,12 @@ export async function getEmbeddingWithCredits(
   apiKey: string,
   userId: string,
   feature: string,
-  text: string
+  text: string,
+  attribution: UsageAttribution = {},
 ): Promise<{ embedding: number[]; credits: CreditInfo }> {
   const { result, credits } = await openRouterWithCredits(
     db, apiKey, userId, `${feature}:embedding`, "embeddings",
-    { model: "openai/text-embedding-3-small", input: text }
+    { model: "openai/text-embedding-3-small", input: text }, attribution
   );
   return { embedding: result.data[0].embedding, credits };
 }

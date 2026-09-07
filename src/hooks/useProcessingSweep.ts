@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { retryLexiconEnrollments } from "@/lib/note-ai-enrollment";
 import { useAuth } from "@/contexts/AuthContext";
 
 const SWEEP_INTERVAL_MS = 5 * 60_000;
@@ -8,10 +9,9 @@ const SWEEP_INTERVAL_MS = 5 * 60_000;
 /**
  * Server-side safety net for AI note processing.
  *
- * The editor's auto-process timer is best-effort: navigating away or closing
- * the tab drops it. This asks the `sweep-note-processing` edge function to pick
- * up any note that has content but was never indexed. `process-note` is
- * idempotent per content version, so repeated sweeps never re-spend credits.
+ * Note writes queue work transactionally. This cheap reconciliation repairs
+ * missed enrollment requests after reconnect; it never dispatches paid work.
+ * Repeated requests leave the server's quiet period and cooldown unchanged.
  */
 export function useProcessingSweep() {
   const { user, session } = useAuth();
@@ -23,15 +23,15 @@ export function useProcessingSweep() {
 
     const run = async () => {
       try {
+        await retryLexiconEnrollments(user.id);
+        if (cancelled) return;
         const { data, error } = await supabase.functions.invoke("sweep-note-processing", {
           body: { limit: 10 },
         });
         if (cancelled || error) return;
-        if ((data as { triggered?: number } | null)?.triggered) {
-          // Give the background runs a moment, then refresh the notes list.
-          setTimeout(() => {
-            if (!cancelled) queryClient.invalidateQueries({ queryKey: ["notes"] });
-          }, 20_000);
+        if (data) {
+          // Acceptance means queued, not completed. Read the actual job state.
+          queryClient.invalidateQueries({ queryKey: ["note-ai-state"] });
         }
       } catch {
         // Non-critical background maintenance — stay silent.

@@ -3,7 +3,8 @@
 // for one subject (owner or contact). All apply operations snapshot the prior
 // rows into the review_queue payload so they can be rolled back exactly.
 
-import { runChat } from "./llm-router.ts";
+import { runChat, resolveConfig } from "./llm-router.ts";
+import { evaluateNormalizationStage, type NormalizationStage } from "./profile-normalization-spend.ts";
 import {
   PROFILE_CANONICAL_SCHEMA,
   CANONICAL_LABELS_FOR_PROMPT,
@@ -185,6 +186,9 @@ export async function planSubjectNormalization(args: {
   contactId: string | null;
   includeNotesContext?: boolean;
   deterministicOnly?: boolean;
+  manual?: boolean;
+  stages?: NormalizationStage[];
+  snapshotRows?: ProfileEntryRow[];
 }): Promise<NormalizationGroup[]> {
   const { supabase, userId, contactId, includeNotesContext = false, deterministicOnly = false } = args;
 
@@ -194,15 +198,18 @@ export async function planSubjectNormalization(args: {
     .select("id, category_id, contact_id, label, value, sort_order, linked_note_id, created_at")
     .eq("user_id", userId);
   entryQuery = contactId ? entryQuery.eq("contact_id", contactId) : entryQuery.is("contact_id", null);
-  const { data: entries } = await entryQuery;
-  const rows: ProfileEntryRow[] = (entries || []) as ProfileEntryRow[];
+  const { data: entries, error: entriesError } = await entryQuery;
+  if (entriesError) throw entriesError;
+  const rows: ProfileEntryRow[] = ((entries || []) as ProfileEntryRow[]).map((r) => ({ ...r })).sort((a, b) => a.id.localeCompare(b.id));
+  args.snapshotRows?.push(...rows.map((r) => ({ ...r })));
   if (rows.length <= 1) return [];
 
   const catIds = [...new Set(rows.map((r) => r.category_id))];
-  const { data: cats } = await supabase
+  const { data: cats, error: categoriesError } = await supabase
     .from("profile_categories")
     .select("id, slug")
     .in("id", catIds);
+  if (categoriesError) throw categoriesError;
   const slugById = new Map<string, string>();
   for (const c of (cats || []) as any[]) slugById.set(c.id, c.slug);
 
@@ -568,25 +575,36 @@ export async function planSubjectNormalization(args: {
   // spend audit of 2026-09-03.
   const userPrompt = `Subject: ${contactId ? `contact ${contactId}` : "owner (the user themself)"}\n\nCurrent profile entries (JSON, includes created_at):\n${JSON.stringify(llmEntries)}${evidenceBlock}\n\nReturn ONLY groups that require a change.`;
 
-  let parsed: any = null;
-  try {
-    const result = await runChat({
-      db: supabase,
-      userId,
-      callSite: "normalize-profile.plan",
-      messages: [{ role: "user", content: userPrompt }],
-      defaults: {
-        provider: "openrouter",
-        model: "deepseek/deepseek-v4-flash",
-        systemPrompt: NORMALIZE_SYSTEM_PROMPT,
-      },
-      callOptions: { response_format: { type: "json_object" } },
-    });
-    parsed = JSON.parse(result.content);
-  } catch (err) {
-    console.error("[normalize-profile] LLM call failed:", err);
-    return deterministicGroups.concat(listValuedGroups).concat(subsumptionGroups).concat(softSingleGroups);
-  }
+  const defaults = { provider: "openrouter" as const, model: "deepseek/deepseek-v4-flash", systemPrompt: NORMALIZE_SYSTEM_PROMPT };
+  const { effective } = await resolveConfig(supabase, "normalize-profile.plan", defaults);
+  const { data: pending, error: pendingError } = await supabase.from("review_queue")
+    .select("id, suggestion_type, payload, status, suppression_key")
+    .eq("user_id", userId)
+    .in("suggestion_type", ["normalize_profile_entry", "add_profile_entry", "update_profile_entry"])
+    .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+  if (pendingError) throw pendingError;
+  const subjectPending = (pending || []).filter((q: any) => (q.payload?.contact_id ?? null) === contactId)
+    .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)));
+  const stage = await evaluateNormalizationStage({
+    db: supabase, userId, contactId, manual: args.manual ?? true,
+    input: { version: 1, userPrompt, schema: PROFILE_CANONICAL_SCHEMA, effective, pending: subjectPending },
+    evaluate: async () => {
+      const result = await runChat({
+        db: supabase,
+        userId,
+        callSite: "normalize-profile.plan",
+        messages: [{ role: "user", content: userPrompt }],
+        defaults,
+        callOptions: { response_format: { type: "json_object" } },
+      });
+      const parsed = JSON.parse(result.content);
+      if (!Array.isArray(parsed?.groups)) throw new Error("INVALID_NORMALIZATION_RESULT");
+      return parsed;
+    },
+  });
+  const parsed = stage.result;
+  if (args.stages) args.stages.push(stage);
+  else await stage.finish();
 
   const rawGroups: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
   // Only non-deterministic row ids are valid for LLM groups — this rejects any
@@ -707,7 +725,16 @@ type ReviewSuggestion = {
   suppression_key?: string | null;
 };
 
-export async function createNormalizationSuggestions(args: {
+export async function createNormalizationSuggestions(args: Parameters<typeof createNormalizationSuggestionsCore>[0]) {
+  const stages: NormalizationStage[] = [];
+  const result = await createNormalizationSuggestionsCore({ ...args, stages });
+  for (const stage of stages) await stage.finish();
+  return result;
+}
+
+async function createNormalizationSuggestionsCore(args: {
+  manual?: boolean;
+  stages?: NormalizationStage[];
   supabase: any;
   userId: string;
   contactId: string | null;
@@ -725,7 +752,8 @@ export async function createNormalizationSuggestions(args: {
 }): Promise<{ created: number; autoApplied: number; planned: number; applied: number; review: number; skipped: number }> {
   const { supabase, userId, contactId, sourceNoteId, helpers, includeNotesContext = false, deterministicOnly = false } = args;
 
-  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext, deterministicOnly });
+  const snapshotRows: ProfileEntryRow[] = [];
+  const groups = await planSubjectNormalization({ supabase, userId, contactId, includeNotesContext, deterministicOnly, manual: args.manual ?? false, stages: args.stages, snapshotRows });
   if (groups.length === 0) return { created: 0, autoApplied: 0, planned: 0, applied: 0, review: 0, skipped: 0 };
 
   // Reload the subject's current rows so we can snapshot accurately.
@@ -734,8 +762,15 @@ export async function createNormalizationSuggestions(args: {
     .select("id, category_id, contact_id, label, value, sort_order, linked_note_id")
     .eq("user_id", userId);
   entryQuery = contactId ? entryQuery.eq("contact_id", contactId) : entryQuery.is("contact_id", null);
-  const { data: entries } = await entryQuery;
-  const rows: ProfileEntryRow[] = (entries || []) as ProfileEntryRow[];
+  const { data: entries, error: entriesError } = await entryQuery;
+  if (entriesError) throw entriesError;
+  const rows: ProfileEntryRow[] = ((entries || []) as ProfileEntryRow[]).map((r) => ({ ...r })).sort((a, b) => a.id.localeCompare(b.id));
+
+  const unchanged = rows.length === snapshotRows.length && snapshotRows.every((before) => {
+    const now = rows.find((r) => r.id === before.id);
+    return now && now.label === before.label && now.value === before.value && now.category_id === before.category_id && now.contact_id === before.contact_id;
+  });
+  if (!unchanged) throw new Error("NORMALIZATION_INPUT_CHANGED");
 
   // Resolve subject name for nice titles.
   let subjectLabel = "your";
@@ -800,6 +835,7 @@ export async function createNormalizationSuggestions(args: {
 
     const suggestion = makeSuggestion(g, payload);
     if (g.auto_apply_direct) {
+      for (const stage of args.stages || []) await stage.assertLease();
       const result = await applyNormalization(supabase, payload);
       if (result.ok && result.entryId) {
         applied += 1;
@@ -825,8 +861,9 @@ export async function createNormalizationSuggestions(args: {
 
   let created = 0;
   if (auditRows.length > 0) {
+    for (const stage of args.stages || []) await stage.assertLease();
     const { error } = await supabase.from("review_queue").insert(auditRows);
-    if (error) console.error("[normalize-profile] audit insert failed:", error);
+    if (error) throw error;
     else created += auditRows.length;
   }
 
@@ -838,10 +875,10 @@ export async function createNormalizationSuggestions(args: {
   const prepared = unsuppressed.map((s) => ({ ...s, status: "pending_review" }));
 
   if (prepared.length > 0) {
+    for (const stage of args.stages || []) await stage.assertLease();
     const { error } = await supabase.from("review_queue").insert(prepared);
     if (error) {
-      console.error("[normalize-profile] insert failed:", error);
-      skipped += prepared.length;
+      throw error;
     } else {
       created += prepared.length;
     }

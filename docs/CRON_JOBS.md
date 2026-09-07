@@ -47,6 +47,16 @@ optional cleanup, not a security fix.
 
 ## Runbooks
 
+### Deferred note worker (local implementation, not yet deployed)
+
+`20260907130000_schedule_note_ai_jobs.sql` adds `drain-note-ai-jobs` at once per minute, **inactive**, plus a disabled worker setting with an empty account allowlist. It uses the existing `internal.call_edge` and `isValidCronRequest`, not another secret. Enabling the timer alone cannot enable execution.
+
+The worker admits at most ten jobs per tick and holds at most two execution slots. Database claims enforce per-job exclusion across workers. Admission stops after 25 seconds, reserving 110 seconds for the final HTTP call plus margin under the documented 150-second free-plan runtime. This is an execution-capacity bound, not a change to the two-minute quiet period, ten-minute spacing or fifteen-minute pending target.
+
+`internal.call_edge` has a ten-second HTTP timeout. The worker authenticates, reads its configuration and returns acceptance while `EdgeRuntime.waitUntil` runs the drain. HTTP 202 is not completion. Inspect the drain's final counts, `note_ai_jobs` states and `note_ai_completions`, as well as `net._http_response`. Unknown dispatch outcomes retain an uncertainty diagnostic instead of an immediate paid retry.
+
+The full staged activation, verification and pause procedure is in [NOTE_AI_ROLLOUT.md](NOTE_AI_ROLLOUT.md). Nothing in this local change enables production execution.
+
 **Rotate the shared secret** (no redeploys, takes effect on the next run of
 each job):
 

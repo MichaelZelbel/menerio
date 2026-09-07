@@ -3,6 +3,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { runChat } from "../_shared/llm-router.ts";
 import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 import { softStructure } from "../_shared/wiki-structure.ts";
+import { createNoteAIJobs, classifyNoteAIError, NoteAIJobError } from "../_shared/note-ai-jobs.ts";
+import { runWikiStage, dispatchWikiRequest } from "../_shared/wiki-ingest-jobs.ts";
+import { shouldExtractFacts } from "../_shared/hub-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -355,12 +358,18 @@ async function callSynthesis(
   defaultSystemPrompt: string,
   userContent: string,
   templateVars?: Record<string, string | number | null | undefined>,
+  job?: any,
+  stage?: string,
 ): Promise<{ raw: string; usage?: Record<string, unknown> }> {
   const result = await runChat({
     db,
     userId,
     callSite,
     messages: [{ role: "user", content: userContent }],
+    noteId: job?.note_id,
+    jobId: job?.id,
+    revision: job?.fingerprint,
+    stage,
     defaults: {
       provider: "openrouter",
       model: "deepseek/deepseek-v4-flash",
@@ -388,21 +397,24 @@ function extractPeopleFromMetadata(metadata: unknown): string[] {
   return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
 }
 
-async function synthesizeGroupInsights(db: any, userId: string, note: any, noteId: string, contentText: string) {
+async function synthesizeGroupInsights(db: any, userId: string, note: any, noteId: string, contentText: string, job: any, jobs: any) {
   const people = extractPeopleFromMetadata(note.metadata);
-  if (people.length === 0) return { updated: 0, skipped: "no_people_metadata" };
+  if (people.length === 0) return { actions: [], updated: 0, skipped: "no_people_metadata" };
 
   const { data: contacts, error: contactsError } = await db
     .from("contacts")
     .select("id, name")
+    .eq("user_id", userId)
     .in("name", people);
   if (contactsError) throw contactsError;
   const personIds = [...new Set((contacts || []).map((contact: any) => contact.id))];
-  if (personIds.length === 0) return { updated: 0, skipped: "no_matching_contacts" };
+  if (personIds.length === 0) return { actions: [], updated: 0, skipped: "no_matching_contacts" };
 
   const { data: memberships, error: membershipsError } = await db
     .from("contact_group_memberships")
-    .select("group_id, contact_id, contact_groups:group_id(id, slug, name)")
+    .select("group_id, contact_id, contact_groups:group_id!inner(id, slug, name)")
+    .eq("contact_groups.user_id", userId)
+    .eq("user_id", userId)
     .in("contact_id", personIds)
     .is("archived_at", null);
   if (membershipsError) throw membershipsError;
@@ -415,16 +427,17 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     current.personIds.add(membership.contact_id);
     groups.set(group.id, current);
   }
-  if (groups.size === 0) return { updated: 0, skipped: "no_groups" };
+  if (groups.size === 0) return { actions: [], updated: 0, skipped: "no_groups" };
 
-  let updated = 0;
+  const actions: any[] = [];
   const cutoff = Date.now() - 5 * 60 * 1000;
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   for (const group of groups.values()) {
     const { data: page, error: pageError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, content, last_synthesized_at, protected_sections")
+      .select("id, slug, title, content, last_synthesized_at, protected_sections, updated_at, page_type, summary")
+      .eq("user_id", userId)
       .eq("slug", `group-${group.slug}`)
       .eq("page_type", "group")
       .maybeSingle();
@@ -436,6 +449,7 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
     const { data: interactions, error: interactionsError } = await db
       .from("contact_interactions")
       .select("interaction_date, type, summary, action_items, contact_id")
+      .eq("user_id", userId)
       .in("contact_id", Array.from(group.personIds))
       .gte("interaction_date", since)
       .order("interaction_date", { ascending: false })
@@ -444,13 +458,16 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
 
     const { data: recentNotes, error: recentNotesError } = await db
       .from("notes")
-      .select("id, title, content, metadata, created_at")
+      .select("id, title, content, metadata, created_at, source_app")
+      .eq("user_id", userId)
       .eq("ai_visibility", "visible")
+      .eq("is_trashed", false)
       .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false })
       .limit(100);
     if (recentNotesError) throw recentNotesError;
     const noteExcerpts = (recentNotes || [])
+      .filter((candidate: any) => shouldExtractFacts(candidate.source_app))
       .filter((candidate: any) => extractPeopleFromMetadata(candidate.metadata).some((person) => people.includes(person)))
       .slice(0, 12)
       .map((candidate: any) => `- ${candidate.title || "Untitled"}: ${noteContentToText(candidate.content).slice(0, 500)}`)
@@ -465,97 +482,64 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
       `Existing page content:\n${page.content}`,
     ].join("\n\n");
 
-    const { raw } = await callSynthesis(
-      db,
-      userId,
-      "wiki-ingest.group-insights",
-      "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
-      context,
-    );
+    const saved = await runWikiStage(db, job, `wiki-group:${group.id}`, async () => {
+      await jobs.assertCurrent(job);
+      const { raw } = await callSynthesis(
+        db,
+        userId,
+        "wiki-ingest.group-insights",
+        "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
+        context,
+        undefined, job, `wiki-group:${group.id}`,
+      );
+      return { raw, page };
+    });
+    const { raw } = saved;
     const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""));
     const insights = typeof parsed.insights === "string" && parsed.insights.trim() ? parsed.insights : "_No synthesized insights yet._";
-    const nextContent = replaceInsightsSection(page.content || "", insights);
+    const nextContent = replaceInsightsSection(saved.page.content || "", insights);
 
-    const { error: revisionError } = await db.from("wiki_revisions").insert({
-      user_id: userId,
-      wiki_page_id: page.id,
-      page_slug: page.slug,
-      page_title: page.title,
-      change_type: "updated",
-      previous_content: page.content,
-      new_content: nextContent,
-      source_note_id: noteId,
-      change_summary: "Updated group insights from recent member context",
-      status: "applied",
-    });
-    if (revisionError) throw revisionError;
-
-    const { error: updateError } = await db
-      .from("wiki_pages")
-      .update({ content: nextContent, last_synthesized_at: new Date().toISOString() })
-      .eq("id", page.id);
-    if (updateError) throw updateError;
-    const { error: sourceError } = await db
-      .from("wiki_page_sources")
-      .upsert({ user_id: userId, wiki_page_id: page.id, note_id: noteId }, { onConflict: "wiki_page_id,note_id" });
-    if (sourceError) throw sourceError;
-    updated += 1;
+    actions.push({ op: "update", slug: saved.page.slug, patch: nextContent,
+      expected: saved.page, group_insights: true,
+      change_summary: "Updated group insights from recent member context" });
   }
 
-  return { updated };
+  return { updated: actions.length, actions };
 }
 
 async function processIngest(
   db: any,
-  userId: string,
-  noteId: string,
-  changeType: string,
+  jobs: ReturnType<typeof createNoteAIJobs>,
+  job: any,
   startedAt: number,
 ) {
-  try {
+  const { user_id: userId, note_id: noteId } = job;
+  const changeType = "UPDATE";
+  await jobs.assertCurrent(job);
 
-    const { data: note, error: noteError } = await db
-      .from("notes")
-      .select("id, title, content, metadata, ai_visibility")
-      .eq("id", noteId)
-      .maybeSingle();
+  const note = job.snapshot;
+  if (!note || note.ai_visibility === "hidden" || !shouldExtractFacts(note.source_app) || note.is_trashed) {
+    throw new Error("ineligible_note");
+  }
 
-    if (noteError) throw noteError;
-    if (!note) {
-      await logWiki(db, userId, "ingest_skipped", { reason: "note_not_found", note_id: noteId });
-      return;
-    }
+  const contentText = noteContentToText(note.content);
+  const meaningfulText = `${note.title || ""}\n${contentText}`.replace(/\s+/g, " ").trim();
+  if (meaningfulText.length < 20) {
+    await logWiki(db, userId, "ingest_skipped", { reason: "note_too_short", note_id: noteId });
+    await jobs.finish(job);
+    return { finished: true, skipped: "note_too_short" };
+  }
 
-    // AI-visibility: a note marked hidden must not contribute to Lexicon pages.
-    if (note.ai_visibility === "hidden") {
-      await logWiki(db, userId, "ingest_skipped", { reason: "ai_hidden", note_id: noteId });
-      return;
-    }
-
-    const contentText = noteContentToText(note.content);
-    const meaningfulText = `${note.title || ""}\n${contentText}`.replace(/\s+/g, " ").trim();
-    if (meaningfulText.length < 20) {
-      await logWiki(db, userId, "ingest_skipped", { reason: "note_too_short", note_id: noteId });
-      return;
-    }
-
+  const { raw, existingPages } = await runWikiStage(db, job, "wiki-main", async () => {
+    await jobs.assertCurrent(job);
     const { data: existingPages, error: pagesError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, page_type, summary, content, protected_sections")
+      .select("id, slug, title, page_type, summary, content, protected_sections, updated_at")
+      .eq("user_id", userId)
       .order("page_type", { ascending: true })
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
 
-
-    const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
-    for (const page of existingPages || []) {
-      existingBySlug.set(page.slug, {
-        title: page.title || page.slug,
-        page_type: page.page_type || "concept",
-        content: page.content || "",
-        protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
-      });
-    }
 
     // Pre-filter the index: only show pages whose title or slug-words appear in the note,
     // plus all overview/synthesis pages (which legitimately span multiple notes).
@@ -567,127 +551,149 @@ async function processIngest(
       const titleMatch = page.title ? normalizedNoteForIndex.includes(normalizeForMatch(page.title)) : false;
       const slugMatch = normalizedNoteForIndex.includes(normalizeForMatch(slugToWords(page.slug)));
       return titleMatch || slugMatch;
+  });
+
+  const index = relevantPages.length > 0
+    ? relevantPages
+        .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
+        .join("\n")
+    : "No existing pages match this note. You may only `create` a new page or return empty actions.";
+
+  const userMessage = `# ${note.title || "Untitled"}\n\n${contentText}`;
+
+  const { raw } = await callSynthesis(
+    db,
+    userId,
+    "wiki-ingest.main",
+    WIKI_INGEST_PROMPT,
+    userMessage,
+    { existingPagesIndex: index },
+    job, "wiki-main",
+  );
+  return { raw, existingPages: existingPages || [] };
+  });
+  const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
+  for (const page of existingPages || []) {
+    existingBySlug.set(page.slug, {
+      title: page.title || page.slug,
+      page_type: page.page_type || "concept",
+      content: page.content || "",
+      protected_sections: Array.isArray(page.protected_sections) ? page.protected_sections : [],
     });
-
-    const index = relevantPages.length > 0
-      ? relevantPages
-          .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
-          .join("\n")
-      : "No existing pages match this note. You may only `create` a new page or return empty actions.";
-
-    const userMessage = `# ${note.title || "Untitled"}\n\n${contentText}`;
-
-    const { raw } = await callSynthesis(
-      db,
-      userId,
-      "wiki-ingest.main",
-      WIKI_INGEST_PROMPT,
-      userMessage,
-      { existingPagesIndex: index },
-    );
-    let parsed: SynthesisResult;
-    try {
-      parsed = normalizeResult(extractJson(raw), noteId);
-    } catch (parseError) {
-      await logWiki(db, userId, "ingest_failed", {
-        note_id: noteId,
-        reason: "parse_failed",
-        raw_response: raw,
-        error: parseError instanceof Error ? parseError.message : String(parseError),
-      });
-      return;
-    }
-
-    // Build the set of slugs that may legitimately be linked to: every existing page
-    // plus every slug being created in this same batch.
-    const plannedSlugs = new Set<string>(existingBySlug.keys());
-    for (const action of parsed.actions) plannedSlugs.add(action.slug);
-
-    // Grounding validation pass.
-    const validationLog: Array<{
-      slug: string;
-      outcome: string;
-      reason?: string;
-      stripped_links?: number;
-      stripped_uuids?: number;
-      removed_sections?: string[];
-    }> = [];
-    const acceptedActions: WikiAction[] = [];
-    for (const action of parsed.actions) {
-      const existingMeta = existingBySlug.get(action.slug);
-      const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null, plannedSlugs);
-      if (!result.ok) {
-        validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
-        continue;
-      }
-
-      // Respect user-protected sections: never overwrite content the user has edited.
-      const meta = existingBySlug.get(action.slug);
-      let outcome = "accepted";
-      if (meta && meta.protected_sections.length > 0) {
-        const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
-        const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
-        if ((result.action as any).content !== undefined) (result.action as any).content = merged;
-        if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
-        outcome = "accepted_merged_protected";
-      }
-      validationLog.push({
-        slug: action.slug,
-        outcome,
-        stripped_links: result.strippedLinks,
-        stripped_uuids: result.strippedUuids,
-        removed_sections: result.removedSections,
-      });
-      acceptedActions.push(result.action);
-    }
-    parsed.actions = acceptedActions;
-    // Also drop source_links pointing to rejected pages.
-    const acceptedSlugs = new Set(acceptedActions.map((a) => a.slug));
-    parsed.source_links = parsed.source_links
-      .map((link) => ({ ...link, page_slugs: link.page_slugs.filter((slug) => acceptedSlugs.has(slug) || existingBySlug.has(slug)) }))
-      .filter((link) => link.page_slugs.length > 0);
-
-    const { data: applyResult, error: applyError } = await db.rpc("wiki_apply_ingest", {
-      p_note_id: noteId,
-      p_actions: parsed.actions,
-      p_source_links: parsed.source_links,
-    });
-    if (applyError) throw applyError;
-
-    const groupInsightsResult = changeType === "UPDATE"
-      ? await synthesizeGroupInsights(db, userId, note, noteId, contentText)
-      : { updated: 0, skipped: "not_update" };
-
-    const durationMs = Date.now() - startedAt;
-    await logWiki(db, userId, "ingest", {
-      note_id: noteId,
-      change_type: changeType,
-      action_count: parsed.actions.length,
-      validation: validationLog,
-      log_summary: parsed.log_summary,
-      duration_ms: durationMs,
-      apply_result: applyResult,
-      group_insights: groupInsightsResult,
-    });
-
-    return {
-      ok: true,
-      summary: parsed.log_summary,
-      action_count: parsed.actions.length,
-      validation: validationLog,
-      group_insights: groupInsightsResult,
-      duration_ms: durationMs,
-    };
-  } catch (error) {
-    console.error("wiki-ingest background failed", error);
-    if (db && userId) {
-      await logWiki(db, userId, "ingest_failed", {
-        note_id: noteId,
-        error: error instanceof Error ? error.message : String(error),
-        duration_ms: Date.now() - startedAt,
-      }).catch((logError: unknown) => console.error("failed to log wiki ingest failure", logError));
-    }
   }
+
+  let parsed: SynthesisResult;
+  try {
+    parsed = normalizeResult(extractJson(raw), noteId);
+  } catch (parseError) {
+    await logWiki(db, userId, "ingest_failed", {
+      note_id: noteId,
+      reason: "parse_failed",
+      raw_response: raw,
+      error: parseError instanceof Error ? parseError.message : String(parseError),
+    });
+    throw parseError;
+  }
+
+  // Build the set of slugs that may legitimately be linked to: every existing page
+  // plus every slug being created in this same batch.
+  const plannedSlugs = new Set<string>(existingBySlug.keys());
+  for (const action of parsed.actions) plannedSlugs.add(action.slug);
+
+  // Grounding validation pass.
+  const validationLog: Array<{
+    slug: string;
+    outcome: string;
+    reason?: string;
+    stripped_links?: number;
+    stripped_uuids?: number;
+    removed_sections?: string[];
+  }> = [];
+  const acceptedActions: WikiAction[] = [];
+  for (const action of parsed.actions) {
+    const existingMeta = existingBySlug.get(action.slug);
+    const result = validateAction(action, contentText, existingMeta?.content ?? null, existingMeta?.title ?? null, plannedSlugs);
+    if (!result.ok) {
+      validationLog.push({ slug: action.slug, outcome: "rejected", reason: result.reason });
+      continue;
+    }
+
+    // Respect user-protected sections: never overwrite content the user has edited.
+    const meta = existingBySlug.get(action.slug);
+    let outcome = "accepted";
+    if (meta && meta.protected_sections.length > 0) {
+      const proposed = (result.action as any).content ?? (result.action as any).patch ?? "";
+      const merged = mergeWithProtectedSections(meta.content, proposed, meta.protected_sections);
+      if ((result.action as any).content !== undefined) (result.action as any).content = merged;
+      if ((result.action as any).patch !== undefined) (result.action as any).patch = merged;
+      outcome = "accepted_merged_protected";
+    }
+    validationLog.push({
+      slug: action.slug,
+      outcome,
+      stripped_links: result.strippedLinks,
+      stripped_uuids: result.strippedUuids,
+      removed_sections: result.removedSections,
+    });
+    acceptedActions.push(result.action);
+  }
+  parsed.actions = acceptedActions;
+  // Also drop source_links pointing to rejected pages.
+  const acceptedSlugs = new Set(acceptedActions.map((a) => a.slug));
+  parsed.source_links = parsed.source_links
+    .map((link) => ({ ...link, page_slugs: link.page_slugs.filter((slug) => acceptedSlugs.has(slug) || existingBySlug.has(slug)) }))
+    .filter((link) => link.page_slugs.length > 0);
+
+  const groupInsightsResult = await synthesizeGroupInsights(db, userId, note, noteId, contentText, job, jobs);
+  const actions = parsed.actions.map((action) => ({ ...action,
+    expected: existingPages.find((page: any) => page.slug === action.slug) || null,
+  }));
+  for (const groupAction of groupInsightsResult.actions) {
+    const existingAction = actions.find((action: any) => action.slug === groupAction.slug);
+    if (existingAction) {
+      // Keep main synthesis outside Insights; both effects use the same page baseline.
+      const insights = parseSections(groupAction.patch).find((section) => section.slug === "insights")?.body || "";
+      existingAction.patch = replaceInsightsSection(existingAction.patch || existingAction.content || "", insights);
+    } else actions.push(groupAction);
+    parsed.source_links.push({ note_id: noteId, page_slugs: [groupAction.slug] });
+  }
+  const args = { _user_id: userId, _job_id: job.id, _lease_id: job.lease_id };
+  const stage = await db.rpc("begin_note_ai_stage", { ...args, _stage: "wiki-apply" });
+  if (stage.error) throw stage.error;
+  if (!stage.data) throw new NoteAIJobError("stale", "lease_lost");
+  if (stage.data.status === "uncertain") throw new NoteAIJobError("uncertain", "uncertain");
+  if (stage.data.status === "started") {
+    const saved = await db.rpc("checkpoint_note_ai_stage", { ...args, _stage: "wiki-apply",
+      _result: { actions, source_links: parsed.source_links } });
+    if (saved.error) throw saved.error;
+    if (!saved.data) throw new Error("lease_lost");
+  }
+  const { data: applyResult, error: applyError } = await db.rpc("wiki_apply_note_ai_result", args);
+  if (applyError) throw applyError;
+  if (!applyResult) throw new Error("lease_lost");
+  await jobs.finish(job);
+
+  const durationMs = Date.now() - startedAt;
+  await logWiki(db, userId, "ingest", {
+    note_id: noteId,
+    change_type: changeType,
+    action_count: parsed.actions.length,
+    validation: validationLog,
+    log_summary: parsed.log_summary,
+    duration_ms: durationMs,
+    apply_result: applyResult,
+    group_insights: { updated: groupInsightsResult.updated },
+  });
+
+  return {
+    ok: true,
+    finished: true,
+    summary: parsed.log_summary,
+    action_count: parsed.actions.length,
+    validation: validationLog,
+    group_insights: { updated: groupInsightsResult.updated },
+    duration_ms: durationMs,
+  };
 }
 
 serve(async (req) => {
@@ -698,31 +704,31 @@ serve(async (req) => {
     const token = extractBearer(req);
     if (!token) return jsonResponse({ error: "Unauthenticated" }, 401);
 
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userError } = await authClient.auth.getUser(token);
-    if (userError || !userData.user) return jsonResponse({ error: "Unauthenticated" }, 401);
-    const userId = userData.user.id;
-
-    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
     const body = await req.json().catch(() => ({}));
-    const noteId = body.note_id;
-    const changeType = body.change_type;
-    if (!isUuid(noteId) || !["INSERT", "UPDATE"].includes(changeType)) {
-      return jsonResponse({ error: "Invalid request body" }, 400);
-    }
-
-    // Run heavy AI synthesis in the background so we don't hit the 150s edge timeout.
-    // @ts-expect-error — EdgeRuntime is provided by Supabase Edge Runtime.
-    EdgeRuntime.waitUntil(processIngest(db, userId, noteId, changeType, startedAt));
-
-    return jsonResponse({ accepted: true, note_id: noteId }, 202);
+    if (!isUuid(body.note_id)) return jsonResponse({ error: "Invalid request body" }, 400);
+    const serviceToken = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const db = createClient(SUPABASE_URL, serviceToken);
+    const jobs = createNoteAIJobs(db);
+    const result = await dispatchWikiRequest(token, body, {
+      serviceToken,
+      authenticate: async (bearer) => {
+        const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data, error } = await authClient.auth.getUser(bearer);
+        return error ? null : data.user?.id || null;
+      },
+      jobs,
+      execute: async (job) => {
+        try {
+          return await processIngest(db, jobs, job, startedAt);
+        } catch (error) {
+          await jobs.fail(job, classifyNoteAIError(error));
+          throw error;
+        }
+      },
+    });
+    return jsonResponse(result.body, result.status);
   } catch (error) {
     console.error("wiki-ingest dispatch failed", error);
     return jsonResponse({ error: "Lexicon ingest failed" }, 500);
   }
 });
-
-// TODO: Add a wiki_ingest_jobs queue table later if duplicate work becomes a problem.

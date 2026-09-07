@@ -1,7 +1,10 @@
+import { createNoteAIJobs, NoteAIJobError, classifyNoteAIError, type NoteAILease } from "../_shared/note-ai-jobs.ts";
+import { handleNoteAIRequest, changedProfileSubjects } from "../_shared/note-ai-processing.ts";
+import { createNoteAIExecutionDatabase } from "../_shared/note-ai-db.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
-  insufficientCreditsResponse,
+
 } from "../_shared/llm-credits.ts";
 import { outputLanguageRule, parseModelJson, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import {
@@ -59,7 +62,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const executionDatabase = createNoteAIExecutionDatabase(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY));
+const supabase = executionDatabase.db;
+const noteJobs = createNoteAIJobs(supabase);
 
 /** Strip HTML tags and decode common entities to produce plain text.
  *  Also handles markdown content (passes through mostly as-is). */
@@ -599,7 +604,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
         .from("profile_entries")
         .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: String((suggestion.payload as any)?.evidence_quote || "").trim(), linked_note_id: (suggestion as any).source_note_id || null })
         .select("id")
-        .single();
+        .maybeSingle();
       if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
       if (error || !data) return { ...suggestion, status: "pending_review" };
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
@@ -985,19 +990,21 @@ async function verifyRealPeopleWithLLM(
   noteText: string,
   candidates: string[],
   noteId: string | null,
+  lease: NoteAILease,
 ): Promise<Set<string>> {
   const allowAll = new Set(candidates.map((n) => n.toLowerCase()));
   if (candidates.length === 0) return allowAll;
-  try {
+  {
     const snippets = candidates.map((n) => {
       const ctx = contextAround(n, noteText, 200) || "(no context found)";
       return `- ${n}: "${ctx.replace(/\s+/g, " ").trim()}"`;
     }).join("\n");
     const userPrompt = `Note title: ${noteTitle}\n\nCandidate names extracted from this note (each with surrounding text):\n${snippets}\n\nFor EACH candidate, decide whether it is a REAL person the note's author knows or interacts with, or a FICTIONAL character (from a novel, anime, manga, game, film, TV show, comic, etc.), or UNCLEAR. Actors/creators/streamers count as real; the roles they play do not. Return strict JSON: {"verdicts":[{"name":"...","verdict":"real_person"|"fictional_character"|"unclear"}]}`;
-    const result = await runChat({
+    const result = await noteJobs.runStage(lease, "fiction_guard", () => runChat({
       db: supabase,
       userId,
       callSite: "process-note.fiction_guard",
+        jobId: lease.id, revision: lease.fingerprint, stage: "fiction_guard",
       noteId,
       messages: [{ role: "user", content: userPrompt }],
       defaults: {
@@ -1006,7 +1013,7 @@ async function verifyRealPeopleWithLLM(
         systemPrompt: "You classify whether extracted names refer to real people the note's author knows, or to fictional characters. Be strict: when the surrounding text frames the name as a character, role, or media reference, mark it fictional. When context is thin, mark it unclear. Output valid JSON only.",
       },
       callOptions: { response_format: { type: "json_object" } },
-    });
+    }));
     const parsed = parseModelJson<any>(result.content) ?? {};
     const verdicts = Array.isArray(parsed?.verdicts) ? parsed.verdicts : [];
     const real = new Set<string>();
@@ -1018,9 +1025,6 @@ async function verifyRealPeopleWithLLM(
     // If the LLM returned nothing usable, fall back to permissive to avoid regressions.
     if (real.size === 0 && verdicts.length === 0) return allowAll;
     return real;
-  } catch (err) {
-    console.error("[fiction_guard] LLM verification failed, allowing all candidates:", err);
-    return allowAll;
   }
 }
 
@@ -1031,6 +1035,7 @@ async function generateReviewItems(
   noteTitle: string,
   noteContent: string,
   metadata: Record<string, unknown>,
+  lease: NoteAILease,
 ) {
   try {
     const people = Array.isArray(metadata.people) ? (metadata.people as string[]) : [];
@@ -1213,7 +1218,7 @@ async function generateReviewItems(
       // batched call per note, only when there is at least one candidate.
       if (newContactCandidates.length > 0) {
         const names = newContactCandidates.map((s) => String(s.extracted_value || ""));
-        const verifiedReal = await verifyRealPeopleWithLLM(userId, noteTitle, fullText, names, noteId);
+        const verifiedReal = await verifyRealPeopleWithLLM(userId, noteTitle, fullText, names, noteId, lease);
         for (const cand of newContactCandidates) {
           const key = String(cand.extracted_value || "").toLowerCase();
           if (verifiedReal.has(key)) {
@@ -1280,6 +1285,7 @@ async function generateReviewItems(
     }
   } catch (err) {
     console.error("generateReviewItems error:", err);
+    throw err;
   }
 }
 
@@ -1290,7 +1296,8 @@ async function generateProfileSuggestions(
   noteTitle: string,
   noteContent: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
-  context?: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown>; note_created_at?: string | null },
+  context: { source_app?: string | null; is_external?: boolean | null; metadata?: Record<string, unknown>; note_created_at?: string | null },
+  lease: NoteAILease,
 ) {
   const noteDateISO = context?.note_created_at ? new Date(context.note_created_at).toISOString().slice(0, 10) : null;
   const selfEntry = matchedPeople.find((p) => p.is_self);
@@ -1317,10 +1324,8 @@ async function generateProfileSuggestions(
 
     // Check balance before making another LLM call
     const balance = await checkBalance(supabase, userId);
-    if (!balance.allowed) {
-      console.log(`Skipping profile extraction for note ${noteId}: insufficient credits`);
-      return;
-    }
+    if (balance.unavailable) throw new NoteAIJobError("transient", "Allowance unavailable");
+    if (!balance.allowed) throw new NoteAIJobError("no_credit", "INSUFFICIENT_CREDITS");
 
     // Load the user's effective profile-field vocabulary so extraction respects
     // fields they have already approved via the review queue.
@@ -1352,10 +1357,11 @@ async function generateProfileSuggestions(
     }> = [];
 
     try {
-      const result = await runChat({
+      const result = await noteJobs.runStage(lease, "profile", () => runChat({
         db: supabase,
         userId,
         callSite: "process-note.profile_extraction",
+        jobId: lease.id, revision: lease.fingerprint, stage: "profile",
         noteId,
         messages: [{ role: "user", content: userPrompt }],
         defaults: {
@@ -1374,9 +1380,9 @@ async function generateProfileSuggestions(
           outputLanguageRule(preferences.profileLanguage),
         ].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
-      });
-
-      const rawContent = result.content;
+      }));
+      await noteJobs.assertCurrent(lease);
+      const rawContent = result!.content;
       console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
       const parsed = parseModelJson<any>(rawContent);
       if (parsed === null) {
@@ -1384,7 +1390,7 @@ async function generateProfileSuggestions(
         console.error(
           `[profile-extract] model returned no parseable JSON for note ${noteId} — extraction abandoned. First 200 chars: ${JSON.stringify(String(rawContent ?? "").slice(0, 200))}`,
         );
-        return;
+        throw new NoteAIJobError("permanent", "Invalid profile JSON");
       }
 
       // Normalize response shapes for facts
@@ -1445,11 +1451,9 @@ async function generateProfileSuggestions(
       console.log(`[profile-extract] parseShape=${parseShape}, factsCount=${extractedFacts.length}, relationshipsCount=${extractedRelationships.length} for note ${noteId}`);
     } catch (err: any) {
       if (err.message === "INSUFFICIENT_CREDITS") {
-        console.log(`Credit limit reached during profile extraction for note ${noteId}`);
-        return;
+        throw err;
       }
-      console.error("Profile extraction LLM error:", err);
-      return;
+      throw err;
     }
 
     if (extractedFacts.length === 0 && extractedRelationships.length === 0) {
@@ -1833,9 +1837,11 @@ async function generateProfileSuggestions(
     }
 
 
+    const savedProfileSubjects = new Set<string | null>();
     if (suggestions.length > 0) {
       const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
       const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
+      for (const subject of changedProfileSubjects(prepared)) savedProfileSubjects.add(subject);
       const { error } = await supabase.from("review_queue").insert(prepared);
       if (error) console.error("Profile suggestion insert error:", error);
       else console.log(`Created ${prepared.length} profile suggestions for note ${noteId}`);
@@ -2070,15 +2076,7 @@ async function generateProfileSuggestions(
     // each touched subject's now-current SAVED profile. Best-effort: never
     // throw out of process-note.
     try {
-      const touchedContactIds = new Set<string>();
-      let touchedOwner = false;
-      for (const f of validFacts) {
-        if (f._target.contact_id) touchedContactIds.add(f._target.contact_id);
-        else touchedOwner = true;
-      }
-      const subjects: Array<string | null> = [];
-      if (touchedOwner) subjects.push(null);
-      for (const cid of touchedContactIds) subjects.push(cid);
+      const subjects = [...savedProfileSubjects];
 
       for (const subj of subjects) {
         try {
@@ -2107,6 +2105,7 @@ async function generateProfileSuggestions(
     }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
+    throw err;
   }
 }
 
@@ -2121,6 +2120,7 @@ async function generateMomentSuggestions(
   fullText: string,
   matchedPeople: Array<{ name: string; contact_id?: string; canonical_name?: string; is_self?: boolean }>,
   metadata: Record<string, unknown>,
+  lease: NoteAILease,
 ) {
   try {
     const dates = Array.isArray((metadata as any).dates_mentioned) ? ((metadata as any).dates_mentioned as string[]) : [];
@@ -2131,7 +2131,8 @@ async function generateMomentSuggestions(
     if (preferences.mode === "off") return;
 
     const balance = await checkBalance(supabase, userId);
-    if (!balance.allowed) return;
+    if (balance.unavailable) throw new NoteAIJobError("transient", "Allowance unavailable");
+    if (!balance.allowed) throw new NoteAIJobError("no_credit", "INSUFFICIENT_CREDITS");
 
     const peopleHint = matchedPeople
       .map((p) => `${p.canonical_name || p.name}${p.is_self ? " (owner)" : ""}`)
@@ -2140,11 +2141,12 @@ async function generateMomentSuggestions(
     const userPrompt = `Known people in this note: ${peopleHint}\nDates mentioned: ${datesHint}\n\nNote title: ${noteTitle}\nNote content (including [Media content] OCR):\n${stripHtmlIfNeeded(fullText).slice(0, 16000)}`;
 
     let parsed: any;
-    try {
-      const result = await runChat({
+    {
+      const result = await noteJobs.runStage(lease, "moment", () => runChat({
         db: supabase,
         userId,
         callSite: "process-note.moment_extraction",
+        jobId: lease.id, revision: lease.fingerprint, stage: "moment",
         noteId,
         messages: [{ role: "user", content: userPrompt }],
         defaults: {
@@ -2158,16 +2160,13 @@ async function generateMomentSuggestions(
         // world extractor, with nothing on screen to make it visible.
         systemSuffix: outputLanguageRule(preferences.profileLanguage),
         callOptions: { response_format: { type: "json_object" } },
-      });
-      parsed = parseModelJson<any>(result.content);
+      }));
+      await noteJobs.assertCurrent(lease);
+      parsed = parseModelJson<any>(result!.content);
       if (parsed === null) {
         console.error(`[moment-extract] model returned no parseable JSON for note ${noteId}; first 200 chars: ${JSON.stringify(String(result.content ?? "").slice(0, 200))}`);
-        return;
+        throw new NoteAIJobError("permanent", "Invalid moment JSON");
       }
-    } catch (err: any) {
-      if (err?.message === "INSUFFICIENT_CREDITS") return;
-      console.error("[moment-extract] LLM error:", err);
-      return;
     }
 
     if (!parsed || parsed.is_event !== true) {
@@ -2301,6 +2300,7 @@ async function generateMomentSuggestions(
     else console.log(`Created moment suggestion for note ${noteId} (status=${prepared[0]?.status})`);
   } catch (err) {
     console.error("generateMomentSuggestions error:", err);
+    throw err;
   }
 }
 
@@ -2329,137 +2329,26 @@ async function generateMomentSuggestions(
 /* ── Processing-state helpers ── */
 const MIN_WORDS_FOR_PROCESSING = 3;
 
-async function setProcessingState(
-  noteId: string,
-  status: string,
-  extra: Record<string, unknown> = {},
-) {
+
+
+/* ── Claimed snapshot processor ── */
+async function processInBackground(lease: NoteAILease, authHeader: string) {
   try {
-    await supabase.from("notes").update({ processing_status: status, ...extra }).eq("id", noteId);
-  } catch (err) {
-    console.warn("failed to set processing_status", noteId, status, err);
+    await executionDatabase.run(lease.user_id, () => noteJobs.assertCurrent(lease), () => processCapturedSnapshot(lease, authHeader));
+  } catch (error) {
+    await noteJobs.fail(lease, classifyNoteAIError(error));
+    throw error;
   }
 }
-
-/* ── Main background processor ── */
-/**
- * How long a claim can sit before another run may take it. Must match
- * sweep-note-processing's STUCK_MS, which is what decides a note is stuck and
- * re-triggers it; a shorter value here would let two runs overlap again, and a
- * longer one would make the sweep re-trigger notes this function then refuses.
- */
-const CLAIM_STALE_MS = 10 * 60_000;
-
-/**
- * Take exclusive ownership of a note before spending anything on it.
- *
- * The content-hash check in processInBackground stops a re-run of a version we
- * already finished. It cannot stop two runs STARTING at once, which is the race
- * its own comment describes: the client flush and the sweep both fire, both
- * read a status that is not yet "processing", both proceed, and the note is
- * embedded and extracted twice at double the credit cost.
- *
- * The conditional update collapses that read-then-write into one statement, so
- * exactly one caller gets a row back.
- *
- * The or() is what stops the claim becoming a deadlock. A run that dies
- * mid-flight leaves the status at "processing" forever, and a bare
- * `neq("processing_status", "processing")` would then refuse every retry.
- * `is.null` is in there because a legacy note has no status at all, and in SQL
- * `NULL <> 'processing'` is NULL rather than true, so neq alone would skip it.
- */
-async function claimNoteForProcessing(
-  noteId: string,
-  attemptsSoFar: number,
-): Promise<boolean> {
-  const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
-  const { data, error } = await supabase
-    .from("notes")
-    // The attempt is counted here, at the moment the note is claimed, because
-    // this is the last point before money is spent. It is reset to 0 on success
-    // below. `sweep-note-processing` stops re-triggering at 3, so a note that can
-    // never be processed stops costing an extraction on every sweep forever.
-    .update({
-      processing_status: "processing",
-      processing_error: null,
-      processing_attempts: attemptsSoFar + 1,
-    })
-    .eq("id", noteId)
-    .or(
-      `processing_status.is.null,processing_status.neq.processing,updated_at.lt.${staleBefore}`,
-    )
-    .select("id");
-
-  if (error) {
-    console.warn("failed to claim note for processing", noteId, error.message);
-    return false;
-  }
-  const won = Array.isArray(data) && data.length > 0;
-  if (!won) console.log(`process-note: ${noteId} is already being processed, skipping`);
-  return won;
-}
-
-async function processInBackground(noteId: string, authHeader: string, force = false) {
-  let contentHash: string | null = null;
-  try {
-    const { data: note, error: fetchErr } = await supabase
-      .from("notes")
-      .select("id, title, content, user_id, metadata, source_app, is_external, ai_visibility, created_at, processing_status, processed_hash, embedding, processing_attempts")
-      .eq("id", noteId)
-      .single();
-
-    if (fetchErr || !note) {
-      console.error("Note not found:", noteId);
-      return;
-    }
-
-    const aiHidden = (note as any).ai_visibility === "hidden";
-
-    let fullText = `${note.title}\n\n${note.content}`.trim();
-    if (!fullText) {
-      await setProcessingState(noteId, "skipped_empty", { processing_error: null });
-      return;
-    }
-
-    // Idempotency: never re-spend credits on a content version we already
-    // processed (the client flush and the server sweep can both fire).
-    contentHash = noteContentHash(`${note.title ?? ""}\n\n${note.content ?? ""}`);
-    if (
-      !force &&
-      (note as any).processing_status === "processed" &&
-      (note as any).processed_hash === contentHash &&
-      (note as any).embedding
-    ) {
-      console.log("process-note: already processed this content version:", noteId);
-      return;
-    }
-
-    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
-    if (wordCount < MIN_WORDS_FOR_PROCESSING) {
-      await setProcessingState(noteId, "skipped_short", { processed_hash: contentHash, processing_error: null });
-      return;
-    }
-
-    // Claim it before spending. `force` is the deliberate admin re-run and
-    // keeps its existing override.
-    if (force) {
-      // The deliberate admin re-run is never capped, and resets the count so a
-      // note a human has just fixed gets a clean slate.
-      await setProcessingState(noteId, "processing", {
-        processing_error: null,
-        processing_attempts: 0,
-      });
-    } else if (!(await claimNoteForProcessing(noteId, Number((note as any).processing_attempts) || 0))) {
-      return;
-    }
-
-    // Include media analysis content in the embedding text
-    const { data: mediaEntries } = await supabase
-      .from("media_analysis")
-      .select("extracted_text, description, topics")
-      .eq("note_id", noteId)
-      .eq("analysis_status", "complete");
-
+async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
+  const noteId = lease.note_id;
+  const note = lease.snapshot;
+  const contentHash = lease.fingerprint;
+  {
+    await noteJobs.assertCurrent(lease);
+    const aiHidden = note.ai_visibility === "hidden";
+    let fullText = `${note.title ?? ""}\n\n${note.content ?? ""}`.trim();
+    const mediaEntries = note.media || [];
     const mediaTopics: string[] = [];
     if (mediaEntries && mediaEntries.length > 0) {
       const mediaTexts = mediaEntries.map((m: any) => {
@@ -2469,13 +2358,14 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       fullText += "\n\n[Media content]\n" + mediaTexts.join("\n");
     }
 
-    // Pre-check balance before making any LLM calls
-    const balance = await checkBalance(supabase, note.user_id);
-    if (!balance.allowed) {
-      console.log(`Skipping AI processing for note ${noteId}: insufficient credits for user ${note.user_id}`);
-      await setProcessingState(noteId, "skipped_no_credits");
+    if (fullText.split(/\s+/).filter(Boolean).length < MIN_WORDS_FOR_PROCESSING) {
+      await noteJobs.applyNote(lease, { finish: true, processedHash: contentHash });
       return;
     }
+    // Pre-check balance before making any LLM calls
+    const balance = await checkBalance(supabase, note.user_id);
+    if (balance.unavailable) throw new NoteAIJobError("transient", "Allowance unavailable");
+    if (!balance.allowed) throw new NoteAIJobError("no_credit", "INSUFFICIENT_CREDITS");
 
 
     // Extract metadata first (single chat call). Embeddings are produced via
@@ -2486,11 +2376,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       count: 0, truncated: false, failures: 0,
     };
 
-    try {
-      const chatResult = await runChat({
+    {
+      const chatResult = await noteJobs.runStage(lease, "metadata", () => runChat({
         db: supabase,
         userId: note.user_id,
         callSite: "process-note.metadata",
+        jobId: lease.id, revision: lease.fingerprint, stage: "metadata",
         noteId,
         messages: [{ role: "user", content: fullText.slice(0, 24000) }],
         defaults: {
@@ -2504,17 +2395,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         // both fiction gates permanently off.
         systemSuffix: [metadataFieldContract(), sourceLanguageRule()].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
-      });
+      }));
 
-      metadata = parseModelJson<Record<string, unknown>>(chatResult.content) ?? {};
+      metadata = parseModelJson<Record<string, unknown>>(chatResult!.content) ?? {};
       if (Object.keys(metadata).length === 0) {
-        // The old code fell back silently here, so a note whose metadata pass
-        // returned junk looked identical to one with genuinely nothing to say,
-        // and content_mode went missing without a trace.
-        console.error(
-          `[process-note] metadata pass returned no parseable JSON for note ${noteId}; falling back to defaults. First 200 chars: ${JSON.stringify(String(chatResult.content ?? "").slice(0, 200))}`,
-        );
-        metadata = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
+        // The paid response is checkpointed; invalid output needs review, not re-billing.
+        throw new NoteAIJobError("permanent", "Invalid metadata JSON");
       }
 
       // Smart-chunk the note and embed each chunk. The note-level embedding is
@@ -2522,6 +2408,11 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       // working, while the per-chunk embeddings power the new RAG retrieval.
       const chunkResult = await embedAndStoreNoteChunks(
         supabase, OPENROUTER_API_KEY, note.user_id, noteId, note.title, fullText, "process-note",
+        {
+          attribution: {noteId,jobId:lease.id,revision:lease.fingerprint,callSite:"process-note.embedding"},
+          runPaid: (hash, produce) => noteJobs.runStage(lease, `embedding:${hash}`, produce),
+          replaceChunks: (rows) => noteJobs.replaceChunks(lease, rows),
+        },
       );
       embedding = chunkResult.firstChunkEmbedding;
       chunkInfo = {
@@ -2529,13 +2420,6 @@ async function processInBackground(noteId: string, authHeader: string, force = f
         truncated: chunkResult.truncated,
         failures: chunkResult.failures,
       };
-    } catch (err: any) {
-      if (err.message === "INSUFFICIENT_CREDITS") {
-        console.log(`Credit limit reached during processing of note ${noteId}`);
-        await setProcessingState(noteId, "skipped_no_credits");
-        return;
-      }
-      throw err;
     }
 
 
@@ -2546,6 +2430,12 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       metadata.topics = merged;
     }
 
+    // Restricted sources remain searchable, but cannot cause any derivative effects.
+    if (aiHidden || !shouldExtractFacts(note.source_app) || note.extract_facts === false) {
+      await noteJobs.applyNote(lease, { metadata: { ...metadata, chunking: chunkInfo }, embedding,
+        processedHash: contentHash, finish: true });
+      return;
+    }
     // Auto-link metadata people to contacts (alias-aware) + self-recognition
     const metadataPeople = Array.isArray(metadata.people) ? metadata.people as string[] : [];
     const contactMap: Record<string, string> = {};
@@ -2720,59 +2610,20 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       chunking: { count: chunkInfo.count, truncated: chunkInfo.truncated, failures: chunkInfo.failures, updated_at: new Date().toISOString() },
     };
 
-    // Update the note with embedding, metadata, and optionally a smarter title.
-    //
-    // `embedding` is only written when we actually produced one. It used to go
-    // in unconditionally, so a chunking run that failed without throwing wrote
-    // embedding: null and wiped a perfectly good vector off the note, taking it
-    // out of note-level semantic search until something reprocessed it.
-    const updatePayload: Record<string, unknown> = { metadata: mergedMetadata };
-    if (embedding) updatePayload.embedding = embedding;
-    if (aiTitle) updatePayload.title = aiTitle;
-    // Hash the content version we actually processed. When the AI renames the
-    // note we hash the new title, otherwise the sweep would see a mismatch and
-    // reprocess (and re-charge) the same note forever.
-    updatePayload.processing_status = "processed";
-    updatePayload.processed_at = new Date().toISOString();
-    updatePayload.processed_hash = noteContentHash(
-      `${aiTitle || note.title || ""}\n\n${note.content ?? ""}`,
-    );
-    updatePayload.processing_error = null;
-    // Succeeded, so the strike count goes back to zero.
-    updatePayload.processing_attempts = 0;
-
-    const { error: updateErr } = await supabase
-      .from("notes")
-      .update(updatePayload)
-      .eq("id", noteId);
-
-    if (updateErr) {
-      console.error("Update error:", updateErr);
-      await setProcessingState(noteId, "failed", { processing_error: updateErr.message });
-      return;
-    }
+    // Store indexing output atomically, but retain the lease and processing status
+    // until every derivative has succeeded. Generated titles are applied only at finish.
+    const output = {
+      metadata: { ...metadata, chunking: mergedMetadata.chunking },
+      embedding,
+      title: aiTitle,
+      processedHash: noteContentHash(`${aiTitle || note.title || ""}\n\n${note.content ?? ""}`),
+    };
+    await noteJobs.applyNote(lease, { ...output, title: null, finish: false });
 
 
-    // AI-hidden notes: keep embeddings (local search) but skip every downstream
-    // AI surface — review queue, profile suggestions, knowledge graph connections.
-    //
-    // Notes synced from Michael's hub take the same exit, for a different
-    // reason. They are indexed so search can find them, which is the whole
-    // point of syncing them, but they must never be mined for facts: the hub's
-    // observations are an AI's guesses about him, and extracting claims from
-    // them would let the system cite its own guesses back as things he said.
-    const hubSourced = !shouldExtractFacts((note as any).source_app);
-    if (aiHidden || hubSourced) {
-      console.log(
-        "process-note: embedded, skipping AI-derivative work for",
-        noteId,
-        aiHidden ? "(ai_visibility=hidden)" : "(synced from the hub)",
-      );
-      return;
-    }
 
-    // Generate review queue suggestions (no extra LLM calls)
-    await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata);
+    // Review suggestions include a checkpointed fiction guard when needed.
+    await generateReviewItems(note.user_id, noteId, note.title, note.content, mergedMetadata, lease);
 
     // Generate profile suggestions for matched people + OWNER (one extra LLM call).
     // Pass fullText (includes [Media content] OCR) so scans/IDs contribute facts.
@@ -2781,10 +2632,10 @@ async function processInBackground(noteId: string, authHeader: string, force = f
       is_external: (note as any).is_external,
       metadata: mergedMetadata,
       note_created_at: (note as any).created_at ?? null,
-    });
+    }, lease);
 
     // Generate timeline-moment suggestions from past events documented in the note.
-    await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata);
+    await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata, lease);
 
     // Promote whatever facts this note just produced into dated claims.
     //
@@ -2806,7 +2657,8 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     //
     // Logged the way compute-connections is, and for the same reason: fetch()
     // only rejects on a transport error, so a 4xx/5xx would otherwise vanish.
-    fetch(`${SUPABASE_URL}/functions/v1/promote-profile-entries`, {
+    await noteJobs.assertCurrent(lease);
+    await fetch(`${SUPABASE_URL}/functions/v1/promote-profile-entries`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
@@ -2820,21 +2672,22 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     })
       .then(async (r) => {
         if (!r.ok) {
-          console.error(
+          throw new Error(
             `promote-profile-entries rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
           );
         }
       })
-      .catch((err) => console.error("promote-profile-entries trigger error:", err));
+      .catch((err) => { throw err; });
 
-    // Trigger connection computation (fire-and-forget, but never silent).
+    // Await connection computation while the analysis lease is still held.
     //
     // fetch() only rejects on a transport error, so an HTTP 4xx/5xx from the
     // callee used to vanish with no log line at all. That is how every
     // sweep-processed note silently missed the knowledge graph for as long as
     // it did: compute-connections answered 401 and the .catch() never fired.
     const computeUrl = `${SUPABASE_URL}/functions/v1/compute-connections`;
-    fetch(computeUrl, {
+    await noteJobs.assertCurrent(lease);
+    await fetch(computeUrl, {
       method: "POST",
       headers: {
         Authorization: authHeader,
@@ -2844,19 +2697,15 @@ async function processInBackground(noteId: string, authHeader: string, force = f
     })
       .then(async (r) => {
         if (!r.ok) {
-          console.error(
+          throw new Error(
             `compute-connections rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
           );
         }
       })
-      .catch((err) => console.error("compute-connections trigger error:", err));
+      .catch((err) => { throw err; });
 
+    await noteJobs.applyNote(lease, { ...output, finish: true });
     console.log("process-note completed for:", noteId);
-  } catch (err) {
-    console.error("Background processing error:", err);
-    await setProcessingState(noteId, "failed", {
-      processing_error: err instanceof Error ? err.message.slice(0, 500) : "Unknown error",
-    });
   }
 }
 
@@ -2875,47 +2724,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const { note_id, force } = await req.json();
-    if (!note_id) {
-      return new Response(JSON.stringify({ error: "note_id required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Authorize the caller. This function runs with the service-role key and
-    // derives user_id from the note row, so an unauthenticated caller could
-    // otherwise force AI reprocessing of ANY note (draining the owner's credits
-    // and the shared LLM budget) just by guessing a note UUID. Accept either:
-    //   (a) an internal service-role call (other edge functions fan out here), or
-    //   (b) a real user JWT whose user owns the target note.
-    const token = authHeader.replace("Bearer ", "").trim();
-    const isInternal = token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!isInternal) {
-      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-      if (authErr || !user) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const { data: owned } = await supabase
-        .from("notes")
-        .select("user_id")
-        .eq("id", note_id)
-        .single();
-      if (!owned || owned.user_id !== user.id) {
-        return new Response(JSON.stringify({ error: "Forbidden" }), {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
-    EdgeRuntime.waitUntil(processInBackground(note_id, authHeader, Boolean(force)));
-
-    return new Response(JSON.stringify({ ok: true, processing: true }), {
+    const result = await handleNoteAIRequest(await req.json(), authHeader, {
+      isService: (header) => header.replace(/^Bearer\s+/i, "").trim() === SUPABASE_SERVICE_ROLE_KEY,
+      authenticate: async (header) => {
+        const { data, error } = await supabase.auth.getUser(header.replace(/^Bearer\s+/i, "").trim());
+        return error ? null : data.user?.id ?? null;
+      },
+      findNote: async (id) => {
+        const { data, error } = await supabase.from("notes").select("user_id").eq("id", id).maybeSingle();
+        if (error) throw new NoteAIJobError("transient", "Note lookup failed");
+        return data;
+      },
+      isAdmin: async (userId) => {
+        const {data,error} = await supabase.rpc("is_admin", {_user_id:userId});
+        if(error) throw new NoteAIJobError("transient", "Administrator lookup failed");
+        return data === true;
+      },
+      jobs: noteJobs,
+      execute: (lease) => processInBackground(lease, authHeader),
+    });
+    return new Response(JSON.stringify(result.body), {
+      status: result.status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

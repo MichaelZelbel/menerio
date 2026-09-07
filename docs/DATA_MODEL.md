@@ -44,11 +44,27 @@ Tracks moderation strikes and suspension status per user.
 
 ## AI & Credits
 
+### Deferred note analysis (`note_ai_jobs`)
+One row per account, note and pipeline (`analysis` or `lexicon`) combines successive edits. Database input fingerprints, generations and expiring lease tokens are separate from `notes.updated_at`. Ordinary saves remain note writes, including offline uploads. The queue is additive and does not enroll the historical archive in Lexicon.
+
+Relevant completed attachment text is part of the captured input. Metadata-only output updates do not restart the quiet period. Each executor reads one captured snapshot, rechecks account/source/visibility rules and acknowledges only that generation. New edits remain pending. A completed zero-action Lexicon result is still completion.
+
+`note_ai_completions` retains input fingerprints, not note bodies. `note_ai_stage_results` checkpoints paid outputs for recovery before effects; access is service-only. Active snapshots and unfinished paid outputs are sensitive data, not logs. Retention and lease details are defined in the queue migration.
+
+`note_ai_worker_settings` installs with `enabled=false` and an empty account allowlist. An explicit account list enables a canary; `user_ids=null` means all accounts and requires separate rollout approval. The scheduled job also installs inactive.
+
+`capture_note_with_lexicon` is an authenticated, owner-scoped transaction for new UI captures and eligible offline uploads. It saves the note and enrolls its Lexicon subscription together. `note_capture_receipts` stores only account/note IDs and creation time, so retrying a lost response cannot overwrite newer content or recreate a deleted capture. Receipts survive note deletion but are removed when the account is deleted. There is no historical backfill or new source permission.
+
+### Profile normalization evaluations
+`profile_normalization_leases` serializes work for an account and subject. `profile_normalization_inputs` records canonical input fingerprints, bounded attempts and reusable results, including no-change results. The fingerprint includes the actual prompt, model configuration, schema and relevant pending suggestions. These tables have no client read/write access.
+
 ### AI Allowance Periods (`ai_allowance_periods`)
 Token budgets granted per time period. Tracks how many tokens were granted and used.
 
 ### LLM Usage Events (`llm_usage_events`)
 Individual AI usage records: feature, model, token counts, credits charged. Supports idempotency keys to prevent double-charging.
+
+New deductions attach call site, note, job, revision and stage to the exact event inside the deduction transaction. No caller may identify its usage event by selecting the account's newest row. Earlier attribution is not rewritten by the migration.
 
 ### AI Credit Settings (`ai_credit_settings`)
 Global configuration for AI credit system (e.g. default token allowance).

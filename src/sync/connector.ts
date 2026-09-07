@@ -5,6 +5,7 @@ import {
   UpdateType,
 } from "@powersync/web";
 import { supabase } from "@/integrations/supabase/client";
+import { captureNoteWithLexicon } from "@/lib/note-ai-enrollment";
 import { POWERSYNC_URL } from "./config";
 
 // Columns stored as JSON text in SQLite that must be real JSON/arrays in Postgres.
@@ -100,6 +101,12 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     const table = supabase.from(op.table as any);
     if (op.op === UpdateType.PUT) {
       const record = { ...toPostgresRecord(op.table, op.opData ?? {}), id: op.id };
+      const data = op.opData ?? {};
+      if (op.table === "notes" && data.user_id && !data.source_app && !data.is_external
+          && !data.is_trashed && data.ai_visibility !== "hidden") {
+        await captureNoteWithLexicon(record);
+        return;
+      }
       const { error } = await table.upsert(record);
       if (error) throw error;
     } else if (op.op === UpdateType.PATCH) {
@@ -126,12 +133,13 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     // without ever being attempted — silent loss of the user's later edits.
     //
     // A retryable failure still throws, so PowerSync replays the transaction
-    // with backoff. Replay is safe: PUT is an upsert, PATCH and DELETE are keyed
-    // by id, so re-applying an op that already succeeded is a no-op.
+    // with backoff. Capture PUT uses insert-or-read so a lost response does not
+    // overwrite a newer remote body. Other operations retain existing semantics.
     const discarded: Array<{ op: CrudEntry; error: unknown }> = [];
     for (const op of transaction.crud) {
       try {
         await this.applyOp(op);
+
       } catch (error) {
         if (!isFatalError(error)) throw error;
         discarded.push({ op, error });

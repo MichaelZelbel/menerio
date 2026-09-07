@@ -388,6 +388,11 @@ export async function runChat(args: {
    * left "107 extractions across at most 24 notes" an inference on 2026-09-03.
    */
   noteId?: string | null;
+  jobId?: string | null;
+  revision?: string | null;
+  stage?: string | null;
+  /** Ledger retry key for one paid attempt, not provider-call deduplication. */
+  idempotencyKey?: string;
 }): Promise<RunChatResult> {
   const { effective, source } = await resolveConfig(args.db, args.callSite, args.defaults);
 
@@ -552,34 +557,14 @@ export async function runChat(args: {
         promptTokens: pt,
         completionTokens: ct,
         usageSource,
+        callSite: args.callSite,
+        configSource: source,
+        noteId: args.noteId,
+        jobId: args.jobId,
+        revision: args.revision,
+        stage: args.stage,
+        idempotencyKey: args.idempotencyKey,
       });
-      // Best-effort tagging of the usage event with the call_site.
-      //
-      // This used to be one UPDATE ... eq(user_id) with .order().limit(1) hung off
-      // it. PostgREST does not scope an UPDATE that way, so every call rewrote
-      // the call_site of EVERY row the user had, and the whole ledger ended up
-      // stamped with whichever call site wrote last. On 2026-08-27 all 7 days of
-      // rows read `profile-audit.main`, which made the ledger useless for finding
-      // out what was actually spending. Read the id first, then update that row.
-      try {
-        const { data: newest } = await args.db
-          .from("llm_usage_events")
-          .select("id")
-          .eq("user_id", args.userId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (newest?.id) {
-          const tag: Record<string, unknown> = {
-            call_site: args.callSite,
-            config_source: source,
-          };
-          if (args.noteId) tag.note_id = args.noteId;
-          await args.db.from("llm_usage_events").update(tag).eq("id", newest.id);
-        }
-      } catch {
-        // non-fatal
-      }
     } catch (err) {
       // The provider has already been paid by this point, so the answer is
       // returned rather than binning work the spend cannot be undone on. But
@@ -624,6 +609,12 @@ export async function runOcr(args: {
   defaults: { model: string };
   /** Cost per processed page (token equivalent for billing). Default 500. */
   tokensPerPage?: number;
+  noteId?: string | null;
+  jobId?: string | null;
+  revision?: string | null;
+  stage?: string | null;
+  /** Ledger retry key for one paid attempt, not provider-call deduplication. */
+  idempotencyKey?: string;
 }): Promise<{
   raw: any;
   pages: any[];
@@ -678,29 +669,14 @@ export async function runOcr(args: {
       promptTokens: 0,
       completionTokens: 0,
       usageSource: "fallback",
+      callSite: args.callSite,
+      configSource: source,
+      noteId: args.noteId,
+      jobId: args.jobId,
+      revision: args.revision,
+      stage: args.stage,
+      idempotencyKey: args.idempotencyKey,
     });
-    // Same fix `runChat` got on 2026-08-27, which this copy never received.
-    // PostgREST does not scope an UPDATE with order/limit, so the old version
-    // here relabelled EVERY usage row the user had with the OCR call site,
-    // destroying the record of what was actually spending. Read the id first,
-    // then update that one row.
-    try {
-      const { data: newest } = await args.db
-        .from("llm_usage_events")
-        .select("id")
-        .eq("user_id", args.userId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (newest?.id) {
-        await args.db
-          .from("llm_usage_events")
-          .update({ call_site: args.callSite, config_source: source })
-          .eq("id", newest.id);
-      }
-    } catch {
-      // non-fatal
-    }
   } catch (err) {
     console.warn(`[llm-router] OCR deduct failed for ${args.callSite}:`, (err as Error).message);
   }

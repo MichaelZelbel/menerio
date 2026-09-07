@@ -8,6 +8,25 @@
 
 ## Test Personas
 
+### Deferred note analysis regression workload
+
+Use synthetic notes and labelled mock provider outputs for local tests. Never use customer content or change a production allowance to test exhaustion.
+
+- Edit every twenty seconds for two minutes, then stop: saving continues immediately; each enrolled pipeline processes the final input after settlement.
+- Edit continuously for thirty minutes: automatic starts are at least ten minutes apart; the last revision eventually completes.
+- Repeat unchanged/manual requests and zero-action synthesis: no second provider call for completed input.
+- Change completed attachment text without editing the note: analysis gets a new generation.
+- Race clients and workers in actual PostgreSQL sessions: one owner, stale-token fencing, no lost newer generation and no cross-account reads/writes.
+- Close/switch/hide the editor and reconnect an offline capture: preserve the final save and eligible Lexicon enrollment.
+- Exhaust a synthetic allowance or fail its read: zero provider calls, distinct parked versus retry states.
+- Repeat an unchanged saved profile and pending suggestions: normalization reuses its completed evaluation.
+- Keep profile facts unchanged but change the normalization prompt/schema fixture: paid entry points reach the shared full-input check instead of skipping on the old profile-only record.
+- Explicitly force a normalization backfill: the first pass requests manual re-evaluation; subsequent internal passes do not force another evaluation of unchanged input.
+- Run scheduled normalization maintenance: retain its deterministic-only, dirty-subject queue scope without introducing paid archive scans.
+- Delay mock executors: verify the two-slot cap, admission budget, acceptance versus completion and uncertain dispatch recovery.
+
+Unit tests run with `npm test`. Real SQL tests require an explicitly supplied disposable database and are deliberately separate. See [NOTE_AI_ROLLOUT.md](NOTE_AI_ROLLOUT.md) for commands and the separately approved live canary; local fixtures do not prove production output quality or savings.
+
 | Persona | Email (example) | Role | Purpose |
 |---------|-----------------|------|---------|
 | **Free User** | `free@example.test` | `free` | Validates core features and premium gates |

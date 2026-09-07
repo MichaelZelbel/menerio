@@ -107,14 +107,14 @@ function parseReformatted(raw: string): string {
 }
 
 async function callReformat(
-  db: any,
+  billingDb: any,
   userId: string,
   userContent: string,
   maxTokens: number,
 ): Promise<string> {
   try {
     const result = await runChat({
-      db,
+      db: billingDb,
       userId,
       callSite: "wiki-restructure.main",
       messages: [{ role: "user", content: userContent }],
@@ -163,7 +163,7 @@ function reattachProtected(content: string, protectedMap: Map<string, string>): 
   return next;
 }
 
-async function restructurePage(db: any, page: PageRow, dryRun: boolean) {
+async function restructurePage(db: any, billingDb: any, page: PageRow, dryRun: boolean) {
   const original = page.content || "";
   const before = analyzeStructure(original);
 
@@ -198,7 +198,7 @@ async function restructurePage(db: any, page: PageRow, dryRun: boolean) {
           // plus headroom is plenty and keeps the provider from reserving more.
           const maxTokens = Math.min(8000, Math.ceil(chunks[index].length / 3) + 900);
           const out = await callReformat(
-            db,
+            billingDb,
             page.user_id,
             `Page title: ${page.title}\n\n---\n${chunks[index]}\n---${label}${strictNote}`,
             maxTokens,
@@ -312,7 +312,7 @@ async function isRestructureAllowed(page: PageRow): Promise<boolean> {
   return true;
 }
 
-async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolean) {
+async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[], dryRun: boolean) {
   const startedAt = Date.now();
   const results: unknown[] = [];
   let failed = 0;
@@ -322,7 +322,7 @@ async function runJob(db: any, actorId: string, pages: PageRow[], dryRun: boolea
   for (const page of pages) {
     let result: unknown;
     try {
-      result = await restructurePage(db, page, dryRun);
+      result = await restructurePage(db, billingDb, page, dryRun);
     } catch (error) {
       if (error instanceof SweepAbort) {
         // Provider out of credit — stop immediately instead of burning the
@@ -439,8 +439,11 @@ serve(async (req) => {
       return jsonResponse({ accepted: true, dry_run: true, total: candidates.length, pages: preview });
     }
 
-    // @ts-expect-error — EdgeRuntime is provided by Supabase Edge Runtime.
-    EdgeRuntime.waitUntil(runJob(db, actorId || candidates[0].user_id, candidates, false));
+    // Keep the user-RLS data client. Only router/billing operations need service
+    // credentials, and their owner comes from the authorized page rows above.
+    const billingDb = isServiceCall ? db : createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    // @ts-expect-error EdgeRuntime is provided by Supabase Edge Runtime.
+    EdgeRuntime.waitUntil(runJob(db, billingDb, actorId || candidates[0].user_id, candidates, false));
 
     return jsonResponse({ accepted: true, total: candidates.length }, 202);
   } catch (error) {

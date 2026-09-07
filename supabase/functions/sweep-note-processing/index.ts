@@ -1,15 +1,11 @@
-// Safety net for AI note processing.
-//
-// The web editor schedules `process-note` on a client-side timer, which is lost
-// when the user navigates away or closes the tab. This sweep finds the caller's
-// notes that have content but were never indexed (no embedding / no processing
-// status / a failed or stuck run) and runs `process-note` on them.
-//
-// POST { limit?: number = 10 } → { scanned, triggered, ids }
-// Idempotency lives in `process-note` itself (content-hash check), so a note
-// that is already processed for its current content version is never charged.
+// Compatibility safety net: reconcile saved notes into the durable analysis queue.
+// This endpoint never dispatches paid execution. Queue generation, quiet period,
+// retry budget and allowance parking are authoritative in the database.
+// POST { limit?: number = 10 } -> { scanned, triggered, ids }
+// triggered counts accepted enqueue requests, not completed analysis.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createNoteAIJobs } from "../_shared/note-ai-jobs.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -26,8 +22,7 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-/** Notes must be settled for this long before the sweep touches them, so we
- *  never race the editor's own 10s auto-process timer. */
+/** Bound legacy reconciliation to older saves; database quiet time remains authoritative. */
 const SETTLE_MS = 90_000;
 /** A run marked "processing" that never finished is retried after this long. */
 const STUCK_MS = 10 * 60_000;
@@ -103,25 +98,17 @@ Deno.serve(async (req) => {
       return json({ scanned: candidates?.length ?? 0, triggered: 0, ids: [] });
     }
 
+    const queuedIds: string[] = [];
+    const jobs = createNoteAIJobs(admin);
     for (const note of targets) {
-      try {
-        await fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ note_id: note.id }),
-        });
-      } catch (err) {
-        console.error("sweep: process-note trigger failed", note.id, err);
-      }
+      const job = await jobs.enqueue(userId, note.id, "analysis", "automatic");
+      if (job) queuedIds.push(note.id);
     }
 
     return json({
       scanned: candidates?.length ?? 0,
-      triggered: targets.length,
-      ids: targets.map((n: any) => n.id),
+      triggered: queuedIds.length,
+      ids: queuedIds,
     });
   } catch (err) {
     console.error("sweep-note-processing error:", err);

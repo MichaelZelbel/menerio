@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createNoteAIJobs } from "../_shared/note-ai-jobs.ts";
 import {
   checkBalance,
   getEmbeddingWithCredits,
@@ -217,10 +218,10 @@ async function writeAnalysisRecord(p: {
 
   if (existingId) {
     const { error } = await supabase.from("media_analysis").update(payload).eq("id", existingId);
-    if (error) console.warn("media_analysis update failed:", error.message);
+    if (error) throw new Error(error.message);
   } else {
     const { error } = await supabase.from("media_analysis").insert(payload);
-    if (error) console.warn("media_analysis insert failed:", error.message);
+    if (error) throw new Error(error.message);
   }
 }
 
@@ -238,6 +239,7 @@ async function processImage(
     db: supabase,
     userId,
     callSite: "analyze-media.ocr",
+    noteId,
     document: { type: "image_url", image_url: dataUrl },
     defaults: { model: OCR_MODEL },
   });
@@ -274,6 +276,7 @@ async function processPdf(
     db: supabase,
     userId,
     callSite: "analyze-media.ocr",
+    noteId,
     document: { type: "document_url", document_url: dataUrl },
     extra: { include_image_base64: true },
     defaults: { model: OCR_MODEL },
@@ -422,30 +425,8 @@ async function processMedia(
       `analyze-media complete via Mistral (${mediaType}) note=${noteId} path=${storagePath}`
     );
 
-    // If this was the LAST in-flight media row for the note, re-trigger
-    // process-note so newly-OCR'd document text feeds embeddings, profile
-    // extraction, and moment detection. Fire-and-forget; downstream dedup
-    // prevents duplicate suggestions.
-    try {
-      const { count: stillProcessing } = await supabase
-        .from("media_analysis")
-        .select("id", { count: "exact", head: true })
-        .eq("note_id", noteId)
-        .eq("analysis_status", "processing");
-      if (!stillProcessing || stillProcessing === 0) {
-        const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`;
-        fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ note_id: noteId }),
-        }).catch((e) => console.warn("re-trigger process-note failed:", e));
-      }
-    } catch (e) {
-      console.warn("post-OCR re-trigger check failed:", e);
-    }
+    // Media completion already queued transactionally; reconcile without provider dispatch.
+    await createNoteAIJobs(supabase).enqueue(userId, noteId, "analysis", "automatic");
   } catch (err) {
     console.error("analyze-media error:", err);
     await supabase
