@@ -14,6 +14,103 @@ export type Database = {
   }
   public: {
     Tables: {
+      // BEGIN GENERATED CONTACT TOPIC TABLES
+      contact_topics: {
+        Row: {
+          archived_at: string | null
+          completed_at: string | null
+          contact_id: string
+          created_at: string
+          id: string
+          last_discussed_at: string | null
+          mode: string
+          priority: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          archived_at?: string | null
+          completed_at?: string | null
+          contact_id: string
+          created_at?: string
+          id?: string
+          last_discussed_at?: string | null
+          mode?: string
+          priority?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          archived_at?: string | null
+          completed_at?: string | null
+          contact_id?: string
+          created_at?: string
+          id?: string
+          last_discussed_at?: string | null
+          mode?: string
+          priority?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          { foreignKeyName: "contact_topics_user_id_contact_id_fkey"; columns: ["user_id","contact_id"]; isOneToOne: false; referencedRelation: "contacts"; referencedColumns: ["user_id","id"] },
+        ]
+      }
+      contact_topic_events: {
+        Row: {
+          action: string
+          after_state: Json
+          before_state: Json | null
+          created_at: string
+          happened_at: string
+          id: string
+          request_hash: string
+          request_id: string
+          reverses_event_id: string | null
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          after_state: Json
+          before_state?: Json | null
+          created_at?: string
+          happened_at: string
+          id?: string
+          request_hash: string
+          request_id: string
+          reverses_event_id?: string | null
+          topic_id: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          after_state?: Json
+          before_state?: Json | null
+          created_at?: string
+          happened_at?: string
+          id?: string
+          request_hash?: string
+          request_id?: string
+          reverses_event_id?: string | null
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          { foreignKeyName: "contact_topic_events_reverses_event_id_fkey"; columns: ["reverses_event_id"]; isOneToOne: false; referencedRelation: "contact_topic_events"; referencedColumns: ["id"] },
+          { foreignKeyName: "contact_topic_events_user_id_topic_id_fkey"; columns: ["user_id","topic_id"]; isOneToOne: false; referencedRelation: "contact_topics"; referencedColumns: ["user_id","id"] },
+        ]
+      }
+      // END GENERATED CONTACT TOPIC TABLES
       action_items: {
         Row: {
           ai_visibility: string
@@ -4088,6 +4185,28 @@ export type Database = {
       }
     }
     Functions: {
+      // BEGIN GENERATED CONTACT TOPIC FUNCTIONS
+      apply_contact_topic_command: {
+        Args: { p_request_id: string; p_command: Json }
+        Returns: Json
+      }
+      apply_contact_topic_command_for_user: {
+        Args: { p_user_id: string; p_request_id: string; p_command: Json }
+        Returns: Json
+      }
+      apply_contact_topic_command_internal: {
+        Args: { p_user_id: string; p_request_id: string; p_command: Json }
+        Returns: Json
+      }
+      reassign_contact_topics: {
+        Args: { p_source_contact_id: string; p_target_contact_id: string }
+        Returns: number
+      }
+      reassign_contact_topics_for_user: {
+        Args: { p_user_id: string; p_source_contact_id: string; p_target_contact_id: string }
+        Returns: number
+      }
+      // END GENERATED CONTACT TOPIC FUNCTIONS
       ai_can_see: {
         Args: { _id: string; _kind: string; _user_id: string }
         Returns: boolean

@@ -107,6 +107,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const userId = user.id;
 
+    if (!merge_into_self && source_contact_id === target_contact_id) {
+      return new Response(JSON.stringify({ error: "Choose another person as the merge target" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Check before any profile writes. The database also checks at the merge
+    // marker, so a concurrent topic creation cannot strand its history.
+    if (merge_into_self) {
+      const { count, error: topicsError } = await supabase.from("contact_topics")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId).eq("contact_id", source_contact_id);
+      if (topicsError) throw topicsError;
+      if (count) {
+        return new Response(JSON.stringify({
+          error: "Reassign this person's conversation topics to another person before merging into yourself",
+          code: "TOPICS_REQUIRE_REASSIGNMENT",
+          topic_count: count,
+        }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     // Verify source contact belongs to user and is not already merged
     const { data: source, error: srcErr } = await supabase
       .from("contacts")
@@ -409,14 +431,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // h) Mark source as merged
-    const mergeTarget = merge_into_self ? "self" : targetContactId;
-    await supabase
+    const { error: mergeError } = await supabase
       .from("contacts")
       .update({
         merged_into: merge_into_self ? source_contact_id : targetContactId,
         merged_at: new Date().toISOString(),
       } as any)
       .eq("id", source_contact_id);
+    if (mergeError) throw mergeError;
 
     // For merge-into-self, we set merged_into to self (the contact's own ID) as a sentinel
     // since the column references contacts(id), we can't use a non-contact UUID
