@@ -2,6 +2,19 @@
 
 > **Last updated:** 2026-05-01
 
+## Person conversation topics (2026-09-07)
+
+Use two synthetic owners and test people only. See [CONTACT_TOPICS.md](CONTACT_TOPICS.md) for release boundaries.
+
+- Create in the browser, list through MCP; create through MCP while the profile is already open and confirm refresh.
+- Discuss a one-off and a recurring topic from each interface; close a recurring topic explicitly and verify history retains original wording after edits.
+- Verify five-row priority preview, expanded list, archive, reopen, latest-event undo, keyboard focus, and 390px/light/dark layouts.
+- Retry an acknowledged request and race two requests against one version. Reused IDs with different payloads fail. Inject event-insert failure and confirm no partial mutation.
+- Verify different owners cannot read, write, reassign, or merge one another's topics. MCP also refuses hidden/sensitive people and keys without contacts scope.
+- Merge people with existing topics and discussion history; race merge with capture; refuse merge into self until topics are reassigned. Delete a synthetic person and verify topic/event cascades.
+- Disconnect refresh, reconnect, switch person/account, and verify no stale response or private cache leaks.
+- Keep the Conversation tab usable. Ordinary people sync must not delete topics or create profile facts from them.
+
 > **Note:** Test accounts must be provisioned per environment. Do not commit real credentials. The personas below use placeholder values — replace them with accounts you create locally or in your Supabase project.
 
 ---

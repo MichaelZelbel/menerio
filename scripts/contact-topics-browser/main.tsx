@@ -1,0 +1,13 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ThemeProvider } from 'next-themes';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { PersonDetail } from '@/components/people/PersonDetail';
+import '@/index.css';
+const fixture = await fetch(import.meta.env.TOPIC_TEST_BACKEND+'/fixture').then(r=>r.json());
+const person = { id: fixture.person, user_id:fixture.owner, name:'Synthetic Alex', aliases:['Craft friend'], notes:'', tags:[], ai_visibility:'visible', is_sensitive:false };
+const people = [person, {...person,id:fixture.second,name:'Synthetic Robin',aliases:[]}];
+const queryClient = new QueryClient({ defaultOptions:{queries:{retry:false}} });
+createRoot(document.getElementById('root')!).render(<React.StrictMode><ThemeProvider attribute="class" defaultTheme="light"><QueryClientProvider client={queryClient}><BrowserRouter><TooltipProvider><div className="h-dvh bg-background text-foreground"><div className="mx-auto h-full max-w-4xl"><PersonDetail person={person as never} people={people as never} onClose={()=>{}} /></div></div></TooltipProvider></BrowserRouter></QueryClientProvider></ThemeProvider></React.StrictMode>);

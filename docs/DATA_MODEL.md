@@ -16,6 +16,9 @@ People the user tracks. Includes name, email, phone, company, role, relationship
 ### Contact Interactions (`contact_interactions`)
 Records of interactions with a contact (meeting, call, email, etc.). Can reference a source note and include a summary and action items.
 
+### Contact topics (`contact_topics`, `contact_topic_events`)
+Person-specific conversation agenda and immutable discussion/command history. Topics have High/Normal/Low priority, one-off or recurring mode, active/completed/archived status, and a version for conflict detection. The browser and MCP share atomic database commands with owner checks and retry receipts. Person merges transfer topics and history; explicit person deletion cascades. These records are separate from notes and reminders and are not backed up by the GitHub people mirror. See [contact topics](CONTACT_TOPICS.md) for the contract and release steps.
+
 ### Contact Groups (`contact_groups`)
 People workspaces for pipelines, relationship circles, communities, Dream 100 lists, hiring funnels, investor pipelines, and similar missions. Stores name, slug, purpose, description, type, sensitivity, icon, color, template configuration, stages, and archival/trash state.
 
