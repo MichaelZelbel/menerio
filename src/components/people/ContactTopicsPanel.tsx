@@ -62,8 +62,8 @@ function TopicsPanel({ contactId, contactName }: { contactId: string; contactNam
     } catch (error) {
       setFailedCommand(command);
       const code = (error as { code?: string })?.code;
-      const rejected = !navigator.onLine || (code && /^(22|23|40|42|PGRST)/.test(code));
-      const detail = code === '40001' ? 'This topic changed elsewhere. Cancel your edit, review the latest topic, then edit again.'
+      const rejected = !navigator.onLine || (code && /^(22|23|40|42|PT409|PGRST)/.test(code));
+      const detail = (code === '40001' || code === 'PT409') ? 'This topic changed elsewhere. Cancel your edit, review the latest topic, then edit again.'
         : error instanceof Error ? error.message : (error as { message?: string })?.message ?? 'Please try again.';
       setFailure(rejected ? `Not saved. ${detail}` : 'Save not confirmed. Retry safely. The connection may have failed after the change reached the server.');
       return false;

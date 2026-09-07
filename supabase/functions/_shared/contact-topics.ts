@@ -9,7 +9,7 @@ export class TopicError extends Error {
 }
 export function checkTopicError(error: { code?: string; message: string; details?: string } | null) {
   if (!error) return;
-  const code = error.code === "40001" ? "VERSION_CONFLICT" : error.code === "42501" ? "NOT_ACCESSIBLE" : error.code === "22023" ? "INVALID_COMMAND" : ["42P01", "42883", "PGRST202", "PGRST205"].includes(error.code ?? "") ? "FEATURE_UNAVAILABLE" : "DATABASE_ERROR";
+  const code = ["40001", "PT409"].includes(error.code ?? "") ? "VERSION_CONFLICT" : error.code === "42501" ? "NOT_ACCESSIBLE" : error.code === "22023" ? "INVALID_COMMAND" : ["42P01", "42883", "PGRST202", "PGRST205"].includes(error.code ?? "") ? "FEATURE_UNAVAILABLE" : "DATABASE_ERROR";
   throw new TopicError(code, code === "DATABASE_ERROR" ? "Topic operation failed. Nothing has been confirmed saved." : error.message, code === "VERSION_CONFLICT" ? error.details : undefined);
 }
 export const personTopicUrl = (id: string) => `https://menerio.com/dashboard/people/${id}`;

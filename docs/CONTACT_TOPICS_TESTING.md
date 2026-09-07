@@ -9,6 +9,7 @@ Set `CONTACT_TOPICS_TEST_DATABASE_URL` to the local disposable connection and `C
 ```sh
 psql "$CONTACT_TOPICS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/bootstrap-contact-topics-test.sql
 psql "$CONTACT_TOPICS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/20260907140000_contact_topics.sql
+psql "$CONTACT_TOPICS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/20260907141000_contact_topic_conflict_http.sql
 pg_prove --dbname "$CONTACT_TOPICS_TEST_DATABASE_URL" supabase/tests/contact_topics.sql
 node scripts/test-contact-topics.mjs
 node scripts/build-contact-topics-test.mjs

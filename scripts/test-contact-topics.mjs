@@ -29,7 +29,7 @@ try {
  const topic = retries[0].topic;
  const edits = await Promise.allSettled([a,b].map((c,i)=>command(c,randomUUID(),{action:'update',topic_id:topic.id,expected_version:1,patch:{title:`Synthetic edit ${i}`}})));
  assert.equal(edits.filter(r=>r.status==='fulfilled').length,1);
- assert.equal(edits.find(r=>r.status==='rejected').reason.code,'40001');
+ assert.equal(edits.find(r=>r.status==='rejected').reason.code,'PT409');
  // Throw at the event insertion boundary, after the row update was attempted.
  await db.query(`create function public.contact_topics_test_fail() returns trigger language plpgsql as $$begin if new.user_id='${owner}' then raise exception 'Synthetic insert failure'; end if; return new; end$$;
  create trigger contact_topics_test_fail before insert on public.contact_topic_events for each row execute function public.contact_topics_test_fail()`);

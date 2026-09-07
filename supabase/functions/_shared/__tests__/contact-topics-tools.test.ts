@@ -65,7 +65,7 @@ describe("registered topic MCP transport", () => {
     expect(decode(r).error.code).toBe("NOT_ACCESSIBLE");
   });
   it("returns conflict details and never success on database failure", async () => {
-    rpcError = { code: "40001", message: "Topic changed", details: '{"current_version":4}' };
+    rpcError = { code: "PT409", message: "Topic changed", details: '{"current_version":4}' };
     const r = await call("discuss_contact_topic", { topic_id: topicId, expected_version: 3, request_id: topicId });
     expect(r.isError).toBe(true); expect(decode(r).error.code).toBe("VERSION_CONFLICT");
   });

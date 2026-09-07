@@ -23,7 +23,7 @@ vi.mock('@/hooks/useContactTopics', async () => {
             state.rows = [...state.rows, topic];
           } else {
             const existing = state.rows.find(row => row.id === command.topic_id)!;
-            if (command.expected_version !== existing.version) throw Object.assign(new Error('Topic version conflict'), { code: '40001' });
+            if (command.expected_version !== existing.version) throw Object.assign(new Error('Topic version conflict'), { code: 'PT409' });
             topic = { ...existing, version: existing.version + 1 };
             if (command.action === 'undo') topic = { ...state.previous!, version: topic.version };
             else {
