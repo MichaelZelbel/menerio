@@ -183,3 +183,7 @@ verify_jwt = false
 
 [functions.wiki-restructure]
 verify_jwt = false
+
+# Preserve the live setting; the handler validates the caller with auth.getUser.
+[functions.merge-contacts]
+verify_jwt = false
