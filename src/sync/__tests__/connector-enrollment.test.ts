@@ -1,11 +1,15 @@
 const recoveryStorage = vi.hoisted(() => new Map());
 vi.mock("idb-keyval", () => ({ createStore: () => ({}), get: async (key: string) => structuredClone(recoveryStorage.get(key)), set: async (key: string, value: unknown) => { recoveryStorage.set(key, structuredClone(value)); } }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ upsert: vi.fn(), update: vi.fn(), invoke: vi.fn(), rpc: vi.fn() }));
+const mock = vi.hoisted(() => ({ upsert: vi.fn(), update: vi.fn(), invoke: vi.fn(), rpc: vi.fn(), userId: "user-1", token: "token", rpcHeader: vi.fn() }));
 vi.mock("@powersync/web", () => ({ UpdateType: { PUT: "PUT", PATCH: "PATCH", DELETE: "DELETE" } }));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: "user-1" }, access_token: "token" } } }) },
-  functions: { invoke: mock.invoke }, rpc: mock.rpc,
-  from: () => ({ upsert: mock.upsert, update: mock.update, delete: () => ({ eq: async () => ({ error: null }) }) }),
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: mock.userId }, access_token: mock.token } } }) },
+  functions: { invoke: mock.invoke }, rpc: (...args: unknown[]) => ({ setHeader: (name: string, value: string) => { mock.rpcHeader(name, value); return mock.rpc(...args); } }),
+  from: () => ({
+    upsert: (...args: unknown[]) => ({ setHeader: () => mock.upsert(...args) }),
+    update: (...args: unknown[]) => ({ eq: (...filters: unknown[]) => ({ setHeader: () => mock.update(...args).eq(...filters) }) }),
+    delete: () => ({ eq: () => ({ setHeader: async () => ({ error: null }) }) }),
+  }),
 } }));
 vi.mock("../config", () => ({ POWERSYNC_URL: "https://example.invalid" }));
 import { SupabaseConnector } from "../connector";
@@ -15,6 +19,7 @@ function db(crud: unknown[]) {
   return { complete, database: { getNextCrudTransaction: async () => ({ crud, complete }) } };
 }
 beforeEach(() => {
+  mock.userId = "user-1"; mock.token = "token"; mock.rpcHeader.mockReset();
   vi.stubGlobal("navigator", { locks: { request: async (_name: string, work: () => unknown) => work() } });
   recoveryStorage.clear();
   localStorage.clear();
@@ -24,6 +29,14 @@ beforeEach(() => {
   mock.rpc.mockReset().mockResolvedValue({ data: { id: "offline-note" }, error: null });
 });
 describe("offline capture enrollment", () => {
+  it("keeps the checked account token on capture when global auth changes before sending", async () => {
+    mock.rpcHeader.mockImplementation(() => { mock.userId = "user-2"; mock.token = "other-token"; });
+    const { database, complete } = db([put("offline-note")]);
+    await expect(new SupabaseConnector("user-1").uploadData(database as never)).rejects.toMatchObject({ status: 401 });
+    expect(mock.rpcHeader).toHaveBeenCalledWith("Authorization", "Bearer token");
+    expect(mock.rpc).toHaveBeenCalledOnce();
+    expect(complete).not.toHaveBeenCalled();
+  });
   it("retains upload on a server enrollment failure without discarding the note", async () => {
     mock.rpc.mockResolvedValueOnce({ error: { code: "40001", message: "capture enrollment unavailable" } });
     const { database, complete } = db([put("offline-note")]);

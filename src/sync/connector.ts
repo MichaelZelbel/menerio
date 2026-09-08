@@ -90,13 +90,13 @@ export function classifySyncError(error: unknown): FailureKind {
 export class SupabaseConnector implements PowerSyncBackendConnector {
   constructor(private ownerId?: string) {}
 
-  private async requireOwner(): Promise<string> {
+  private async requireOwner(): Promise<{ ownerId: string; authorization: string }> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session || (this.ownerId && session.user.id !== this.ownerId)) {
       throw Object.assign(new Error("Sign in to the account that made these changes."), { status: 401 });
     }
     this.ownerId = session.user.id;
-    return this.ownerId;
+    return { ownerId: this.ownerId, authorization: `Bearer ${session.access_token}` };
   }
 
   async fetchCredentials() {
@@ -111,7 +111,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   private async applyOp(op: CrudEntry): Promise<void> {
-    await this.requireOwner();
+    const { authorization } = await this.requireOwner();
     if (op.opData?.user_id && op.opData.user_id !== this.ownerId) throw Object.assign(new Error("Change belongs to another account."), { code: "42501" });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const table = supabase.from(op.table as any);
@@ -120,21 +120,21 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       const data = op.opData ?? {};
       if (op.table === "notes" && data.user_id && !data.source_app && !data.is_external
           && !data.is_trashed && data.ai_visibility !== "hidden") {
-        await captureNoteWithLexicon(record);
+        await captureNoteWithLexicon(record, authorization);
         return;
       }
-      const { error } = await table.upsert(record);
+      const { error } = await table.upsert(record).setHeader("Authorization", authorization);
       if (error) throw error;
     } else if (op.op === UpdateType.PATCH) {
       if (op.opData && Object.keys(op.opData).length > 0) {
         const record = toPostgresRecord(op.table, op.opData);
         if (Object.keys(record).length > 0) {
-          const { error } = await table.update(record).eq("id", op.id);
+          const { error } = await table.update(record).eq("id", op.id).setHeader("Authorization", authorization);
           if (error) throw error;
         }
       }
     } else if (op.op === UpdateType.DELETE) {
-      const { error } = await table.delete().eq("id", op.id);
+      const { error } = await table.delete().eq("id", op.id).setHeader("Authorization", authorization);
       if (error) throw error;
     }
   }
@@ -158,7 +158,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   async retryRecovery(): Promise<void> {
-    const owner = await this.requireOwner();
+    const { ownerId: owner } = await this.requireOwner();
     await withRecoveryLock(owner, async () => {
       const all = await readRecovery(owner);
       for (const batch of all.filter(item => item.status === "recovery")) {
@@ -174,7 +174,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
     const transaction = await database.getNextCrudTransaction();
     if (!transaction) return;
-    const owner = await this.requireOwner();
+    const { ownerId: owner } = await this.requireOwner();
     await withRecoveryLock(owner, async () => {
       const all = await readRecovery(owner);
       const current: RecoveryBatch[] = [];

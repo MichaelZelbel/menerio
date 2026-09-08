@@ -1,5 +1,6 @@
 const recoveryStorage = vi.hoisted(() => new Map());
 const storageFailure = vi.hoisted(() => ({ fail: false }));
+const auth = vi.hoisted(() => ({ userId: "user-1", token: "token", beforeSend: undefined as undefined | (() => void), headers: [] as string[] }));
 vi.mock("idb-keyval", () => ({ createStore: () => ({}), get: async (key: string) => structuredClone(recoveryStorage.get(key)), set: async (key: string, value: unknown) => { if (storageFailure.fail) throw new Error("disk full"); recoveryStorage.set(key, structuredClone(value)); } }));
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -12,11 +13,11 @@ vi.mock("@powersync/web", () => ({
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: "user-1" }, access_token: "token" } } }) },
+  supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: auth.userId }, access_token: auth.token } } }) },
     from: () => ({
-      upsert: (...a: unknown[]) => upsert(...a),
-      update: (...a: unknown[]) => ({ eq: () => update(...a) }),
-      delete: () => ({ eq: (...a: unknown[]) => del(...a) }),
+      upsert: (...a: unknown[]) => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return upsert(...a); } }),
+      update: (...a: unknown[]) => ({ eq: () => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return update(...a); } }) }),
+      delete: () => ({ eq: (...a: unknown[]) => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return del(...a); } }) }),
     }),
   },
 }));
@@ -40,6 +41,7 @@ function fakeDb(crud: unknown[], complete: () => void) {
 }
 
 beforeEach(() => {
+  auth.userId = "user-1"; auth.token = "token"; auth.beforeSend = undefined; auth.headers = [];
   vi.stubGlobal("navigator", { locks: { request: async (_name: string, work: () => unknown) => work() } });
   recoveryStorage.clear();
   storageFailure.fail = false;
@@ -101,6 +103,23 @@ describe("malformed JSON in a synced column", () => {
 
 
 describe("durable recovery", () => {
+  it.each(["PUT", "PATCH", "DELETE"])("binds %s to the checked account when auth switches before sending", async op => {
+    auth.beforeSend = () => { auth.userId = "user-2"; auth.token = "other-token"; };
+    const complete = vi.fn();
+    const database = fakeDb([{ ...put("private", { title: "A private title" }), op }], complete);
+    const connector = new SupabaseConnector("user-1");
+    await expect(connector.uploadData(database as never)).rejects.toMatchObject({ status: 401 });
+    expect(auth.headers).toEqual(["Bearer token"]);
+    expect(complete).not.toHaveBeenCalled();
+    expect(await readRecovery("user-1")).toMatchObject([{ completed: 1 }]);
+    expect(await readRecovery("user-2")).toEqual([]);
+    await expect(connector.retryRecovery()).rejects.toMatchObject({ status: 401 });
+    auth.userId = "user-1"; auth.token = "token"; auth.beforeSend = undefined;
+    await connector.uploadData(database as never);
+    expect(auth.headers).toEqual(["Bearer token"]);
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it("recovers unconfirmed uploads after an account change removes their PowerSync transaction", async () => {
     upsert.mockResolvedValueOnce({ error: null }).mockRejectedValueOnce(new Error("lost response"));
     const complete = vi.fn();
