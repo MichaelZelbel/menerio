@@ -81,16 +81,17 @@ export function updateContactCache(old: unknown, id: string, changes: Partial<Pe
   return old;
 }
 
-export function usePeople(search = "") {
+export function usePeople(search = "", options: { enabled?: boolean; excludeId?: string } = {}) {
   const { user } = useAuth();
   const query = useInfiniteQuery({
-    queryKey: ["contacts", user?.id, "pages", search.trim()],
-    enabled: !!user,
+    queryKey: ["contacts", user?.id, "pages", search.trim(), options.excludeId ?? null],
+    enabled: !!user && options.enabled !== false,
     initialPageParam: null as ContactPage["next"],
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await (supabase as any).rpc("search_contacts_page", {
         search_text: search.trim(), after_name: pageParam?.name ?? null,
         after_id: pageParam?.id ?? null, page_size: 50,
+        exclude_contact_id: options.excludeId ?? null,
       }).abortSignal(signal);
       if (error) throw error;
       return data as ContactPage;

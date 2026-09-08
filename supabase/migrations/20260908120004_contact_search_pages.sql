@@ -2,11 +2,12 @@
 -- SECURITY INVOKER preserves RLS, with an explicit owner filter as defense in depth.
 CREATE OR REPLACE FUNCTION public.search_contacts_page(
   search_text text DEFAULT '', after_name text DEFAULT NULL,
-  after_id uuid DEFAULT NULL, page_size integer DEFAULT 50
+  after_id uuid DEFAULT NULL, page_size integer DEFAULT 50, exclude_contact_id uuid DEFAULT NULL
 ) RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $$
   WITH matches AS MATERIALIZED (
     SELECT c.* FROM public.contacts c
     WHERE c.user_id = auth.uid() AND c.merged_into IS NULL
+      AND (exclude_contact_id IS NULL OR c.id <> exclude_contact_id)
       AND (coalesce(trim(search_text),'') = ''
         OR strpos(lower(c.name),lower(trim(search_text))) > 0
         OR EXISTS (SELECT 1 FROM unnest(c.aliases) alias
@@ -25,6 +26,6 @@ CREATE OR REPLACE FUNCTION public.search_contacts_page(
       LIMIT 1)
   );
 $$;
-REVOKE ALL ON FUNCTION public.search_contacts_page(text,text,uuid,integer) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.search_contacts_page(text,text,uuid,integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.search_contacts_page(text,text,uuid,integer,uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.search_contacts_page(text,text,uuid,integer,uuid) TO authenticated;
 CREATE INDEX IF NOT EXISTS contacts_active_name_id ON public.contacts(user_id,name,id) WHERE merged_into IS NULL;

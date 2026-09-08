@@ -44,6 +44,10 @@ BEGIN
   UPDATE contacts SET name='Aardvark' WHERE name='D';
   response:=search_contacts_page('',NULL,NULL,50);
   ASSERT (response->>'total')::int=4 AND jsonb_array_length(response->'rows')=4,'refresh includes rename across cursor';
+  SELECT id INTO cursor_id FROM contacts WHERE name='AA';
+  response:=search_contacts_page('',NULL,NULL,2,cursor_id);
+  ASSERT (response->>'total')::int=3 AND jsonb_array_length(response->'rows')=2,'exclude source before counting and paging';
+  ASSERT NOT EXISTS(SELECT 1 FROM jsonb_array_elements(response->'rows') r WHERE (r->>'id')::uuid=cursor_id),'source offered as target';
 END $$;
 RESET ROLE;
 INSERT INTO contacts(user_id,name) VALUES('78000000-0000-0000-0000-000000000002','Foreign');

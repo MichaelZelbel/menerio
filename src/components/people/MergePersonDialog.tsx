@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { usePeople, usePerson } from "@/hooks/usePeople";
 import { usePeopleSync } from "@/hooks/usePeopleSync";
 import { broadcastInvalidation } from "@/lib/query-sync";
 import { topicSelectClass } from "./ContactTopicRow";
@@ -60,6 +61,11 @@ export function MergePersonDialog({
   const [mergeIntoSelf, setMergeIntoSelf] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [topicTarget, setTopicTarget] = useState('');
+  const [topicSearch, setTopicSearch] = useState('');
+  const [topicTargetName, setTopicTargetName] = useState('');
+  const candidateQuery = usePeople(search, { enabled: open, excludeId: sourcePerson.id });
+  const topicCandidates = usePeople(topicSearch, { enabled: open && mergeIntoSelf, excludeId: sourcePerson.id });
+  const selectedQuery = usePerson(open ? selectedTarget : null);
   const topicCount = useQuery({
     queryKey: ['contact-topics', user?.id, sourcePerson.id, { count: true }],
     enabled: open && !!user, staleTime: 0, persister: undefined,
@@ -80,18 +86,9 @@ export function MergePersonDialog({
     }
   }, [open, prefillTargetId]);
 
-  const candidates = allPeople
-    .filter((p) => p.id !== sourcePerson.id)
-    .filter((p) => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.aliases || []).some((a) => a.toLowerCase().includes(q))
-      );
-    });
-
-  const targetPerson = candidates.find((p) => p.id === selectedTarget);
+  const candidates = candidateQuery.data;
+  const targetPerson = selectedQuery.data ?? candidates.find((p) => p.id === selectedTarget)
+    ?? allPeople.find((p) => p.id === selectedTarget);
 
   const mergeMutation = useMutation({
     mutationFn: async () => {
@@ -112,6 +109,7 @@ export function MergePersonDialog({
       }
       const { data, error } = await supabase.functions.invoke("merge-contacts", {
         body: {
+          request_id: sourcePerson.id, // Stable across a lost response and retry.
           source_contact_id: sourcePerson.id,
           target_contact_id: mergeIntoSelf ? null : selectedTarget,
           merge_into_self: mergeIntoSelf,
@@ -207,8 +205,11 @@ export function MergePersonDialog({
               />
             </div>
 
+            <p className="text-xs text-muted-foreground">{candidates.length} of {candidateQuery.total} people</p>
+            {candidateQuery.isPending && <p role="status">Loading people...</p>}
+            {candidateQuery.isError && <p role="alert">Could not load people. <button onClick={() => candidateQuery.refetch()}>Retry</button></p>}
             <div className="max-h-60 overflow-y-auto space-y-1">
-              {candidates.length === 0 ? (
+              {!candidateQuery.isPending && !candidateQuery.isError && candidates.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   No other people to merge with.
                 </p>
@@ -236,6 +237,9 @@ export function MergePersonDialog({
                 ))
               )}
             </div>
+            {candidateQuery.hasNextPage && <Button variant="outline" disabled={candidateQuery.isFetching} onClick={() => candidateQuery.fetchNextPage()}>
+              {candidateQuery.isFetchingNextPage ? "Loading..." : "Load more people"}
+            </Button>}
           </div>
 
           {mergeMutation.isPending && (
@@ -269,10 +273,16 @@ export function MergePersonDialog({
             {topicCount.isPending ? <p role="status">Checking conversation topics...</p> : topicCount.isError ? <p role="alert">Could not check topics. Close and try again.</p> : (topicCount.data ?? 0) > 0 ? <>
               <p>This person has {topicCount.data} conversation topics, including history. Choose another person to receive them before merging into your own profile.</p>
               <label htmlFor="merge-topic-target" className="block font-medium">Move conversation topics to</label>
-              <select id="merge-topic-target" value={topicTarget} onChange={e => setTopicTarget(e.target.value)} className={`${topicSelectClass} w-full`}>
+              <Input aria-label="Search topic recipients" placeholder="Search all people..." value={topicSearch} onChange={e => setTopicSearch(e.target.value)} />
+              <p>{topicCandidates.data.length} of {topicCandidates.total} people</p>
+              {topicCandidates.isPending && <p role="status">Loading recipients...</p>}
+              {topicCandidates.isError && <p role="alert">Could not load recipients. <button onClick={() => topicCandidates.refetch()}>Retry</button></p>}
+              <select id="merge-topic-target" value={topicTarget} onChange={e => { setTopicTarget(e.target.value); setTopicTargetName(topicCandidates.data.find(p => p.id === e.target.value)?.name ?? ''); }} className={`${topicSelectClass} w-full`}>
                 <option value="">Choose a person</option>
-                {allPeople.filter(p => p.id !== sourcePerson.id).map(p => <option value={p.id} key={p.id}>{p.name}</option>)}
+                {topicTarget && !topicCandidates.data.some(p => p.id === topicTarget) && <option value={topicTarget}>{topicTargetName}</option>}
+                {topicCandidates.data.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}
               </select>
+              {topicCandidates.hasNextPage && <Button variant="outline" disabled={topicCandidates.isFetching} onClick={() => topicCandidates.fetchNextPage()}>Load more recipients</Button>}
               <p className="text-muted-foreground">Moving topics happens first and remains saved if the profile merge later fails.</p>
             </> : null}
           </div>}
