@@ -507,7 +507,7 @@ export default function ReviewQueue() {
     try {
       for (const sourceId of mergeIds) {
         const { data, error } = await supabase.functions.invoke("merge-contacts", {
-          body: { source_contact_id: sourceId, target_contact_id: keepId },
+          body: { request_id: sourceId, source_contact_id: sourceId, target_contact_id: keepId },
         });
         if (error || (data && data.error)) {
           throw new Error(error?.message || data?.error || "Merge failed");
@@ -1386,4 +1386,3 @@ export default function ReviewQueue() {
     </div>
   );
 }
-
