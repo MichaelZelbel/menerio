@@ -76,6 +76,7 @@ export interface PeopleTreeProps {
   memberships: MembershipLite[];
   selectedPersonId: string | null;
   searchQuery: string;
+  serverSearch?: boolean;
   onSelectPerson: (id: string) => void;
   onToggleFavorite: (id: string, isFavorite: boolean) => void;
   onCreateGroup: (parentGroupId: string | null) => void;
@@ -510,6 +511,7 @@ export function PeopleTree({
   memberships,
   selectedPersonId,
   searchQuery,
+  serverSearch = false,
   onSelectPerson,
   onToggleFavorite,
   onCreateGroup,
@@ -577,6 +579,7 @@ export function PeopleTree({
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
+    if (serverSearch) return people;
     return people
       .filter(
         (p) =>
@@ -584,7 +587,7 @@ export function PeopleTree({
           (p.aliases || []).some((a) => a.toLowerCase().includes(q)),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [people, searchQuery]);
+  }, [people, searchQuery, serverSearch]);
 
   const searching = searchQuery.trim().length > 0;
 

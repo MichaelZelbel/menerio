@@ -34,6 +34,7 @@ import { useGroups, useCreateGroup, useUpdateGroup, useArchiveGroup } from "@/ho
 import { useAllMemberships, useAddMembership, useRemoveMembership } from "@/hooks/useGroupMemberships";
 import {
   usePeople,
+  usePerson,
   useCreatePerson,
   useDeletePerson,
   useToggleFavoritePerson,
@@ -77,11 +78,13 @@ export default function People() {
   }, [searchParams, navigate, setSearchParams]);
 
   // ── Queries ──
-  const { data: people = [] } = usePeople();
+  const peopleQuery = usePeople(searchQuery);
+  const { data: people, total } = peopleQuery;
+  const selectedQuery = usePerson(selectedPersonId);
   const { data: groups = [] } = useGroups();
   const { data: memberships = [] } = useAllMemberships();
 
-  const selectedPerson = people.find((p) => p.id === selectedPersonId);
+  const selectedPerson = selectedQuery.data ?? people.find((p) => p.id === selectedPersonId);
 
   // ── Mutations ──
   const createPerson = useCreatePerson();
@@ -195,7 +198,7 @@ export default function People() {
             <div className="flex items-center gap-1.5">
               <Users className="h-4 w-4" /> People
             </div>
-            <span className="text-[10px] font-normal text-muted-foreground">{people.length}</span>
+            <span className="text-[10px] font-normal text-muted-foreground">{people.length} of {total}{searchQuery.trim() ? " matches" : " people"}</span>
           </div>
           <Button
             variant="ghost"
@@ -233,12 +236,15 @@ export default function People() {
           </div>
         </div>
 
+        {peopleQuery.isError && <p role="alert" className="p-2 text-sm text-destructive">Could not load people. <button onClick={() => peopleQuery.refetch()}>Retry</button></p>}
+        {peopleQuery.isPending && <p role="status" className="p-2 text-sm">Loading people...</p>}
         <PeopleTree
           people={people}
           groups={groups}
           memberships={memberships}
           selectedPersonId={selectedPersonId}
           searchQuery={searchQuery}
+          serverSearch
           onSelectPerson={openPerson}
           onToggleFavorite={(id, isFavorite) => toggleFavorite.mutate({ id, isFavorite })}
           onCreateGroup={handleCreateGroup}
@@ -251,18 +257,29 @@ export default function People() {
           onMergePerson={(id) => setMergeTreeId(id)}
           onDeletePerson={handleDeletePerson}
         />
+        <div className="shrink-0 border-t p-2 space-y-2">
+          <p className="text-xs text-muted-foreground">Groups, favorites and recent people show loaded contacts.</p>
+          {peopleQuery.hasNextPage && <Button className="w-full" variant="outline" disabled={peopleQuery.isFetching} onClick={() => peopleQuery.fetchNextPage()}>
+            {peopleQuery.isFetchingNextPage ? "Loading..." : "Load more people"}
+          </Button>}
+          <Button className="w-full" variant="ghost" disabled={peopleQuery.isFetching} onClick={() => peopleQuery.refetch()}>Refresh people</Button>
+        </div>
       </div>
 
       {/* Right panel — detail */}
       <div className={cn("min-w-0 flex-1 flex-col", isMobile && !selectedPersonId ? "hidden" : "flex")}>
-        {selectedPerson ? (
+        {selectedPersonId && selectedQuery.isPending ? (
+          <p role="status" className="p-8">Loading person...</p>
+        ) : selectedPersonId && selectedQuery.isError ? (
+          <p role="alert" className="p-8">Could not load this person. <button onClick={() => selectedQuery.refetch()}>Retry</button></p>
+        ) : selectedPerson ? (
           <PersonDetail key={selectedPerson.id} person={selectedPerson} people={people} onClose={closePerson} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center p-8 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <User className="h-6 w-6 text-primary" />
             </div>
-            <h3 className="mb-2 text-lg font-semibold">Select a person</h3>
+            <h3 className="mb-2 text-lg font-semibold">{selectedPersonId ? "Person not found" : "Select a person"}</h3>
             <p className="max-w-sm text-sm text-muted-foreground">
               Choose someone from the list, or add a new person to get started.
             </p>

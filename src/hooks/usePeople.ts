@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -53,27 +53,65 @@ export function shouldTouchLoadedPerson(
   return shouldTouchViewed(person.last_viewed_at ?? null, now);
 }
 
-export function usePeople() {
-  const { user } = useAuth();
+export interface ContactPage {
+  rows: Person[];
+  total: number;
+  next: { name: string; id: string } | null;
+}
 
-  return useQuery<Person[]>({
-    queryKey: ["contacts", user?.id],
+function normalizePerson(d: Person): Person {
+  return { ...d, aliases: d.aliases || [], app_mappings: d.app_mappings || {},
+    is_favorite: d.is_favorite ?? false, last_viewed_at: d.last_viewed_at ?? null };
+}
+
+export function flattenContactPages(pages: ContactPage[]): Person[] {
+  // A contact renamed across the cursor between requests can occur twice.
+  return [...new Map(pages.flatMap((page) => page.rows).map((row) => [row.id, normalizePerson(row)])).values()];
+}
+
+/** Update list pages and independently loaded detail rows together. */
+export function updateContactCache(old: unknown, id: string, changes: Partial<Person>): unknown {
+  const update = (row: Person) => row.id === id ? { ...row, ...changes } : row;
+  if (Array.isArray(old)) return old.map(update);
+  if (!old || typeof old !== "object") return old;
+  if ("pages" in old && Array.isArray(old.pages)) {
+    return { ...old, pages: old.pages.map((page: ContactPage) => ({ ...page, rows: page.rows.map(update) })) };
+  }
+  if ("id" in old) return update(old as Person);
+  return old;
+}
+
+export function usePeople(search = "") {
+  const { user } = useAuth();
+  const query = useInfiniteQuery({
+    queryKey: ["contacts", user?.id, "pages", search.trim()],
     enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("contacts")
-        .select(PEOPLE_COLUMNS)
-        .eq("user_id", user!.id)
-        .is("merged_into", null)
-        .order("name");
+    initialPageParam: null as ContactPage["next"],
+    queryFn: async ({ pageParam, signal }) => {
+      const { data, error } = await (supabase as any).rpc("search_contacts_page", {
+        search_text: search.trim(), after_name: pageParam?.name ?? null,
+        after_id: pageParam?.id ?? null, page_size: 50,
+      }).abortSignal(signal);
       if (error) throw error;
-      return ((data || []) as any[]).map((d) => ({
-        ...d,
-        aliases: d.aliases || [],
-        app_mappings: d.app_mappings || {},
-        is_favorite: d.is_favorite ?? false,
-        last_viewed_at: d.last_viewed_at ?? null,
-      })) as Person[];
+      return data as ContactPage;
+    },
+    getNextPageParam: (page) => page.next ?? undefined,
+  });
+  return { ...query, data: flattenContactPages(query.data?.pages ?? []),
+    total: query.data?.pages.at(-1)?.total ?? 0 };
+}
+
+export function usePerson(id: string | null) {
+  const { user } = useAuth();
+  return useQuery<Person | null>({
+    queryKey: ["contacts", user?.id, "person", id],
+    enabled: !!user && !!id,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await (supabase as any).from("contacts")
+        .select(PEOPLE_COLUMNS).eq("user_id", user!.id).eq("id", id)
+        .is("merged_into", null).abortSignal(signal).maybeSingle();
+      if (error) throw error;
+      return data ? normalizePerson(data) : null;
     },
   });
 }
@@ -181,14 +219,12 @@ export function useToggleFavoritePerson() {
     onMutate: async ({ id, isFavorite }) => {
       const queryKey = ["contacts", user?.id];
       await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueryData<Person[]>(queryKey);
-      qc.setQueryData<Person[]>(queryKey, (old) =>
-        old?.map((person) => (person.id === id ? { ...person, is_favorite: isFavorite } : person)),
-      );
+      const previous = qc.getQueriesData({ queryKey });
+      qc.setQueriesData({ queryKey }, (old: unknown) => updateContactCache(old, id, { is_favorite: isFavorite }));
       return { previous, queryKey };
     },
     onError: (e: any, _vars, context) => {
-      if (context) qc.setQueryData(context.queryKey, context.previous);
+      context?.previous.forEach(([key, data]) => qc.setQueryData(key, data));
       showToast.error(e.message ?? "Failed to update favorite");
     },
     onSettled: (_data, _err, _vars, context) => {
@@ -206,7 +242,7 @@ export function useTouchPersonViewed() {
     mutationFn: async (id: string) => {
       const queryKey = ["contacts", user?.id];
       const people = qc.getQueryData<Person[]>(queryKey);
-      const person = people?.find((p) => p.id === id);
+      const person = qc.getQueryData<Person>([...queryKey, "person", id]) ?? people?.find((p) => p.id === id);
       if (!shouldTouchLoadedPerson(person, new Date())) {
         return null;
       }
@@ -220,12 +256,8 @@ export function useTouchPersonViewed() {
     },
     onSuccess: (result) => {
       if (!result) return;
-      const queryKey = ["contacts", user?.id];
-      qc.setQueryData<Person[]>(queryKey, (old) =>
-        old?.map((person) =>
-          person.id === result.id ? { ...person, last_viewed_at: result.lastViewedAt } : person,
-        ),
-      );
+      qc.setQueriesData({ queryKey: ["contacts", user?.id] }, (old: unknown) =>
+        updateContactCache(old, result.id, { last_viewed_at: result.lastViewedAt }));
     },
   });
 }
