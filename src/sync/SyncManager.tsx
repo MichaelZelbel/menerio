@@ -117,7 +117,7 @@ export function SyncManager() {
           return;
         }
 
-        await db.connect(new SupabaseConnector());
+        await db.connect(new SupabaseConnector(user.id));
 
         // connect() returning means the attempt STARTED, nothing more. It starts
         // a background stream that retries on its own and never rejects, so the

@@ -1,7 +1,9 @@
+const recoveryStorage = vi.hoisted(() => new Map());
+vi.mock("idb-keyval", () => ({ createStore: () => ({}), get: async (key: string) => structuredClone(recoveryStorage.get(key)), set: async (key: string, value: unknown) => { recoveryStorage.set(key, structuredClone(value)); } }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ upsert: vi.fn(), update: vi.fn(), invoke: vi.fn(), rpc: vi.fn() }));
 vi.mock("@powersync/web", () => ({ UpdateType: { PUT: "PUT", PATCH: "PATCH", DELETE: "DELETE" } }));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: {
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: "user-1" }, access_token: "token" } } }) },
   functions: { invoke: mock.invoke }, rpc: mock.rpc,
   from: () => ({ upsert: mock.upsert, update: mock.update, delete: () => ({ eq: async () => ({ error: null }) }) }),
 } }));
@@ -13,6 +15,7 @@ function db(crud: unknown[]) {
   return { complete, database: { getNextCrudTransaction: async () => ({ crud, complete }) } };
 }
 beforeEach(() => {
+  recoveryStorage.clear();
   localStorage.clear();
   mock.upsert.mockReset().mockResolvedValue({ error: null });
   mock.update.mockReset().mockReturnValue({ eq: async () => ({ error: null }) });

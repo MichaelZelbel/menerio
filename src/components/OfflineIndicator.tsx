@@ -1,6 +1,7 @@
 import { AlertTriangle, WifiOff } from "lucide-react";
 import { useOnline } from "@/hooks/use-online";
 import { useSyncHealth } from "@/sync/sync-health";
+import { RecoveryNotice } from "@/sync/RecoveryNotice";
 
 /**
  * The one place the app admits it is not showing current data.
@@ -17,6 +18,10 @@ import { useSyncHealth } from "@/sync/sync-health";
  *   still only on this device, which is what `pendingUploads` is saying.
  */
 export function OfflineIndicator() {
+  return <><RecoveryNotice /><ConnectionIndicator /></>;
+}
+
+function ConnectionIndicator() {
   const online = useOnline();
   const sync = useSyncHealth();
 
