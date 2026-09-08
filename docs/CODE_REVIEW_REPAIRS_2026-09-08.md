@@ -1,6 +1,15 @@
 # Repairs for the 8 September code review
 
-Implemented all six findings on `codex/code-review-20260908`, starting from `a95d69d3`. Changes are separated into commits on the existing review branch. No production migration, edge deployment, or frontend publication was performed.
+Implemented all six findings on `codex/code-review-20260908`, starting from `a95d69d3`. After Michael requested production deployment, merged the reviewed revision `ce4ae389be687e6867ec541d08727468094a8431` into `main` and deployed it on 8 September 2026.
+
+## Production deployment
+
+- All five migrations applied and recorded in one production transaction. Both ownership constraints are validated. Preflight found zero mismatched shares or GitHub note links, and both private quarantine tables remain empty.
+- Deployed `merge-contacts`, `github-sync-pull`, `github-sync-scheduled` and `github-people-sync`; all report active.
+- Published the matching Lovable revision. [Menerio](https://menerio.com/) serves deployment `f5650553-6ea0-483e-af83-f76246c4bd32` with the new account-cache/recovery code and contact-search page bundle.
+- Live read-only authenticated-role contact search returned three rows with a total matching the database. Authenticated users can invoke the merge function; anonymous users cannot. All three merge/pull/scheduler HTTP entrypoints rejected unauthenticated requests with 401.
+- The live browser rendered the sign-in page correctly for a protected contact URL. No real-account merge, vault synchronization or browser account-switch operation was performed in production; the synthetic database/browser acceptance results below cover those scenarios.
+- Existing application records were not changed by smoke checks. The original public-share function definition was retained locally before migration for incident investigation; security constraints must remain in place during any application rollback.
 
 ## Changes
 
@@ -28,7 +37,7 @@ The original diagnostic command now runs repaired-behavior regression tests inst
 - Actual scheduler/manual entrypoints and shared pull ran against synthetic service responses: GitHub 401/403/429/504, timeout, partial import, no changes, bad authorization, supplied foreign user and foreign note reference.
 - Real Chromium ran the actual AuthProvider and query persister with synthetic authentication: two-tab account changes, same group slug/bookmarked note, delayed profile, reload with query fetching disabled, real IndexedDB recovery reload and concurrent tab writes.
 
-The browser fixture does not use real Supabase accounts or exercise the complete PowerSync SQLite runtime. Its offline check disables query fetching while the local fixture itself remains reachable. PostgreSQL fixtures use relevant real functions and constraints, but do not constitute a restored staging database or a replay of every historic migration. Those staging and production checks remain unperformed. The 14 existing skipped tests remain skipped.
+The browser fixture does not use real Supabase accounts or exercise the complete PowerSync SQLite runtime. Its offline check disables query fetching while the local fixture itself remains reachable. PostgreSQL fixtures use relevant real functions and constraints, but do not constitute a restored staging database or a replay of every historic migration. A restored-staging replay remains unperformed. Production checks are listed above. The 14 existing skipped tests remain skipped.
 
 ## CI and commands
 
@@ -50,6 +59,6 @@ Database fixtures refuse non-test database names. Exact fresh-database commands 
 1. Test the five additive `20260908120001` through `20260908120005` migrations on a restored staging database. They depend on the existing contact-topic and normalization schema. Validate historic valid records and deliberately invalid owner fixtures.
 2. Apply database protections and transactional functions before the dependent application code. Keep protections if application code is rolled back. Private audit records and merge receipts must stay inaccessible to other accounts.
 3. Deploy `merge-contacts`, `github-sync-pull` and `github-sync-scheduled`, then the frontend. Shared helper changes also affect `github-people-sync` and other importing GitHub handlers when they are next deployed.
-4. Run staging account-switch/offline and scheduler checks with synthetic users, then obtain approval for production deployment. Production behavior and existing data exposure are unverified by this repair run.
+4. Run staging account-switch/offline and scheduler checks with synthetic users, then obtain approval for production deployment. Michael provided that approval in this task; deployment and the limited live smoke checks are recorded above. Past exposure was not investigated.
 
 Merge vault jobs stay pending while export is disabled or a target is conflicted, missing or stale. The scheduled sync completes them only after the required export/retirement is confirmed. Monitor pending age and failed attempts using identifiers and error categories, without note content or credentials.
