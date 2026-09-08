@@ -11,23 +11,33 @@ export interface RecoveryBatch {
   code?: string;
   createdAt: string;
 }
-const store = () => createStore("menerio-upload-recovery", "accounts");
+const store = createStore("menerio-upload-recovery", "accounts");
 export async function readRecovery(userId: string): Promise<RecoveryBatch[]> {
-  return (await get<RecoveryBatch[]>(userId, store())) ?? [];
+  return (await get<RecoveryBatch[]>(userId, store)) ?? [];
 }
 export async function writeRecovery(userId: string, batches: RecoveryBatch[]) {
   // Await the IndexedDB transaction commit before acknowledging PowerSync.
-  await set(userId, batches, store());
+  await set(userId, batches, store);
   window.dispatchEvent(new Event("menerio-recovery-change"));
 }
 
-const pending = new Map<string, Promise<unknown>>();
 export async function withRecoveryLock<T>(userId: string, work: () => Promise<T>): Promise<T> {
-  if (navigator.locks) return await navigator.locks.request(`menerio-recovery:${userId}`, work);
-  const previous = pending.get(userId) ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(work);
-  pending.set(userId, next);
-  return next.finally(() => { if (pending.get(userId) === next) pending.delete(userId); });
+  // A per-tab mutex cannot protect the shared IndexedDB journal. Without the
+  // browser lock, retain PowerSync's edits instead of risking a lost update.
+  if (!navigator.locks) throw new Error("This browser cannot safely upload saved changes. Use a browser with Web Locks support.");
+  return await navigator.locks.request(`menerio-recovery:${userId}`, work);
+}
+
+/** Make in-flight work retryable before its PowerSync transaction is cleared. */
+export async function preserveUploadsBeforeAccountClear(userId: string): Promise<void> {
+  await withRecoveryLock(userId, async () => {
+    const batches = await readRecovery(userId);
+    await writeRecovery(userId, batches
+      .filter(batch => batch.completed < batch.operations.length)
+      .map(batch => batch.status === "uploading"
+        ? { ...batch, status: "recovery" as const, kind: "transient" as const }
+        : batch));
+  });
 }
 
 // Conservative dependency closure: same row, or any referenced row ID, including

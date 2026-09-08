@@ -24,7 +24,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("../config", () => ({ POWERSYNC_URL: "https://example.invalid" }));
 
 import { SupabaseConnector, classifySyncError } from "../connector";
-import { readRecovery } from "../recovery";
+import { readRecovery, preserveUploadsBeforeAccountClear } from "../recovery";
 
 function put(id: string, opData: Record<string, unknown> = {}) {
   return { op: "PUT", table: "notes", id, opData };
@@ -40,6 +40,7 @@ function fakeDb(crud: unknown[], complete: () => void) {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("navigator", { locks: { request: async (_name: string, work: () => unknown) => work() } });
   recoveryStorage.clear();
   storageFailure.fail = false;
   upsert.mockReset().mockResolvedValue({ error: null });
@@ -100,6 +101,36 @@ describe("malformed JSON in a synced column", () => {
 
 
 describe("durable recovery", () => {
+  it("recovers unconfirmed uploads after an account change removes their PowerSync transaction", async () => {
+    upsert.mockResolvedValueOnce({ error: null }).mockRejectedValueOnce(new Error("lost response"));
+    const complete = vi.fn();
+    const database = fakeDb([put("confirmed"), put("unconfirmed")], complete);
+    await expect(new SupabaseConnector().uploadData(database as never)).rejects.toThrow("lost response");
+    expect((await readRecovery("user-1")).some(batch => batch.status === "uploading")).toBe(true);
+
+    // AuthProvider performs this durable step before disconnectAndClear.
+    await preserveUploadsBeforeAccountClear("user-1");
+    const emptyDatabase = { getNextCrudTransaction: async () => null };
+    expect(await readRecovery("user-1")).toMatchObject([
+      { status: "recovery", completed: 0, operations: [{ id: "unconfirmed" }] },
+    ]);
+    expect(await readRecovery("user-2")).toEqual([]);
+    await new SupabaseConnector().uploadData(emptyDatabase as never);
+    await new SupabaseConnector().retryRecovery();
+    expect(upsert.mock.calls.map(call => call[0].id)).toEqual(["confirmed", "unconfirmed", "unconfirmed"]);
+    expect(await readRecovery("user-1")).toEqual([]);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("retains the transaction without a cross-tab lock", async () => {
+    vi.stubGlobal("navigator", {});
+    const complete = vi.fn();
+    await expect(new SupabaseConnector().uploadData(fakeDb([put("saved")], complete) as never)).rejects.toThrow("Web Locks");
+    expect(upsert).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(await readRecovery("user-1")).toEqual([]);
+  });
+
   it.each([["22P02", "data"], ["23505", "data"], ["42501", "permission"], ["42P01", "schema"], ["PGRST301", "auth"], ["08006", "transient"]])("classifies %s as %s", (code, kind) => {
     expect(classifySyncError({ code })).toBe(kind);
   });

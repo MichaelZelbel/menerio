@@ -15,6 +15,7 @@ function db(crud: unknown[]) {
   return { complete, database: { getNextCrudTransaction: async () => ({ crud, complete }) } };
 }
 beforeEach(() => {
+  vi.stubGlobal("navigator", { locks: { request: async (_name: string, work: () => unknown) => work() } });
   recoveryStorage.clear();
   localStorage.clear();
   mock.upsert.mockReset().mockResolvedValue({ error: null });

@@ -7,9 +7,13 @@ const mocks = vi.hoisted(() => ({
   profileResolvers: new Map<string, (v: any) => void>(),
   roleResolvers: new Map<string, (v: any) => void>(),
   fetch: vi.fn(),
+  offline: false,
+  preserve: vi.fn(),
+  clearDb: vi.fn(),
 }));
-vi.mock("@/lib/flags", () => ({ OFFLINE_CORE: false }));
-vi.mock("@/sync/db", () => ({ getDb: vi.fn() }));
+vi.mock("@/lib/flags", () => ({ get OFFLINE_CORE() { return mocks.offline; } }));
+vi.mock("@/sync/db", () => ({ getDb: () => ({ disconnectAndClear: mocks.clearDb }) }));
+vi.mock("@/sync/recovery", () => ({ preserveUploadsBeforeAccountClear: mocks.preserve }));
 vi.mock("@/lib/query-sync", () => ({ installQuerySyncListener: () => () => {} }));
 vi.mock("idb-keyval", () => ({ get: async () => undefined, set: async () => {}, del: async () => {}, keys: async () => [], delMany: async () => {} }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {
@@ -29,9 +33,41 @@ function Content() {
 async function login(id: string | null, event = "SIGNED_IN") {
   await act(async () => { mocks.callback!(event, id ? { user: { id } } : null); });
 }
-beforeEach(() => { mocks.fetch.mockReset().mockImplementation(async id => `${id}-group`); mocks.profileResolvers.clear(); mocks.roleResolvers.clear(); });
+beforeEach(() => { mocks.offline = false; mocks.preserve.mockReset().mockResolvedValue(undefined); mocks.clearDb.mockReset().mockResolvedValue(undefined); localStorage.clear(); mocks.fetch.mockReset().mockImplementation(async id => `${id}-group`); mocks.profileResolvers.clear(); mocks.roleResolvers.clear(); });
 afterEach(cleanup);
 describe("AuthProvider account changes", () => {
+  it("waits for recoverable uploads before clearing the previous account database", async () => {
+    render(<AuthProvider><Content /></AuthProvider>);
+    await screen.findByText(/anonymous/);
+    await login("A");
+    await screen.findByText(/A-group/);
+    mocks.offline = true;
+    localStorage.setItem("menerio:powersync-user", "A");
+    let release!: () => void;
+    mocks.preserve.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
+    await login("B");
+    expect(mocks.preserve).toHaveBeenCalledWith("A");
+    expect(mocks.clearDb).not.toHaveBeenCalled();
+    expect(screen.queryByText(/B-group/)).toBeNull();
+    await act(async () => { release(); });
+    await screen.findByText(/B-group/);
+    expect(mocks.clearDb).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the old database intact if upload preservation cannot commit", async () => {
+    render(<AuthProvider><Content /></AuthProvider>);
+    await screen.findByText(/anonymous/);
+    await login("A");
+    await screen.findByText(/A-group/);
+    mocks.offline = true;
+    localStorage.setItem("menerio:powersync-user", "A");
+    mocks.preserve.mockRejectedValue(new Error("storage failure"));
+    await login("B");
+    await screen.findByText(/Your account could not be opened safely/);
+    expect(mocks.clearDb).not.toHaveBeenCalled();
+    expect(screen.queryByText(/A-group|B-group/)).toBeNull();
+  });
+
   it.each([false, true])("clears profile, role and reused group on account switch (signout=%s)", async signout => {
     render(<AuthProvider><Content /></AuthProvider>);
     await screen.findByText(/anonymous/);

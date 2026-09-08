@@ -9,6 +9,7 @@ import { createAccountQueryClient } from "@/lib/account-query-client";
 import { installQuerySyncListener } from "@/lib/query-sync";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
+import { preserveUploadsBeforeAccountClear } from "@/sync/recovery";
 
 const LAST_USER_KEY = "menerio:last-user-id";
 
@@ -118,7 +119,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (previousOwner) await clearPersistedQueries(previousOwner);
         if (OFFLINE_CORE) {
           const localOwner = localStorage.getItem("menerio:powersync-user");
-          if (localOwner !== nextOwner) await getDb().disconnectAndClear();
+          if (localOwner !== nextOwner) {
+            if (localOwner) await preserveUploadsBeforeAccountClear(localOwner);
+            await getDb().disconnectAndClear();
+          }
           if (nextOwner) localStorage.setItem("menerio:powersync-user", nextOwner);
           else localStorage.removeItem("menerio:powersync-user");
         }
