@@ -3,7 +3,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
   Routes,
@@ -15,8 +14,6 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { RequiresOnline } from "@/components/RequiresOnline";
-import { queryPersister } from "@/lib/query-persister";
-import { installQuerySyncListener } from "@/lib/query-sync";
 import { MaybePowerSyncProvider } from "@/sync/PowerSyncProvider";
 import { SyncManager } from "@/sync/SyncManager";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -74,29 +71,6 @@ const SharedNote = lazy(() => import("./pages/SharedNote"));
 const ReviewQueue = lazy(() => import("./pages/ReviewQueue"));
 const OrphanNotes = lazy(() => import("./pages/OrphanNotes"));
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000,
-      // Must be >= the persister's maxAge window for restored queries to
-      // stay alive; also keeps warm data around across route changes.
-      gcTime: 24 * 60 * 60 * 1000,
-      refetchOnWindowFocus: false,
-      retry: 1,
-      // Render cached/persisted data when offline instead of erroring;
-      // retries pause until connectivity returns.
-      networkMode: "offlineFirst",
-      persister: queryPersister.persisterFn,
-    },
-  },
-});
-
-// Install cross-window cache sync once at module load. Any window (main app
-// or popped-out note) that saves a note broadcasts an invalidation so other
-// open windows drop their stale cached copy and refetch immediately.
-installQuerySyncListener(queryClient);
-
-
 const LegacyWikiRedirect = () => {
   const { slug } = useParams<{ slug?: string }>();
   return <Navigate to={slug ? `/lexicon/${slug}` : "/lexicon"} replace />;
@@ -109,7 +83,6 @@ const App = () => (
     enableSystem
     disableTransitionOnChange={false}
   >
-    <QueryClientProvider client={queryClient}>
       <MaybePowerSyncProvider>
       <TooltipProvider>
         <Toaster />
@@ -239,7 +212,6 @@ const App = () => (
         </BrowserRouter>
       </TooltipProvider>
       </MaybePowerSyncProvider>
-    </QueryClientProvider>
   </ThemeProvider>
 );
 

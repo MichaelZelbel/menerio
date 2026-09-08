@@ -1,26 +1,32 @@
-import { get, set, del, clear } from "idb-keyval";
+import { get, set, del, keys, delMany } from "idb-keyval";
 import { experimental_createQueryPersister } from "@tanstack/query-persist-client-core";
 
-// Fine-grained per-query persistence to IndexedDB. Cached results render
-// instantly on reload — including with no network — and are replaced when a
-// fresh fetch succeeds. The service worker never caches data requests; this
-// persister is the single owner of data caching.
-export const queryPersister = experimental_createQueryPersister({
-  storage: {
-    getItem: (key: string) => get<string>(key),
-    setItem: (key: string, value: string) => set(key, value),
-    removeItem: (key: string) => del(key),
-  },
-  maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-  // Bump whenever a query's cached data SHAPE changes. Persisted entries are
-  // JSON, so a Map/Set that used to be cached comes back as a plain object and
-  // crashes callers ("x.get is not a function"). A new buster discards every
-  // old entry instead of feeding stale shapes to new code.
-  buster: "v2",
-});
+export function createAccountPersister(accountId: string | null) {
+  let active = true;
+  const writes = new Set<Promise<void>>();
+  const prefix = `menerio:queries:v3:${encodeURIComponent(accountId ?? "anonymous")}:`;
+  const persister = experimental_createQueryPersister({
+    storage: {
+      getItem: async (key: string) => active && accountId ? get<string>(prefix + key) : undefined,
+      setItem: async (key: string, value: string) => {
+        if (active && accountId) {
+          const write = set(prefix + key, value);
+          writes.add(write);
+          try { await write; } finally { writes.delete(write); }
+        }
+      },
+      removeItem: (key: string) => del(prefix + key),
+    },
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+    buster: "account-v3",
+  });
+  return { ...persister, retire: async () => { active = false; await Promise.allSettled([...writes]); } };
+}
 
-// Query keys do not include the user id, so cached data must never survive a
-// sign-out or account switch.
-export async function clearPersistedQueries() {
-  await clear();
+// Delete only this feature's cache, never other IndexedDB consumers.
+export async function clearPersistedQueries(accountId?: string) {
+  const prefix = accountId ? `menerio:queries:v3:${encodeURIComponent(accountId)}:` : "menerio:queries:";
+  const cacheKeys = (await keys()).filter(key => typeof key === "string" &&
+    (key.startsWith(prefix) || key.startsWith("tanstack-query-")));
+  await delMany(cacheKeys);
 }

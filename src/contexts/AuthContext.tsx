@@ -1,10 +1,14 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { clearPersistedQueries } from "@/lib/query-persister";
 import { BRAND } from "@/lib/brand";
-import { useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createAccountQueryClient } from "@/lib/account-query-client";
+import { installQuerySyncListener } from "@/lib/query-sync";
+import { OFFLINE_CORE } from "@/lib/flags";
+import { getDb } from "@/sync/db";
 
 const LAST_USER_KEY = "menerio:last-user-id";
 
@@ -42,108 +46,112 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const queryClient = useQueryClient();
+  const generation = useRef(0);
+  const owner = useRef<string | null | undefined>(undefined);
+  const [cache, setCache] = useState(() => createAccountQueryClient(null));
+  const cacheRef = useRef(cache);
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [roleLoading, setRoleLoading] = useState(true);
+  const [transitionError, setTransitionError] = useState(false);
   const { toast } = useToast();
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string, epoch = generation.current) => {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, display_name, avatar_url")
       .eq("id", userId)
       .single();
-    if (!error && data) setProfile(data as Profile);
+    if (!error && data && epoch === generation.current && owner.current === userId) setProfile(data as Profile);
   }, []);
 
-  const fetchRole = useCallback(async (userId: string) => {
+  const fetchRole = useCallback(async (userId: string, epoch = generation.current) => {
     try {
       const { data, error } = await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", userId)
         .single();
-      if (!error && data) {
+      if (!error && data && epoch === generation.current && owner.current === userId) {
         setRole(data.role as AppRole);
       }
     } finally {
-      setRoleLoading(false);
+      if (epoch === generation.current && owner.current === userId) setRoleLoading(false);
     }
   }, []);
 
   const refreshProfile = useCallback(async () => {
     if (user) {
       setRoleLoading(true);
-      await fetchProfile(user.id);
-      await fetchRole(user.id);
+      const epoch = generation.current;
+      await fetchProfile(user.id, epoch);
+      await fetchRole(user.id, epoch);
     }
   }, [user, fetchProfile, fetchRole]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        // Private topic data must leave memory as well as disk on session changes.
-        const topicQueries = { predicate: (query: { queryKey: readonly unknown[] }) =>
-          (query.queryKey[0] === 'contact-topics' || query.queryKey[0] === 'contact-topic-history') &&
-          (!newSession?.user || query.queryKey[1] !== newSession.user.id) };
-        void queryClient.cancelQueries(topicQueries);
-        queryClient.removeQueries(topicQueries);
+    let disposed = false;
+    let receivedEvent = false;
+    let cleanup = Promise.resolve();
+    const transition = (newSession: Session | null) => {
+      const nextOwner = newSession?.user.id ?? null;
+      if (owner.current === nextOwner) {
         setSession(newSession);
         setUser(newSession?.user ?? null);
-
-        if (newSession?.user) {
-          // Offline cache is keyed per-origin, not per-user: wipe it when a
-          // different account signs in so no data leaks across users.
-          const lastUserId = localStorage.getItem(LAST_USER_KEY);
-          if (lastUserId && lastUserId !== newSession.user.id) {
-            void clearPersistedQueries();
-          }
-          localStorage.setItem(LAST_USER_KEY, newSession.user.id);
-          // Ask the browser to exempt our storage (IndexedDB cache, future
-          // local DB) from automatic eviction — matters most on iOS Safari.
-          void navigator.storage?.persist?.();
-
-          setRoleLoading(true);
-          setTimeout(() => {
-            fetchProfile(newSession.user.id);
-            fetchRole(newSession.user.id);
-          }, 0);
-        } else {
-          setProfile(null);
-          setRole(null);
-          setRoleLoading(false);
+        return;
+      }
+      const epoch = ++generation.current;
+      const previousOwner = owner.current;
+      owner.current = nextOwner;
+      setLoading(true);
+      setTransitionError(false);
+      setProfile(null);
+      setRole(null);
+      setRoleLoading(!!nextOwner);
+      // Start cancellation immediately. Serialize disk cleanup across rapid events.
+      const retired = cacheRef.current.retire();
+      cleanup = cleanup.catch(() => {}).then(async () => {
+        await retired;
+        if (previousOwner) await clearPersistedQueries(previousOwner);
+        if (OFFLINE_CORE) {
+          const localOwner = localStorage.getItem("menerio:powersync-user");
+          if (localOwner !== nextOwner) await getDb().disconnectAndClear();
+          if (nextOwner) localStorage.setItem("menerio:powersync-user", nextOwner);
+          else localStorage.removeItem("menerio:powersync-user");
         }
-
-        if (event === "SIGNED_OUT") {
-          setProfile(null);
-          setRole(null);
-          setRoleLoading(false);
-          void clearPersistedQueries();
-        }
-
+        if (disposed || epoch !== generation.current) return;
+        const nextCache = createAccountQueryClient(nextOwner);
+        cacheRef.current = nextCache;
+        setCache(nextCache);
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
         setLoading(false);
-      }
-    );
-
-    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
-      setSession(existingSession);
-      setUser(existingSession?.user ?? null);
-      if (existingSession?.user) {
-        setRoleLoading(true);
-        fetchProfile(existingSession.user.id);
-        fetchRole(existingSession.user.id);
-      } else {
-        setRoleLoading(false);
-      }
-      setLoading(false);
+        if (nextOwner) {
+          localStorage.setItem(LAST_USER_KEY, nextOwner);
+          void navigator.storage?.persist?.();
+          // Outside the synchronous auth callback to avoid Supabase auth locking.
+          void fetchProfile(nextOwner, epoch);
+          void fetchRole(nextOwner, epoch);
+        }
+      }).catch(() => {
+        // Keep children unmounted when cleanup fails. Never expose the old store.
+        if (!disposed && epoch === generation.current) { setLoading(true); setTransitionError(true); }
+      });
+    };
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      receivedEvent = true;
+      transition(newSession);
     });
+    void supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      if (!receivedEvent && !disposed) transition(existingSession);
+    });
+    return () => { disposed = true; generation.current++; owner.current = undefined; subscription.unsubscribe(); };
+  }, [fetchProfile, fetchRole]);
 
-    return () => subscription.unsubscribe();
-  }, [fetchProfile, fetchRole, queryClient]);
+  useEffect(() => installQuerySyncListener(cache.client), [cache]);
 
   const handleAuthError = (error: AuthError) => {
     const messages: Record<string, string> = {
@@ -208,7 +216,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{ user, session, profile, role, loading, roleLoading, signIn, signUp, signOut, signInWithOAuth, resetPassword, updatePassword, refreshProfile }}
     >
-      {children}
+      {loading ? <div role="status">{transitionError ? <>Your account could not be opened safely. <button onClick={() => window.location.reload()}>Try again</button></> : "Loading your account..."}</div> : (
+        <QueryClientProvider client={cache.client} key={user?.id ?? "anonymous"}>
+          {children}
+        </QueryClientProvider>
+      )}
     </AuthContext.Provider>
   );
 }
