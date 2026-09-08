@@ -70,6 +70,7 @@ for (const file of files) {
 
 // 3. scheduler-triggered functions must authenticate the scheduler.
 const CRON_GATED = [
+  "github-sync-scheduled",
   "drain-note-ai-jobs",
   "profile-reconcile",
   "profile-audit",

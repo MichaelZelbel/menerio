@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/code-review-20260908]
   pull_request:
     branches: [main]
 
@@ -19,7 +19,7 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run lint
+      - run: npm run lint -- --max-warnings 1453
       - run: npm run check:functions
       - run: node scripts/check-brand-strings.mjs
       - run: npm test
@@ -44,3 +44,42 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: psql -h localhost -U postgres -d share_review_test -f scripts/test-share-ownership.sql
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Test sync permissions, contact pagination and atomic merges
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          MERGE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/merge_review_test
+        run: |
+          createdb github_sync_test
+          psql -d github_sync_test -f scripts/test-github-sync-lease.sql
+          createdb github_note_owner_test
+          psql -d github_note_owner_test -f scripts/test-github-note-ownership.sql
+          createdb contact_pagination_test
+          psql -v ON_ERROR_STOP=1 -d contact_pagination_test -f scripts/bootstrap-contact-pagination-test.sql -f supabase/migrations/20260908120004_contact_search_pages.sql -f scripts/test-contact-pagination.sql
+          createdb merge_review_test
+          psql -v ON_ERROR_STOP=1 -d merge_review_test -f scripts/bootstrap-merge-review-test.sql -f supabase/migrations/20260907140000_contact_topics.sql -f supabase/migrations/20260907141000_contact_topic_conflict_http.sql -f supabase/migrations/20260908120002_atomic_contact_merge.sql
+          node scripts/test-merge-review.mjs
+
+  browser-account-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install pinned browser test tools outside application dependencies
+        run: |
+          npm install --prefix /tmp/review-browser --no-package-lock playwright@1.62.1
+          /tmp/review-browser/node_modules/.bin/playwright install --with-deps chromium
+      - name: Test two tabs and real IndexedDB
+        env:
+          REVIEW_PLAYWRIGHT_MODULE: /tmp/review-browser/node_modules/playwright/index.mjs
+        run: node scripts/test-review-browser.mjs
