@@ -1,101 +1,37 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
+import { runGithubSync } from "../_shared/github-sync-run.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
+const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-key", "Content-Type": "application/json" };
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
+  if (req.method === "OPTIONS") return new Response(null, { headers });
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const serviceClient = createClient(supabaseUrl, SERVICE_ROLE_KEY);
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-    // Auth: either a user JWT (manual sync from app) OR the service role key (cron).
-    const authHeader = req.headers.get("Authorization") || "";
-    const isServiceRole = authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
-    if (!isServiceRole && !authHeader.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Identify the user when called with a user JWT; service-role calls process all connections.
+    const url = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const authorization = req.headers.get("Authorization") || "";
+    const scheduler = (Boolean(serviceKey) && authorization === `Bearer ${serviceKey}`) || await isValidCronRequest(req);
     let userId: string | null = null;
-    if (!isServiceRole && authHeader.startsWith("Bearer ")) {
-      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData } = await userClient.auth.getClaims(token);
-      if (!claimsData?.claims) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      userId = claimsData.claims.sub as string;
+    if (!scheduler) {
+      if (!authorization.startsWith("Bearer ")) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers });
+      const userClient = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } } });
+      const { data, error } = await userClient.auth.getClaims(authorization.slice(7));
+      if (error || !data?.claims?.sub) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers });
+      userId = data.claims.sub as string;
     }
-
-    // Get connections to sync
-    let query = serviceClient
-      .from("github_connections")
-      .select("*")
-      .eq("sync_enabled", true)
-      .in("sync_direction", ["bidirectional", "import"]);
-
-    if (userId) {
-      query = query.eq("user_id", userId);
-    }
-
-    const { data: connections } = await query;
-    if (!connections || connections.length === 0) {
-      return new Response(JSON.stringify({ message: "No connections to sync" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const results: { user_id: string; success: boolean; error?: string }[] = [];
-
-    for (const conn of connections) {
-      try {
-        // Call github-sync-pull for this user
-        const pullRes = await fetch(`${supabaseUrl}/functions/v1/github-sync-pull`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${conn.github_token}`,
-          },
-          body: JSON.stringify({}),
-        });
-
-        // Since we can't use the user's JWT from a cron context, we directly
-        // call the sync logic inline for each connection. For simplicity,
-        // just update last_sync_at — the actual pull is done when user triggers "Sync Now"
-        // or via the pull function with proper auth.
-
-        // For cron: we mark last_sync_at so the UI knows when sync ran
-        await serviceClient
-          .from("github_connections")
-          .update({ last_sync_at: new Date().toISOString() })
-          .eq("id", conn.id);
-
-        results.push({ user_id: conn.user_id, success: true });
-      } catch (err) {
-        results.push({ user_id: conn.user_id, success: false, error: String(err) });
-      }
-    }
-
-    return new Response(JSON.stringify({ results }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const client = createClient(url, serviceKey);
+    const connections = await selectAllRows<any>((from, to) => {
+      let query = client.from("github_connections").select("*").eq("sync_enabled", true).in("sync_direction", ["bidirectional", "import", "export"]).order("id").range(from, to);
+      if (userId) query = query.eq("user_id", userId);
+      return query;
     });
-  } catch (err) {
-    console.error("github-sync-scheduled error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders });
+    const results = [];
+    for (const connection of connections) {
+      const result = await runGithubSync(client, connection.user_id, connection);
+      results.push({ connection_id: connection.id, ...result });
+    }
+    const success = results.every(result => result.success);
+    return new Response(JSON.stringify({ success, results }), { status: success ? 200 : 502, headers });
+  } catch {
+    return new Response(JSON.stringify({ success: false, error: "Scheduled synchronization failed" }), { status: 502, headers });
   }
 });

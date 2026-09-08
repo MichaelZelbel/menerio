@@ -1,3 +1,4 @@
+import { selectAllRows } from "./paged-select.ts";
 // Sweep-export and pull-apply logic for the People & Groups vault mirror.
 // Used by github-people-sync (export/conflicts) and github-sync-pull (pull).
 //
@@ -69,29 +70,15 @@ function entityKey(type: string, id: string): string {
 }
 
 export async function loadPeopleData(db: DbClient, userId: string): Promise<PeopleData> {
-  // Explicit range: PostgREST's default 1000-row cap would silently truncate
-  // large datasets, and a truncated contacts list would make the retire pass
-  // delete files for contacts that still exist.
-  const MAX = 9999;
-  const [contactsRes, groupsRes, membershipsRes, entriesRes, categoriesRes, syncRes] = await Promise.all([
-    db.from("contacts").select("*").eq("user_id", userId).range(0, MAX),
-    db.from("contact_groups").select("*").eq("user_id", userId).range(0, MAX),
-    db.from("contact_group_memberships").select("*").eq("user_id", userId).range(0, MAX),
-    db.from("profile_entries").select("*").eq("user_id", userId).not("contact_id", "is", null).range(0, MAX),
-    db.from("profile_categories").select("*").eq("user_id", userId).not("contact_id", "is", null).range(0, MAX),
-    db.from("github_sync_log").select("*").eq("user_id", userId).in("entity_type", ["person", "group"]).range(0, MAX),
+  const [contacts, groups, memberships, entries, categories, syncRows] = await Promise.all([
+    selectAllRows((from,to)=>db.from("contacts").select("*").eq("user_id",userId).order("id").range(from,to)),
+    selectAllRows((from,to)=>db.from("contact_groups").select("*").eq("user_id",userId).order("id").range(from,to)),
+    selectAllRows((from,to)=>db.from("contact_group_memberships").select("*").eq("user_id",userId).order("id").range(from,to)),
+    selectAllRows((from,to)=>db.from("profile_entries").select("*").eq("user_id",userId).not("contact_id","is",null).order("id").range(from,to)),
+    selectAllRows((from,to)=>db.from("profile_categories").select("*").eq("user_id",userId).not("contact_id","is",null).order("id").range(from,to)),
+    selectAllRows((from,to)=>db.from("github_sync_log").select("*").eq("user_id",userId).in("entity_type",["person","group"]).order("id").range(from,to)),
   ]);
-  for (const res of [contactsRes, groupsRes, membershipsRes, entriesRes, categoriesRes, syncRes]) {
-    if (res.error) throw new Error(`People sync data load failed: ${res.error.message}`);
-  }
-  return {
-    contacts: contactsRes.data || [],
-    groups: groupsRes.data || [],
-    memberships: membershipsRes.data || [],
-    entries: entriesRes.data || [],
-    categories: categoriesRes.data || [],
-    syncRows: syncRes.data || [],
-  };
+  return { contacts, groups, memberships, entries, categories, syncRows };
 }
 
 // ─── Indexing helpers ────────────────────────────────────────────────
@@ -369,14 +356,14 @@ export async function sweepPeopleExport(
   for (const g of liveGroups) {
     const row = idx.syncByEntity.get(entityKey("group", g.id));
     if (row?.sync_status === "conflict") continue;
-    if (opts.bulk || !row || !row.synced_at || forceGroups.has(g.id) || groupClusterUpdatedAt(g, idx) > ts(row.synced_at)) {
+    if (opts.bulk || !row || row.sync_status === "pending" || !row.synced_at || forceGroups.has(g.id) || groupClusterUpdatedAt(g, idx) > ts(row.synced_at)) {
       dirtyGroups.add(g.id);
     }
   }
   for (const c of liveContacts) {
     const row = idx.syncByEntity.get(entityKey("person", c.id));
     if (row?.sync_status === "conflict") continue;
-    if (opts.bulk || !row || !row.synced_at || forcePeople.has(c.id) || personClusterUpdatedAt(c, idx) > ts(row.synced_at)) {
+    if (opts.bulk || !row || row.sync_status === "pending" || !row.synced_at || forcePeople.has(c.id) || personClusterUpdatedAt(c, idx) > ts(row.synced_at)) {
       dirtyPeople.add(c.id);
     }
   }

@@ -1,3 +1,7 @@
+export function githubFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  return fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(30_000) });
+}
+
 // GitHub REST helpers shared by the github-* sync functions.
 // Extracted verbatim from github-sync-pull; keep behavior identical.
 
@@ -14,7 +18,7 @@ export async function ensureGithubRepository(token: string, owner: string, repo:
 }
 
 export async function githubGetAuthenticatedUser(token: string) {
-  const res = await fetch("https://api.github.com/user", {
+  const res = await githubFetch("https://api.github.com/user", {
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
   });
   if (!res.ok) throw new Error(`GitHub authentication failed (${res.status}): ${await res.text()}`);
@@ -22,7 +26,7 @@ export async function githubGetAuthenticatedUser(token: string) {
 }
 
 export async function githubGetRepo(token: string, owner: string, repo: string) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+  const res = await githubFetch(`https://api.github.com/repos/${owner}/${repo}`, {
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
   });
   if (res.status === 404) return null;
@@ -31,7 +35,7 @@ export async function githubGetRepo(token: string, owner: string, repo: string) 
 }
 
 export async function githubCreateUserRepo(token: string, repo: string, branch: string) {
-  const res = await fetch("https://api.github.com/user/repos", {
+  const res = await githubFetch("https://api.github.com/user/repos", {
     method: "POST",
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
     body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
@@ -41,7 +45,7 @@ export async function githubCreateUserRepo(token: string, repo: string, branch: 
 }
 
 export async function githubCreateOrgRepo(token: string, org: string, repo: string, branch: string) {
-  const res = await fetch(`https://api.github.com/orgs/${org}/repos`, {
+  const res = await githubFetch(`https://api.github.com/orgs/${org}/repos`, {
     method: "POST",
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
     body: JSON.stringify({ name: repo, private: true, auto_init: true, default_branch: branch || "main" }),
@@ -51,7 +55,7 @@ export async function githubCreateOrgRepo(token: string, org: string, repo: stri
 }
 
 export async function githubGetFile(token: string, owner: string, repo: string, path: string, ref: string) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`, {
+  const res = await githubFetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`, {
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
   });
   if (res.status === 404) return null;
@@ -60,7 +64,7 @@ export async function githubGetFile(token: string, owner: string, repo: string, 
 }
 
 export async function githubGetFileContent(token: string, owner: string, repo: string, path: string, ref: string): Promise<string | null> {
-  const file = await githubGetFile(token, owner, repo, path, ref).catch(() => null);
+  const file = await githubGetFile(token, owner, repo, path, ref);
   if (!file?.content) return null;
   return decodeURIComponent(escape(atob(file.content.replace(/\n/g, ""))));
 }
@@ -75,7 +79,7 @@ export async function githubPutFile(
     branch,
   };
   if (sha) body.sha = sha;
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+  const res = await githubFetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
     method: "PUT",
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -88,7 +92,7 @@ export async function githubDeleteFile(
   token: string, owner: string, repo: string, path: string,
   sha: string, message: string, branch: string,
 ) {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+  const res = await githubFetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
     method: "DELETE",
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
     body: JSON.stringify({ message, sha, branch }),

@@ -17,11 +17,15 @@ export async function selectAllRows<T>(
   pageSize = 1000,
 ): Promise<T[]> {
   const out: T[] = [];
-  for (let from = 0; ; from += pageSize) {
+  if (!Number.isInteger(pageSize) || pageSize < 1) throw new Error("pageSize must be a positive integer");
+  for (let from = 0; ;) {
     const { data, error } = await buildQuery(from, from + pageSize - 1);
     if (error) throw error;
     const rows = data ?? [];
     out.push(...rows);
-    if (rows.length < pageSize) return out;
+    if (rows.length === 0) return out;
+    // A server may cap a response below the requested range. Advance by the
+    // received count and confirm completion with an empty page.
+    from += rows.length;
   }
 }

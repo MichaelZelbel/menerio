@@ -12,14 +12,14 @@ describe("selectAllRows", () => {
     expect(rows[2299].id).toBe(2299);
   });
 
-  it("stops on a short page", async () => {
+  it("continues past an unexpectedly short server page", async () => {
     let calls = 0;
     const rows = await selectAllRows<{ id: number }>(async () => {
       calls += 1;
-      return { data: [{ id: 1 }], error: null };
+      return { data: calls === 1 ? [{ id: 1 }] : [], error: null };
     }, 1000);
     expect(rows).toHaveLength(1);
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
   });
 
   it("handles an exact multiple of the page size without looping forever", async () => {
