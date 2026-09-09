@@ -2,6 +2,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, deductTokens } from "./llm-credits.ts";
 import { runChat } from "./llm-router.ts";
 
+// The prompt-safety helpers live in their own module because this one imports
+// the Supabase client from esm.sh, which the Node test runner cannot resolve —
+// so nothing in here could be unit tested. Re-exported so callers are unchanged.
+export { noteText, sanitizePromptData, sanitizePromptText, taggedPrompt } from "./prompt-safety.ts";
+
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -104,37 +109,4 @@ export async function callMarkdown(
     defaults: { provider: "openrouter", model: MODEL },
   });
   return String(result.content || "").trim();
-}
-
-const UNTRUSTED_TEXT_KEYS = new Set(["name", "title", "summary", "content", "description", "purpose", "company", "role", "notes", "reasoning"]);
-
-export function sanitizePromptText(value: unknown, maxLength = 500) {
-  return String(value ?? "")
-    .replace(/```/g, "'''")
-    .replace(/`/g, "'")
-    .replace(/"""/g, "'''")
-    .slice(0, maxLength);
-}
-
-export function sanitizePromptData<T>(value: T, key = ""): T {
-  if (typeof value === "string") return (UNTRUSTED_TEXT_KEYS.has(key) ? sanitizePromptText(value) : value) as T;
-  if (Array.isArray(value)) return value.map((item) => sanitizePromptData(item)) as T;
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [entryKey, sanitizePromptData(entryValue, entryKey)]),
-    ) as T;
-  }
-  return value;
-}
-
-export function taggedPrompt(sections: Record<string, unknown>) {
-  // Compact JSON. Indentation is billed per token and no human reads this
-  // string; see the note on the same change in `profile-normalization.ts`.
-  return Object.entries(sections)
-    .map(([tag, value]) => `<${tag}>\n${JSON.stringify(sanitizePromptData(value))}\n</${tag}>`)
-    .join("\n\n");
-}
-
-export function noteText(note: { title?: string | null; content?: string | null }) {
-  return `${sanitizePromptText(note.title || "Untitled")}: ${sanitizePromptText((note.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " "))}`;
 }
