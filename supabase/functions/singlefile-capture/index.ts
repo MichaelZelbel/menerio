@@ -21,6 +21,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
+import { isSafeOutboundUrl } from "../_shared/ssrf-guard.ts";
 import {
   decodeEntities,
   extractCanonicalUrl,
@@ -207,58 +208,22 @@ function decodeDataUri(uri: string): { bytes: Uint8Array; mime: string } | null 
 const MAX_HERO_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /**
- * Block hosts that point at private, loopback, link-local, or cloud-metadata
- * addresses. The hero-image URL comes from attacker-controlled uploaded HTML,
- * so fetching it server-side is an SSRF vector (e.g. http://169.254.169.254/…).
- * Note: literal IPs and known-internal hostnames are blocked; a public hostname
- * that *resolves* to a private IP (DNS rebinding) is not caught here, since the
- * Supabase edge runtime doesn't expose reliable DNS resolution — this closes the
- * common vectors, not every theoretical one.
- */
-function isBlockedHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-  if (!h) return true;
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return true;
-  if (h === "metadata.google.internal" || h === "instance-data") return true;
-
-  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;          // link-local incl. metadata
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true;          // private
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    return false;
-  }
-  if (h.includes(":")) {
-    if (h === "::1" || h === "::") return true;
-    if (h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return true;
-    const mapped = h.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // IPv4-mapped IPv6
-    if (mapped) return isBlockedHost(mapped[1]);
-    return false;
-  }
-  return false; // ordinary public hostname
-}
-
-/**
  * Fetch an image URL with SSRF protection: only http(s), reject blocked hosts,
  * and follow redirects manually (re-validating each hop) so a redirect into
  * internal address space is caught rather than blindly followed.
+ *
+ * The host check is `_shared/ssrf-guard.ts`. This file used to carry its own
+ * byte-for-byte copy of it, which meant a fix to one was not a fix to the other:
+ * both were still passing `[::ffff:a9fe:a9fe]` — the cloud metadata endpoint
+ * written in hex — long after the shared version was the one under test.
  */
 async function fetchImageSafely(startUrl: string): Promise<Response | null> {
   let url = startUrl;
   for (let hop = 0; hop < 4; hop++) {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return null;
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (isBlockedHost(parsed.hostname)) {
-      console.warn(`[singlefile-capture] blocked SSRF hero-image fetch to ${parsed.hostname}`);
+    // http is allowed here (unlike the https-only webhook path) because a hero
+    // image on an otherwise-fine page is often served over plain http.
+    if (!isSafeOutboundUrl(url, { requireHttps: false })) {
+      console.warn("[singlefile-capture] blocked SSRF hero-image fetch");
       return null;
     }
     const res = await fetch(url, {
@@ -269,7 +234,12 @@ async function fetchImageSafely(startUrl: string): Promise<Response | null> {
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (!loc) return null;
-      url = new URL(loc, url).toString(); // resolve relative redirects, re-check next loop
+      // A malformed Location header is the remote page's problem, not a 500 of ours.
+      try {
+        url = new URL(loc, url).toString(); // resolve relative redirects, re-check next loop
+      } catch {
+        return null;
+      }
       continue;
     }
     return res;
