@@ -69,7 +69,15 @@ for (const file of files) {
 }
 
 // 3. scheduler-triggered functions must authenticate the scheduler.
-const CRON_GATED = [
+//
+// The list below was hand-written, which made it the weakest part of this check:
+// a function newly put on a schedule is protected only if somebody remembers to
+// add it here, and forgetting leaves no trace. The schedule itself is not a
+// matter of memory — it is in the migrations, as internal.call_edge('name') and
+// cron.schedule(...) — so the list is read from there and the hardcoded names are
+// only a floor, kept so that removing a cron line cannot quietly drop a gate that
+// is still needed.
+const CRON_GATED_FLOOR = [
   "github-sync-scheduled",
   "drain-note-ai-jobs",
   "profile-reconcile",
@@ -78,8 +86,38 @@ const CRON_GATED = [
   "powersync-keepalive",
   "admin-normalize",
 ];
-for (const fn of CRON_GATED) {
+
+function scheduledFunctionNames() {
+  const found = new Set();
+  const dir = "supabase/migrations";
+  if (!existsSync(dir)) return found;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".sql")) continue;
+    const sql = readFileSync(join(dir, name), "utf8");
+    // internal.call_edge('fn-name', …) — how pg_cron reaches a function here.
+    for (const m of sql.matchAll(/call_edge\s*\(\s*'([a-z0-9-]+)'/gi)) found.add(m[1]);
+    // A direct pg_net post to /functions/v1/fn-name from a cron job.
+    for (const m of sql.matchAll(/\/functions\/v1\/([a-z0-9-]+)/gi)) found.add(m[1]);
+  }
+  return found;
+}
+
+// notify-admin is reached by pg_net from a row trigger rather than by the
+// scheduler, and it authenticates with the service-role key instead of the cron
+// key. It is gated, just not by this mechanism.
+const NOT_CRON_GATED = new Set(["notify-admin"]);
+
+const cronGated = new Set(CRON_GATED_FLOOR);
+for (const fn of scheduledFunctionNames()) if (!NOT_CRON_GATED.has(fn)) cronGated.add(fn);
+
+for (const fn of [...cronGated].sort()) {
   const file = join(ROOT, fn, "index.ts");
+  // A renamed or deleted function used to crash this script with a bare ENOENT
+  // stack, which reads like a broken tool rather than a finding.
+  if (!existsSync(file)) {
+    problems.push(`${file}  scheduled in a migration but the function does not exist (renamed or deleted?)`);
+    continue;
+  }
   const src = readFileSync(file, "utf8");
   if (!/\bisValidCronRequest\s*\(/.test(src)) {
     problems.push(`${file}  cron auth missing: must call isValidCronRequest() from _shared/cron-auth.ts`);
