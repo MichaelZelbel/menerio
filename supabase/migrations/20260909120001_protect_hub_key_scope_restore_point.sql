@@ -1,0 +1,19 @@
+-- Protect the scope restore point left behind by 20260818130000.
+--
+-- That migration created public.hub_api_keys_scope_backup_20260818 with
+-- CREATE TABLE ... AS SELECT and never enabled row-level security on it.
+-- Supabase grants anon and authenticated SELECT on new public tables by default,
+-- so a public-schema table with RLS off is readable through the REST API by
+-- anyone holding the (public) anon key. It carries no key hashes, but it does
+-- carry every affected key's id and its full scope set.
+--
+-- This is a latent hole, not a live one: the table does not exist in the
+-- production project (checked 2026-09-09), so it was created and later dropped.
+-- What is still true is that replaying these migrations — a fresh project, a
+-- branch database, a restore, a local `supabase db reset` — recreates it exactly
+-- as it was, unprotected. RLS with no policy attached denies anon and
+-- authenticated outright while service_role continues to bypass it, which is
+-- precisely what a restore point wants.
+--
+-- IF EXISTS so this is a no-op wherever the table has already been cleaned up.
+ALTER TABLE IF EXISTS public.hub_api_keys_scope_backup_20260818 ENABLE ROW LEVEL SECURITY;
