@@ -7,6 +7,114 @@
  * resolving to a private IP) is not caught, since the Supabase edge runtime does
  * not expose reliable DNS resolution — this closes the common vectors.
  */
+/**
+ * Parse an IPv6 literal into its 16 bytes, or null when it is not one.
+ *
+ * Written out rather than pattern-matched because the previous version tested
+ * string prefixes ("::1", "fe80", "fc", "fd") and a trailing dotted quad, and an
+ * IPv6 address has too many spellings for that to hold: `0:0:0:0:0:0:0:1` is
+ * loopback and matched none of them, and `::ffff:a9fe:a9fe` is the cloud
+ * metadata endpoint written in hex instead of dotted form, which is exactly the
+ * address this guard exists to refuse. Both were allowed through. Comparing
+ * bytes has no spellings.
+ */
+function parseIPv6(text: string): Uint8Array | null {
+  let head = text;
+  let tail = "";
+  const doubleColon = text.indexOf("::");
+  if (doubleColon !== -1) {
+    if (text.indexOf("::", doubleColon + 1) !== -1) return null; // only one "::" is legal
+    head = text.slice(0, doubleColon);
+    tail = text.slice(doubleColon + 2);
+  }
+
+  const bytes: number[] = [];
+  const pushGroups = (part: string, into: number[]): boolean => {
+    if (part === "") return true;
+    const groups = part.split(":");
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      // A trailing dotted quad ("::ffff:127.0.0.1") stands for the last 4 bytes.
+      if (group.includes(".")) {
+        if (i !== groups.length - 1) return false;
+        const quad = group.split(".");
+        if (quad.length !== 4) return false;
+        for (const octet of quad) {
+          if (!/^\d{1,3}$/.test(octet)) return false;
+          const value = Number(octet);
+          if (value > 255) return false;
+          into.push(value);
+        }
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(group)) return false;
+      const value = parseInt(group, 16);
+      into.push(value >> 8, value & 0xff);
+    }
+    return true;
+  };
+
+  const headBytes: number[] = [];
+  const tailBytes: number[] = [];
+  if (!pushGroups(head, headBytes)) return null;
+  if (!pushGroups(tail, tailBytes)) return null;
+
+  if (doubleColon === -1) {
+    if (headBytes.length !== 16) return null;
+    return new Uint8Array(headBytes);
+  }
+  const fill = 16 - headBytes.length - tailBytes.length;
+  if (fill < 0) return null;
+  bytes.push(...headBytes, ...new Array(fill).fill(0), ...tailBytes);
+  return new Uint8Array(bytes);
+}
+
+/** True when the four bytes name an address we refuse to fetch. */
+function isBlockedIPv4Bytes(a: number, b: number, _c: number, _d: number): boolean {
+  if (a === 0 || a === 10 || a === 127) return true;       // this-network, private, loopback
+  if (a === 169 && b === 254) return true;                  // link-local incl. cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;         // private
+  if (a === 192 && b === 168) return true;                  // private
+  if (a === 100 && b >= 64 && b <= 127) return true;        // CGNAT
+  if (a === 192 && b === 0 && _c === 0) return true;         // IETF protocol assignments
+  if (a >= 224) return true;                                 // multicast and reserved
+  return false;
+}
+
+/** True when the 16 bytes name an IPv6 address we refuse to fetch. */
+function isBlockedIPv6Bytes(ip: Uint8Array): boolean {
+  const allZeroUpTo = (n: number) => ip.subarray(0, n).every((b) => b === 0);
+
+  if (allZeroUpTo(15) && ip[15] === 1) return true; // ::1 loopback, any spelling
+  if (allZeroUpTo(16)) return true;                 // :: unspecified, any spelling
+
+  // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible ::/96 both carry a v4 address
+  // in the last four bytes; judge it as the v4 address it is.
+  if (allZeroUpTo(10) && ip[10] === 0xff && ip[11] === 0xff) {
+    return isBlockedIPv4Bytes(ip[12], ip[13], ip[14], ip[15]);
+  }
+  // IPv4-translated ::ffff:0:0:0/96 (RFC 2765) — same reasoning.
+  if (allZeroUpTo(8) && ip[8] === 0xff && ip[9] === 0xff && ip[10] === 0 && ip[11] === 0) {
+    return isBlockedIPv4Bytes(ip[12], ip[13], ip[14], ip[15]);
+  }
+  if (allZeroUpTo(12)) return true; // ::a.b.c.d deprecated compatible range
+  // NAT64 well-known prefix 64:ff9b::/96 embeds a v4 address too.
+  if (ip[0] === 0x00 && ip[1] === 0x64 && ip[2] === 0xff && ip[3] === 0x9b && allZeroUpToRange(ip, 4, 12)) {
+    return isBlockedIPv4Bytes(ip[12], ip[13], ip[14], ip[15]);
+  }
+
+  if ((ip[0] & 0xfe) === 0xfc) return true;                       // fc00::/7 unique-local
+  if (ip[0] === 0xfe && (ip[1] & 0xc0) === 0x80) return true;      // fe80::/10 link-local
+  if (ip[0] === 0xff) return true;                                 // ff00::/8 multicast
+  if (ip[0] === 0x20 && ip[1] === 0x01 && ip[2] === 0x00 && (ip[3] & 0xf0) === 0x00) return true; // 2001:0::/24 teredo/orchid
+  return false;
+}
+
+function allZeroUpToRange(ip: Uint8Array, from: number, to: number): boolean {
+  for (let i = from; i < to; i++) if (ip[i] !== 0) return false;
+  return true;
+}
+
 export function isBlockedHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   if (!h) return true;
@@ -15,21 +123,17 @@ export function isBlockedHost(host: string): boolean {
 
   const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    return false;
+    const octets = [Number(v4[1]), Number(v4[2]), Number(v4[3]), Number(v4[4])];
+    // Not a valid dotted quad at all; nothing will resolve it, so refuse.
+    if (octets.some((o) => o > 255)) return true;
+    return isBlockedIPv4Bytes(octets[0], octets[1], octets[2], octets[3]);
   }
   if (h.includes(":")) {
-    if (h === "::1" || h === "::") return true;
-    if (h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return true;
-    const mapped = h.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // IPv4-mapped IPv6
-    if (mapped) return isBlockedHost(mapped[1]);
-    return false;
+    const ip = parseIPv6(h);
+    // Contains a colon but is not a parseable IPv6 literal: refuse rather than
+    // guess. A hostname cannot contain a colon, so there is nothing legitimate here.
+    if (!ip) return true;
+    return isBlockedIPv6Bytes(ip);
   }
   return false; // ordinary public hostname
 }
