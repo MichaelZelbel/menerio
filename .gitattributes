@@ -1,0 +1,43 @@
+# Normalise line endings so a Windows checkout runs the same code CI runs.
+#
+# There was no .gitattributes here and core.autocrlf=true is the Windows default,
+# so every text file arrived in the working tree with CRLF while CI on Linux saw
+# LF. That is not cosmetic: it silently broke the merge-contacts handler test
+# (a regex line-strip whose `.` cannot match `\r`), and it is the same reason a
+# shell script committed from Windows fails with "bad interpreter: ^M".
+#
+# Declaring the endings in the repo means the tool decides, not the developer's
+# git config.
+
+# Everything text-like is normalised to LF in the repo and checked out as LF.
+* text=auto eol=lf
+
+# Shell scripts and anything with a shebang MUST be LF or the interpreter breaks.
+*.sh   text eol=lf
+*.bash text eol=lf
+*.mjs  text eol=lf
+
+# Windows-only scripts want CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binaries: never touched.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.icns binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.mp4  binary
+*.wasm binary
+
+# Lockfiles are generated; keep them out of review diffs.
+package-lock.json linguist-generated=true -diff
+bun.lock          linguist-generated=true -diff
