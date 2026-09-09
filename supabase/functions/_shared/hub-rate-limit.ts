@@ -12,14 +12,11 @@ export async function checkRateLimit(
   );
 
   const now = new Date();
-  const windowStart = new Date(
-    Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS
-  ).toISOString();
+  const windowStartMs = Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS;
+  const windowStart = new Date(windowStartMs).toISOString();
 
   const rateLimited = () => {
-    const windowEnd =
-      Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS + WINDOW_MS;
-    const retryAfter = Math.ceil((windowEnd - now.getTime()) / 1000);
+    const retryAfter = Math.ceil((windowStartMs + WINDOW_MS - now.getTime()) / 1000);
     return {
       allowed: false as const,
       retryAfter,
@@ -41,34 +38,46 @@ export async function checkRateLimit(
     };
   };
 
-  // Read the current count for this window, decide, then increment.
-  // NOTE: the previous implementation upserted `request_count: 1` on every
-  // call, which reset the counter to 1 each request via ON CONFLICT DO UPDATE —
-  // so the limit was NEVER reached and every key was effectively unlimited.
-  // Here we read the real count and only bump it. There is a small benign race
-  // under highly concurrent bursts (two callers can both read N and write N+1,
-  // undercounting slightly); that is acceptable for an abuse throttle and is
-  // vastly better than the permanent bypass. A fully atomic version would use a
-  // DB-side `INSERT ... ON CONFLICT DO UPDATE SET request_count = request_count + 1`
-  // function once the table's column types are confirmed.
-  const { data: existing } = await supabaseAdmin
-    .from("hub_api_usage")
-    .select("request_count")
-    .eq("key_id", keyId)
-    .eq("window_start", windowStart)
-    .maybeSingle();
+  // One statement counts the request and decides, inside the database.
+  //
+  // This used to be SELECT the count, compare it, then UPSERT the absolute value
+  // count + 1. Sequentially that is correct, which is why it read as fine. In
+  // parallel it is not a throttle at all: every caller in a burst reads the same
+  // count and writes the same count + 1, so the stored counter advances by ONE
+  // for the whole burst and every request is admitted. Measured against a limit
+  // of 5, forty concurrent calls all passed and the counter finished at 1 — and
+  // parallel traffic is the only kind a throttle exists to stop.
+  //
+  // `hub_api_bump_usage` does the increment relative to the stored value in a
+  // single INSERT ... ON CONFLICT DO UPDATE, so Postgres serialises conflicting
+  // writers on the unique index and each caller is told its own count.
+  // `scripts/test-hub-rate-limit.mjs` runs both versions against real concurrent
+  // connections so the difference stays proven.
+  const { data, error } = await supabaseAdmin.rpc("hub_api_bump_usage", {
+    p_key_id: keyId,
+    p_window_start: windowStart,
+    p_limit: RATE_LIMIT,
+  });
 
-  const currentCount = existing?.request_count ?? 0;
-  if (currentCount >= RATE_LIMIT) {
-    return rateLimited();
+  if (error) {
+    // Fail OPEN, deliberately, and say so in the log.
+    //
+    // This throttle exists to stop abuse, not to protect data: every caller has
+    // already proven it holds a valid key, and the endpoints behind it enforce
+    // their own scopes and row-level security. A database hiccup here should not
+    // take the whole Hub API offline for legitimate clients. The counter is the
+    // thing that broke, so the honest response is to serve the request and make
+    // the fault loud rather than silent.
+    console.error(
+      `[hub-rate-limit] usage counter unavailable for key=${keyId}: ` +
+        `${[error.code, error.message].filter(Boolean).join(" ")}. Request allowed uncounted.`
+    );
+    return { allowed: true };
   }
 
-  await supabaseAdmin
-    .from("hub_api_usage")
-    .upsert(
-      { key_id: keyId, window_start: windowStart, request_count: currentCount + 1 },
-      { onConflict: "key_id,window_start", ignoreDuplicates: false }
-    );
+  // The RPC returns a one-row table, which supabase-js surfaces as an array.
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row && row.allowed === false) return rateLimited();
 
   return { allowed: true };
 }
