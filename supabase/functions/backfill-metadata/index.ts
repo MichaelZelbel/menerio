@@ -1,9 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getEmbeddingWithCredits, openRouterWithCredits } from "../_shared/llm-credits.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -19,31 +19,14 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text }),
-  });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => "");
-    throw new Error(`Embedding failed: ${r.status} ${msg}`);
-  }
-  const d = await r.json();
-  return d.data[0].embedding;
+// Both calls go through the metered client: balance check, ledger row, repeat guard on chat.
+async function getEmbedding(userId: string, text: string): Promise<number[]> {
+  const { embedding } = await getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, userId, "backfill-metadata", text);
+  return embedding;
 }
 
-async function extractMetadata(text: string): Promise<Record<string, unknown>> {
-  const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+async function extractMetadata(userId: string, text: string): Promise<Record<string, unknown>> {
+  const { result: d } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, userId, "backfill-metadata.main", "chat/completions", {
       model: "deepseek/deepseek-v4-flash",
       response_format: { type: "json_object" },
       messages: [
@@ -61,9 +44,7 @@ Only extract what's explicitly there. Don't invent details.`,
         },
         { role: "user", content: text },
       ],
-    }),
   });
-  const d = await r.json();
   try {
     return JSON.parse(d.choices[0].message.content);
   } catch {
@@ -115,8 +96,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           if (!fullText || fullText.length < 5) return null;
 
           const [embedding, metadata] = await Promise.all([
-            getEmbedding(fullText).catch(() => null),
-            extractMetadata(fullText),
+            getEmbedding(user.id, fullText).catch(() => null),
+            extractMetadata(user.id, fullText),
           ]);
 
           const updatePayload: Record<string, unknown> = { metadata };

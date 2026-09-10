@@ -20,6 +20,7 @@ import { PROFILE_AUDIT_SYSTEM_PROMPT } from "./profile-audit.ts";
 import {
   BLOCKED_LABELS_FOR_PROMPT,
   CANONICAL_LABELS_FOR_PROMPT,
+  PROFILE_CANONICAL_SCHEMA,
   PROFILE_CATEGORY_SLUGS,
 } from "./profile-canonical-schema.ts";
 
@@ -630,6 +631,177 @@ export const ANALYZE_MEDIA_VISION_PROMPT = `Analyze this image. Return JSON:
 - "content_type": one of "screenshot", "photo", "diagram", "chart", "whiteboard", "document", "handwriting", "ui_mockup", "code", "other".
 Only describe what's actually visible.`;
 
+/**
+ * Prompts for the five call sites that ran on inline defaults only, until the
+ * spend audit of 2026-09-11. An unregistered call site does not appear on the
+ * admin screen, cannot be steered there, and had no max_tokens cap. Each text
+ * below is a copy of what its caller passes inline today, so the seeded row
+ * matches what runs now. The callers still hold their own copy (they are
+ * edited separately); when one is next touched, point it at the constant here
+ * and delete the local copy.
+ */
+
+// The 17-slug taxonomy in the order the three extraction callers carry it
+// (classify-profile-fact, enrich-person-from-lexicon, moment extraction).
+// Same set as PROFILE_CATEGORY_SLUGS above, but that one lists "financial"
+// right after "communication" and the callers list it after "digital". The
+// prompts must match the callers word for word, so the callers' order wins.
+const INLINE_PROFILE_CATEGORY_SLUGS = [
+  "identity", "location", "professional", "education", "relationships",
+  "communication", "personality", "principles", "health", "hobbies",
+  "food", "entertainment", "travel", "digital", "financial", "goals", "preferences",
+];
+
+export const PROCESS_NOTE_FICTION_GUARD_PROMPT =
+  "You classify whether extracted names refer to real people the note's author knows, or to fictional characters. Be strict: when the surrounding text frames the name as a character, role, or media reference, mark it fictional. When context is thin, mark it unclear. Output valid JSON only.";
+
+// `{{contactName}}` is interpolated by the llm-router (templateVars).
+export const CLASSIFY_PROFILE_FACT_PROMPT = [
+  `You file a single short fact about a person named "{{contactName}}" into exactly one profile category.`,
+  ``,
+  `Allowed category_slug values (choose STRICTLY one of these 17):`,
+  INLINE_PROFILE_CATEGORY_SLUGS.join(", "),
+  ``,
+  `Canonical labels for the structured categories (prefer these EXACT labels when the fact fits one; other categories are open — use a short natural label):`,
+  CANONICAL_LABELS_FOR_PROMPT,
+  ``,
+  `Rules:`,
+  `- Split the fact into a short "label" (the attribute — a few words) and a "value" (the detail), unless a label and value are already given, in which case keep them.`,
+  `- Prefer a canonical label for structured categories; keep a concise natural label for open categories.`,
+  `- category_slug MUST be exactly one of the 17 slugs listed above.`,
+  `- Return ONLY a JSON object: {"label": string, "value": string, "category_slug": string, "confidence": number between 0 and 1}. No prose, no markdown.`,
+].join("\n");
+
+// Labels the moment extractor lets the model emit, grouped by category slug.
+// Copy of ALLOWED_PROFILE_LABELS in moment-profile-extraction.ts, which also
+// drops anything outside this list after the call.
+const MOMENT_ALLOWED_PROFILE_LABELS: Record<string, string[]> = {
+  identity: ["date of birth", "pronouns", "nationality", "languages", "full name", "nickname"],
+  location: ["current city", "current country", "hometown", "home address", "neighborhood"],
+  professional: ["job title", "company", "employer", "industry", "started role", "previous company", "previous job title"],
+  education: ["school", "university", "degree", "field of study", "graduation year"],
+  relationships: ["partner", "spouse", "children", "siblings", "parents"],
+  communication: ["preferred channel", "email", "phone", "timezone"],
+  personality: ["traits", "communication style"],
+  principles: ["values", "beliefs"],
+  health: ["allergies", "dietary restrictions", "conditions"],
+  hobbies: ["hobbies", "interests", "sports"],
+  food: ["favorite cuisine", "dietary preference", "favorite restaurant", "allergies"],
+  entertainment: ["favorite music", "favorite movies", "favorite books", "favorite shows"],
+  travel: ["bucket list", "visited countries", "favorite destination"],
+  digital: ["website", "github", "linkedin", "twitter", "instagram"],
+  financial: ["currency"],
+  goals: ["short-term goals", "long-term goals"],
+  preferences: ["gift preferences", "coffee order", "drink preference"],
+};
+
+export const EXTRACT_MOMENT_PROFILE_PROMPT = `You are extracting biographical facts about specific real people from a personal life-timeline "moment" (an event or milestone the user recorded).
+
+The moment has a title, optional description, a date, optional category, and a list of named participants (people who were involved).
+
+Return a JSON object with two keys:
+1. "facts": an array of profile fact objects, each with:
+   - "contact_name": the person's name exactly as provided
+   - "category_slug": one of: ${INLINE_PROFILE_CATEGORY_SLUGS.join(", ")}
+   - "label": MUST be one of the allowed labels listed below for the chosen category. Pick the closest match. If none fits, skip the fact.
+   - "value": the actual value (e.g. "Lisbon", "Head of Design at Notion", "1990-05-12")
+    - "source_quote": the shortest exact verbatim quote from the moment title or description that proves this fact
+
+Allowed labels per category (lowercase, use exactly these strings):
+${Object.entries(MOMENT_ALLOWED_PROFILE_LABELS).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n")}
+
+2. "relationships": an array of relationship objects, each with:
+   - "person_a", "person_b" ("me"/"myself" if author)
+   - "label_a_to_b", "label_b_to_a"
+
+HARD RULES (violations cause the fact to be dropped):
+- The "value" MUST appear verbatim (case-insensitive) somewhere in the moment title or description, OR be an ISO date computed from an explicit Nth-birthday phrase. If you cannot point to the exact substring, return an empty facts array.
+- The "label" MUST be from the allowed list above.
+- If the moment describes a one-time action by or about a participant (verbs like: adds, posts, tags, mentions, likes, comments, messages, called, visited, met, hung out, watched, played, attended, shared, followed, replied), return empty arrays UNLESS the same moment ALSO contains an explicit ongoing-attribute clause (e.g. "Tom, now Head of Design at Notion, posted ...").
+- Do not invent attributes that are merely plausible. Only extract what is explicitly stated.
+
+DO EXTRACT clear personal facts the moment establishes about a named participant. Examples that QUALIFY:
+- "Sarah moved to Lisbon" with Sarah → {contact_name: "Sarah", category_slug: "location", label: "current city", value: "Lisbon"}
+- "Tom's promotion to Head of Design at Notion" → {contact_name: "Tom", category_slug: "professional", label: "job title", value: "Head of Design at Notion"}
+- "Anna's 30th birthday" on 2024-03-12 → {contact_name: "Anna", category_slug: "identity", label: "date of birth", value: "1994-03-12"}
+- "Karim and Lina got married" → relationship {person_a: "Karim", person_b: "Lina", label_a_to_b: "spouse", label_b_to_a: "spouse"}
+
+Examples that DO NOT QUALIFY (return empty arrays):
+- "Yumei adds Michael to her Discord banner" → {facts: [], relationships: []}
+- "Tom posted about his vacation" → {facts: [], relationships: []}
+- "Anna tagged me in a photo" → {facts: [], relationships: []}
+- "Karim mentioned Lina in his story" → {facts: [], relationships: []}
+- "Coffee with Sarah" → {facts: [], relationships: []}
+- "Sarah visited Paris" → not a profile fact (one-time activity).
+
+Rules:
+- For dates of birth: if the moment is an Nth birthday with an explicit date, compute year = year(date) - N and emit ISO YYYY-MM-DD.
+- For relationships, use standard labels: employee, employer, friend, brother, sister, mother, father, son, daughter, partner, spouse, mentor, mentee, manager, report, co-worker, neighbor, roommate, client, provider, teacher, student.
+- Return empty arrays if nothing qualifies.`;
+
+export const ENRICH_PERSON_FROM_LEXICON_PROMPT = `You are extracting biographical facts and relationships about ONE specific person from a bundle of evidence (a Lexicon page about them, related Lexicon pages, timeline moments, notes, and attachment OCR text).
+
+Return a JSON object with two keys:
+1. "facts": array of { contact_name, category_slug (one of: ${INLINE_PROFILE_CATEGORY_SLUGS.join(", ")}), label, value, source_quote }
+2. "relationships": array of { person_a, person_b, label_a_to_b, label_b_to_a }
+
+Reasoning rules — apply common sense across ALL evidence, not just one source:
+- Marriage cues anywhere in the evidence — "wife", "husband", "married", "wedding day", "spouse", "anniversary", "Marriage Papers", "Heirat", "Hochzeit", "Ehefrau", "Ehemann" — imply a SPOUSE relationship between the named people. A note titled "Marriage Papers X and Y" plus a wedding-day moment is direct proof.
+- Use "me"/"myself" for the note author when the evidence refers to them in first person ("my wife X") or by their display name.
+- Prefer the strongest label: spouse > partner > lover. If the evidence clearly says "wife"/"husband"/"married", emit "spouse" (not "lover" or "partner").
+- If multiple sources independently support a relationship, you should still emit it once.
+- Use standard relationship labels: spouse, partner, lover, friend, mother, father, parent, child, son, daughter, brother, sister, sibling, mentor, mentee, manager, report, employee, employer, co-worker, neighbor, roommate, client, provider, teacher, student.
+- Do NOT invent facts. If unsure, skip.
+- Every fact must include the shortest exact verbatim source_quote from the supplied evidence. If no exact quote proves it, do not emit it.
+- "value" must contain ONLY the fact itself. Strip editorial, joking, or parenthetical commentary: emit 5'4", NOT 5'4" (fun sized).
+- Emit each distinct fact ONCE, even when several sources state it.
+- Return empty arrays if nothing qualifies.
+
+CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
+${CANONICAL_LABELS_FOR_PROMPT}
+When one of these fits, USE IT EXACTLY. Only use a natural label if none fits.`;
+
+// Copy of buildSchemaDescription() in profile-normalization.ts.
+function normalizeSchemaDescription(): string {
+  const lines: string[] = [];
+  for (const [slug, schema] of Object.entries(PROFILE_CANONICAL_SCHEMA)) {
+    if (schema.shape === "open" || schema.labels.length === 0) {
+      lines.push(`- ${slug} (OPEN): keep user labels as-is; only group exact-meaning duplicates`);
+      continue;
+    }
+    const names = schema.labels
+      .map((l) => `${l.canonical} [${l.single ? "single" : "multi"}]`)
+      .join(", ");
+    lines.push(`- ${slug}: ${names}`);
+  }
+  return lines.join("\n");
+}
+
+export const NORMALIZE_PROFILE_PLAN_PROMPT = `You normalize ONE person's profile (owner or contact). You receive a JSON list of their CURRENT profile_entries. Your job: produce groups of entries that should be merged/relabeled/recategorized/reformatted into a single canonical entry.
+
+Canonical schema (per category, [single]=one truth per subject, [multi]=many allowed):
+${normalizeSchemaDescription()}
+
+Canonical label vocabulary you may use:
+${CANONICAL_LABELS_FOR_PROMPT}
+
+Rules:
+1. Group entries that describe the SAME underlying fact. For each group choose:
+   - canonical_category_slug (from the schema)
+   - canonical_label (use the EXACT canonical label from the schema when it fits; for OPEN categories keep the user's natural label)
+   - canonical_value: the RICHEST/most complete value (e.g. "Dortmund, Germany" over "Dortmund"; an ISO date "2006-01-23" over "January 23 2006"). Normalize dates to YYYY-MM-DD.
+2. A [single] label may appear ONCE per subject. If two [single] entries hold genuinely DIFFERENT values that look like a CHANGE OVER TIME (moved cities, changed jobs), DO NOT merge them. Keep the most current as canonical. If a "Previous X" canonical exists (Previous city, Previous address, Previous employer) emit a separate relabel group for the older one. Otherwise leave both alone (do not emit a group).
+3. NEVER collapse two genuinely different facts into one.
+4. Open categories (personality, principles, health, hobbies, food, entertainment, travel, digital, goals, preferences): only group EXACT-meaning duplicates and fix wrong category. Never force a canonical label onto them.
+5. Fix obviously wrong categories (e.g. "Place of birth" filed under location → identity; wedding/spouse → relationships).
+6. Output ONLY groups that require a CHANGE. If an entry is already canonical, unique, and correctly categorized, omit it.
+7. survivor_entry_id: pick the existing row that already best matches the canonical (richest value + correct category) so we UPDATE it in place. Set null only when no member is a good survivor; in that case the apply step will INSERT a fresh canonical and delete all members.
+8. Only map an entry to a canonical label when the entry's VALUE is consistent with that label's meaning. Never relabel based on the label name alone when the value contradicts it (e.g. 'Humor Style: Witty' is NOT a Social handle). If a field is really a personality/communication-style trait, recategorize it to 'personality' and KEEP its existing label rather than forcing a canonical label. If you are unsure, leave the entry untouched (emit no group for it).
+9. TIME-BASED CONFLICTS (only when a "DATED EVIDENCE" section is provided below): When two [single] entries hold DIFFERENT values and the dated evidence shows the subject CHANGED over time (moved city/address, changed job/employer), set the MOST RECENT/current value as the canonical [single] entry (operation 'reformat' or 'relabel' as appropriate), AND emit a SEPARATE group that relabels the OLDER entry to its 'Previous X' canonical (Previous city / Previous address / Previous employer), operation 'relabel', keeping that older entry's value. Cite the evidence (note title or date) in the rationale. Only do this when the dated evidence supports it; if it remains unclear, leave both entries unchanged (emit nothing). Each such group has exactly one member entry.
+
+Return JSON ONLY in this shape (no prose):
+{ "groups": [ { "member_entry_ids": ["uuid", ...], "survivor_entry_id": "uuid"|null, "canonical_category_slug": "string", "canonical_label": "string", "canonical_value": "string", "operation": "merge"|"relabel"|"recategorize"|"reformat", "confidence": 0.0, "rationale": "short string" } ] }`;
+
 // ---------- registry ----------
 
 export interface CallSiteDefault {
@@ -646,6 +818,15 @@ export interface CallSiteDefault {
   placeholders: string[];
 }
 
+/**
+ * max_tokens is a cap on every chat call site since the spend audit of
+ * 2026-09-11, when 31 of 33 rows had null (unbounded). Sized to what the site
+ * returns: small verdicts and single fields 300 to 500, metadata JSON 800 to
+ * 1200, extraction 2500, page rewrites and chat 4000. The OCR and embedding
+ * rows stay null because the option does not apply to them. A non-force
+ * admin sync leaves an existing row's max_tokens alone, so a row seeded
+ * before this date only picks the cap up through a force sync or an edit.
+ */
 export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
   {
     call_site: "ai-moderate-content.main",
@@ -653,7 +834,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "lovable",
     model: "google/gemini-3-flash-preview",
     system_prompt: AI_MODERATE_CONTENT_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 400, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "analyze-media.ocr",
@@ -669,7 +850,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "mistral",
     model: "mistral-small-latest",
     system_prompt: ANALYZE_MEDIA_PAGE_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 800, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "analyze-media.vision",
@@ -677,7 +858,17 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "mistral",
     model: "pixtral-12b-2409",
     system_prompt: ANALYZE_MEDIA_VISION_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 800, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+    // Registered 2026-09-11. Ran on inline defaults only before that, with no cap.
+    call_site: "classify-profile-fact",
+    description: "Files one short fact typed into a person's profile under a label, value and category.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: CLASSIFY_PROFILE_FACT_PROMPT,
+    temperature: 0.1, max_tokens: 600, extra_options: JSON_OBJECT, enabled: true,
+    placeholders: ["contactName"],
   },
   {
     call_site: "conversation-chat.main",
@@ -685,7 +876,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "minimax/minimax-m2.7",
     system_prompt: CONVERSATION_CHAT_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: ["personContext"],
+    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true, placeholders: ["personContext"],
   },
   {
     call_site: "daily-digest.main",
@@ -693,7 +884,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: DAILY_DIGEST_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "draft-event.main",
@@ -701,7 +892,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "google/gemini-2.5-flash",
     system_prompt: DRAFT_EVENT_PROMPT,
-    temperature: 0.2, max_tokens: null, extra_options: {}, enabled: true,
+    temperature: 0.2, max_tokens: 2500, extra_options: {}, enabled: true,
     placeholders: ["currentDate", "peopleContext"],
   },
   {
@@ -713,13 +904,31 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
   },
   {
+    // Registered 2026-09-11. Ran on inline defaults only before that, with no cap.
+    call_site: "enrich-person-from-lexicon",
+    description: "Extracts profile facts and relationships for one person from their Lexicon page, moments, notes and OCR text.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: ENRICH_PERSON_FROM_LEXICON_PROMPT,
+    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
     call_site: "extract-event.main",
     description: "Extracts a single timeline event from a note.",
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: EXTRACT_EVENT_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true,
+    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true,
     placeholders: ["currentDate"],
+  },
+  {
+    // Registered 2026-09-11. Ran on inline defaults only before that, with no cap.
+    call_site: "extract-moment-profile",
+    description: "Extracts profile facts and relationships about the participants of one timeline moment.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: EXTRACT_MOMENT_PROFILE_PROMPT,
+    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "find-connections.main",
@@ -727,7 +936,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: FIND_CONNECTIONS_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 800, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "generate-profile-suggestions.main",
@@ -735,7 +944,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GENERATE_PROFILE_SUGGESTIONS_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.briefing",
@@ -743,7 +952,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_BRIEFING_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.next_step",
@@ -751,7 +960,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_NEXT_STEP_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.suggest_members",
@@ -759,7 +968,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_SUGGEST_MEMBERS_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "ingest-thought.metadata",
@@ -767,7 +976,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: INGEST_THOUGHT_METADATA_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "note-chat.main",
@@ -775,7 +984,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "minimax/minimax-m2.7",
     system_prompt: NOTE_CHAT_NOTE_MODE_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true,
+    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true,
     placeholders: ["noteContext"],
   },
   {
@@ -784,7 +993,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "minimax/minimax-m2.7",
     system_prompt: NOTE_CHAT_GENERAL_MODE_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "note-chat.summarize",
@@ -792,7 +1001,18 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: NOTE_CHAT_SUMMARIZE_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1200, extra_options: {}, enabled: true, placeholders: [],
+  },
+  {
+    // Registered 2026-09-11. Ran on inline defaults only before that, with no
+    // cap, and it is the most expensive call site in the app (see the note on
+    // compact JSON in profile-normalization.ts).
+    call_site: "normalize-profile.plan",
+    description: "Plans which profile entries of one person to merge, relabel, recategorize or reformat.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: NORMALIZE_PROFILE_PLAN_PROMPT,
+    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "profile-audit.main",
@@ -800,7 +1020,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "google/gemini-2.5-flash",
     system_prompt: PROFILE_AUDIT_SYSTEM_PROMPT,
-    temperature: 0, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
 
@@ -809,7 +1029,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_METADATA_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "process-note.profile_extraction",
@@ -817,7 +1037,16 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+  },
+  {
+    // Registered 2026-09-11. Ran on inline defaults only before that, with no cap.
+    call_site: "process-note.fiction_guard",
+    description: "Verdicts each extracted name as a real person, a fictional character, or unclear.",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    system_prompt: PROCESS_NOTE_FICTION_GUARD_PROMPT,
+    temperature: null, max_tokens: 800, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     // Registered so it is visible and steerable from the admin screen. It was
@@ -832,7 +1061,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_MOMENT_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "quick-capture.metadata",
@@ -840,7 +1069,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: QUICK_CAPTURE_METADATA_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "relationship.adjudication",
@@ -864,7 +1093,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: SUGGEST_CONNECTIONS_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "weekly-review.main",
@@ -872,7 +1101,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WEEKLY_REVIEW_PROMPT,
-    temperature: null, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-cleanup.main",
@@ -880,7 +1109,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_CLEANUP_PROMPT,
-    temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-restructure.main",
@@ -888,7 +1117,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_RESTRUCTURE_PROMPT,
-    temperature: 0, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-ingest.main",
@@ -896,7 +1125,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_INGEST_PROMPT,
-    temperature: null, max_tokens: null, extra_options: {}, enabled: true,
+    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true,
     placeholders: ["existingPagesIndex"],
   },
   {
@@ -905,7 +1134,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
-    temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-lint.main",
@@ -913,7 +1142,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_LINT_PROMPT,
-    temperature: 0.1, max_tokens: null, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
 ];
 

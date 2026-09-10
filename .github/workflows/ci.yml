@@ -56,6 +56,7 @@ jobs:
           PGPASSWORD: postgres
           MERGE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/merge_review_test
           HUB_RATE_LIMIT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/hub_rate_limit_test
+          NOTE_AI_NORMALIZE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/note_ai_normalize_test
         run: |
           createdb github_sync_test
           psql -d github_sync_test -f scripts/test-github-sync-lease.sql
@@ -69,6 +70,8 @@ jobs:
           createdb hub_rate_limit_test
           psql -v ON_ERROR_STOP=1 -d hub_rate_limit_test -f scripts/bootstrap-hub-rate-limit-test.sql
           node scripts/test-hub-rate-limit.mjs
+          createdb note_ai_normalize_test
+          node scripts/test-note-ai-normalize.mjs
 
   browser-account-isolation:
     runs-on: ubuntu-latest

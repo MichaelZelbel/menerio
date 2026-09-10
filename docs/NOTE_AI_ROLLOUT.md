@@ -9,9 +9,10 @@ Production project identified by the plan and read-only inspection: `tjeapelvjlm
 ## Defaults being introduced
 
 - Save immediately through the existing editor/local database paths.
-- Wait two minutes after the last relevant input change.
-- Space automatic starts for each note/pipeline by ten minutes.
-- After fifteen minutes pending during continuous editing, make the latest snapshot eligible, subject to spacing and available capacity.
+- A new note is eligible two minutes after capture. A revision waits ten minutes after the last relevant input change (since 2026-09-11; it was two minutes for revisions too).
+- The fingerprint hashes a normalized body (`public.note_ai_normalize_text`): checkbox state, line endings, trailing whitespace and blank-line runs are not a revision. A checklist ticked through one day cost 17 runs before this (2026-09-10).
+- Space automatic starts for each note/pipeline by ten minutes, doubling with every run completed in the last 24 hours (analysis 10, 20, 40, 80, 120 min cap; Lexicon 1, 2, 4, 6 h cap). Manual requests ignore spacing.
+- After sixty minutes pending during continuous editing, make the latest snapshot eligible, subject to spacing and available capacity.
 - Manual requests get priority, not permission to repeat a completed fingerprint or bypass a lease/balance check.
 - At most three attempts for a revision. Known no-credit refusals park for a cheap one-hour probe or an explicit manual wake. Uncertain paid outcomes retain a diagnostic fence rather than buying another call immediately.
 - One scheduler tick per minute, at most ten admissions and two concurrent executions per invocation. Default admission window is 25 seconds; execution HTTP timeout is 110 seconds. Queue leases are five minutes.

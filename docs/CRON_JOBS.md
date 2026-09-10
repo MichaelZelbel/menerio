@@ -36,7 +36,7 @@ literal reappears in function code.
 | 10 | gdrive-watch-maintenance | 0 * * * * | gdrive-watch-maintenance | x-cron-key (own env key, predates call_edge) |
 | 11 | profile-lint-nightly | 20 3 * * * | profile-lint | x-cron-key (own env key, predates call_edge) |
 | 12 | profile-reconcile-sweep | 17 */2 * * * | profile-reconcile | x-cron-key via call_edge |
-| 13 | profile-audit-sweep | */15 * * * * | profile-audit | x-cron-key via call_edge |
+| 16 | profile-audit-sweep | 50 */6 * * * | profile-audit | x-cron-key via call_edge (was job 13 at */15; retimed 2026-09-03) |
 | 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge; **inactive since 2026-09-07**, see runbook |
 | 15 | profile-explode-bags-nightly | 40 3 * * * | normalize-profile (explode_bags) | x-cron-key (own env key, predates call_edge) |
 
@@ -67,9 +67,9 @@ and can be re-enabled with `cron.alter_job(14, active := true)`.
 
 ### Deferred note worker (local implementation, not yet deployed)
 
-`20260907130000_schedule_note_ai_jobs.sql` adds `drain-note-ai-jobs` at once per minute, **inactive**, plus a disabled worker setting with an empty account allowlist. It uses the existing `internal.call_edge` and `isValidCronRequest`, not another secret. Enabling the timer alone cannot enable execution.
+`20260907130000_schedule_note_ai_jobs.sql` adds `drain-note-ai-jobs` at once per minute (job 18, **active since 2026-09-07**, worker setting enabled for all accounts), initially installed inactive with a disabled worker setting and an empty account allowlist. It uses the existing `internal.call_edge` and `isValidCronRequest`, not another secret. Enabling the timer alone cannot enable execution.
 
-The worker admits at most ten jobs per tick and holds at most two execution slots. Database claims enforce per-job exclusion across workers. Admission stops after 25 seconds, reserving 110 seconds for the final HTTP call plus margin under the documented 150-second free-plan runtime. This is an execution-capacity bound, not a change to the two-minute quiet period, ten-minute spacing or fifteen-minute pending target.
+The worker admits at most ten jobs per tick and holds at most two execution slots. Database claims enforce per-job exclusion across workers. Admission stops after 25 seconds, reserving 110 seconds for the final HTTP call plus margin under the documented 150-second free-plan runtime. This is an execution-capacity bound, not a change to the quiet period, spacing or pending target (values in `NOTE_AI_ROLLOUT.md`; since 2026-09-11 revisions wait ten minutes, spacing doubles per run in the last day, and cosmetic edits such as a ticked checkbox are not a revision).
 
 `internal.call_edge` has a ten-second HTTP timeout. The worker authenticates, reads its configuration and returns acceptance while `EdgeRuntime.waitUntil` runs the drain. HTTP 202 is not completion. Inspect the drain's final counts, `note_ai_jobs` states and `note_ai_completions`, as well as `net._http_response`. Unknown dispatch outcomes retain an uncertainty diagnostic instead of an immediate paid retry.
 

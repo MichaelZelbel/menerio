@@ -775,6 +775,9 @@ serve(async (req) => {
       const preferences = await getSuggestionPreferences(db, userId);
       const force = body?.force === true;
       const includeNotesContext = body?.includeNotesContext === false ? false : true;
+      // The profile page asks for this on every mount; folding duplicates is free,
+      // the model plan is not, and it already runs from the note pipeline.
+      const deterministicOnly = body?.deterministic_only === true;
 
       const subjects: Array<string | null> = [];
       if (scope === "owner") {
@@ -827,6 +830,7 @@ serve(async (req) => {
               preferences,
               sourceNoteId: null,
               includeNotesContext,
+              deterministicOnly,
               // A deliberate rerun bypasses the cache once, not on follow-up passes.
               manual: force && pass === 0,
               helpers,

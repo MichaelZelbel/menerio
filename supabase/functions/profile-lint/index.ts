@@ -10,6 +10,7 @@ import {
   exactQuoteExists,
   noteContentHash,
   recoverRelationshipEvidence,
+  type RelationshipAdjudication,
 } from "../_shared/relationship-adjudicator.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
@@ -62,6 +63,18 @@ async function findRelationshipSource(userId: string, relationshipId: string) {
   return data as { source_note_id: string | null; payload: Record<string, unknown> | null; description: string | null } | null;
 }
 
+/** Rebuild a verdict from a relationship_evidence row so an unchanged note is not re-judged. */
+function storedAdjudication(e: any, label: string): RelationshipAdjudication {
+  const outcome: RelationshipAdjudication["outcome"] = ["keep", "reject", "review"].includes(e.outcome) ? e.outcome : "review";
+  return {
+    outcome, reason: String(e.reason || "Evidence adjudicated"), canonicalLabel: e.adjudicated_label || canonicalLabel(label) || null, inverseLabel: null,
+    personAKind: e.real_person_a ? "real_person" : "unclear", personBKind: e.real_person_b ? "real_person" : "unclear",
+    personallyRelevant: e.personally_relevant === true, relationshipSupported: e.relationship_supported === true,
+    incidentalOrTransactional: e.incidental_or_transactional === true, fictionalOrRoleplay: e.fictional_or_roleplay === true,
+    confidence: Number(e.confidence) || 0,
+  };
+}
+
 async function processRelationshipRepairBatch(userId: string, runId: string, batchSize: number) {
   const { data: run, error: runError } = await admin.from("relationship_repair_runs").select("*").eq("id", runId).eq("user_id", userId).single();
   if (runError || !run) throw runError || new Error("Repair run not found");
@@ -81,6 +94,22 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
   const names = new Map((contacts || []).map((contact: ContactRow) => [contact.id, contact.name || "Unnamed"]));
   const counters = { kept_count: 0, removed_count: 0, merged_count: 0, relabeled_count: 0, queued_count: 0, failed_count: 0 };
 
+  // Read-side pre-filter: evidence already written at the current adjudication
+  // version is reused when the note content hash still matches, so a row that
+  // has not changed costs no model call on the next sweep.
+  const { data: priorEvidence } = await admin
+    .from("relationship_evidence")
+    .select("relationship_id,source_note_id,note_content_hash,source_quote,source_context,adjudicated_label,outcome,reason,real_person_a,real_person_b,personally_relevant,relationship_supported,incidental_or_transactional,fictional_or_roleplay,confidence")
+    .eq("user_id", userId)
+    .eq("adjudication_version", RELATIONSHIP_ADJUDICATION_VERSION)
+    .in("relationship_id", batch.map((r: { id: string }) => r.id));
+  const priorByRelationship = new Map<string, any[]>();
+  for (const e of priorEvidence || []) {
+    const list = priorByRelationship.get(e.relationship_id) || [];
+    list.push(e);
+    priorByRelationship.set(e.relationship_id, list);
+  }
+
   for (const raw of batch) {
     const row = raw as RelationshipRow & { created_at: string };
     const nameA = entityName(row, "source", names);
@@ -89,11 +118,17 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
       const source = await findRelationshipSource(userId, row.id);
       const noteId = source?.source_note_id || null;
       const { data: note } = noteId ? await admin.from("notes").select("id,title,content").eq("id", noteId).eq("user_id", userId).maybeSingle() : { data: null };
+      const contentHash = noteContentHash(String(note?.content || ""));
+      const prior = noteId ? (priorByRelationship.get(row.id) || []).find((e) => e.source_note_id === noteId && e.note_content_hash === contentHash) : null;
       const payload = source?.payload || {};
       let quote = String(payload.evidence_quote || "").trim();
       let context = String(payload.evidence_context || "").trim();
       let hasVerifiableQuote = !!note && exactQuoteExists(String(note.content || ""), quote);
-      if (note && !hasVerifiableQuote) {
+      if (prior) {
+        quote = String(prior.source_quote || "").trim();
+        context = String(prior.source_context || "").trim();
+        hasVerifiableQuote = true;
+      } else if (note && !hasVerifiableQuote) {
         const recovered = await recoverRelationshipEvidence({
           db: admin,
           userId,
@@ -109,7 +144,9 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
           hasVerifiableQuote = true;
         }
       }
-      const adjudication = hasVerifiableQuote
+      const adjudication = prior
+        ? storedAdjudication(prior, row.label)
+        : hasVerifiableQuote
         ? await adjudicateRelationship({ db: admin, userId, candidate: { personA: nameA, personB: nameB, label: row.label, sourceQuote: quote, sourceContext: context } })
         : {
             outcome: "review" as const, reason: note ? "No exact source quote could be verified in the source note" : "No source note could be recovered",
@@ -155,7 +192,7 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
           real_person_b: ["real_person", "public_person"].includes(adjudication.personBKind), personally_relevant: adjudication.personallyRelevant,
           relationship_supported: adjudication.relationshipSupported, incidental_or_transactional: adjudication.incidentalOrTransactional,
           fictional_or_roleplay: adjudication.fictionalOrRoleplay, confidence: adjudication.confidence,
-          adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION, note_content_hash: noteContentHash(String(note?.content || "")),
+          adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION, note_content_hash: contentHash,
         }, { onConflict: "user_id,source_note_id,proposed_label,note_content_hash,source_quote" });
       }
       await admin.from("relationship_repair_items").upsert({

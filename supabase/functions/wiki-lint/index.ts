@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { WIKI_LINT_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
@@ -13,6 +14,8 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUP
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "deepseek/deepseek-v4-flash";
+// Metering client: the deduction RPC is granted to service_role only.
+const meter = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Auditor system prompt resolved at runtime from llm_call_configs (call_site: "wiki-lint.main").
 // Falls back to WIKI_LINT_PROMPT in llm-defaults.ts.
@@ -71,32 +74,18 @@ function extractJson(text: string) {
   }
 }
 
-async function callAuditor(systemPrompt: string, userContent: string): Promise<{ result: AuditorResult; raw: string }> {
+async function callAuditor(userId: string, systemPrompt: string, userContent: string): Promise<{ result: AuditorResult; raw: string }> {
   if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-    }),
+  const { result: data } = await openRouterWithCredits(meter, OPENROUTER_API_KEY, userId, "wiki-lint.main", "chat/completions", {
+    model: OPENROUTER_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+    temperature: 0.1,
+    response_format: { type: "json_object" },
   });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`LLM audit failed: ${response.status} ${text}`);
-  }
-
-  const data = await response.json();
   const raw = data.choices?.[0]?.message?.content || "";
   return { result: normalizeAuditorResult(extractJson(raw)), raw };
 }
@@ -243,7 +232,7 @@ serve(async (req) => {
     const pagesForAudit = allPages.slice(0, 20);
     try {
       const auditorPrompt = await resolveSystemPrompt(db, "wiki-lint.main", WIKI_LINT_PROMPT);
-      const audited = await callAuditor(auditorPrompt, formatPagesForAudit(pagesForAudit));
+      const audited = await callAuditor(userId, auditorPrompt, formatPagesForAudit(pagesForAudit));
       auditor = audited.result;
     } catch (error) {
       llmError = error instanceof Error ? error.message : String(error);

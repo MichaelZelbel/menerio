@@ -2078,6 +2078,26 @@ async function generateProfileSuggestions(
     try {
       const subjects = [...savedProfileSubjects];
 
+      // One paid plan per subject per day. Every revision of a note used to buy a
+      // fresh normalize-profile.plan for each subject it mentions (12k to 46k
+      // tokens a call, 42 calls for one account on 2026-09-01); the deterministic
+      // pass still runs every time, and the model plan waits for tomorrow unless
+      // someone asks for it by hand.
+      const paidToday = new Set<string>();
+      try {
+        const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: recentPlans } = await supabase
+          .from("profile_normalization_inputs")
+          .select("subject_key")
+          .eq("user_id", userId)
+          .not("result", "is", null)
+          .gte("completed_at", dayAgo);
+        for (const row of (recentPlans || []) as Array<{ subject_key: string }>) paidToday.add(row.subject_key);
+      } catch (e) {
+        console.error("[normalize-profile] could not read today's paid plans; running deterministic only:", e);
+        for (const subj of subjects) paidToday.add(subj ?? "owner");
+      }
+
       for (const subj of subjects) {
         try {
           const res = await createNormalizationSuggestions({
@@ -2086,6 +2106,7 @@ async function generateProfileSuggestions(
             contactId: subj,
             preferences,
             sourceNoteId: noteId,
+            deterministicOnly: paidToday.has(subj ?? "owner"),
             helpers: {
               filterSuppressedSuggestions,
               prepareSuggestionForInsert,
@@ -2375,6 +2396,26 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
     let chunkInfo: { count: number; truncated: boolean; failures: number } = {
       count: 0, truncated: false, failures: 0,
     };
+
+    // Notes mirrored out of the hub are indexed for search and nothing else:
+    // the hub reads them by meaning, never by the title, tags or summary this
+    // pass would write, and every hub commit that touched one re-bought it.
+    const indexOnly = !shouldExtractFacts(note.source_app);
+    if (indexOnly) {
+      const chunkResult = await embedAndStoreNoteChunks(
+        supabase, OPENROUTER_API_KEY, note.user_id, noteId, note.title, fullText, "process-note",
+        {
+          attribution: {noteId,jobId:lease.id,revision:lease.fingerprint,callSite:"process-note.embedding"},
+          runPaid: (hash, produce) => noteJobs.runStage(lease, `embedding:${hash}`, produce),
+          replaceChunks: (rows) => noteJobs.replaceChunks(lease, rows),
+        },
+      );
+      await noteJobs.applyNote(lease, {
+        metadata: { chunking: { count: chunkResult.chunkCount, truncated: chunkResult.truncated, failures: chunkResult.failures } },
+        embedding: chunkResult.firstChunkEmbedding, processedHash: contentHash, finish: true,
+      });
+      return;
+    }
 
     {
       const chatResult = await noteJobs.runStage(lease, "metadata", () => runChat({

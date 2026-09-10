@@ -9,7 +9,6 @@ import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const corsHeaders = {
@@ -23,23 +22,6 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/text-embedding-3-small",
-      input: text.slice(0, 8000),
-    }),
-  });
-  if (!r.ok) throw new Error(`Embedding failed: ${r.status}`);
-  const d = await r.json();
-  return d.data[0].embedding;
 }
 
 Deno.serve(async (req: Request) => {

@@ -26,6 +26,7 @@
 // → { planned, promoted, linked, skipped, skipped_by_reason, claims_embedded, … }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
 import {
   planPromotions,
   type ContactVisibility,
@@ -37,7 +38,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -56,15 +56,10 @@ function textFor(c: { attribute: string; value: string; evidence_quote: string |
   return c.evidence_quote ? `${triple}\n${c.evidence_quote}` : triple;
 }
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text }),
-  });
-  if (!r.ok) throw new Error(`OpenRouter embeddings failed: ${r.status}`);
-  const d = await r.json();
-  return d.data[0].embedding;
+// Metered: balance check and a ledger row per claim embedded.
+async function getEmbedding(db: any, userId: string, text: string): Promise<number[]> {
+  const { embedding } = await getEmbeddingWithCredits(db, OPENROUTER_API_KEY, userId, "promote-profile-entries", text);
+  return embedding;
 }
 
 Deno.serve(async (req) => {
@@ -197,7 +192,7 @@ Deno.serve(async (req) => {
       // readable through get_claims either way, and backfill-claim-embeddings
       // sweeps up whatever failed here.
       try {
-        const emb = await getEmbedding(textFor(inserted as any));
+        const emb = await getEmbedding(admin, userId, textFor(inserted as any));
         const { error: embErr } = await admin.from("claims").update({ embedding: emb }).eq("id", inserted.id);
         if (!embErr) embedded++;
       } catch (_e) {

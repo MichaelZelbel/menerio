@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { WIKI_CLEANUP_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
@@ -10,8 +11,11 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = "deepseek/deepseek-v4-flash";
+// Metering client: the deduction RPC is granted to service_role only.
+const meter = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 type CleanupCandidate = {
   id: string;
@@ -60,20 +64,14 @@ function noteContentToText(content: unknown): string {
   return t.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-async function callLLM(system: string, user: string): Promise<string> {
+async function callLLM(userId: string, system: string, user: string): Promise<string> {
   if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY missing");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-    }),
+  const { result: data } = await openRouterWithCredits(meter, OPENROUTER_API_KEY, userId, "wiki-cleanup.main", "chat/completions", {
+    model: OPENROUTER_MODEL,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    temperature: 0.1,
+    response_format: { type: "json_object" },
   });
-  if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text().catch(() => "")}`);
-  const data = await res.json();
   return data.choices?.[0]?.message?.content || "";
 }
 
@@ -166,7 +164,7 @@ serve(async (req) => {
 
       const userMsg = `Page slug: ${page.slug}\nPage type: ${page.page_type}\nCurrent title: ${page.title}\n\nSource notes:\n\n${noteBlocks}`;
       const rebuildPrompt = await resolveSystemPrompt(db, "wiki-cleanup.main", WIKI_CLEANUP_PROMPT);
-      const raw = await callLLM(rebuildPrompt, userMsg);
+      const raw = await callLLM(userId, rebuildPrompt, userMsg);
       let parsed: { title?: string; summary?: string; content?: string };
       try {
         const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");

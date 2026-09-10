@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { callMarkdown, corsHeaders, deductFixedCredits, ensureCredits, getAuthedAdmin, isUuid, jsonResponse, taggedPrompt } from "../_shared/group-ai.ts";
+import { callMarkdown, corsHeaders, ensureCredits, getAuthedAdmin, isUuid, jsonResponse, taggedPrompt } from "../_shared/group-ai.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -8,7 +8,7 @@ serve(async (req) => {
     if (!isUuid(group_id)) return jsonResponse({ error: "Invalid group_id" }, 400);
     const days = Math.min(90, Math.max(1, Number(period_days) || 7));
     const { userId, admin } = await getAuthedAdmin(req);
-    const cost = await ensureCredits(admin, userId, "group_briefing");
+    await ensureCredits(admin, userId, "group_briefing");
 
     const { data: group, error: groupError } = await admin.from("contact_groups").select("*").eq("id", group_id).eq("user_id", userId).maybeSingle();
     if (groupError) throw groupError;
@@ -40,7 +40,7 @@ serve(async (req) => {
       console.error("generate-group-briefing insert failed", insertError);
       return jsonResponse({ error: "Failed to save briefing" }, 500);
     }
-    await deductFixedCredits(admin, userId, "group_briefing", cost.tokens);
+    // runChat inside callMarkdown already billed the real usage; no second fixed deduction.
     return jsonResponse({ briefing_markdown: briefing, generated_at: generatedAt });
   } catch (error) {
     console.error("generate-group-briefing failed", error);

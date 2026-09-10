@@ -90,9 +90,7 @@ export async function adjudicateRelationship(args: {
       defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 2000 },
       messages: [{ role: "user", content: JSON.stringify(args.candidate) }],
       callOptions: { response_format: { type: "json_object" } },
-      // Reconciliation is a platform integrity task, like moderation. It must
-      // not consume or be gated by the profile owner's interactive AI allowance.
-      skipDeduct: true,
+      // Billed to the profile owner so the call is in the ledger and repeat-guarded.
     });
     if (!result.content.trim()) {
       throw new Error("Relationship adjudication returned empty content");
@@ -164,8 +162,7 @@ export async function recoverRelationshipEvidence(args: {
         role: "user",
         content: `Note title: ${args.noteTitle}\nProposed relationship: ${args.personA} is ${args.label} of ${args.personB}\n\nSource note:\n${content}`,
       }],
-      // This is maintenance of canonical profile data, not a user AI feature.
-      skipDeduct: true,
+      // Billed to the profile owner so the call is in the ledger and repeat-guarded.
     });
     if (!result.content.trim()) {
       throw new Error("Relationship evidence recovery returned empty content");

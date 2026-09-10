@@ -31,6 +31,47 @@ interface ConnectionsData {
   insight: string | null;
 }
 
+/**
+ * One find-connections call per note per calendar day.
+ *
+ * The effect below used to call the function on every mount, and the function
+ * buys one chat completion per call, so every note open was a paid call
+ * (spend audit, 2026-09-11). The result is now kept in localStorage under the
+ * note id with the day it was fetched, the way TodaysConnections keeps the
+ * daily widget. The Retry / Search again / Refresh buttons bypass the cache
+ * and overwrite it. A failed call is never cached, so the Retry button keeps
+ * its meaning.
+ */
+const CACHE_KEY_PREFIX = "menerio-note-connections:";
+
+function cacheKey(noteId: string): string {
+  return `${CACHE_KEY_PREFIX}${noteId}`;
+}
+
+function readCachedConnections(noteId: string): ConnectionsData | null {
+  try {
+    const raw = localStorage.getItem(cacheKey(noteId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { date?: string; data?: ConnectionsData };
+    if (!parsed || parsed.date !== new Date().toDateString() || !parsed.data) return null;
+    return parsed.data;
+  } catch {
+    return null; // malformed entry or storage unavailable: fetch as before
+  }
+}
+
+function writeCachedConnections(noteId: string, data: ConnectionsData): void {
+  try {
+    localStorage.setItem(
+      cacheKey(noteId),
+      JSON.stringify({ date: new Date().toDateString(), data }),
+    );
+  } catch {
+    // Storage full or blocked: the panel still shows the result, it just pays
+    // again on the next open.
+  }
+}
+
 export function ConnectionsPanel({ noteId }: { noteId: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -38,8 +79,18 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchConnections = async () => {
+  const fetchConnections = async (opts: { force?: boolean } = {}) => {
     if (!user) return;
+
+    if (!opts.force) {
+      const cached = readCachedConnections(noteId);
+      if (cached) {
+        setData(cached);
+        setError(null);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
@@ -56,6 +107,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
         setError(res.data?.error || "Failed to find connections");
       } else {
         setData(res.data);
+        writeCachedConnections(noteId, res.data);
       }
     } catch {
       setError("Failed to find connections");
@@ -63,6 +115,8 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
       setLoading(false);
     }
   };
+
+  const refresh = () => fetchConnections({ force: true });
 
   useEffect(() => {
     fetchConnections();
@@ -81,7 +135,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
     return (
       <div className="text-center py-4">
         <p className="text-xs text-muted-foreground mb-2">{error}</p>
-        <Button variant="ghost" size="sm" onClick={fetchConnections} className="text-xs gap-1">
+        <Button variant="ghost" size="sm" onClick={refresh} className="text-xs gap-1">
           <RefreshCw className="h-3 w-3" /> Retry
         </Button>
       </div>
@@ -93,7 +147,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
       <div className="text-center py-4">
         <Link2 className="h-6 w-6 mx-auto mb-2 text-muted-foreground/30" />
         <p className="text-xs text-muted-foreground">No connections found yet.</p>
-        <Button variant="ghost" size="sm" onClick={fetchConnections} className="text-xs gap-1 mt-1">
+        <Button variant="ghost" size="sm" onClick={refresh} className="text-xs gap-1 mt-1">
           <RefreshCw className="h-3 w-3" /> Search again
         </Button>
       </div>
@@ -197,7 +251,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
           </>
         )}
 
-        <Button variant="ghost" size="sm" onClick={fetchConnections} className="w-full text-xs gap-1">
+        <Button variant="ghost" size="sm" onClick={refresh} className="w-full text-xs gap-1">
           <RefreshCw className="h-3 w-3" /> Refresh connections
         </Button>
       </div>

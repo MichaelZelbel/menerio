@@ -105,6 +105,9 @@ export function useContactProfile(contactId: string | null) {
           scope: "contact",
           contact_id: contactId,
           includeNotesContext: true,
+          // Opening a page folds duplicates for free; the paid model plan runs
+          // once a day from the note pipeline or from the Normalize button.
+          deterministic_only: true,
         },
       })
       .then(({ data, error }) => {

@@ -7,7 +7,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
-import { openRouterWithCredits } from "../_shared/llm-credits.ts";
+import { getEmbeddingWithCredits, openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
@@ -135,34 +135,19 @@ const ALLOWED_MOMENT_STATUSES = ["past_fact", "future_plan", "ongoing", "unknown
 const MOMENT_FIELD_NAMES = ["title", "description", "happened_at", "happened_end", "status", "impact_level", "confidence_date", "confidence_truth", "category", "person_name", "participant_names", "document_ids"] as const;
 const MOMENT_RESPONSE_FIELDS = ["id", "moment_uid", "user_id", "source", "created_at", "updated_at", "person_id", ...MOMENT_FIELD_NAMES, "primary_person", "participants", "documents"] as const;
 
-async function getEmbedding(text: string): Promise<number[]> {
-  const r = await fetch(`${OPENROUTER_BASE}/embeddings`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/text-embedding-3-small",
-      input: text,
-    }),
-  });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => "");
-    throw new Error(`OpenRouter embeddings failed: ${r.status} ${msg}`);
-  }
-  const d = await r.json();
-  return d.data[0].embedding;
+// Metered: balance check, ledger row, no repeat guard (embeddings are exempt).
+// Search-time callers use the default label; a capture passes its own.
+async function getEmbedding(text: string, feature = "mcp-search"): Promise<number[]> {
+  const { embedding } = await getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), feature, text);
+  return embedding;
 }
 
+const CAPTURE_FALLBACK_METADATA = { topics: ["uncategorized"], type: "observation" };
+
 async function extractMetadata(text: string): Promise<Record<string, unknown>> {
-  const r = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  let d: any;
+  try {
+    ({ result: d } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "mcp-capture.metadata", "chat/completions", {
       model: "deepseek/deepseek-v4-flash",
       response_format: { type: "json_object" },
       messages: [
@@ -178,13 +163,17 @@ Only extract what's explicitly there.`,
         },
         { role: "user", content: text },
       ],
-    }),
-  });
-  const d = await r.json();
+    }));
+  } catch (err) {
+    // A refused balance must not lose the note: capture with fallback metadata, like deferred indexing.
+    const msg = (err as Error)?.message;
+    if (msg === "INSUFFICIENT_CREDITS" || msg === "BALANCE_UNAVAILABLE" || msg === "REPEAT_CALL_BLOCKED") return { ...CAPTURE_FALLBACK_METADATA };
+    throw err;
+  }
   try {
     return JSON.parse(d.choices[0].message.content);
   } catch {
-    return { topics: ["uncategorized"], type: "observation" };
+    return { ...CAPTURE_FALLBACK_METADATA };
   }
 }
 
@@ -746,6 +735,7 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   let semanticResults: any[] = [];
   let semanticOk = false;
   try {
+    // A balance refusal (INSUFFICIENT_CREDITS) lands here too and degrades to the ILIKE path below.
     const qEmb = await getEmbedding(query);
     const { data, error } = await supabase.rpc("match_note_chunks", {
       query_embedding: qEmb,
@@ -890,6 +880,7 @@ async function searchClaims(
   asOf: string | null,
 ): Promise<ClaimHit[]> {
   try {
+    // A balance refusal (INSUFFICIENT_CREDITS) degrades to no claim hits rather than failing the search.
     const qEmb = await getEmbedding(query);
     const { data, error } = await supabase.rpc("match_claims", {
       query_embedding: qEmb,
@@ -1532,7 +1523,13 @@ server.registerTool(
           return await mq;
         })(),
         (async () => {
-          const emb = await getEmbedding(`notes about ${name}`);
+          // A balance refusal (INSUFFICIENT_CREDITS) degrades to the metadata match alone.
+          let emb: number[];
+          try {
+            emb = await getEmbedding(`notes about ${name}`);
+          } catch (embErr) {
+            return { data: [] as any[], error: embErr };
+          }
           const { data, error } = await supabase.rpc("match_note_chunks", {
             query_embedding: emb,
             match_threshold: 0.5,
@@ -3860,7 +3857,7 @@ server.registerTool(
         const text = claim.evidence_quote
           ? `${claim.attribute}: ${claim.value}\n${claim.evidence_quote}`
           : `${claim.attribute}: ${claim.value}`;
-        const emb = await getEmbedding(text);
+        const emb = await getEmbedding(text, "mcp-capture");
         await supabase.from("claims").update({ embedding: emb }).eq("id", claim.id);
       } catch (_e) {
         // Deliberately silent to the caller; the sweeper is the safety net.

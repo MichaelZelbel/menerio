@@ -157,7 +157,7 @@ serve(async (req) => {
         return jsonResponse({ error: "Failed to save member suggestions" }, 500);
       }
     }
-    await deductFixedCredits(admin, userId, "group_member_suggestions", cost.tokens);
+    // runChat inside callJson already billed the real usage; no second fixed deduction.
     return jsonResponse({ suggestions_added: rows.length, auto_applied: rows.filter((row) => row.status === "auto_applied_unreviewed").length });
   } catch (error) {
     console.error("suggest-group-members failed", error);

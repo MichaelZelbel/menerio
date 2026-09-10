@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { callJson, corsHeaders, deductFixedCredits, ensureCredits, getAuthedAdmin, isUuid, jsonResponse, noteText, taggedPrompt } from "../_shared/group-ai.ts";
+import { callJson, corsHeaders, ensureCredits, getAuthedAdmin, isUuid, jsonResponse, noteText, taggedPrompt } from "../_shared/group-ai.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -7,7 +7,7 @@ serve(async (req) => {
     const { membership_id } = await req.json().catch(() => ({}));
     if (!isUuid(membership_id)) return jsonResponse({ error: "Invalid membership_id" }, 400);
     const { userId, admin } = await getAuthedAdmin(req);
-    const cost = await ensureCredits(admin, userId, "group_next_step");
+    await ensureCredits(admin, userId, "group_next_step");
 
     const { data: membership, error: membershipError } = await admin
       .from("contact_group_memberships")
@@ -30,7 +30,7 @@ serve(async (req) => {
       { role: "user", content: taggedPrompt({ group: membership.contact_groups, person: membership.contacts, interactions: interactions || [], notes: (notes || []).map(noteText) }) },
     ]);
 
-    await deductFixedCredits(admin, userId, "group_next_step", cost.tokens);
+    // runChat inside callJson already billed the real usage; no second fixed deduction.
     return jsonResponse({
       title: String(result.title || "Follow up"),
       due_date_offset_days: Number(result.due_date_offset_days || 3),
