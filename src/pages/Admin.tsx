@@ -174,10 +174,13 @@ function OverviewTab() {
         supabase.from("profiles").select("id", { count: "exact", head: true }),
         supabase.from("user_roles").select("id", { count: "exact", head: true }).in("role", ["premium", "premium_gift", "admin"]),
         supabase.from("profiles").select("id", { count: "exact", head: true }).gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString()),
-        supabase.from("llm_usage_events" as any).select("total_tokens"),
+        // Ask the database for the sum. Fetching every `total_tokens` row and
+        // adding it up here read low by 23x: PostgREST caps a response at
+        // max_rows (1000 on this project) and the ledger holds 20,297 rows.
+        supabase.from("llm_usage_totals" as any).select("total_tokens").maybeSingle(),
       ]);
 
-      const totalTokens = (tokensRes.data as any[] || []).reduce((sum: number, e: any) => sum + Number(e.total_tokens || 0), 0);
+      const totalTokens = Number((tokensRes.data as any)?.total_tokens ?? 0);
 
       setStats({
         totalUsers: profilesRes.count || 0,
@@ -743,15 +746,16 @@ function UsageLogTable() {
   const [modelFilter, setModelFilter] = useState("all");
   const [distinctModels, setDistinctModels] = useState<string[]>([]);
 
-  // Fetch distinct models once
+  // Fetch distinct models once. The database does the DISTINCT: reading every
+  // `model` value to de-duplicate them here hit the same 1000-row cap as the
+  // totals did, so the filter only listed the models in an arbitrary first page.
   useEffect(() => {
     (async () => {
       const { data } = await supabase
-        .from("llm_usage_events" as any)
-        .select("model")
-        .not("model", "is", null);
+        .from("llm_usage_models" as any)
+        .select("model");
       if (data) {
-        const unique = [...new Set((data as any[]).map((d: any) => d.model as string).filter(Boolean))].sort();
+        const unique = (data as any[]).map((d: any) => d.model as string).filter(Boolean).sort();
         setDistinctModels(unique);
       }
     })();
