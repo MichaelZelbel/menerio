@@ -39,6 +39,7 @@ literal reappears in function code.
 | 16 | profile-audit-sweep | 50 */6 * * * | profile-audit | x-cron-key via call_edge (was job 13 at */15; retimed 2026-09-03) |
 | 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge; **inactive since 2026-09-07**, see runbook |
 | 15 | profile-explode-bags-nightly | 40 3 * * * | normalize-profile (explode_bags) | x-cron-key (own env key, predates call_edge) |
+| 19 | delete-job-run-details | 0 12 * * * | (SQL only) prunes `cron.job_run_details` to the last 7 days | none; added 2026-09-11, see migration `20260911140000` |
 
 The three "own env key" jobs (gdrive, profile-lint, explode-bags) use secrets
 stored as edge function environment variables plus a literal in the job
