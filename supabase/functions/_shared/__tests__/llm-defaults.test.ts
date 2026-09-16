@@ -35,7 +35,10 @@ describe("CALL_SITE_DEFAULTS max_tokens caps", () => {
       }
       expect(typeof d.max_tokens, d.call_site).toBe("number");
       expect(d.max_tokens!, d.call_site).toBeGreaterThanOrEqual(300);
-      expect(d.max_tokens!, d.call_site).toBeLessThanOrEqual(4000);
+      // 8000, not 4000: deepseek-v4-flash counts its reasoning as completion
+      // tokens (up to 6,606 seen on a metadata call), and a cap the answer
+      // cannot fit under checkpoints a truncated reply as the paid result.
+      expect(d.max_tokens!, d.call_site).toBeLessThanOrEqual(8000);
     }
   });
 

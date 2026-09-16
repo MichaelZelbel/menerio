@@ -1089,21 +1089,22 @@ async function generateReviewItems(
       // these are non-person entities (projects, products, tools, …) and must
       // never trigger an "Add to People" suggestion.
       const lexiconNames = new Set<string>();
+      // `wiki_pages` has no aliases column (it never did; checked live
+      // 2026-09-16). Selecting one was tolerated while database errors were
+      // thrown away; under the durable pipeline it failed every analysis job
+      // that reached this point, which is every note that names a person.
       const { data: lexiconPages } = await supabase
         .from("wiki_pages")
-        .select("title, slug, aliases")
+        .select("title, slug")
         .eq("user_id", userId);
       for (const p of (lexiconPages || []) as any[]) {
         if (p.title) lexiconNames.add(String(p.title).toLowerCase());
         if (p.slug) lexiconNames.add(String(p.slug).toLowerCase().replace(/-/g, " "));
-        if (Array.isArray(p.aliases)) {
-          for (const a of p.aliases) if (a) lexiconNames.add(String(a).toLowerCase());
-        }
       }
       // Same-note race: include pages created by wiki-ingest for THIS note.
       const { data: thisNotePages } = await supabase
         .from("wiki_page_sources")
-        .select("wiki_pages(title, aliases, slug)")
+        .select("wiki_pages(title, slug)")
         .eq("user_id", userId)
         .eq("note_id", noteId);
       for (const row of (thisNotePages || []) as any[]) {
@@ -1111,9 +1112,6 @@ async function generateReviewItems(
         if (!wp) continue;
         if (wp.title) lexiconNames.add(String(wp.title).toLowerCase());
         if (wp.slug) lexiconNames.add(String(wp.slug).toLowerCase().replace(/-/g, " "));
-        if (Array.isArray(wp.aliases)) {
-          for (const a of wp.aliases) if (a) lexiconNames.add(String(a).toLowerCase());
-        }
       }
 
       const fullText = `${noteTitle}\n${noteContent}`;

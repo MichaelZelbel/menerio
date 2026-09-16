@@ -834,7 +834,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "lovable",
     model: "google/gemini-3-flash-preview",
     system_prompt: AI_MODERATE_CONTENT_PROMPT,
-    temperature: null, max_tokens: 400, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 3000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "analyze-media.ocr",
@@ -884,7 +884,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: DAILY_DIGEST_PROMPT,
-    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "draft-event.main",
@@ -892,7 +892,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "google/gemini-2.5-flash",
     system_prompt: DRAFT_EVENT_PROMPT,
-    temperature: 0.2, max_tokens: 2500, extra_options: {}, enabled: true,
+    temperature: 0.2, max_tokens: 8000, extra_options: {}, enabled: true,
     placeholders: ["currentDate", "peopleContext"],
   },
   {
@@ -918,7 +918,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: EXTRACT_EVENT_PROMPT,
-    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true,
+    temperature: null, max_tokens: 8000, extra_options: {}, enabled: true,
     placeholders: ["currentDate"],
   },
   {
@@ -936,7 +936,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: FIND_CONNECTIONS_PROMPT,
-    temperature: null, max_tokens: 800, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "generate-profile-suggestions.main",
@@ -944,7 +944,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GENERATE_PROFILE_SUGGESTIONS_PROMPT,
-    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.briefing",
@@ -952,7 +952,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_BRIEFING_PROMPT,
-    temperature: null, max_tokens: 2500, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.next_step",
@@ -960,7 +960,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_NEXT_STEP_PROMPT,
-    temperature: null, max_tokens: 1000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "group-ai.suggest_members",
@@ -968,7 +968,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: GROUP_SUGGEST_MEMBERS_PROMPT,
-    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "ingest-thought.metadata",
@@ -976,7 +976,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: INGEST_THOUGHT_METADATA_PROMPT,
-    temperature: null, max_tokens: 1000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     call_site: "note-chat.main",
@@ -1001,7 +1001,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: NOTE_CHAT_SUMMARIZE_PROMPT,
-    temperature: null, max_tokens: 1200, extra_options: {}, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: {}, enabled: true, placeholders: [],
   },
   {
     // Registered 2026-09-11. Ran on inline defaults only before that, with no
@@ -1029,7 +1029,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_METADATA_PROMPT,
-    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     call_site: "process-note.profile_extraction",
@@ -1037,7 +1037,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_PROFILE_PROMPT,
-    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     // Registered 2026-09-11. Ran on inline defaults only before that, with no cap.
@@ -1061,7 +1061,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: PROCESS_NOTE_MOMENT_PROMPT,
-    temperature: null, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     call_site: "quick-capture.metadata",
@@ -1069,7 +1069,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: QUICK_CAPTURE_METADATA_PROMPT,
-    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: { ...JSON_OBJECT, reasoning: { enabled: false } }, enabled: true, placeholders: [],
   },
   {
     call_site: "relationship.adjudication",
@@ -1093,7 +1093,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: SUGGEST_CONNECTIONS_PROMPT,
-    temperature: null, max_tokens: 1200, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 6000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "weekly-review.main",
@@ -1101,7 +1101,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WEEKLY_REVIEW_PROMPT,
-    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: null, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-cleanup.main",
@@ -1109,7 +1109,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_CLEANUP_PROMPT,
-    temperature: 0.1, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-restructure.main",
@@ -1117,7 +1117,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_RESTRUCTURE_PROMPT,
-    temperature: 0, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-ingest.main",
@@ -1125,7 +1125,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_INGEST_PROMPT,
-    temperature: null, max_tokens: 4000, extra_options: {}, enabled: true,
+    temperature: null, max_tokens: 8000, extra_options: {}, enabled: true,
     placeholders: ["existingPagesIndex"],
   },
   {
@@ -1134,7 +1134,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: "You rewrite only the Insights section for a group Lexicon page. Return JSON only: {\"insights\": \"Markdown body for the Insights section, without the ## Insights heading\"}. Do not alter Purpose or Members. Do not invent facts. Only state things visibly supported by the supplied context.",
-    temperature: 0.1, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
     call_site: "wiki-lint.main",
@@ -1142,7 +1142,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     system_prompt: WIKI_LINT_PROMPT,
-    temperature: 0.1, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
+    temperature: 0.1, max_tokens: 8000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
 ];
 
