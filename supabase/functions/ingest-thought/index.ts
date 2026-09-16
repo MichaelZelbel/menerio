@@ -112,6 +112,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (!messageText || messageText.trim() === "") return new Response("ok", { status: 200 });
 
+    // Slack wants a 2xx within three seconds and re-sends the event up to
+    // three times otherwise. The embedding and the metadata call below take
+    // longer than that on a slow day, and the first delivery keeps running
+    // after Slack gives up on it, so a retry used to mean two to four copies of
+    // the note, each charged. A retry is answered at once, and a message whose
+    // ts is already on a note is not captured a second time.
+    if (req.headers.get("X-Slack-Retry-Num")) return new Response("ok", { status: 200 });
+    if (messageTs) {
+      const { data: already } = await supabase
+        .from("notes")
+        .select("id")
+        .eq("user_id", BRAIN_OWNER_USER_ID)
+        .eq("metadata->>slack_ts", messageTs)
+        .limit(1);
+      if (already && already.length > 0) return new Response("ok", { status: 200 });
+    }
+
     // Check credit balance for the brain owner
     const balance = await checkBalance(supabase, BRAIN_OWNER_USER_ID);
     if (!balance.allowed) {

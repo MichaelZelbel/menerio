@@ -299,7 +299,12 @@ export function useUpdateNote() {
       return data as unknown as Note;
     },
     onSuccess: (note, variables) => {
-      const queries = qc.getQueriesData<Note[]>({ queryKey: ["notes"] });
+      // On the local-first path the list cache holds raw SQLite rows (the
+      // PowerSync hook's `select` maps them per observer, not in the cache),
+      // where is_trashed is 0 or 1. The boolean filter below would keep only
+      // the row just merged and collapse the list to one note until the next
+      // table change. The live query re-runs on the write anyway, so leave it.
+      const queries = isLocalFirstActive() ? [] : qc.getQueriesData<Note[]>({ queryKey: ["notes"] });
       for (const [key, current] of queries) {
         if (!current) continue;
         const filter = (key?.[1] as string) ?? "all";

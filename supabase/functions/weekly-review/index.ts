@@ -4,7 +4,7 @@ import {
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { WEEKLY_REVIEW_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
@@ -156,12 +156,9 @@ ${noteSummaries.join("\n\n")}`;
   });
   const credits = chatResult.credits;
 
-  let reviewData: Record<string, unknown>;
-  try {
-    reviewData = JSON.parse(chatResult.content);
-  } catch {
-    throw new Error("Failed to parse AI response");
-  }
+  const parsedReview = parseModelJson<Record<string, unknown>>(chatResult.content);
+  if (!parsedReview || typeof parsedReview !== "object") throw new Error("Failed to parse AI response");
+  const reviewData: Record<string, unknown> = parsedReview;
 
   const { data: savedReview, error: saveError } = await supabaseAdmin
     .from("weekly_reviews")

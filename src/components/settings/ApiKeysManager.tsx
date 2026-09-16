@@ -77,6 +77,9 @@ export function ApiKeysManager() {
         method: "GET",
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
+      // functions.invoke reports failure in the result, it does not throw; a
+      // failed load used to render "No API keys yet" over keys that exist.
+      if (res.error || res.data?.error) throw new Error(res.data?.error || res.error?.message);
       if (res.data?.keys) {
         setKeys(res.data.keys);
       }
@@ -118,10 +121,11 @@ export function ApiKeysManager() {
   const handleRevoke = async (id: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      await supabase.functions.invoke(`hub-api-keys/${id}`, {
+      const res = await supabase.functions.invoke(`hub-api-keys/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
+      if (res.error || res.data?.error) throw new Error(res.data?.error || res.error?.message);
       toast({ title: "Key revoked" });
       fetchKeys();
     } catch {

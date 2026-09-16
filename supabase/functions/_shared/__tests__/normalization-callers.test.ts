@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import * as normalization from "../profile-normalization.ts";
 import { runChat, resolveConfig } from "../llm-router.ts";
 
-vi.mock("../llm-router.ts", () => ({
+vi.mock("../llm-router.ts", async (importOriginal) => ({
+  parseModelJson: (await importOriginal<typeof import("../llm-router.ts")>()).parseModelJson,
   runChat: vi.fn(async () => ({ content: '{"groups":[]}' })),
   resolveConfig: vi.fn(async (_db, _site, defaults) => ({ effective: defaults })),
 }));

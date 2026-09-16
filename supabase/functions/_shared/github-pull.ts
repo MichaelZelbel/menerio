@@ -2,6 +2,7 @@ import { selectAllRows } from "./paged-select.ts";
 import { checkedDatabase } from "./sync-database.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildBlobLookup, importNoteAttachments } from "./obsidian-attachments.ts";
+import { parseFrontmatter } from "./frontmatter.ts";
 import {
   ensureGithubRepository,
   githubFetch,
@@ -139,22 +140,17 @@ function encodeEntities(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function parseFrontmatter(content: string): { data: Record<string, unknown>; body: string } {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) return { data: {}, body: content };
-  const data: Record<string, unknown> = {};
-  for (const line of match[1].split("\n")) {
-    const kv = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
-    if (!kv) continue;
-    let val: unknown = kv[2].trim();
-    if (typeof val === "string" && val.startsWith("[") && val.endsWith("]")) {
-      val = val.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    } else if (val === "true") val = true;
-    else if (val === "false") val = false;
-    else if (typeof val === "string" && val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-    data[kv[1]] = val;
-  }
-  return { data, body: match[2] };
+/**
+ * Tags out of parsed frontmatter, as a clean list. `_shared/frontmatter.ts`
+ * reads Obsidian's block-style list (`tags:\n  - work`) as string[]; a bare
+ * `tags:` with nothing under it comes back as "", which must not become a
+ * tag. The inline-only parser this file used to carry read the block style
+ * as "" too, so every vault written with Obsidian's Properties editor lost
+ * its tags and gained one empty one.
+ */
+function frontmatterTags(fm: Record<string, unknown>): string[] {
+  const raw = Array.isArray(fm.tags) ? fm.tags : typeof fm.tags === "string" ? [fm.tags] : [];
+  return [...new Set(raw.map((t) => String(t).trim()).filter(Boolean))];
 }
 
 function filePathToNoteTitle(filePath: string): string {
@@ -308,24 +304,35 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
             try { metadata = JSON.parse(atob(fm.menerio_metadata as string)); } catch { /* ignore */ }
           }
 
-          const tags: string[] = [];
-          if (Array.isArray(fm.tags)) tags.push(...(fm.tags as string[]));
-          else if (typeof fm.tags === "string") tags.push(fm.tags);
+          const tags = frontmatterTags(fm);
 
-          await serviceClient.from("notes").update({
+          const { data: updatedNote } = await serviceClient.from("notes").update({
             title: (fm.title as string) || note.title,
             content: noteContent,
             folder_path: filePathToFolderPath(path, basePath),
             metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-            tags: tags.length > 0 ? [...new Set(tags)] : undefined,
-          }).eq("id", note.id).eq("user_id", userId);
+            tags: tags.length > 0 ? tags : undefined,
+          }).eq("id", note.id).eq("user_id", userId).select("updated_at").maybeSingle();
 
+          // The trigger stamped updated_at on that write. Record the sync as of
+          // that exact instant, so the push step below sees "not changed since
+          // sync" and leaves the file alone. Any clock we picked ourselves could
+          // land before the database's, and the note would read as edited.
+          const syncedAt = updatedNote?.updated_at || new Date().toISOString();
+          const pulledEntry = {
+            ...syncEntry,
+            github_sha: remoteFile.sha,
+            sync_status: "synced",
+            synced_at: syncedAt,
+            error_message: null,
+          };
           await serviceClient.from("github_sync_log").update({
             github_sha: remoteFile.sha,
             sync_status: "synced",
-            synced_at: new Date().toISOString(),
+            synced_at: syncedAt,
             error_message: null,
           }).eq("id", syncEntry.id);
+          syncByNoteId.set(note.id, pulledEntry);
 
           results.pulled++;
           results.details.push({ path, action: "pulled", noteId: note.id });
@@ -370,8 +377,7 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
         metadata.imported_from = "obsidian";
         metadata.original_path = path;
 
-        const tags: string[] = [];
-        if (Array.isArray(fm.tags)) tags.push(...(fm.tags as string[]));
+        const tags = frontmatterTags(fm);
 
         const { data: inserted, error: insertErr } = await serviceClient.from("notes").insert({
           user_id: userId,
@@ -379,14 +385,20 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
           content: noteContent,
           folder_path: filePathToFolderPath(path, basePath),
           metadata,
-          tags: [...new Set(tags)],
+          tags,
           source_app: "obsidian",
           entity_type: (fm.type as string) || null,
-        }).select("id").single();
+        }).select("id, updated_at").single();
 
         if (insertErr) { results.errors++; continue; }
 
-        await serviceClient.from("github_sync_log").upsert({
+        // Same reasoning as the pull above: the sync log and the in-memory map
+        // both carry the row's own updated_at, so the push step does not treat
+        // the note it just imported as a local change and write it back to the
+        // repository under its title (which, when the title differs from the
+        // file name, made a second file the next sync imported as a second
+        // note, and so on every run).
+        const importedEntry = {
           user_id: userId,
           note_id: inserted.id,
           entity_type: "note",
@@ -395,8 +407,10 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
           github_sha: remoteFile.sha,
           sync_status: "synced",
           sync_direction: "import",
-          synced_at: new Date().toISOString(),
-        }, { onConflict: "user_id,note_id" });
+          synced_at: inserted.updated_at || new Date().toISOString(),
+        };
+        await serviceClient.from("github_sync_log").upsert(importedEntry, { onConflict: "user_id,note_id" });
+        syncByNoteId.set(inserted.id, importedEntry);
 
         results.new_imports++;
         results.details.push({ path, action: "new_import", noteId: inserted.id });

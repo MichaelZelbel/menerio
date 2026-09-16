@@ -1,5 +1,5 @@
-import { runChat } from "./llm-router.ts";
-import { canonicalLabel } from "./relationship-canonical.ts";
+import { parseModelJson, runChat } from "./llm-router.ts";
+import { canonicalLabel, relationshipKind } from "./relationship-canonical.ts";
 import {
   RELATIONSHIP_ADJUDICATION_PROMPT,
   RELATIONSHIP_EVIDENCE_RECOVERY_PROMPT,
@@ -34,12 +34,15 @@ export interface RelationshipAdjudication {
 }
 
 const NON_PERSON_WORDS = /\b(company|corporation|platform|product|app|software|service|project|team|department|brand|server|bot|assistant|avatar|character|role|protagonist|anime|manga|novel|game)\b/i;
-const PERSONAL_LABELS = new Set([
-  "wife", "husband", "spouse", "partner", "lover", "mother", "father", "parent",
-  "son", "daughter", "child", "brother", "sister", "sibling", "friend", "mentor",
-  "mentee", "manager", "report", "co-worker", "colleague", "neighbor", "roommate",
-  "client", "provider", "teacher", "student", "employer", "employee",
-]);
+
+// The roles this judge accepts are the roles relationship-canonical.ts knows,
+// personal and professional alike. A private 29-entry list here rejected
+// cousin, grandmother, aunt, step- and in-law roles, doctor, therapist and
+// co-founder with confidence 1, and profile-lint then deleted such rows while
+// the bulk keep archived them.
+function isSupportedRole(label: string): boolean {
+  return relationshipKind(label) !== "other";
+}
 
 function clampConfidence(value: unknown): number {
   const number = Number(value);
@@ -55,7 +58,7 @@ function deterministicRejection(candidate: RelationshipCandidate): RelationshipA
   const label = canonicalLabel(candidate.label);
   const quote = candidate.sourceQuote.trim();
   if (!quote) return rejected("No exact source quote was supplied", label);
-  if (!PERSONAL_LABELS.has(label)) return rejected(`Unsupported relationship role: ${label || candidate.label}`, label);
+  if (!isSupportedRole(label)) return rejected(`Unsupported relationship role: ${label || candidate.label}`, label);
   if (candidate.personA.trim().toLowerCase() === candidate.personB.trim().toLowerCase()) return rejected("A person cannot have a relationship with the same identity", label);
   if (NON_PERSON_WORDS.test(`${candidate.personA} ${candidate.personB}`) && NON_PERSON_WORDS.test(candidate.sourceContext || quote)) {
     return rejected("At least one endpoint is described as a non-person entity, avatar, fictional character, or role", label);
@@ -95,14 +98,15 @@ export async function adjudicateRelationship(args: {
     if (!result.content.trim()) {
       throw new Error("Relationship adjudication returned empty content");
     }
-    const parsed = JSON.parse(result.content);
+    const parsed = parseModelJson<Record<string, unknown>>(result.content);
+    if (!parsed || typeof parsed !== "object") throw new Error("Relationship adjudication returned no JSON object");
     const aKind = kind(parsed.person_a_kind);
     const bKind = kind(parsed.person_b_kind);
     const supported = parsed.relationship_supported === true;
     const relevant = parsed.personally_relevant === true;
     const fictional = parsed.fictional_or_roleplay === true || [aKind, bKind].some((v) => ["fictional_character", "avatar", "role"].includes(v));
     const nonPerson = [aKind, bKind].some((v) => !["real_person", "public_person"].includes(v));
-    let outcome: AdjudicationOutcome = ["keep", "reject", "review"].includes(parsed.outcome) ? parsed.outcome : "review";
+    let outcome: AdjudicationOutcome = ["keep", "reject", "review"].includes(String(parsed.outcome)) ? parsed.outcome as AdjudicationOutcome : "review";
     if (fictional || nonPerson || !supported || !relevant || parsed.incidental_or_transactional === true) outcome = outcome === "review" && !fictional && !supported ? "review" : "reject";
     return {
       outcome,

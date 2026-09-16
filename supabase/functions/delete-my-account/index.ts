@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { removeUserStorage } from "../_shared/delete-user-storage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,23 +43,38 @@ serve(async (req) => {
       });
     }
 
-    // Verify password by attempting sign-in
-    const { password } = await req.json();
-    if (!password) {
-      return new Response(JSON.stringify({ error: "Password required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Prove it is really them. An account with a password re-enters it. An
+    // account that only ever signed in with Google or GitHub has no password,
+    // and the old check answered every such user "Invalid password": they
+    // could not delete their own data at all. They confirm by typing their
+    // e-mail address exactly instead.
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
+    const { password, confirm_email } = body as { password?: string; confirm_email?: string };
+    const hasPassword = (user.identities ?? []).some((i) => i.provider === "email");
 
-    const { error: signInError } = await createClient(supabaseUrl, supabaseAnonKey)
-      .auth.signInWithPassword({ email: user.email!, password });
-
-    if (signInError) {
-      return new Response(JSON.stringify({ error: "Invalid password" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (hasPassword) {
+      if (!password) {
+        return new Response(JSON.stringify({ error: "Password required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { error: signInError } = await createClient(supabaseUrl, supabaseAnonKey)
+        .auth.signInWithPassword({ email: user.email!, password });
+      if (signInError) {
+        return new Response(JSON.stringify({ error: "Invalid password" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      const typed = String(confirm_email ?? "").trim().toLowerCase();
+      if (!typed || typed !== String(user.email ?? "").trim().toLowerCase()) {
+        return new Response(JSON.stringify({ error: "Type your account e-mail address exactly to confirm" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Notify admin before deletion (best-effort, never blocks deletion)
@@ -85,16 +101,9 @@ serve(async (req) => {
     // Use service role client for deletion
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Delete avatar files from storage
-    const { data: avatarFiles } = await adminClient.storage
-      .from("avatars")
-      .list(user.id);
-
-    if (avatarFiles && avatarFiles.length > 0) {
-      await adminClient.storage
-        .from("avatars")
-        .remove(avatarFiles.map((f) => `${user.id}/${f.name}`));
-    }
+    // Every file of theirs: avatars and note attachments (clips, scans, uploads).
+    const storage = await removeUserStorage(adminClient, user.id);
+    for (const err of storage.errors) console.error("[DELETE-ACCOUNT] storage cleanup:", err);
 
     // Delete user roles
     await adminClient.from("user_roles").delete().eq("user_id", user.id);

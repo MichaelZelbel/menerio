@@ -9,6 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronLeft, Loader2, Merge, Plus, Star, Trash2, User, X } from "lucide-react";
 
@@ -258,14 +269,33 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                         </Button>
                       </>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => deletePerson.mutate(person.id, { onSuccess: () => onClose() })}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {/* A hard delete that cascades memberships, interactions and
+                        relationships with no undo. The people tree asks first;
+                        this button fired straight away on a mis-click. */}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="text-destructive" aria-label="Delete person">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete {person.name}?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This removes the person together with their interactions, relationships and group memberships. It cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => deletePerson.mutate(person.id, { onSuccess: () => onClose() })}
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </div>
               </CardHeader>

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -549,15 +550,23 @@ async function handleBulkSync(
   vaultPath: string,
   repositoryCreated = false,
 ) {
-  // Get all non-trashed notes
-  const { data: notes, error } = await supabase
-    .from("notes")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("is_trashed", false)
-    .order("updated_at", { ascending: false });
-
-  if (error) {
+  // Get all non-trashed notes, every one of them: an unpaged select stops at
+  // PostgREST's max_rows (1000) without saying so, and a vault past that size
+  // reported a successful bulk sync that had silently left notes behind.
+  type BulkNote = Record<string, unknown> & { id: string; title: string | null };
+  let notes: BulkNote[];
+  try {
+    notes = await selectAllRows<BulkNote>((from, to) =>
+      supabase
+        .from("notes")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("is_trashed", false)
+        .order("updated_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    );
+  } catch {
     return new Response(JSON.stringify({ error: "Failed to fetch notes" }), { status: 500, headers: corsHeaders });
   }
 

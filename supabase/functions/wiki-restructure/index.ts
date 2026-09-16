@@ -340,8 +340,10 @@ async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[]
       result = { slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) };
     }
     results.push(result);
-    // Log per page so progress survives a runtime shutdown mid-sweep.
-    await logWiki(db, actorId, operation, { total: 1, failed: 0, page: page.slug, results: [result] });
+    // Log per page so progress survives a runtime shutdown mid-sweep. Under the
+    // page's own owner: the cron sweep spans every user, and logging under the
+    // first candidate's id showed one user the slugs of everyone else's pages.
+    await logWiki(db, page.user_id || actorId, operation, { total: 1, failed: 0, page: page.slug, results: [result] });
   }
 
   await logWiki(db, actorId, operation, {

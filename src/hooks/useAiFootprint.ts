@@ -1,6 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
+
+/**
+ * Drop every cached view of the data a footprint removal deletes. These are
+ * the prefixes the pages actually query under (hyphenated); the underscored
+ * table names that used to be invalidated here matched nothing, so deleted
+ * profile entries kept rendering for the cache's lifetime and survived reloads
+ * through the persister.
+ */
+function invalidateDerivedData(qc: QueryClient) {
+  for (const key of ["wiki-pages", "wiki-page", "profile-entries", "contact-profile-entries", "note-connections"]) {
+    qc.invalidateQueries({ queryKey: [key] });
+  }
+}
 
 export interface AiFootprint {
   wikiPages: Array<{ id: string; title: string; slug: string; sourceLinkId: string }>;
@@ -107,6 +120,7 @@ export function useRemoveFootprintItem(noteId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai_footprint", noteId] });
+      invalidateDerivedData(qc);
       showToast.success("Removed");
     },
     onError: (e: any) => showToast.error(e.message ?? "Failed to remove"),
@@ -148,9 +162,7 @@ export function useRemoveAllFootprint(noteId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai_footprint", noteId] });
-      qc.invalidateQueries({ queryKey: ["wiki_pages"] });
-      qc.invalidateQueries({ queryKey: ["profile_entries"] });
-      qc.invalidateQueries({ queryKey: ["note_connections"] });
+      invalidateDerivedData(qc);
       showToast.success("All derived data removed");
     },
     onError: (e: any) => showToast.error(e.message ?? "Failed to remove"),

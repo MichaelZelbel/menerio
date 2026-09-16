@@ -4,7 +4,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
-import { runChat, runOcr } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, runOcr } from "../_shared/llm-router.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -105,7 +105,7 @@ async function summarizePageText(
       },
       callOptions: { response_format: { type: "json_object" } },
     });
-    const parsed = JSON.parse(result.content || "{}");
+    const parsed = parseModelJson<Record<string, unknown>>(result.content) ?? {};
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
@@ -141,7 +141,7 @@ async function describeImage(
       },
       callOptions: { response_format: { type: "json_object" } },
     });
-    const parsed = JSON.parse(result.content || "{}");
+    const parsed = parseModelJson<Record<string, unknown>>(result.content) ?? {};
     return {
       description: String(parsed.description || ""),
       topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],

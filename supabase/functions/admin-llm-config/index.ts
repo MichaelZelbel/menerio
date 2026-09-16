@@ -198,6 +198,10 @@ Deno.serve(async (req) => {
           messages: [{ role: "user", content: userPrompt }],
           defaults: { provider: row.provider, model: row.model },
           templateVars,
+          // The admin test-run the router documents: not charged to the admin
+          // and not counted by the repeat breaker, which used to lock the
+          // sixth test of a prompt for an hour.
+          skipDeduct: true,
         });
         return json({
           ok: true,

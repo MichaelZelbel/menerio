@@ -3,7 +3,7 @@
 // for one subject (owner or contact). All apply operations snapshot the prior
 // rows into the review_queue payload so they can be rolled back exactly.
 
-import { runChat, resolveConfig } from "./llm-router.ts";
+import { parseModelJson, runChat, resolveConfig } from "./llm-router.ts";
 import { evaluateNormalizationStage, type NormalizationStage } from "./profile-normalization-spend.ts";
 import {
   PROFILE_CANONICAL_SCHEMA,
@@ -597,7 +597,9 @@ export async function planSubjectNormalization(args: {
         defaults,
         callOptions: { response_format: { type: "json_object" } },
       });
-      const parsed = JSON.parse(result.content);
+      // Fenced JSON used to be a parse error here, and three fenced replies
+      // locked the subject's plan through the three-attempt lease.
+      const parsed = parseModelJson<Record<string, unknown>>(result.content);
       if (!Array.isArray(parsed?.groups)) throw new Error("INVALID_NORMALIZATION_RESULT");
       return parsed;
     },

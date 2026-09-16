@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
-import { json, errorJson, handleOptions, parsePath } from "../_shared/hub-helpers.ts";
+import { json, errorJson, handleOptions, intParam, parsePath } from "../_shared/hub-helpers.ts";
 import {
   parseLimit,
   parseUpdatedSince,
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
   const since = parseUpdatedSince(url.searchParams.get("updated_since"));
   if (since.error) return errorJson("BAD_REQUEST", since.error, 400);
   const limit = parseLimit(url.searchParams.get("limit"));
-  const offset = Math.max(parseInt(url.searchParams.get("offset") || "0", 10), 0);
+  const offset = intParam(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
 
   try {
     const gate = await loadGate(supabase, userId);

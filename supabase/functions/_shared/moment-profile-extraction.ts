@@ -7,7 +7,7 @@
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance } from "./llm-credits.ts";
-import { runChat } from "./llm-router.ts";
+import { parseModelJson, runChat } from "./llm-router.ts";
 import {
   canonicalLabel,
   inverseLabel,
@@ -450,7 +450,8 @@ export async function extractProfileFromMoment(
       },
       callOptions: { response_format: { type: "json_object" } },
     });
-    parsed = JSON.parse(result.content);
+    parsed = parseModelJson<Record<string, unknown>>(result.content);
+    if (parsed === null) throw new Error("Model returned no JSON");
   } catch (err: any) {
     if (err?.message === "INSUFFICIENT_CREDITS") return { ...empty, skipped_reason: "insufficient_credits" };
     console.error("[moment-extract] LLM error:", err);

@@ -225,7 +225,12 @@ export function claimsToSupersede(
   return existing.filter(
     (c) =>
       normalizeAttribute(c.attribute) === attribute &&
-      (!c.valid_to || c.valid_to > start),
+      (!c.valid_to || c.valid_to > start) &&
+      // A claim that starts after the incoming one is the newer fact, and a
+      // historical entry ("employer X, 2010 to 2015") must not close it with a
+      // valid_to before its own valid_from, which took it out of every
+      // current view. An undated claim is treated as current and superseded.
+      (!c.valid_from || c.valid_from <= start),
   );
 }
 

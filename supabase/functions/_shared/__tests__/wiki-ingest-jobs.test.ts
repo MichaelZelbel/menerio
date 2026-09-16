@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { parseModelJson } from '../llm-router.ts';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { softStructure } from '../wiki-structure';
@@ -54,7 +55,7 @@ it('group insight outputs are checkpointed and tenant scoped, never directly wri
     const q: any = { select: () => q, eq: (key: string, value: string) => { if (key === 'user_id' && value === 'u') scopes.push(table); if (key === 'contact_groups.user_id' && value === 'u') relationScopes.push(table); return q; }, in: () => q, is: (key: string) => { if (table === 'notes' && key === 'deleted_at') throw new Error('notes uses is_trashed'); return q; }, gte: () => q, order: () => q, limit: () => q, maybeSingle: () => q, then: (done: any) => done({ data: fixtures[table], error: null }) }; return q;
   }, rpc: vi.fn(async (name: string) => ({ data: name === 'begin_note_ai_stage' ? { status: 'started' } : true, error: null })) };
   const runChat = vi.fn(async () => ({ content: JSON.stringify({ insights: 'Synthetic new insight' }) }));
-  const { synthesizeGroupInsights } = endpointFunctions({ runChat, runWikiStage, shouldExtractFacts: () => true });
+  const { synthesizeGroupInsights } = endpointFunctions({ runChat, runWikiStage, parseModelJson, shouldExtractFacts: () => true });
   const result = await synthesizeGroupInsights(db, 'u', { metadata: { people: ['Fixture'] } }, 'n', 'Fixture context', { id: 'j', user_id: 'u', lease_id: 'l' }, { assertCurrent: vi.fn() });
   expect(result.actions[0].patch).toContain('User purpose');
   expect(result.actions[0].patch).toContain('Synthetic new insight');

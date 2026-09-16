@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { avatarPublicUrl as avatarUrlFor } from "@/lib/avatar-url";
 import { useToast } from "@/hooks/use-toast";
 import { useLogActivity } from "@/hooks/useLogActivity";
 import { SEOHead } from "@/components/SEOHead";
@@ -122,9 +123,7 @@ export default function Settings() {
   const initials = (profile?.display_name || user?.email || "U")
     .split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
-  const avatarPublicUrl = profile?.avatar_url
-    ? supabase.storage.from("avatars").getPublicUrl(profile.avatar_url).data.publicUrl
-    : null;
+  const avatarPublicUrl = avatarUrlFor(profile?.avatar_url) ?? null;
 
   // ── Profile save ──
   const handleSaveProfile = async () => {
@@ -165,11 +164,9 @@ export default function Settings() {
 
     setAvatarUploading(true);
 
-    // Delete old avatar if exists
-    if (profile?.avatar_url) {
-      await supabase.storage.from("avatars").remove([profile.avatar_url]);
-    }
-
+    // Upload the new file and point the profile at it before touching the old
+    // one. Removing first meant a failed upload left the profile pointing at a
+    // file that no longer existed.
     const ext = file.name.split(".").pop();
     const path = `${user.id}/avatar-${Date.now()}.${ext}`;
 
@@ -184,7 +181,18 @@ export default function Settings() {
       return;
     }
 
-    await supabase.from("profiles").update({ avatar_url: path }).eq("id", user.id);
+    const { error: profileError } = await supabase.from("profiles").update({ avatar_url: path }).eq("id", user.id);
+    if (profileError) {
+      await supabase.storage.from("avatars").remove([path]);
+      toast({ variant: "destructive", title: "Upload failed", description: profileError.message });
+      setAvatarUploading(false);
+      return;
+    }
+
+    const previous = profile?.avatar_url;
+    if (previous && previous !== path && !/^https?:\/\//.test(previous)) {
+      await supabase.storage.from("avatars").remove([previous]);
+    }
     await refreshProfile();
     toast({ title: "Avatar updated" });
     setAvatarUploading(false);
@@ -207,13 +215,16 @@ export default function Settings() {
   };
 
   // ── Delete account ──
+  // An account that only ever signed in with Google or GitHub has no password
+  // to re-enter; it confirms by typing its e-mail address instead.
+  const hasPassword = (user?.identities ?? []).some((i) => i.provider === "email");
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== "DELETE") return;
     setDeleteLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await supabase.functions.invoke("delete-my-account", {
-        body: { password: deletePassword },
+        body: hasPassword ? { password: deletePassword } : { confirm_email: deletePassword },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
 
@@ -512,8 +523,14 @@ export default function Settings() {
                     </AlertDialogHeader>
                     <div className="space-y-4 py-2">
                       <div className="space-y-2">
-                        <Label htmlFor="delPw">Enter your password to confirm</Label>
-                        <Input id="delPw" type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} placeholder="Your password" />
+                        <Label htmlFor="delPw">{hasPassword ? "Enter your password to confirm" : "Type your e-mail address to confirm"}</Label>
+                        <Input
+                          id="delPw"
+                          type={hasPassword ? "password" : "email"}
+                          value={deletePassword}
+                          onChange={(e) => setDeletePassword(e.target.value)}
+                          placeholder={hasPassword ? "Your password" : user?.email ?? "you@example.com"}
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="delConfirm">Type <span className="font-mono font-bold text-destructive">DELETE</span> to confirm</Label>

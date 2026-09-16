@@ -105,13 +105,24 @@ Deno.serve(async (req: Request) => {
     };
 
     // --- Upsert: check if note with same source_app + source_id + user_id exists ---
-    const { data: existing } = await supabase
+    // Oldest first with limit(1): there is no unique index on the triple, and
+    // once two rows existed for one source_id, maybeSingle() answered with an
+    // error that was thrown away, `existing` read as null, and every later push
+    // inserted yet another copy.
+    const { data: existing, error: existingErr } = await supabase
       .from("notes")
       .select("id")
       .eq("user_id", userId)
       .eq("source_app", appName)
       .eq("source_id", source_id)
+      .order("created_at", { ascending: true })
+      .limit(1)
       .maybeSingle();
+
+    if (existingErr) {
+      console.error("Lookup error:", existingErr);
+      return json({ error: existingErr.message }, 500);
+    }
 
     if (existing) {
       // UPDATE — never overwrite folder_path on update (user may have moved the note)

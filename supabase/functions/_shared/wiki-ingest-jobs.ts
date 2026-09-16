@@ -8,6 +8,12 @@ export async function runWikiStage<T>(db: RpcClient, job: WikiJob, stage: string
   const result = await createNoteAIJobs(db).runStage(job as NoteAILease, stage, async () => {
     try { return await produce(); } catch (error) {
       if (classifyNoteAIError(error) === 'no_credit' || error instanceof NoteAIJobError) throw error;
+      // Refused before the provider was ever reached: nothing was paid, so a
+      // retry is the right answer, not a terminal "uncertain" that fenced the
+      // stage for good after one unreadable allowance view.
+      if (error instanceof Error && ['BALANCE_UNAVAILABLE', 'REPEAT_CALL_BLOCKED'].includes(error.message)) {
+        throw new NoteAIJobError('transient', error.message);
+      }
       throw new NoteAIJobError('uncertain', 'Provider result unavailable');
     }
   });

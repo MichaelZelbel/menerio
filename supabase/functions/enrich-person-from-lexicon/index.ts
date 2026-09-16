@@ -27,6 +27,17 @@ import {
 import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
 import { ilikeContains } from "../_shared/postgrest-filters.ts";
+// These six were used without being imported. Nothing type-checks the Deno
+// functions in CI, so every run paid for the model call and then died with a
+// ReferenceError that the background handler swallowed.
+import {
+  buildSelfAliases,
+  canonicalLabel,
+  inverseLabel,
+  isSelfName,
+  isSymmetricLabel,
+  relationshipPairKey,
+} from "../_shared/relationship-canonical.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

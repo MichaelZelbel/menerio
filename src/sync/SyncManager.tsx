@@ -73,7 +73,11 @@ export function SyncManager() {
       // local copy, keep retrying, and let the offline pill do the talking.
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setSyncHealth({ state: "starting", error: null });
-        scheduleRetry();
+        // The caller schedules the retry. This used to arm one here as well,
+        // so every failed attempt while offline left two timers, each of which
+        // ran another attempt: the count doubled per cycle, and a device that
+        // came back after an hour in airplane mode fired thousands of connect
+        // calls at once.
         return;
       }
       let pendingUploads = 0;
@@ -142,6 +146,8 @@ export function SyncManager() {
 
     const scheduleRetry = () => {
       if (cancelled) return;
+      // One pending attempt at a time, whatever path asked for it.
+      if (retryTimer) clearTimeout(retryTimer);
       const wait = RETRY_SCHEDULE_MS[Math.min(attempt, RETRY_SCHEDULE_MS.length - 1)];
       attempt += 1;
       retryTimer = setTimeout(() => {

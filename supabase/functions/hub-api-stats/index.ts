@@ -5,6 +5,7 @@ import {
   json,
   errorJson,
   handleOptions,
+  intParam,
   parsePath,
 } from "../_shared/hub-helpers.ts";
 
@@ -81,7 +82,7 @@ Deno.serve(async (req) => {
 
     // GET /hub-api-stats/activity?days=30
     if (req.method === "GET" && action === "activity") {
-      const days = Math.min(Math.max(parseInt(url.searchParams.get("days") || "30", 10), 1), 365);
+      const days = intParam(url, "days", 30, 1, 365);
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
       const { data: events, error } = await supabase

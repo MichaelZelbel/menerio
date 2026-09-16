@@ -87,6 +87,20 @@ describe("claimsToSupersede", () => {
     const out = claimsToSupersede(before, { attribute: "employer", valid_from: "2026-06-01" });
     expect(out).toHaveLength(0);
   });
+
+  it("does not close a newer fact when a historical one is added", () => {
+    // Adding "employer X, 2010 to 2015" used to stamp valid_to=2010-01-01 on
+    // the current employer that started in 2020, closing it before it began.
+    const before = [claim({ attribute: "employer", value: "Current", valid_from: "2020-01-01" })];
+    const out = claimsToSupersede(before, { attribute: "employer", valid_from: "2010-01-01" });
+    expect(out).toHaveLength(0);
+  });
+
+  it("still closes an undated open claim", () => {
+    const before = [claim({ attribute: "employer", value: "Acme", valid_from: null })];
+    const out = claimsToSupersede(before, { attribute: "employer", valid_from: "2010-01-01" });
+    expect(out).toHaveLength(1);
+  });
 });
 
 describe("reviewDaysFor", () => {

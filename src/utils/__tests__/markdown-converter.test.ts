@@ -69,6 +69,16 @@ describe("htmlToMarkdown", () => {
     expect(htmlToMarkdown("<p>Use <code>npm install</code></p>")).toContain("`npm install`");
   });
 
+  it("keeps dollar patterns inside inline code verbatim", () => {
+    // String.replace reads `$$`, `$&`, `` $` `` and `$'` in a replacement
+    // string as patterns; `echo $$` came back as `echo $` and `$'` spliced in
+    // the rest of the document, then the next autosave persisted it.
+    const html = markdownToHtml("Run `echo $$` and `a$'b` then `x$&y` here");
+    expect(html).toContain("<code>echo $$</code>");
+    expect(html).toContain("<code>a$'b</code>");
+    expect(html).toContain("<code>x$&amp;y</code>");
+  });
+
   it("converts blockquotes", () => {
     const html = "<blockquote><p>Quote</p></blockquote>";
     expect(htmlToMarkdown(html)).toContain("> Quote");

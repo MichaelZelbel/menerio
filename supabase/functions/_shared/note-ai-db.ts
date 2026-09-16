@@ -9,7 +9,11 @@ export function createNoteAIExecutionDatabase<T extends object>(raw: T) {
   try {
    const response=await result;
    // Unique violations are deliberate idempotency decisions in existing helpers.
-   if(response?.error && response.error.code!=='23505') throw new NoteAIJobError('transient','Analysis database operation failed');
+   if(response?.error && response.error.code!=='23505') {
+    // Name the cause: the generic message hid a 22P02 for weeks.
+    console.error('[note-ai-db] database operation failed',response.error.code,response.error.message);
+    throw new NoteAIJobError('transient',`Analysis database operation failed (${response.error.code||'?'}): ${response.error.message||''}`);
+   }
    return response;
   } catch(error) {remember(error);throw error}
  }

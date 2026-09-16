@@ -309,7 +309,12 @@ export function markdownToHtml(md: string): string {
 
   // Restore inline codes
   for (let i = 0; i < inlineCodes.length; i++) {
-    result = result.replace(`%%INLINECODE_${i}%%`, inlineCodes[i]);
+    // A replacer function, never the string: String.replace reads `$$`, `$&`,
+    // `` $` `` and `$'` in a replacement string as patterns, so `echo $$` in
+    // inline code came back as `echo $` and `$'` spliced in the rest of the
+    // document, and the next autosave made it permanent.
+    const code = inlineCodes[i];
+    result = result.replace(`%%INLINECODE_${i}%%`, () => code);
   }
 
   return result;

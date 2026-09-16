@@ -231,7 +231,10 @@ async function auditScope(
       const { merges, rejected } = planMerges(entries, groups);
       findings = [...findings, ...rejected].slice(-200);
       for (const r of rejected as any[]) {
-        const ids = Array.isArray(r?.entry_ids) ? r.entry_ids : [];
+        // planMerges returns `ids`; reading `entry_ids` made every "do not
+        // propose again" note empty, so the same lossy group was proposed and
+        // paid for on every round.
+        const ids = Array.isArray(r?.ids) ? r.ids : Array.isArray(r?.entry_ids) ? r.entry_ids : [];
         const note = `${r?.reason || "rejected"}: ${ids.join(" + ")}`;
         if (!rejectedNotes.includes(note)) rejectedNotes.push(note);
       }

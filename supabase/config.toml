@@ -187,3 +187,14 @@ verify_jwt = false
 # Preserve the live setting; the handler validates the caller with auth.getUser.
 [functions.merge-contacts]
 verify_jwt = false
+
+# Called by the two-minute Drive backstop and the hourly watch renewal (cron.job
+# 9 and 10) with an x-cron-key header and no user JWT, and by the app with a
+# user JWT the function checks itself. Neither had an entry here, so a redeploy
+# could flip them to verify_jwt = true and every scheduled run would be refused
+# at the gateway before the function saw it.
+[functions.gdrive-sync]
+verify_jwt = false
+
+[functions.gdrive-watch-maintenance]
+verify_jwt = false

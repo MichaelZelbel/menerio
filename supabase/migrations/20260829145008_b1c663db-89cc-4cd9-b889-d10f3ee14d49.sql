@@ -120,9 +120,13 @@ begin
   -- the inventory above, and silently continuing would strand a sweep on the
   -- old header-less call once the functions start requiring the key.
   select count(*) into migrated from cron.job where command ilike '%internal.call_edge%';
-  if migrated <> 5 then
+  -- At least five: a later migration (20260907130000) added a sixth call_edge job,
+  -- and an exact-count check made this file unreplayable on any database that
+  -- had it (db reset, a branch, a restore) as well as on a fresh one.
+  -- A database with no scheduler jobs at all (a fresh one) has nothing to cut over.
+  if migrated < 5 and (migrated > 0 or rewritten > 0) then
     raise exception
-      'cron_shared_secret: % job(s) call internal.call_edge, expected 5 (rewrote % this run). Inspect cron.job and update this migration before deploying the strict functions.',
+      'cron_shared_secret: % job(s) call internal.call_edge, expected at least 5 (rewrote % this run). Inspect cron.job and update this migration before deploying the strict functions.',
       migrated, rewritten;
   end if;
 end

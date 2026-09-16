@@ -11,6 +11,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance } from "../_shared/llm-credits.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -19,6 +20,12 @@ const CONNECTOR_ID = "google_drive";
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // matches the note-attachments limit
 const MAX_FILES_PER_RUN = 10;
+// Drive pages hold at most 100 files; 20 pages bounds one run at 2,000 files
+// of listing, newest first, which is far more than any watched scan folder.
+const MAX_LIST_PAGES = 20;
+// A claim left in "importing" longer than this belongs to a run that died
+// mid-import (a function timeout, a crash) and may be taken over.
+const STALE_CLAIM_MS = 30 * 60 * 1000;
 
 const IMAGE_MIMES = new Set([
   "image/png",
@@ -98,6 +105,43 @@ async function recordImport(
     },
     { onConflict: "user_id,file_id" },
   );
+}
+
+/**
+ * Take the file for this run before any bytes move. Three callers share
+ * `syncConnection` for the same user (the two-minute cron backstop, a Drive push
+ * ping per upload, and "Sync now"), and nothing else stops two of them from
+ * seeing the same file as unseen and importing it twice: `notes` has no unique
+ * key on the Drive file id, and until this row existed the import was only
+ * recorded after download, upload, note insert and OCR had all finished. The
+ * UNIQUE (user_id, file_id) on gdrive_imports makes the insert the lock; a
+ * second run gets 23505 and moves on. Returns false when another run holds it.
+ */
+async function claimImport(userId: string, file: DriveFile): Promise<boolean> {
+  const now = new Date().toISOString();
+  const { error } = await admin.from("gdrive_imports").insert({
+    user_id: userId,
+    file_id: file.id,
+    file_name: file.name,
+    mime_type: file.mimeType,
+    status: "importing",
+    imported_at: now,
+  });
+  if (!error) return true;
+  if (error.code !== "23505") throw new Error(`Could not claim ${file.id}: ${error.message}`);
+  // The row exists. Only a claim abandoned by a run that died mid-import may
+  // be taken over; the conditional update is atomic, so two runs cannot both
+  // succeed here either.
+  const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { data } = await admin
+    .from("gdrive_imports")
+    .update({ imported_at: now })
+    .eq("user_id", userId)
+    .eq("file_id", file.id)
+    .eq("status", "importing")
+    .lt("imported_at", cutoff)
+    .select("id");
+  return (data?.length ?? 0) > 0;
 }
 
 /** Import one Drive file. Returns "imported" | "skipped" | "failed". */
@@ -218,41 +262,68 @@ async function syncConnection(conn: Conn) {
     return summary;
   }
 
+  // Every import this user has on record, not the first thousand of them: an
+  // unbounded select is capped at PostgREST's max_rows, and a truncated seen-set
+  // makes older Drive files look new again. A claim left in "importing" past
+  // the stale window is treated as unseen so `claimImport` can take it over.
+  const staleCutoff = Date.now() - STALE_CLAIM_MS;
+  const seenRows = await selectAllRows<{ file_id: string; status: string; imported_at: string }>((from, to) =>
+    admin
+      .from("gdrive_imports")
+      .select("file_id, status, imported_at")
+      .eq("user_id", conn.user_id)
+      .order("file_id")
+      .range(from, to),
+  );
+  const seen = new Set(
+    seenRows
+      .filter((r) => !(r.status === "importing" && new Date(r.imported_at).getTime() < staleCutoff))
+      .map((r) => r.file_id),
+  );
+
+  // List the folder newest first and follow the page token until this run has
+  // its fill. The old single page of 100 oldest files meant that once a folder
+  // held more than 100 already-imported scans, every new one landed past the
+  // end of the page and was never imported, with no error anywhere.
   const q = `'${conn.watch_folder_id.replace(/'/g, "")}' in parents and trashed=false`;
-  const url =
-    `/drive/v3/files?q=${encodeURIComponent(q)}` +
-    `&fields=${encodeURIComponent("files(id,name,mimeType,size,modifiedTime)")}` +
-    `&pageSize=100&orderBy=modifiedTime&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const pending: DriveFile[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES && pending.length < MAX_FILES_PER_RUN; page++) {
+    const url =
+      `/drive/v3/files?q=${encodeURIComponent(q)}` +
+      `&fields=${encodeURIComponent("nextPageToken,files(id,name,mimeType,size,modifiedTime)")}` +
+      `&pageSize=100&orderBy=${encodeURIComponent("modifiedTime desc")}` +
+      `&supportsAllDrives=true&includeItemsFromAllDrives=true` +
+      (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
 
-  const listRes = await driveFetch(conn.connection_key, url);
-  if (!listRes.ok) {
-    const details = await listRes.text();
-    console.error(`list failed [${listRes.status}]: ${details}`);
-    await admin
-      .from("gdrive_connections")
-      .update({
-        last_sync_at: new Date().toISOString(),
-        last_error:
-          listRes.status === 401
-            ? "Google access expired — please reconnect Google Drive."
-            : `Could not read the Drive folder (${listRes.status}).`,
-      })
-      .eq("user_id", conn.user_id);
-    return summary;
+    const listRes = await driveFetch(conn.connection_key, url);
+    if (!listRes.ok) {
+      const details = await listRes.text();
+      console.error(`list failed [${listRes.status}]: ${details}`);
+      await admin
+        .from("gdrive_connections")
+        .update({
+          last_sync_at: new Date().toISOString(),
+          last_error:
+            listRes.status === 401
+              ? "Google access expired — please reconnect Google Drive."
+              : `Could not read the Drive folder (${listRes.status}).`,
+        })
+        .eq("user_id", conn.user_id);
+      return summary;
+    }
+
+    const body = (await listRes.json()) as { files?: DriveFile[]; nextPageToken?: string };
+    for (const f of body.files ?? []) {
+      if (!seen.has(f.id) && pending.length < MAX_FILES_PER_RUN) pending.push(f);
+    }
+    pageToken = body.nextPageToken;
+    if (!pageToken) break;
   }
-
-  const files = ((await listRes.json()) as { files?: DriveFile[] }).files ?? [];
-
-  const { data: seenRows } = await admin
-    .from("gdrive_imports")
-    .select("file_id")
-    .eq("user_id", conn.user_id);
-  const seen = new Set((seenRows ?? []).map((r: { file_id: string }) => r.file_id));
-
-  const pending = files.filter((f) => !seen.has(f.id)).slice(0, MAX_FILES_PER_RUN);
 
   for (const file of pending) {
     try {
+      if (!(await claimImport(conn.user_id, file))) continue; // another run has it
       const outcome = await importFile(conn, file);
       summary[outcome as keyof typeof summary] += 1;
     } catch (e) {

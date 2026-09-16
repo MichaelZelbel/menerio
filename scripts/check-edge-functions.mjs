@@ -107,7 +107,15 @@ function scheduledFunctionNames() {
 // key. It is gated, just not by this mechanism.
 const NOT_CRON_GATED = new Set(["notify-admin"]);
 
-const cronGated = new Set(CRON_GATED_FLOOR);
+// Four scheduled jobs (cron.job 9, 10, 11, 15; inventory in docs/CRON_JOBS.md)
+// predate internal.call_edge and were created in the dashboard, never as a
+// migration, so nothing above derives them. They compare the x-cron-key header
+// against their own environment secret instead of calling isValidCronRequest().
+// gdrive-sync fires every two minutes; an edit that dropped its check used to
+// leave CI green.
+const ENV_KEY_GATED = new Set(["gdrive-sync", "gdrive-watch-maintenance", "profile-lint", "normalize-profile"]);
+
+const cronGated = new Set([...CRON_GATED_FLOOR, ...ENV_KEY_GATED]);
 for (const fn of scheduledFunctionNames()) if (!NOT_CRON_GATED.has(fn)) cronGated.add(fn);
 
 for (const fn of [...cronGated].sort()) {
@@ -119,6 +127,12 @@ for (const fn of [...cronGated].sort()) {
     continue;
   }
   const src = readFileSync(file, "utf8");
+  if (ENV_KEY_GATED.has(fn)) {
+    if (!/x-cron-key/.test(src) || !/Deno\.env\.get\(\s*"[A-Z_]*CRON_(KEY|SECRET)"\s*\)/.test(src)) {
+      problems.push(`${file}  cron auth missing: must compare the x-cron-key header against its CRON_KEY/CRON_SECRET env secret`);
+    }
+    continue;
+  }
   if (!/\bisValidCronRequest\s*\(/.test(src)) {
     problems.push(`${file}  cron auth missing: must call isValidCronRequest() from _shared/cron-auth.ts`);
   }

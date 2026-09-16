@@ -808,7 +808,26 @@ export default function ReviewQueue() {
     showToast.success("Change kept");
   };
 
-  const handleKeep = async (item: ReviewItem) => {
+  // One action per item at a time. The accept paths insert their rows BEFORE
+  // the status mutation starts, so `updateStatus.isPending` was false for the
+  // whole async stretch and a double click on Keep wrote two moments, two
+  // contacts or two relationships.
+  const [inFlight, setInFlight] = useState<Set<string>>(() => new Set());
+  const runOnce = async (item: ReviewItem, action: () => Promise<void>) => {
+    if (inFlight.has(item.id)) return;
+    setInFlight((prev) => new Set(prev).add(item.id));
+    try {
+      await action();
+    } finally {
+      setInFlight((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  };
+
+  const handleKeep = (item: ReviewItem) => runOnce(item, async () => {
     // If the suggestion has not actually been applied yet (no target row written),
     // run the real accept path. Status alone is not enough — historical Kept items
     // exist with status="kept" but null target_entity_id because earlier versions
@@ -817,9 +836,9 @@ export default function ReviewQueue() {
     if (!alreadyApplied) return handleAccept(item);
     updateStatus.mutate({ id: item.id, status: "kept" });
     showToast.success("Change kept");
-  };
+  });
 
-  const handleRemove = async (item: ReviewItem) => {
+  const handleRemove = (item: ReviewItem) => runOnce(item, async () => {
     try {
       await revertAppliedChange(item);
       updateStatus.mutate({ id: item.id, status: "removed" });
@@ -827,9 +846,9 @@ export default function ReviewQueue() {
     } catch (err: any) {
       showToast.error("Could not remove change: " + (err.message || "Unknown error"));
     }
-  };
+  });
 
-  const handleBlock = async (item: ReviewItem) => {
+  const handleBlock = (item: ReviewItem) => runOnce(item, async () => {
     try {
       await revertAppliedChange(item);
       await createSuppression(item);
@@ -838,7 +857,7 @@ export default function ReviewQueue() {
     } catch (err: any) {
       showToast.error("Could not block change: " + (err.message || "Unknown error"));
     }
-  };
+  });
 
   // Server-side bulk actions. The client fires ONE request; the review-queue-bulk
   // edge function processes every row in the background and writes progress into
@@ -1268,7 +1287,7 @@ export default function ReviewQueue() {
                         variant="ghost"
                         className="text-destructive hover:text-destructive"
                         onClick={() => handleBlock(item)}
-                        disabled={updateStatus.isPending}
+                        disabled={updateStatus.isPending || inFlight.has(item.id)}
                       >
                         <X className="h-4 w-4 mr-1" />
                         Never Again
@@ -1277,7 +1296,7 @@ export default function ReviewQueue() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleRemove(item)}
-                        disabled={updateStatus.isPending}
+                        disabled={updateStatus.isPending || inFlight.has(item.id)}
                       >
                         <RotateCcw className="h-4 w-4 mr-1" />
                         Roll Back
@@ -1285,7 +1304,7 @@ export default function ReviewQueue() {
                       <Button
                         size="sm"
                         onClick={() => handleKeep(item)}
-                        disabled={updateStatus.isPending}
+                        disabled={updateStatus.isPending || inFlight.has(item.id)}
                       >
                         <Check className="h-4 w-4 mr-1" />
                         Keep

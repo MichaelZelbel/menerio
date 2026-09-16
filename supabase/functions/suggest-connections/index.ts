@@ -4,7 +4,7 @@ import {
   insufficientCreditsResponse,
   balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { SUGGEST_CONNECTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -152,8 +152,10 @@ Don't suggest links just because notes share a common word. The connection shoul
 
     let suggestions: any[] = [];
     try {
-      const parsed = JSON.parse(chatResult.content);
-      suggestions = (parsed.suggestions || parsed).filter((s: any) => s.should_link);
+      const parsed = parseModelJson<Record<string, unknown>>(chatResult.content);
+      if (parsed === null) throw new Error("no JSON in model reply");
+      const list = Array.isArray(parsed) ? parsed : parsed.suggestions;
+      suggestions = (Array.isArray(list) ? list : []).filter((s) => s?.should_link);
     } catch {
       suggestions = [];
     }

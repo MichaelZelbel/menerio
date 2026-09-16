@@ -70,17 +70,20 @@ export function useAddClaim() {
         .eq("subject_type", input.subject_type)
         .eq("attribute", attribute);
       q = input.subject_type === "self" ? q.is("subject_id", null) : q.eq("subject_id", input.subject_id);
-      const { data: existing } = await q;
+      // A failed lookup used to read as "nothing to close", and the new claim
+      // was inserted beside the old one: two open values for a single-valued
+      // attribute. Same for a failed close, which the toast still counted.
+      const { data: existing, error: existingError } = await q;
+      if (existingError) throw existingError;
 
       const toClose = claimsToSupersede((existing || []) as Claim[], {
         attribute,
         valid_from: input.valid_from ?? null,
       });
       const endDate = supersedeDate({ valid_from: input.valid_from ?? null });
-      for (const claim of toClose) {
-        await db.from("claims").update({ valid_to: endDate }).eq("id", claim.id);
-      }
 
+      // Insert first, close afterwards: if the insert is refused nothing has
+      // been closed, and the fact the user typed is never the one that is lost.
       const { data, error } = await db
         .from("claims")
         .insert({
@@ -97,7 +100,14 @@ export function useAddClaim() {
         .select("*")
         .single();
       if (error) throw error;
-      return { claim: data as Claim, superseded: toClose.length };
+
+      let superseded = 0;
+      for (const claim of toClose) {
+        const { error: closeError } = await db.from("claims").update({ valid_to: endDate }).eq("id", claim.id);
+        if (closeError) throw closeError;
+        superseded += 1;
+      }
+      return { claim: data as Claim, superseded };
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["claims"] });

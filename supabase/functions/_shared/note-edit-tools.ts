@@ -342,7 +342,10 @@ export async function executeNoteEditTool(
           message: `\`find\` occurs ${hits} times — nothing was changed. Provide a longer, unique snippet.`,
         });
       }
-      after = before.replace(find, replace);
+      // A replacer function, never the string: String.replace reads `$$`,
+      // `$&`, `` $` `` and `$'` in a replacement string as patterns, so a
+      // LaTeX `$$E=mc^2$$` would have been written as `$E=mc^2$`.
+      after = before.replace(find, () => replace);
       meta.replaced = excerpt(find, 200);
       break;
     }

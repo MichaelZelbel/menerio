@@ -18,12 +18,22 @@ function json(body: unknown, status = 200) {
   });
 }
 
+/**
+ * Escape user text for a Telegram message sent with parse_mode HTML. Telegram
+ * refuses a message with a stray `<` ("can't parse entities"), so a captured
+ * note reading `if a < b` was saved but its confirmation never arrived, and
+ * the user sent it again.
+ */
+function escapeTelegramHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 async function sendTelegramMessage(
   botToken: string,
   chatId: number,
   text: string
 ) {
-  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -32,6 +42,9 @@ async function sendTelegramMessage(
       parse_mode: "HTML",
     }),
   });
+  if (!res.ok) {
+    console.error(`telegram sendMessage failed [${res.status}]: ${await res.text().catch(() => "")}`);
+  }
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -228,7 +241,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     await sendTelegramMessage(
       conn.bot_token,
       chatId,
-      `✅ <b>Captured!</b>\n"${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"`
+      `✅ <b>Captured!</b>\n"${escapeTelegramHtml(text.slice(0, 100))}${text.length > 100 ? "…" : ""}"`
     );
     return json({ ok: true });
   } catch (err) {

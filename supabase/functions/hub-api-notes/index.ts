@@ -59,18 +59,10 @@ Deno.serve(async (req) => {
 
       const { limit } = paginationParams(url);
 
-      // Call the existing semantic search function internally
-      const searchUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/search-notes-semantic`;
-      const searchRes = await fetch(searchUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query: q, limit }),
-      });
-
-      // The search function needs a user token, so we do a direct DB search instead
+      // A direct text search. The semantic search function needs a user token,
+      // and a call to it with the service key used to sit here anyway: awaited,
+      // answered 401, and its result never read, so every hub search paid an
+      // extra function invocation and failed outright when that call did.
       const query = q.toLowerCase();
       const { data, error } = await supabase
         .from("notes")

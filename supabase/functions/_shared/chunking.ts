@@ -156,7 +156,26 @@ function splitLargeBlock(block: string, maxTokens: number): string[] {
     }
     if (curS.trim()) final.push(curS.trim());
   }
-  return final;
+
+  // A span with no boundary at all (a base64 data URI, a minified blob) stays
+  // one piece through both passes above and then exceeds the embedding
+  // provider's input limit, which failed the whole job. Cut it by size, on
+  // code points so a surrogate pair is never split in half.
+  const hard: string[] = [];
+  const maxChars = Math.max(1, maxTokens * 4);
+  for (const piece of final) {
+    if (estimateTokens(piece) <= maxTokens) { hard.push(piece); continue; }
+    let slice = "";
+    for (const point of piece) {
+      if (slice.length + point.length > maxChars) {
+        if (slice.trim()) hard.push(slice.trim());
+        slice = "";
+      }
+      slice += point;
+    }
+    if (slice.trim()) hard.push(slice.trim());
+  }
+  return hard;
 }
 
 function trailingSentences(text: string, n: number): string {
@@ -233,7 +252,9 @@ export function smartChunkMarkdown(
 
     let body = cleaned;
     const overlap = trailingSentences(prevContent, opts.overlapSentences);
-    if (overlap && !body.startsWith(overlap)) {
+    // A "sentence" longer than the minimum chunk is a span with no sentence
+    // boundary (a data URI, a blob); carrying it over would double the chunk.
+    if (overlap && estimateTokens(overlap) <= opts.minTokens && !body.startsWith(overlap)) {
       body = `${overlap}\n\n${body}`;
     }
 

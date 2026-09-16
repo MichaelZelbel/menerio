@@ -35,8 +35,20 @@ export function parsePath(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
 }
 
+/**
+ * An integer query parameter, clamped, or the fallback when it is missing or
+ * not a number. `parseInt("all")` is NaN, and NaN walks through Math.min and
+ * Math.max untouched; `.range(NaN, NaN)` then fails at PostgREST and the
+ * request answered 500 for a typo in the URL.
+ */
+export function intParam(url: URL, name: string, fallback: number, min: number, max: number): number {
+  const parsed = parseInt(url.searchParams.get(name) ?? "", 10);
+  const value = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
 export function paginationParams(url: URL) {
-  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "50", 10), 1), 200);
-  const offset = Math.max(parseInt(url.searchParams.get("offset") || "0", 10), 0);
+  const limit = intParam(url, "limit", 50, 1, 200);
+  const offset = intParam(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
   return { limit, offset };
 }

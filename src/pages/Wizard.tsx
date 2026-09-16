@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { avatarPublicUrl } from "@/lib/avatar-url";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -133,10 +134,11 @@ export default function Wizard() {
     const ext = file.name.split(".").pop();
     const path = `${user.id}/avatar.${ext}`;
     const { error } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
-    if (!error) {
-      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      setAvatarUrl(data.publicUrl);
-    }
+    // The profile column holds the storage PATH; Settings and Admin wrap it in
+    // getPublicUrl() when they render it and pass it to storage.remove() when
+    // replacing it. Storing the full URL here produced a doubled, broken URL
+    // on those pages and an old file that was never deleted.
+    if (!error) setAvatarUrl(path);
     setUploading(false);
   };
 
@@ -253,7 +255,7 @@ export default function Wizard() {
                   <div className="flex flex-col items-center gap-4">
                     <div className="relative group">
                       <Avatar className="h-24 w-24">
-                        <AvatarImage src={avatarUrl || undefined} />
+                        <AvatarImage src={avatarPublicUrl(avatarUrl)} />
                         <AvatarFallback className="text-2xl bg-muted">
                           {displayName?.[0]?.toUpperCase() || <User className="h-8 w-8" />}
                         </AvatarFallback>

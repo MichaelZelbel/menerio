@@ -155,16 +155,12 @@ export function DashboardSearch() {
     navigate(`/dashboard/notes/${noteId}`);
   }, [navigate]);
 
-  // Keyboard shortcut: Cmd/Ctrl+K
+  // Cmd/Ctrl+K belongs to the command palette (CommandPalette.tsx), which is
+  // mounted on the same layout. Binding it here as well opened both at once,
+  // with the palette's focus trap fighting this input for the caret. This box
+  // only listens for Escape.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setOpen(true);
-        setTimeout(() => {
-          containerRef.current?.querySelector("input")?.focus();
-        }, 50);
-      }
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", handler);
@@ -185,7 +181,7 @@ export function DashboardSearch() {
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => { if (query.trim()) setOpen(true); }}
-          placeholder="Search notes… ⌘K"
+          placeholder="Search notes…"
           className="pl-9 pr-8 h-9 text-sm bg-muted/50 border-transparent focus-visible:border-input"
         />
         {isSearching && (

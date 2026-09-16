@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { insufficientCreditsResponse } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { GENERATE_PROFILE_SUGGESTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const corsHeaders = {
@@ -230,9 +230,10 @@ Only suggest things you're reasonably confident are about the OWNER. Return 5-15
 
     let suggestions: any[] = [];
     try {
-      const content = chatResult.content || "[]";
-      const parsed = JSON.parse(content);
-      suggestions = Array.isArray(parsed) ? parsed : (parsed.suggestions || parsed.entries || []);
+      const parsed = parseModelJson<Record<string, unknown>>(chatResult.content || "[]");
+      if (parsed === null) throw new Error("no JSON in model reply");
+      const list = Array.isArray(parsed) ? parsed : (parsed.suggestions || parsed.entries || []);
+      suggestions = Array.isArray(list) ? list : [];
     } catch {
       console.error("Failed to parse LLM response:", chatResult.content);
       suggestions = [];

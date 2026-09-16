@@ -13,6 +13,7 @@ import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
   applyVisibility,
@@ -165,10 +166,12 @@ Only extract what's explicitly there.`,
       ],
     }));
   } catch (err) {
-    // A refused balance must not lose the note: capture with fallback metadata, like deferred indexing.
-    const msg = (err as Error)?.message;
-    if (msg === "INSUFFICIENT_CREDITS" || msg === "BALANCE_UNAVAILABLE" || msg === "REPEAT_CALL_BLOCKED") return { ...CAPTURE_FALLBACK_METADATA };
-    throw err;
+    // Nothing that goes wrong here may lose the note. A refused balance was
+    // already caught; a provider timeout or a 502 was rethrown, and capture_note
+    // answered with an error before the row existed. The fallback metadata is
+    // the same either way, and process-note re-extracts later.
+    console.error("capture metadata extraction failed, saving with fallback metadata:", (err as Error)?.message ?? err);
+    return { ...CAPTURE_FALLBACK_METADATA };
   }
   try {
     return JSON.parse(d.choices[0].message.content);
@@ -389,40 +392,6 @@ function validateCollectionData(collection: any, data: Record<string, unknown>) 
   const allowed = schemaKeys(collection);
   const unknownKeys = Object.keys(data || {}).filter((key) => !allowed.has(key));
   if (unknownKeys.length) throw new Error(`Unknown field key(s): ${unknownKeys.join(", ")}. Call get_collection_schema first and use only keys from field_schema.`);
-}
-
-async function recentlyUsedCollectionsForDescription(limit = 8) {
-  const { data: collections, error } = await supabase.from("collections").select("id, slug, name, icon, agent_instructions, updated_at").eq("user_id", getCurrentUserId()).order("updated_at", { ascending: false });
-  if (error || !collections?.length) return [];
-  if (collections.length <= limit) return collections as any[];
-
-  const { data: items } = await supabase.from("collection_items").select("collection_id, updated_at").eq("user_id", getCurrentUserId()).order("updated_at", { ascending: false }).limit(200);
-  const collectionById = new Map((collections as any[]).map((collection) => [collection.id, collection]));
-  const ordered: any[] = [];
-  const seen = new Set<string>();
-  for (const item of items || []) {
-    if (!seen.has((item as any).collection_id) && collectionById.has((item as any).collection_id)) {
-      seen.add((item as any).collection_id);
-      ordered.push(collectionById.get((item as any).collection_id));
-    }
-    if (ordered.length >= limit) break;
-  }
-  for (const collection of collections as any[]) {
-    if (ordered.length >= limit) break;
-    if (!seen.has(collection.id)) ordered.push(collection);
-  }
-  return ordered;
-}
-
-async function buildAddCollectionItemDescription() {
-  const collections = await recentlyUsedCollectionsForDescription(8);
-  if (!collections.length) {
-    return "Add a new item to a collection. The user has defined custom collections — call list_collections first to see what's available, then get_collection_schema to know the fields. For sensitive collections (visibility=private), confirm with the user before saving.";
-  }
-  const guidance = collections
-    .map((collection: any) => `- ${collection.icon || "📁"} ${collection.name} (slug: ${collection.slug}): ${collection.agent_instructions || "No capture instructions provided."}`)
-    .join("\n");
-  return `Add a new item to a collection. The user has defined the following collections — pay attention to each one's capture instructions:\n\n${guidance}\n\nCall get_collection_schema before adding to know the exact fields. For sensitive collections (visibility=private), confirm with the user before saving.`;
 }
 
 async function resolveGroup(idOrSlug: string) {
@@ -857,7 +826,9 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     }
   }
 
-  return { rows: ranked.slice(0, CANDIDATE_CAP), total: ranked.length, mode: semanticOk ? "semantic+text" : "text_only" };
+  // `total` is what a caller can actually page through. Reporting the uncapped
+  // count promised pages past the cap, and an agent following has_more looped.
+  return { rows: ranked.slice(0, CANDIDATE_CAP), total: Math.min(ranked.length, CANDIDATE_CAP), mode: semanticOk ? "semantic+text" : "text_only" };
 }
 
 
@@ -1255,7 +1226,9 @@ server.registerTool(
       if (title !== undefined) updates.title = title;
       if (content !== undefined) updates.content = content;
       if (tags !== undefined) updates.tags = tags;
-      if (folder_path !== undefined) updates.folder_path = folder_path;
+      // Same normalisation as note creation and the Hub API: a leading slash
+      // stored verbatim puts the note in a nameless folder above the real one.
+      if (folder_path !== undefined) updates.folder_path = normalizeFolderPath(folder_path);
       if (is_favorite !== undefined) updates.is_favorite = is_favorite;
       if (is_pinned !== undefined) updates.is_pinned = is_pinned;
 
@@ -3397,7 +3370,7 @@ server.registerTool("get_collection_schema", { title: "Get Collection Schema", d
   });
 });
 
-const addCollectionItemTool = server.registerTool("add_collection_item", { title: "Add Collection Item", description: "Add a new item to a collection. The user has defined custom collections — call list_collections first to see what's available, then get_collection_schema to know the fields. Pay close attention to each collection's agent_instructions, which describe when and how to capture entries. For sensitive collections (visibility=private), confirm with the user before saving.", inputSchema: { collection_slug: z.string(), data: z.record(z.string(), z.any()) } }, async ({ collection_slug, data }) => {
+server.registerTool("add_collection_item", { title: "Add Collection Item", description: "Add a new item to a collection. The user has defined custom collections — call list_collections first to see what's available, then get_collection_schema to know the fields. Pay close attention to each collection's agent_instructions, which describe when and how to capture entries. For sensitive collections (visibility=private), confirm with the user before saving.", inputSchema: { collection_slug: z.string(), data: z.record(z.string(), z.any()) } }, async ({ collection_slug, data }) => {
   return withLoggedCollectionTool("add_collection_item", { collection_slug, data }, async () => {
     const collection = await getCollectionBySlug(collection_slug);
     validateCollectionData(collection, data || {});
@@ -3887,7 +3860,15 @@ server.registerTool(
   },
   async ({ subject_type, subject_name, subject_id, attribute, mode, since, limit }) => {
     const userId = getCurrentUserId();
-    let q = supabase.from("claims").select("*").eq("user_id", userId).order("valid_from", { ascending: false, nullsFirst: false }).limit(limit);
+    // The mode filter runs on the rows below, so the database limit only
+    // applies as-is for mode "all". For "current" and "changed_since" the
+    // limit used to cut the rows before the filter, and a subject with more
+    // closed claims than the limit silently lost current ones.
+    const today = todayISO();
+    let q = supabase.from("claims").select("*").eq("user_id", userId).order("valid_from", { ascending: false, nullsFirst: false });
+    if (mode === "current") q = q.or(`valid_to.is.null,valid_to.gt.${today}`).limit(limit);
+    else if (mode === "changed_since" && since && /^\d{4}-\d{2}-\d{2}$/.test(since)) q = q.or(`valid_from.gte.${since},valid_to.gte.${since}`).limit(limit);
+    else q = q.limit(limit);
     if (subject_type) q = q.eq("subject_type", subject_type);
     if (attribute) q = q.eq("attribute", normalizeAttribute(attribute));
 
@@ -3906,7 +3887,6 @@ server.registerTool(
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
     let rows = sortClaims((data || []) as any);
-    const today = todayISO();
     if (mode === "current") rows = rows.filter((c: any) => isCurrentClaim(c, today));
     else if (mode === "changed_since") {
       if (!since) return jsonTool({ error: "mode 'changed_since' requires a `since` date (YYYY-MM-DD)." });
@@ -3996,7 +3976,11 @@ app.all("*", async (c) => {
 
   return await requestContext.run({ userId: auth.userId!, scopes: auth.scopes! }, async () => {
     return await enterVisibilityScope(async () => {
-      addCollectionItemTool.update({ description: await buildAddCollectionItemDescription() });
+      // The tool registry is shared by every request this isolate serves, so
+      // its description must not be rewritten per user: two users hitting the
+      // function at once could each be handed the other's collection names
+      // and capture instructions in tools/list. The per-user guidance is in
+      // the result of list_collections, which the static description points at.
       if (!server.isConnected()) {
         await server.connect(transport);
       }

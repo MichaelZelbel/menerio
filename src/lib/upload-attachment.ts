@@ -131,8 +131,13 @@ export async function uploadAttachment(file: File, userId: string): Promise<Uplo
     source: "menerio",
   });
   if (insertError) {
-    // Not fatal for the immediate UX, but log so we notice issues
+    // Without this row the note's `![[filename]]` embed can never be resolved
+    // again after the signed URL expires: the image showed once, then became a
+    // permanent broken placeholder while the file sat orphaned in storage.
+    // Undo the upload and let the caller report a failed upload instead.
     console.error("note_attachments insert failed:", insertError);
+    await supabase.storage.from("note-attachments").remove([storagePath]).catch(() => {});
+    throw new Error(`Could not register the attachment: ${insertError.message}`);
   }
 
   // Signed URL for immediate display fallback (used by legacy code paths)

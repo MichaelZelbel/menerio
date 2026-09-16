@@ -102,7 +102,10 @@ export function GitHubSyncSettings() {
           sync_people: syncPeople,
         };
         if (token) updates.github_token = token;
-        await supabase.from("github_connections" as any).update(updates).eq("user_id", user.id);
+        // supabase-js reports failure in the result, it does not throw; without
+        // this check a refused write still showed "saved" and wiped the token field.
+        const { error } = await supabase.from("github_connections" as any).update(updates).eq("user_id", user.id);
+        if (error) throw error;
       } else {
         if (!token) { showToast.error("Token is required"); setSaving(false); return; }
         let username = "";
@@ -113,7 +116,7 @@ export function GitHubSyncSettings() {
           username = (vd as any)?.login || "";
         } catch { /* ignore */ }
 
-        await supabase.from("github_connections" as any).insert({
+        const { error } = await supabase.from("github_connections" as any).insert({
           user_id: user.id,
           github_token: token,
           github_username: username,
@@ -124,6 +127,7 @@ export function GitHubSyncSettings() {
           sync_direction: syncDirection,
           sync_people: syncPeople,
         });
+        if (error) throw error;
       }
       setToken("");
       await refetch();
@@ -178,8 +182,10 @@ export function GitHubSyncSettings() {
     if (!user) return;
     setDisconnecting(true);
     try {
-      await supabase.from("github_connections" as any).delete().eq("user_id", user.id);
-      await supabase.from("github_sync_log" as any).delete().eq("user_id", user.id);
+      const { error: connError } = await supabase.from("github_connections" as any).delete().eq("user_id", user.id);
+      if (connError) throw connError;
+      const { error: logError } = await supabase.from("github_sync_log" as any).delete().eq("user_id", user.id);
+      if (logError) throw logError;
       await refetch();
       qc.invalidateQueries({ queryKey: ["github-sync-log"] });
       showToast.success("GitHub disconnected");

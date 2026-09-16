@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import * as spend from "../profile-normalization-spend";
 
 import { readFileSync } from "node:fs";
-vi.mock("../llm-router.ts", () => ({ runChat: vi.fn(async () => ({ content: '{"groups":[]}' })), resolveConfig: vi.fn(async (_db, _site, defaults) => ({ effective: defaults })) }));
+vi.mock("../llm-router.ts", async (importOriginal) => ({ parseModelJson: (await importOriginal<typeof import("../llm-router.ts")>()).parseModelJson, runChat: vi.fn(async () => ({ content: '{"groups":[]}' })), resolveConfig: vi.fn(async (_db, _site, defaults) => ({ effective: defaults })) }));
 import { runChat, resolveConfig } from "../llm-router.ts";
 import { createNormalizationSuggestions, planSubjectNormalization } from "../profile-normalization.ts";
 

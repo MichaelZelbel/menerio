@@ -485,6 +485,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
       const relEvidenceQuote = String(p.evidence_quote || "").trim();
       const hasQuote = relEvidenceQuote.length >= 10;
       if (hasQuote) {
+        let judgeUnavailable = false;
         const verdict = await adjudicateRelationship({
           db,
           userId,
@@ -496,9 +497,19 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
             sourceQuote: relEvidenceQuote,
             sourceContext: String(p.source_context || relEvidenceQuote),
           },
+          onJudgeUnavailable: () => { judgeUnavailable = true; },
         });
-        if (verdict.outcome !== "keep") {
+        // Only a judged rejection archives the row. When the judge could not
+        // run (no credits, provider down, unparseable answer) the outcome is
+        // "review" with confidence 0, and archiving that threw away the user's
+        // own confirmation: forty quoted suggestions bulk-kept on an empty
+        // balance were all filed as removed with nothing created. Such rows
+        // stay pending for the next attempt.
+        if (verdict.outcome === "reject") {
           return skip(`relationship ${verdict.outcome}`);
+        }
+        if (verdict.outcome !== "keep") {
+          return { kind: "already_satisfied", reason: judgeUnavailable ? "evidence judge unavailable, left pending" : "evidence needs a human look, left pending" };
         }
       }
       const { data: inserted, error } = await db.from("contact_relationships").insert({

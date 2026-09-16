@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { avatarPublicUrl } from "@/lib/avatar-url";
 import { toast } from "sonner";
 const ModerationPanel = lazy(() => import("@/components/admin/ModerationPanel"));
 const LLMConfigPanel = lazy(() => import("@/components/admin/LLMConfigPanel"));
@@ -449,7 +450,7 @@ function UsersTab() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
-                            {u.avatar_url && <AvatarImage src={supabase.storage.from("avatars").getPublicUrl(u.avatar_url).data.publicUrl} />}
+                            {u.avatar_url && <AvatarImage src={avatarPublicUrl(u.avatar_url)} />}
                             <AvatarFallback className="text-xs bg-muted">{getInitials(u.display_name)}</AvatarFallback>
                           </Avatar>
                           <div className="min-w-0">

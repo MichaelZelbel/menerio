@@ -24,6 +24,48 @@ interface Props {
   onDelete: (id: string) => void;
 }
 
+interface InlineFormProps {
+  placeholder?: string;
+  text: string;
+  scope: string;
+  onTextChange: (value: string) => void;
+  onScopeChange: (value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+// Module scope on purpose. Defined inside the tab's render, this was a new
+// component type on every keystroke, so React unmounted and remounted the
+// textarea each time: the caret jumped to the end, undo history vanished and
+// an open scope picker snapped shut.
+function InlineForm({ placeholder, text, scope, onTextChange, onScopeChange, onCancel, onSave }: InlineFormProps) {
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-4 bg-muted/30">
+      <Textarea
+        placeholder={placeholder ?? "e.g., Always address me informally"}
+        value={text}
+        onChange={(e) => onTextChange(e.target.value)}
+        rows={2}
+        className="text-sm"
+        autoFocus
+      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Select value={scope} onValueChange={onScopeChange}>
+          <SelectTrigger className="w-48 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SCOPE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex-1" />
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" onClick={onSave} disabled={!text.trim()}>Save</Button>
+      </div>
+    </div>
+  );
+}
+
 export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -53,31 +95,14 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
     setScope("all");
   };
 
-  const InlineForm = ({ placeholder }: { placeholder?: string }) => (
-    <div className="space-y-3 rounded-lg border border-border p-4 bg-muted/30">
-      <Textarea
-        placeholder={placeholder ?? "e.g., Always address me informally"}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={2}
-        className="text-sm"
-        autoFocus
-      />
-      <div className="flex items-center gap-2 flex-wrap">
-        <Select value={scope} onValueChange={setScope}>
-          <SelectTrigger className="w-48 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {SCOPE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
-        <Button size="sm" onClick={handleSave} disabled={!text.trim()}>Save</Button>
-      </div>
-    </div>
-  );
+  const formProps = {
+    text,
+    scope,
+    onTextChange: setText,
+    onScopeChange: setScope,
+    onCancel: cancel,
+    onSave: handleSave,
+  };
 
   return (
     <Card>
@@ -97,7 +122,7 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
       <CardContent className="space-y-3">
         {/* Add form at the top */}
         {adding ? (
-          <InlineForm />
+          <InlineForm {...formProps} />
         ) : (
           <Button variant="outline" size="sm" onClick={() => { setAdding(true); setEditingId(null); }}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Add instruction
@@ -131,7 +156,7 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
         {/* Instruction cards */}
         {instructions.map((inst) =>
           editingId === inst.id ? (
-            <InlineForm key={inst.id} />
+            <InlineForm key={inst.id} {...formProps} />
           ) : (
             <div
               key={inst.id}

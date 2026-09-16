@@ -16,7 +16,7 @@ export interface DrainOptions {
 }
 
 export async function drainNoteAiJobs(options: DrainOptions) {
-  const report = { claimed: 0, finished: 0, accepted: 0, failed: 0, elapsedMs: 0 };
+  const report = { claimed: 0, finished: 0, accepted: 0, failed: 0, timedOut: 0, elapsedMs: 0 };
   if (!options.enabled) return report;
   const now = options.now ?? Date.now;
   const startedAt = now();
@@ -31,7 +31,18 @@ export async function drainNoteAiJobs(options: DrainOptions) {
       let result: Awaited<ReturnType<DrainOptions["dispatch"]>>;
       try {
         result = await options.dispatch(job);
-      } catch {
+      } catch (error) {
+        const name = (error as { name?: string } | null)?.name;
+        if (name === "TimeoutError" || name === "AbortError") {
+          // Our own client-side timeout fired, but the executor is still
+          // running under its 300 s lease and will checkpoint and finish on
+          // its own. Failing the job here revoked that lease, so the paid work
+          // it was about to record was rejected as stale and the job sat in
+          // `failed` until the note was edited. Leave the lease alone; the
+          // claim RPC reclaims it if the executor really is gone.
+          report.timedOut++;
+          return;
+        }
         // A transport failure does not prove the executor never contacted AI.
         await options.fail(job, "uncertain");
         report.failed++;

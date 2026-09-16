@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 import { softStructure } from "../_shared/wiki-structure.ts";
 import { createNoteAIJobs, classifyNoteAIError, NoteAIJobError } from "../_shared/note-ai-jobs.ts";
@@ -495,7 +495,10 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
       return { raw, page };
     });
     const { raw } = saved;
-    const parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""));
+    // The checkpointed `raw` is replayed on every retry, so a reply this could
+    // not parse failed the job three times over and the paid main synthesis
+    // was never applied. An unparseable reply now means "no insights".
+    const parsed = parseModelJson<Record<string, unknown>>(raw) ?? {};
     const insights = typeof parsed.insights === "string" && parsed.insights.trim() ? parsed.insights : "_No synthesized insights yet._";
     const nextContent = replaceInsightsSection(saved.page.content || "", insights);
 

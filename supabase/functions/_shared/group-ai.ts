@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, deductTokens } from "./llm-credits.ts";
-import { runChat } from "./llm-router.ts";
+import { parseModelJson, runChat } from "./llm-router.ts";
 
 // The prompt-safety helpers live in their own module because this one imports
 // the Supabase client from esm.sh, which the Node test runner cannot resolve —
@@ -92,7 +92,11 @@ export async function callJson(
     defaults: { provider: "openrouter", model: MODEL },
     callOptions: { response_format: { type: "json_object" } },
   });
-  return JSON.parse(result.content || "{}");
+  // Fenced JSON is a documented live failure; a bare JSON.parse answered 500
+  // after the call had been billed.
+  const parsed = parseModelJson<Record<string, unknown>>(result.content);
+  if (parsed === null || typeof parsed !== "object") throw new Error("Model returned no JSON object");
+  return parsed;
 }
 
 export async function callMarkdown(

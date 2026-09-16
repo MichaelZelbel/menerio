@@ -4,6 +4,7 @@ import {
   importNoteAttachments,
   type GitHubBlobLookup,
 } from "../_shared/obsidian-attachments.ts";
+import { parseFrontmatter } from "../_shared/frontmatter.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -154,38 +155,15 @@ function encodeEntities(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ─── YAML frontmatter parser (minimal, no dependency) ────────────────
+// ─── YAML frontmatter ────────────────────────────────────────────────
+// Parsed by `_shared/frontmatter.ts`, which also reads Obsidian's block-style
+// lists (`tags:\n  - work`). The inline-only parser this file used to carry
+// read that form as "" and every such note imported with one empty tag.
 
-function parseFrontmatter(content: string): { data: Record<string, unknown>; body: string } {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) return { data: {}, body: content };
-
-  const yamlBlock = match[1];
-  const body = match[2];
-  const data: Record<string, unknown> = {};
-
-  for (const line of yamlBlock.split("\n")) {
-    const kv = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
-    if (!kv) continue;
-    const key = kv[1];
-    let val: unknown = kv[2].trim();
-
-    // Arrays: [a, b, c]
-    if (typeof val === "string" && val.startsWith("[") && val.endsWith("]")) {
-      val = val.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    }
-    // Booleans
-    else if (val === "true") val = true;
-    else if (val === "false") val = false;
-    // Remove wrapping quotes from strings
-    else if (typeof val === "string" && val.startsWith('"') && val.endsWith('"')) {
-      val = val.slice(1, -1);
-    }
-
-    data[key] = val;
-  }
-
-  return { data, body };
+/** A frontmatter value as a clean list of non-empty strings. */
+function frontmatterList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  return [...new Set(raw.map((v) => String(v).trim()).filter(Boolean))];
 }
 
 // ─── Wikilink resolution ─────────────────────────────────────────────
@@ -329,9 +307,11 @@ Deno.serve(async (req) => {
             } catch { /* ignore */ }
           }
           if (Object.keys(metadata).length === 0) {
-            if (fm.tags) metadata.topics = Array.isArray(fm.tags) ? fm.tags : [fm.tags];
+            const topics = frontmatterList(fm.tags);
+            if (topics.length > 0) metadata.topics = topics;
             if (fm.type) metadata.type = fm.type;
-            if (fm.people) metadata.people = Array.isArray(fm.people) ? fm.people : [fm.people];
+            const people = frontmatterList(fm.people);
+            if (people.length > 0) metadata.people = people;
           }
 
           // Mark as imported from Obsidian
@@ -342,9 +322,7 @@ Deno.serve(async (req) => {
           const noteContent = mdBody;
 
           // Tags
-          const tags: string[] = [];
-          if (Array.isArray(fm.tags)) tags.push(...(fm.tags as string[]));
-          else if (typeof fm.tags === "string") tags.push(fm.tags);
+          const tags = frontmatterList(fm.tags);
 
           const noteData: Record<string, unknown> = {
             user_id: userId,

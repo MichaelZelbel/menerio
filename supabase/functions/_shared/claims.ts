@@ -193,8 +193,29 @@ export function claimsToSupersede(
   const attribute = normalizeAttribute(incoming.attribute);
   const start = incoming.valid_from || today;
   return existing.filter(
-    (c) => normalizeAttribute(c.attribute) === attribute && (!c.valid_to || c.valid_to > start),
+    (c) =>
+      normalizeAttribute(c.attribute) === attribute &&
+      (!c.valid_to || c.valid_to > start) &&
+      // A claim that starts after the incoming one is the newer fact, and a
+      // historical entry ("employer X, 2010 to 2015") must not close it with a
+      // valid_to before its own valid_from, which took it out of every
+      // current view. An undated claim is treated as current and superseded.
+      (!c.valid_from || c.valid_from <= start),
   );
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A claim date as the database's `date` column accepts it, or an error.
+ * Nothing validated these before the row was written, and the rows above it
+ * had already been closed by then.
+ */
+export function assertClaimDate(name: string, value: string | null | undefined): void {
+  if (value === null || value === undefined || value === "") return;
+  if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new Error(`${name} must be a date in YYYY-MM-DD form, got "${value}"`);
+  }
 }
 
 /** The end date to stamp on a superseded claim. */
@@ -252,6 +273,12 @@ export async function addClaimWithSupersede(
   }
   const value = String(input.value || "").trim();
   if (!value) throw new Error("A value is required");
+  assertClaimDate("valid_from", input.valid_from);
+  assertClaimDate("valid_to", input.valid_to);
+  assertClaimDate("review_by", input.review_by);
+  if (input.valid_from && input.valid_to && input.valid_to < input.valid_from) {
+    throw new Error("valid_to must not be before valid_from");
+  }
 
   let q = supabase
     .from("claims")
@@ -270,12 +297,10 @@ export async function addClaimWithSupersede(
     valid_from: input.valid_from ?? null,
     cardinality,
   });
-  const endDate = supersedeDate({ valid_from: input.valid_from ?? null });
-  for (const claim of toClose) {
-    const { error } = await supabase.from("claims").update({ valid_to: endDate }).eq("id", claim.id);
-    if (error) throw new Error(error.message);
-  }
-
+  // Insert first, close afterwards. The other order closed the live fact and
+  // then, when the insert was refused, left nothing in its place. Two open
+  // claims for a moment is recoverable; a closed fact with no successor is a
+  // loss the header of this file promises never happens.
   const { data, error } = await supabase
     .from("claims")
     .insert({
@@ -296,5 +321,11 @@ export async function addClaimWithSupersede(
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+
+  const endDate = supersedeDate({ valid_from: input.valid_from ?? null });
+  for (const claim of toClose) {
+    const { error: closeError } = await supabase.from("claims").update({ valid_to: endDate }).eq("id", claim.id);
+    if (closeError) throw new Error(closeError.message);
+  }
   return { claim: data as Claim, superseded: toClose };
 }

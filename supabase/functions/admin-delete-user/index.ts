@@ -9,6 +9,7 @@
 // owned data behind. This function does the real, complete deletion.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { removeUserStorage } from "../_shared/delete-user-storage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,17 +66,17 @@ serve(async (req) => {
       return json({ error: "Use account settings to delete your own account." }, 400);
     }
 
-    // Delete avatar files from storage (best-effort).
-    const { data: avatarFiles } = await adminClient.storage.from("avatars").list(target_user_id);
-    if (avatarFiles && avatarFiles.length > 0) {
-      await adminClient.storage.from("avatars").remove(avatarFiles.map((f) => `${target_user_id}/${f.name}`));
-    }
+    // Every file of theirs (avatars, note attachments), best-effort.
+    const storage = await removeUserStorage(adminClient, target_user_id);
+    for (const err of storage.errors) console.error("[admin-delete-user] storage cleanup:", err);
 
     await adminClient.from("user_roles").delete().eq("user_id", target_user_id);
     await adminClient.from("profiles").delete().eq("id", target_user_id);
 
     // Deleting the auth user cascades owned rows (notes, contacts, …) via their
-    // on-delete-cascade FKs to auth.users — same assumption delete-my-account makes.
+    // on-delete-cascade FKs to auth.users. Migration 20260916120000 gave every
+    // public table with a user_id column that key; before it, contacts, moments,
+    // claims, API keys and about fifty other tables stayed behind.
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(target_user_id);
     if (deleteError) {
       console.error("[admin-delete-user] auth delete failed:", deleteError);

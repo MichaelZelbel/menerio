@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import {
   canonicalProfileLabel,
   matchProfileCategoryByLabel,
@@ -148,7 +148,8 @@ serve(async (req) => {
         callOptions: { response_format: { type: "json_object" } },
         templateVars: { contactName },
       });
-      parsed = JSON.parse(result.content);
+      parsed = parseModelJson<Record<string, unknown>>(result.content);
+      if (parsed === null) throw new Error("Model returned no JSON");
     } catch (err) {
       console.error("[classify-profile-fact] LLM call failed:", err);
       return json({ error: "Could not classify this fact. Please try again." }, 502);

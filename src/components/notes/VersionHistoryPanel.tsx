@@ -39,7 +39,10 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
   const [selected, setSelected] = useState<CommitMeta | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [loadingSha, setLoadingSha] = useState<string | null>(null);
-  const [parsed, setParsed] = useState<{ title: string; content: string } | null>(null);
+  // `content` is HTML for the preview dialog; `markdown` is what gets written
+  // back on restore. Notes are stored as Markdown, and restoring the preview
+  // HTML put HTML into the note body until the next autosave.
+  const [parsed, setParsed] = useState<{ title: string; content: string; markdown: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadVersion = async (commit: CommitMeta) => {
@@ -55,7 +58,7 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
     try {
       const raw = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
       const { title, body } = splitFrontmatter(raw);
-      setParsed({ title: title || "Untitled", content: markdownToHtml(body) });
+      setParsed({ title: title || "Untitled", content: markdownToHtml(body), markdown: body });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       setError(msg ? `Couldn't load this version: ${msg}` : "Couldn't load this version from GitHub.");
@@ -68,7 +71,7 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
   const handleRestore = async () => {
     if (!parsed) return;
     try {
-      await updateNote.mutateAsync({ id: noteId, title: parsed.title, content: parsed.content });
+      await updateNote.mutateAsync({ id: noteId, title: parsed.title, content: parsed.markdown });
       showToast.success("Version restored");
       setPreviewOpen(false);
     } catch {

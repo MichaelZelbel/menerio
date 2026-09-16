@@ -86,12 +86,19 @@ Deno.serve(async (req: Request) => {
         // --- Semantic connections ---
         if (note.embedding) {
           const embedding = typeof note.embedding === "string" ? note.embedding : JSON.stringify(note.embedding);
-          const { data: matches } = await supabase.rpc("match_notes", {
+          const { data: matches, error: matchError } = await supabase.rpc("match_notes", {
             query_embedding: embedding,
             match_threshold: minStrength,
             match_count: 11,
             p_user_id: userId,
           });
+          // A failed search is not an empty search: with `matches` read as []
+          // the keep-set below was empty and every semantic connection of the
+          // note was deleted. Leave this note as it is and move on.
+          if (matchError) {
+            console.error("match_notes failed for", note.id, matchError.message);
+            continue;
+          }
 
           const semanticMatches = (matches || []).filter((m: any) => m.id !== note.id).slice(0, 10);
           for (const m of semanticMatches) {
@@ -107,12 +114,16 @@ Deno.serve(async (req: Request) => {
 
           // Remove stale semantic connections
           const keepIds = new Set(semanticMatches.map((m: any) => m.id));
-          const { data: existing } = await supabase
+          const { data: existing, error: existingError } = await supabase
             .from("note_connections")
             .select("id, target_note_id")
             .eq("source_note_id", note.id)
             .eq("connection_type", "semantic")
             .eq("user_id", userId);
+          if (existingError) {
+            console.error("note_connections read failed for", note.id, existingError.message);
+            continue;
+          }
 
           const toDelete = (existing || [])
             .filter((e: any) => !keepIds.has(e.target_note_id))
@@ -195,12 +206,16 @@ Deno.serve(async (req: Request) => {
           const keepTargets = new Set(
             connections.filter((c) => c.connection_type === type).map((c) => c.target_note_id)
           );
-          const { data: existing } = await supabase
+          const { data: existing, error: existingError } = await supabase
             .from("note_connections")
             .select("id, target_note_id")
             .eq("source_note_id", note.id)
             .eq("connection_type", type)
             .eq("user_id", userId);
+          if (existingError) {
+            console.error(`note_connections (${type}) read failed for`, note.id, existingError.message);
+            continue;
+          }
 
           const toDelete = (existing || [])
             .filter((e: any) => !keepTargets.has(e.target_note_id))

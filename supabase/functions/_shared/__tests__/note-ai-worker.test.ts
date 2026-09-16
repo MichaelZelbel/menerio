@@ -45,6 +45,21 @@ describe("note AI worker admission", () => {
     expect(report.failed).toBe(2);
     expect(fail.mock.calls.map((c) => c[1])).toEqual(["uncertain", "uncertain"]);
   });
+  it("leaves the lease alone when its own client timeout fires", async () => {
+    // The executor keeps running under its 300 s lease after our 110 s abort.
+    // Failing the job here revoked that lease and the paid work was rejected
+    // as stale; the claim RPC reclaims an expired lease if it really died.
+    let next = 0;
+    const fail = vi.fn();
+    const report = await drainNoteAiJobs({
+      enabled: true,
+      claim: async () => next++ < 1 ? ({ id: "job", user_id: "fixture", note_id: "note", pipeline: "analysis", lease_id: "lease" }) : null,
+      dispatch: async () => { throw new DOMException("The operation timed out", "TimeoutError"); },
+      fail,
+    });
+    expect(report).toMatchObject({ claimed: 1, failed: 0, timedOut: 1 });
+    expect(fail).not.toHaveBeenCalled();
+  });
   it("does not claim or dispatch while disabled", async () => {
     const claim = vi.fn();
     const dispatch = vi.fn();

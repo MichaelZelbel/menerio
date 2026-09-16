@@ -318,16 +318,19 @@ async function recordDisambiguation(
   confidence: number,
 ) {
   const lower = alias.toLowerCase();
-  // Look up existing
-  const { data: existing } = await supabase
+  // Look up existing. A "self" decision has no contact, and `.eq(column, null)`
+  // sends `eq.null`, which PostgREST casts against the uuid column and refuses
+  // (22P02). Under the durable pipeline that refusal fails the job, so every
+  // note mentioning the owner's own name stalled in analysis; NULL needs `.is()`.
+  let lookup = supabase
     .from("name_disambiguation_decisions")
     .select("id, decision_count, confidence")
     .eq("user_id", userId)
     .eq("alias_lower", lower)
     .eq("context_kind", "global")
-    .eq("target", target)
-    .eq("target_contact_id", contactId)
-    .maybeSingle();
+    .eq("target", target);
+  lookup = contactId ? lookup.eq("target_contact_id", contactId) : lookup.is("target_contact_id", null);
+  const { data: existing } = await lookup.maybeSingle();
   if (existing) {
     await supabase
       .from("name_disambiguation_decisions")
