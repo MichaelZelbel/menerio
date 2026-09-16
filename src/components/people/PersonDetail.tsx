@@ -88,6 +88,16 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
     enabled: !!person,
     queryFn: async () => {
       const names = [person.name, ...(person.aliases || [])];
+      // The database does the matching over ALL notes. Scanning the 50 newest
+      // here missed every older note about this person.
+      const { data: matched, error: rpcError } = await supabase.rpc("notes_mentioning_people" as never, {
+        p_names: names,
+        p_limit: 100,
+      } as never);
+      if (!rpcError) return (matched as unknown as Array<{ id: string; title: string | null; created_at: string; metadata: unknown }> | null) ?? [];
+      // PGRST202: the function is not deployed yet. Fall back to the old scan
+      // rather than showing an error, until migration 20260917100100 is live.
+      if (rpcError.code !== "PGRST202") throw rpcError;
       const { data, error } = await supabase
         .from("notes")
         .select("id, title, created_at, metadata")

@@ -145,6 +145,7 @@ export function CompactCategorySection({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(category.name);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingEntryDelete, setPendingEntryDelete] = useState<ContactProfileEntry | null>(null);
   const navigate = useNavigate();
 
   const isFiltering = filterQuery.trim().length > 0;
@@ -204,7 +205,8 @@ export function CompactCategorySection({
         variant="ghost"
         size="icon"
         className="h-7 w-7 text-destructive"
-        onClick={() => onDeleteEntry(entry.id)}
+        aria-label="Delete entry"
+        onClick={() => setPendingEntryDelete(entry)}
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
@@ -419,6 +421,28 @@ export function CompactCategorySection({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => onDeleteCategory(category.id)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!pendingEntryDelete} onOpenChange={(open) => !open && setPendingEntryDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{pendingEntryDelete?.label}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This entry will be removed from "{category.name}". This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingEntryDelete) onDeleteEntry(pendingEntryDelete.id);
+                setPendingEntryDelete(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

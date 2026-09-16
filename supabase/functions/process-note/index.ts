@@ -553,6 +553,20 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       const label = String(suggestion.payload.label || "").trim();
       const value = String(suggestion.payload.value || "").trim();
       if (!label || !value || !categorySlug) return { ...suggestion, status: "pending_review" };
+      const factDecision = profileValueDecision(categorySlug, label, value);
+      if (!factDecision.ok) return { ...suggestion, status: "removed" };
+      // The same evidence gate the relationship branch applies, checked here
+      // rather than left to the profile_entries trigger: the trigger refuses an
+      // automated fact whose quote is under ten characters, and under the
+      // durable pipeline a refused insert fails the whole analysis job. An ID
+      // card scan ("DEUTSCH", "181 cm", "47804") lost all nine of its facts
+      // that way. A short quote waits for a human instead.
+      const factEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
+      // Counted in code points, as Postgres `length()` counts them: `.length`
+      // counts UTF-16 units, so five emoji passed here and failed the trigger.
+      // Checked before the category is resolved, so a fact bound for review
+      // does not leave an empty category behind.
+      if ([...factEvidenceQuote].length < 10) return { ...suggestion, status: "pending_review" };
 
       // Resolve / create the category. Owner categories have contact_id IS NULL.
       if (!categoryId) {
@@ -601,16 +615,6 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       if (!categoryId) return { ...suggestion, status: "pending_review" };
 
-      const factDecision = profileValueDecision(categorySlug, label, value);
-      if (!factDecision.ok) return { ...suggestion, status: "removed" };
-      // The same evidence gate the relationship branch applies, checked here
-      // rather than left to the profile_entries trigger: the trigger refuses an
-      // automated fact whose quote is under ten characters, and under the
-      // durable pipeline a refused insert fails the whole analysis job. An ID
-      // card scan ("DEUTSCH", "181 cm", "47804") lost all nine of its facts
-      // that way. A short quote waits for a human instead.
-      const factEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
-      if (factEvidenceQuote.length < 10) return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("profile_entries")
         .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: factEvidenceQuote, linked_note_id: (suggestion as any).source_note_id || null })
@@ -636,7 +640,7 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       // Hard evidence gate: an automated relationship without a verbatim quote
       // from a note is never written — it waits for human review instead.
       const relEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
-      if (relEvidenceQuote.length < 10) return { ...suggestion, status: "pending_review" };
+      if ([...relEvidenceQuote].length < 10) return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null, origin: "ai_note", evidence_quote: relEvidenceQuote, evidence_note_id: (suggestion.payload as any)?.note_id || (suggestion as any).source_note_id || null })
@@ -910,6 +914,10 @@ function deriveCanonicalFacts(
 // below instead — extraction still runs but confidence is capped.
 
 const MAX_FACTS_PER_CONTACT_PER_NOTE = 8;
+// Paid relationship judgements per note. A long chat log can yield dozens of
+// candidate pairs, each one a model call; past this many the rest are dropped
+// and counted in the log rather than bought.
+const MAX_RELATIONSHIP_ADJUDICATIONS_PER_NOTE = 12;
 
 // Sources where extraction still runs but confidence is capped so facts require
 // user review rather than auto-applying. These often contain mixed signal
@@ -1908,6 +1916,8 @@ async function generateProfileSuggestions(
       // candidate rejected for the same reason is a broken prompt, and until now
       // the two looked identical in the log.
       let relNoQuote = 0;
+      let adjudicationsRun = 0;
+      let relOverCap = 0;
       for (const rel of extractedRelationships) {
         if (!exactQuoteExists(cleanContent, rel.source_quote)) {
           if (!String(rel.source_quote || "").trim()) relNoQuote++;
@@ -1966,20 +1976,35 @@ async function generateProfileSuggestions(
         if (seenKeys.has(pairKey)) continue;
         seenKeys.add(pairKey);
 
+        if (adjudicationsRun >= MAX_RELATIONSHIP_ADJUDICATIONS_PER_NOTE) {
+          relOverCap++;
+          continue;
+        }
+        adjudicationsRun++;
+
         const nameA = isSelfA ? "Me" : contactA!.name;
         const nameB = isSelfB ? "Me" : contactB!.name;
-        const adjudication = await adjudicateRelationship({
+        const candidate = {
+          personA: nameA,
+          personB: nameB,
+          label: canonical,
+          inverseLabel: inverse,
+          sourceQuote: rel.source_quote,
+          sourceContext: rel.source_context,
+        };
+        // Each judgement is a paid stage of its own, keyed by the candidate, so a
+        // retry of this job replays the verdict instead of buying it again. They
+        // ran outside the stage protocol until 2026-09-16, uncapped, and every
+        // retry of a job that failed later on re-billed all of them.
+        // adjudicateRelationship never throws (an unavailable judge answers
+        // "review"), so that fail-closed verdict is what gets checkpointed.
+        const adjudicationStage = `relationship:${noteContentHash(JSON.stringify(candidate))}`;
+        const adjudication = await noteJobs.runStage(lease, adjudicationStage, () => adjudicateRelationship({
           db: supabase,
           userId,
-          candidate: {
-            personA: nameA,
-            personB: nameB,
-            label: canonical,
-            inverseLabel: inverse,
-            sourceQuote: rel.source_quote,
-            sourceContext: rel.source_context,
-          },
-        });
+          candidate,
+          attribution: { noteId, jobId: lease.id, revision: lease.fingerprint, stage: adjudicationStage },
+        }));
         const adjudicatedLabel = adjudication.canonicalLabel || canonical;
 
         const { data: evidenceRow, error: evidenceError } = await supabase
@@ -2061,6 +2086,10 @@ async function generateProfileSuggestions(
           is_sensitive: isSensitiveSuggestion("add_relationship", { ...rel, nameA, nameB }, noteContent),
           suppression_key: buildSuppressionKey("add_relationship", "relationship", null, pairKey),
         });
+      }
+
+      if (relOverCap > 0) {
+        console.warn(`[relationships] ${relOverCap} candidate(s) for note ${noteId} not judged: over the cap of ${MAX_RELATIONSHIP_ADJUDICATIONS_PER_NOTE} paid adjudications per note`);
       }
 
       if (relSuggestions.length > 0) {

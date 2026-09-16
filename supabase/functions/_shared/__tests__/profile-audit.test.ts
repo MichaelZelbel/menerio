@@ -39,6 +39,14 @@ describe("parseAuditResponse", () => {
   it("survives garbage", () => {
     expect(parseAuditResponse("no json here").groups).toEqual([]);
   });
+  it("flags an unreadable reply instead of reporting no duplicates", () => {
+    expect(parseAuditResponse("no json here").unparseable).toBe(true);
+    expect(parseAuditResponse("").unparseable).toBe(true);
+    expect(parseAuditResponse('{"groups": [').unparseable).toBe(true);
+    expect(parseAuditResponse('{"answer":"none"}').unparseable).toBe(true);
+    expect(parseAuditResponse('{"groups":[],"none":true}').unparseable).toBeUndefined();
+    expect(parseAuditResponse('{"none":true}').none).toBe(true);
+  });
 });
 
 describe("planMerges — real reported failures", () => {

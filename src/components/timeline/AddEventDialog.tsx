@@ -212,6 +212,30 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         person_id: matchedPeople[0] || null,
       };
 
+      // People are resolved before the moment is written, so a failure here
+      // leaves nothing half-saved and a retry does not create a second moment.
+      const newPeopleIds: string[] = [];
+      for (const name of selectedNewPeople) {
+        // A name typed as new may already be in People under another case.
+        const { data: existing, error: lookupError } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("user_id", user.id)
+          .is("merged_into", null)
+          .ilike("name", name.replace(/[%_\\]/g, (ch) => "\\" + ch))
+          .limit(1);
+        // A failed lookup would otherwise create a duplicate of an existing person.
+        if (lookupError) throw lookupError;
+        if (existing && existing.length > 0) {
+          newPeopleIds.push(existing[0].id);
+          continue;
+        }
+        const { data, error: createError } = await supabase.from("contacts").insert({ user_id: user.id, name }).select("id").single();
+        // Swallowing this used to save the moment without the person, silently.
+        if (createError || !data) throw createError || new Error(`Could not add ${name}`);
+        newPeopleIds.push(data.id);
+      }
+
       let momentId = editEvent?.id;
       if (isEditMode && momentId) {
         const { error } = await supabase.from("moments" as any).update(momentPayload).eq("id", momentId);
@@ -220,24 +244,6 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         const { data, error } = await supabase.from("moments" as any).insert({ ...momentPayload, source: "manual" }).select("id").single();
         if (error || !data) throw error || new Error("Moment was not created");
         momentId = (data as any).id;
-      }
-
-      const newPeopleIds: string[] = [];
-      for (const name of selectedNewPeople) {
-        // A name typed as new may already be in People under another case.
-        const { data: existing } = await supabase
-          .from("contacts")
-          .select("id")
-          .eq("user_id", user.id)
-          .is("merged_into", null)
-          .ilike("name", name.replace(/[%_\\]/g, (ch) => "\\" + ch))
-          .limit(1);
-        if (existing && existing.length > 0) {
-          newPeopleIds.push(existing[0].id);
-          continue;
-        }
-        const { data } = await supabase.from("contacts").insert({ user_id: user.id, name }).select("id").single();
-        if (data) newPeopleIds.push(data.id);
       }
 
       const desiredIds = Array.from(new Set([...matchedPeople, ...newPeopleIds]));

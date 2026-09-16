@@ -222,6 +222,12 @@ async function auditScope(
       });
 
       const parsed = parseAuditResponse(chat.content || "");
+      if (parsed.unparseable) {
+        // Reading an unreadable reply as "no duplicates" marked scopes clean
+        // that were never audited. Fail the round; the catch below leaves the
+        // scope dirty with the reason, so a later sweep asks again.
+        throw new Error("Audit reply was not the expected JSON object; scope left dirty for retry.");
+      }
       const groups = parsed.groups || [];
       if (groups.length === 0) {
         clean = true;

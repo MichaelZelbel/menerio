@@ -41,8 +41,10 @@ import {
 import {
   adjudicateRelationship,
   exactQuoteExists,
+  noteContentHash,
   RELATIONSHIP_ADJUDICATION_VERSION,
 } from "../_shared/relationship-adjudicator.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -106,12 +108,19 @@ async function reconcileUser(db: any, userId: string) {
   };
 
 
-  const [{ data: contactRows }, { data: profileRow }, { data: aliasRows }] = await Promise.all([
-    db.from("contacts").select("id, name, merged_into").eq("user_id", userId),
+  // Every list in this sweep is paged: an unpaged select stops at 1,000 rows
+  // without saying so, and a contact missing from this map makes its
+  // relationships look like dangling endpoints that step 1 deletes.
+  const [contactRows, { data: profileRow }, aliasRows] = await Promise.all([
+    selectAllRows<Contact>((from, to) =>
+      db.from("contacts").select("id, name, merged_into").eq("user_id", userId).order("id").range(from, to)
+    ),
     db.from("profiles").select("display_name").eq("id", userId).maybeSingle(),
-    db.from("user_self_aliases").select("alias").eq("user_id", userId),
+    selectAllRows<{ alias: string }>((from, to) =>
+      db.from("user_self_aliases").select("alias").eq("user_id", userId).order("alias").range(from, to)
+    ),
   ]);
-  const contacts = new Map<string, Contact>((contactRows || []).map((c: Contact) => [c.id, c]));
+  const contacts = new Map<string, Contact>(contactRows.map((c) => [c.id, c]));
   const selfName = String(profileRow?.display_name || "").trim();
 
   // ---- 0. self-duplicate contacts ---------------------------------------
@@ -121,7 +130,7 @@ async function reconcileUser(db: any, userId: string) {
   const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
   const selfNames = new Set<string>();
   if (selfName) selfNames.add(normalizeName(selfName));
-  for (const row of (aliasRows || []) as Array<{ alias: string }>) {
+  for (const row of aliasRows) {
     const normalized = normalizeName(String(row.alias || ""));
     // Single-word pronoun aliases ("I", "me") are not person names.
     if (normalized.length >= 4) selfNames.add(normalized);
@@ -132,12 +141,16 @@ async function reconcileUser(db: any, userId: string) {
   }
   if (selfDuplicateIds.size) {
     const ids = [...selfDuplicateIds];
-    const { data: dupRels } = await db
-      .from("contact_relationships")
-      .select("id, source_type, source_id, target_type, target_id")
-      .eq("user_id", userId)
-      .or(`source_id.in.(${ids.join(",")}),target_id.in.(${ids.join(",")})`);
-    for (const rel of (dupRels || []) as Rel[]) {
+    const dupRels = await selectAllRows<Rel>((from, to) =>
+      db
+        .from("contact_relationships")
+        .select("id, source_type, source_id, target_type, target_id")
+        .eq("user_id", userId)
+        .or(`source_id.in.(${ids.join(",")}),target_id.in.(${ids.join(",")})`)
+        .order("id")
+        .range(from, to)
+    );
+    for (const rel of dupRels) {
       const sourceIsSelf = rel.source_type === "contact" && rel.source_id && selfDuplicateIds.has(rel.source_id);
       const targetIsSelf = rel.target_type === "contact" && rel.target_id && selfDuplicateIds.has(rel.target_id);
       if (sourceIsSelf && targetIsSelf) {
@@ -157,12 +170,16 @@ async function reconcileUser(db: any, userId: string) {
       if (error) await db.from("contact_relationships").delete().eq("id", rel.id);
     }
     // Facts recorded against the duplicate belong on the owner's own profile.
-    const { data: dupEntries } = await db
-      .from("profile_entries")
-      .select("id, label, value")
-      .eq("user_id", userId)
-      .in("contact_id", ids);
-    for (const entry of (dupEntries || []) as Array<{ id: string; label: string; value: string }>) {
+    const dupEntries = await selectAllRows<{ id: string; label: string; value: string }>((from, to) =>
+      db
+        .from("profile_entries")
+        .select("id, label, value")
+        .eq("user_id", userId)
+        .in("contact_id", ids)
+        .order("id")
+        .range(from, to)
+    );
+    for (const entry of dupEntries) {
       const { error } = await db.from("profile_entries").update({ contact_id: null }).eq("id", entry.id);
       if (error) await db.from("profile_entries").delete().eq("id", entry.id);
     }
@@ -178,13 +195,15 @@ async function reconcileUser(db: any, userId: string) {
     return contact.name;
   };
 
-  const { data: relRows } = await db
-    .from("contact_relationships")
-    .select("id, user_id, source_type, source_id, target_type, target_id, label, origin, evidence_quote, evidence_note_id, pair_key, created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
-
-  const relationships = (relRows || []) as Rel[];
+  const relationships = await selectAllRows<Rel>((from, to) =>
+    db
+      .from("contact_relationships")
+      .select("id, user_id, source_type, source_id, target_type, target_id, label, origin, evidence_quote, evidence_note_id, pair_key, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
   stats.relationships_checked = relationships.length;
 
   const drop = async (ids: string[]) => {
@@ -264,11 +283,41 @@ async function reconcileUser(db: any, userId: string) {
   let judgeDown: unknown = null;
   const judgeUnavailable = (error: unknown) => { judgeDown = judgeDown ?? error; };
 
+  // A row is already judged when the judge kept it at the current adjudication
+  // version: recorded by this reconciler against the relationship id, or by
+  // process-note for the same quote from the same note before the row existed.
+  // Those are not re-billed.
+  //
+  // This test used to be `|| !!rel.evidence_quote`. The database refuses any
+  // automated row without a quote, so that shortcut covered every automated
+  // row, the "no quote" branch below covered the rest, and nothing after the
+  // two `continue`s ever ran.
+  const priorKeeps = await selectAllRows<{ relationship_id: string | null; source_note_id: string | null; source_quote: string }>(
+    (from, to) =>
+      db
+        .from("relationship_evidence")
+        .select("relationship_id, source_note_id, source_quote")
+        .eq("user_id", userId)
+        .eq("adjudication_version", RELATIONSHIP_ADJUDICATION_VERSION)
+        .eq("outcome", "keep")
+        .order("id")
+        .range(from, to),
+  );
+  const quoteKey = (noteId: string | null, quote: string | null) => `${noteId || ""}|${String(quote || "").trim()}`;
+  const judgedIds = new Set(priorKeeps.map((e) => e.relationship_id).filter(Boolean));
+  const judgedQuotes = new Set(
+    priorKeeps.filter((e) => e.source_note_id).map((e) => quoteKey(e.source_note_id, e.source_quote)),
+  );
+
   for (const rel of candidates) {
     // Manual rows and legacy rows are the user's own history. They are shown
     // as-is and are never deleted or re-judged by a sweep; the user confirms or
     // removes them in the UI.
-    if (TRUSTED_ORIGINS.has(String(rel.origin || "")) || !!rel.evidence_quote) {
+    if (TRUSTED_ORIGINS.has(String(rel.origin || ""))) {
+      verified.push(rel);
+      continue;
+    }
+    if (judgedIds.has(rel.id) || (rel.evidence_note_id && judgedQuotes.has(quoteKey(rel.evidence_note_id, rel.evidence_quote)))) {
       verified.push(rel);
       continue;
     }
@@ -315,15 +364,24 @@ async function reconcileUser(db: any, userId: string) {
     });
 
     if (judgeDown) break;
-    if (verdict.outcome !== "keep") {
+    if (verdict.outcome === "reject") {
       await drop([rel.id]);
       stats.relationships_deleted_unevidenced += 1;
+      continue;
+    }
+    if (verdict.outcome !== "keep") {
+      // "review" means the judge could not decide, which is not a finding that
+      // the row is false: quarantine it for the user, never delete it.
+      await db.from("contact_relationships").update({ origin: "unverified" }).eq("id", rel.id);
+      verified.push({ ...rel, origin: "unverified" });
       continue;
     }
 
     const finalLabel = verdict.canonicalLabel || rel.label;
     await db.from("contact_relationships").update({ label: finalLabel, origin: "ai_note" }).eq("id", rel.id);
-    await db.from("relationship_evidence").insert({
+    // note_content_hash is NOT NULL and part of the unique key. Without it this
+    // write was refused, unseen, and the row would be re-judged every sweep.
+    const { error: evidenceError } = await db.from("relationship_evidence").upsert({
       user_id: userId,
       relationship_id: rel.id,
       source_note_id: sourceNote.id,
@@ -341,7 +399,9 @@ async function reconcileUser(db: any, userId: string) {
       fictional_or_roleplay: verdict.fictionalOrRoleplay,
       confidence: verdict.confidence,
       adjudication_version: RELATIONSHIP_ADJUDICATION_VERSION,
-    });
+      note_content_hash: noteContentHash(String(sourceNote.content || "")),
+    }, { onConflict: "user_id,source_note_id,proposed_label,note_content_hash,source_quote" });
+    if (evidenceError) console.error("[profile-reconcile] evidence write failed", rel.id, evidenceError.message);
     verified.push({ ...rel, label: finalLabel, origin: "ai_note" });
     stats.relationships_verified += 1;
   }
@@ -357,24 +417,24 @@ async function reconcileUser(db: any, userId: string) {
 
 
   // ---- 5 + 6. profile entries ------------------------------------------
-  const { data: categoryRows } = await db
-    .from("profile_categories")
-    .select("id, slug, contact_id")
-    .eq("user_id", userId);
-  const categories = (categoryRows || []) as Array<{ id: string; slug: string; contact_id: string | null }>;
+  const categories = await selectAllRows<{ id: string; slug: string; contact_id: string | null }>((from, to) =>
+    db.from("profile_categories").select("id, slug, contact_id").eq("user_id", userId).order("id").range(from, to)
+  );
   const categoryById = new Map(categories.map((c) => [c.id, c]));
   const categoryFor = (slug: string, contactId: string | null) =>
     categories.find((c) => c.slug === slug && (c.contact_id ?? null) === (contactId ?? null));
 
-  const { data: entryRows } = await db
-    .from("profile_entries")
-    .select("id, category_id, contact_id, label, value, origin, evidence_quote, linked_note_id")
-    .eq("user_id", userId);
-
-  const entries = (entryRows || []) as Array<{
+  const entries = await selectAllRows<{
     id: string; category_id: string; contact_id: string | null; label: string; value: string;
     origin: string | null; evidence_quote: string | null; linked_note_id: string | null;
-  }>;
+  }>((from, to) =>
+    db
+      .from("profile_entries")
+      .select("id, category_id, contact_id, label, value, origin, evidence_quote, linked_note_id")
+      .eq("user_id", userId)
+      .order("id")
+      .range(from, to)
+  );
 
   const noteCache = new Map<string, string | null>();
   const loadNote = async (noteId: string): Promise<string | null> => {

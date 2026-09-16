@@ -6,6 +6,17 @@ import { ArrowLeft, Archive, CalendarDays, Check, Clapperboard, Compass, Externa
 import { useAuth } from "@/contexts/AuthContext";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -117,7 +128,28 @@ export default function GroupDetail() {
           <AddMemberDialog group={group} existingPersonIds={existingPersonIds} />
           <Button variant="outline" size="sm" onClick={() => setActiveTab("about")}>Edit</Button>
           <Button variant="outline" size="icon" onClick={() => archiveGroup.mutate(group.id, { onSuccess: () => showToast.success("Group archived") })}><Archive className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" className="text-destructive" onClick={() => trashGroup.mutate(group.id, { onSuccess: () => { showToast.success("Group moved to trash"); navigate("/dashboard/groups"); } })}><Trash2 className="h-4 w-4" /></Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="icon" className="text-destructive" aria-label="Move group to trash"><Trash2 className="h-4 w-4" /></Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Move "{group.name}" to trash?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The group will be hidden from your groups. To keep it out of the way but still reachable, archive it instead.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => trashGroup.mutate(group.id, { onSuccess: () => { showToast.success("Group moved to trash"); navigate("/dashboard/groups"); } })}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Move to trash
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
       <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge variant="secondary">{pretty(group.type)}</Badge><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span><span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Created on {new Date(group.created_at).toLocaleDateString()}</span></div>

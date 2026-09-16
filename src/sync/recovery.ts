@@ -1,5 +1,5 @@
 import { createStore, get, set } from "idb-keyval";
-import type { CrudEntry } from "@powersync/web";
+import type { AbstractPowerSyncDatabase, CrudEntry } from "@powersync/web";
 
 export type FailureKind = "data" | "permission" | "schema" | "auth" | "transient";
 export interface RecoveryBatch {
@@ -28,15 +28,53 @@ export async function withRecoveryLock<T>(userId: string, work: () => Promise<T>
   return await navigator.locks.request(`menerio-recovery:${userId}`, work);
 }
 
-/** Make in-flight work retryable before its PowerSync transaction is cleared. */
-export async function preserveUploadsBeforeAccountClear(userId: string): Promise<void> {
+/**
+ * Journal identity of a dependent group of operations. clientId is stable
+ * across retries; the payload avoids collisions after a local database reset
+ * under the same account. uploadData and the account-clear drain must agree.
+ */
+export function recoveryBatchId(operations: CrudEntry[]): string {
+  return JSON.stringify(operations.map(op => [op.clientId, op.table, op.id, op.op, op.opData]));
+}
+
+/**
+ * Make pending work retryable before PowerSync's local database is cleared.
+ *
+ * Two kinds of work would otherwise be lost on sign-out or an account switch:
+ * batches uploadData had started (already journaled, marked "uploading"), and
+ * transactions still waiting in PowerSync's upload queue that uploadData never
+ * picked up, typically edits made offline. Both are kept in the journal as
+ * "recovery" batches, which the recovery notice offers to retry once the same
+ * account signs in again.
+ */
+export async function preserveUploadsBeforeAccountClear(
+  userId: string,
+  database?: Pick<AbstractPowerSyncDatabase, "getCrudTransactions">,
+): Promise<void> {
   await withRecoveryLock(userId, async () => {
     const batches = await readRecovery(userId);
-    await writeRecovery(userId, batches
-      .filter(batch => batch.completed < batch.operations.length)
-      .map(batch => batch.status === "uploading"
-        ? { ...batch, status: "recovery" as const, kind: "transient" as const }
-        : batch));
+    // Checked against the unfiltered journal, so a group that already finished
+    // uploading is not queued to be sent a second time.
+    const known = new Set(batches.map(batch => batch.id));
+    const queued: RecoveryBatch[] = [];
+    if (database) {
+      for await (const transaction of database.getCrudTransactions()) {
+        for (const operations of dependentGroups(transaction.crud)) {
+          const id = recoveryBatchId(operations);
+          if (known.has(id)) continue;
+          known.add(id);
+          queued.push({ id, operations, completed: 0, status: "recovery", kind: "transient", createdAt: new Date().toISOString() });
+        }
+      }
+    }
+    await writeRecovery(userId, [
+      ...batches
+        .filter(batch => batch.completed < batch.operations.length)
+        .map(batch => batch.status === "uploading"
+          ? { ...batch, status: "recovery" as const, kind: "transient" as const }
+          : batch),
+      ...queued,
+    ]);
   });
 }
 

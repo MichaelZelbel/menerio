@@ -8,6 +8,8 @@
  * a fact he stated from a guess a machine made.
  */
 
+import { todayISO } from "./claims";
+
 export interface ClaimRow {
   id: string;
   subject_kind: string;
@@ -45,9 +47,11 @@ export function isStale(
   today = new Date(),
 ): boolean {
   if (!row.review_by) return false;
-  const day = today.toISOString().slice(0, 10);
-  if (row.valid_to && row.valid_to <= day) return false;
-  return row.review_by <= day;
+  // The local calendar day, the same "today" claims.ts uses. toISOString gave
+  // the UTC day, which is tomorrow late in the evening west of UTC.
+  const day = todayISO(today);
+  if (row.valid_to && row.valid_to.slice(0, 10) <= day) return false;
+  return row.review_by.slice(0, 10) <= day;
 }
 
 export interface ClaimGroup {
@@ -68,10 +72,16 @@ export function isHumanWritten(row: Pick<ClaimRow, "origin" | "rank">): boolean 
   return row.origin === "user_manual" || row.rank === "preferred";
 }
 
-/** A claim that has stopped being true still belongs in the history. */
+/**
+ * A claim that has stopped being true still belongs in the history.
+ *
+ * Same rule as isCurrentClaim in claims.ts: current while the end day is after
+ * today's local day. Comparing a date-only valid_to as a UTC-midnight instant
+ * against the current moment disagreed with the Facts panel on the end day.
+ */
 export function isCurrent(row: Pick<ClaimRow, "valid_to">, today = new Date()): boolean {
   if (!row.valid_to) return true;
-  return new Date(row.valid_to).getTime() >= today.getTime();
+  return row.valid_to.slice(0, 10) > todayISO(today);
 }
 
 function sortKey(row: ClaimRow): number {

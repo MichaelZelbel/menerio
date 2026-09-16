@@ -9,6 +9,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -48,12 +59,14 @@ export function TelegramIntegration() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("telegram_connections" as any)
         .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
         .eq("user_id", user.id)
-        .single();
-      if (data) {
+        .maybeSingle();
+      if (error) {
+        showToast.error("Failed to load Telegram settings");
+      } else if (data) {
         const conn = data as unknown as TelegramConnection;
         setConnection(conn);
       }
@@ -89,7 +102,7 @@ export function TelegramIntegration() {
       const pairingCode = generatePairingCode();
 
       if (connection) {
-        await supabase
+        const { error } = await supabase
           .from("telegram_connections" as any)
           .update({
             bot_token: botToken.trim(),
@@ -97,14 +110,16 @@ export function TelegramIntegration() {
             is_active: true,
           })
           .eq("id", connection.id);
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from("telegram_connections" as any)
           .insert({
             user_id: user.id,
             bot_token: botToken.trim(),
             pairing_code: pairingCode,
           });
+        if (error) throw error;
       }
 
       // Set webhook via direct fetch
@@ -182,10 +197,11 @@ export function TelegramIntegration() {
         }
       );
 
-      await supabase
+      const { error } = await supabase
         .from("telegram_connections" as any)
         .update({ is_active: false, is_paired: false, telegram_chat_id: null, pairing_code: null })
         .eq("id", connection.id);
+      if (error) throw error;
 
       setConnection({ ...connection, is_active: false, is_paired: false, telegram_chat_id: null, pairing_code: null });
       setBotToken("");
@@ -342,15 +358,36 @@ export function TelegramIntegration() {
             </Button>
           )}
           {isConnected && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={handleDisconnect}
-            >
-              <Unplug className="h-3.5 w-3.5 mr-1" />
-              Disconnect
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Unplug className="h-3.5 w-3.5 mr-1" />
+                  Disconnect
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect Telegram?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Messages to your bot stop being captured and the pairing with your chat is removed.
+                    To reconnect you will need to enter the bot token and pair again.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDisconnect}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Disconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </CardContent>

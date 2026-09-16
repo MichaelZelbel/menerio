@@ -46,12 +46,16 @@ export function DiscordIntegration() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("discord_connections" as any)
         .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
         .eq("user_id", user.id)
-        .single();
-      if (data) {
+        .maybeSingle();
+      if (error) {
+        // An empty form here would read as "not connected", and saving it would
+        // demand a bot token and try to create a second connection.
+        showToast.error("Failed to load Discord settings");
+      } else if (data) {
         const conn = data as unknown as DiscordConnection;
         setConnection(conn);
         setApplicationId(conn.application_id);
@@ -80,14 +84,16 @@ export function DiscordIntegration() {
       if (botToken.trim()) basePayload.bot_token = botToken.trim();
 
       if (connection) {
-        await supabase
+        const { error } = await supabase
           .from("discord_connections" as any)
           .update(basePayload)
           .eq("id", connection.id);
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from("discord_connections" as any)
           .insert({ ...basePayload, user_id: user.id });
+        if (error) throw error;
       }
 
       // Reload (no bot_token in select — server hides it from clients)
@@ -169,10 +175,14 @@ export function DiscordIntegration() {
 
   const handleDisconnect = async () => {
     if (!connection) return;
-    await supabase
+    const { error } = await supabase
       .from("discord_connections" as any)
       .update({ is_active: false })
       .eq("id", connection.id);
+    if (error) {
+      showToast.error("Failed to disconnect Discord");
+      return;
+    }
     setConnection({ ...connection, is_active: false });
     showToast.success("Discord disconnected");
   };

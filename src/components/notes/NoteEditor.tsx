@@ -1205,16 +1205,31 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   };
 
   const moveToTrash = () => {
-    updateNote.mutate({ id: note.id, is_trashed: true, trashed_at: new Date().toISOString() });
-    if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
-      ghSync.mutate({ noteId: note.id, action: "delete" });
-    }
-    showToast.success("Note moved to trash");
+    // useUpdateNote has no onError of its own. The success toast and the GitHub
+    // delete used to fire before the write settled, so a failed trash said
+    // "moved to trash" and removed the file from GitHub while the note stayed.
+    updateNote.mutate(
+      { id: note.id, is_trashed: true, trashed_at: new Date().toISOString() },
+      {
+        onSuccess: () => {
+          if (ghConn?.sync_enabled && (ghConn.sync_direction === "export" || ghConn.sync_direction === "bidirectional")) {
+            ghSync.mutate({ noteId: note.id, action: "delete" });
+          }
+          showToast.success("Note moved to trash");
+        },
+        onError: (error) => showToast.error(`Could not move the note to trash: ${error.message || "unknown error"}`),
+      },
+    );
   };
 
   const restoreFromTrash = () => {
-    updateNote.mutate({ id: note.id, is_trashed: false, trashed_at: null });
-    showToast.success("Note restored");
+    updateNote.mutate(
+      { id: note.id, is_trashed: false, trashed_at: null },
+      {
+        onSuccess: () => showToast.success("Note restored"),
+        onError: (error) => showToast.error(`Could not restore the note: ${error.message || "unknown error"}`),
+      },
+    );
   };
 
   const permanentDelete = () => {

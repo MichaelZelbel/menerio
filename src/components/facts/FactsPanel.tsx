@@ -13,6 +13,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ChevronDown, Clock, History, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -55,6 +65,7 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
 
   const [adding, setAdding] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Claim | null>(null);
   const [attribute, setAttribute] = useState("");
   const [value, setValue] = useState("");
   const [validFrom, setValidFrom] = useState("");
@@ -161,7 +172,8 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-destructive"
-            onClick={() => deleteClaim.mutate(claim.id)}
+            onClick={() => setPendingDelete(claim)}
+            aria-label="Remove fact"
             title="Remove — use only for facts that were never true"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -291,6 +303,32 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
           </Collapsible>
         )}
       </CardContent>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this fact?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `"${humanizeAttribute(pendingDelete.attribute)}: ${pendingDelete.value}" will be deleted, with no history kept. `
+                : ""}
+              If it was true once and has changed, use "No longer true" instead. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) deleteClaim.mutate(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { insufficientCreditsResponse } from "../_shared/llm-credits.ts";
 import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { GENERATE_PROFILE_SUGGESTIONS_PROMPT } from "../_shared/llm-defaults.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,12 +49,16 @@ serve(async (req) => {
         }
       }
       if (selfMatchingEnabled) {
-        const { data: aliasRows } = await db
-          .from("user_self_aliases")
-          .select("alias, is_active")
-          .eq("user_id", userId)
-          .eq("is_active", true);
-        for (const r of (aliasRows || []) as any[]) {
+        const aliasRows = await selectAllRows<{ alias: string }>((from, to) =>
+          db
+            .from("user_self_aliases")
+            .select("alias, is_active")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .order("id")
+            .range(from, to)
+        );
+        for (const r of aliasRows) {
           const a = String(r.alias || "").trim().toLowerCase();
           if (a) ownerAliases.add(a);
         }
@@ -64,12 +69,16 @@ serve(async (req) => {
     const aliasesText = aliasList.length ? aliasList.join(", ") : "(none provided)";
 
     // Get existing categories for the user
-    const { data: categories } = await db
-      .from("profile_categories")
-      .select("slug, name")
-      .eq("user_id", userId);
+    const categories = await selectAllRows<{ slug: string; name: string }>((from, to) =>
+      db
+        .from("profile_categories")
+        .select("slug, name")
+        .eq("user_id", userId)
+        .order("id")
+        .range(from, to)
+    );
 
-    const categorySlugs = (categories || []).map((c: any) => c.slug);
+    const categorySlugs = [...new Set(categories.map((c) => c.slug))];
 
     // Gather note intelligence
     // 1. Get all notes metadata
@@ -142,12 +151,21 @@ serve(async (req) => {
     });
 
     // 4. Get existing entries to avoid duplicates
-    const { data: existingEntries } = await db
-      .from("profile_entries")
-      .select("label, value, category_id")
-      .eq("user_id", userId);
+    // Paged: past 1,000 rows the model was told "do not duplicate" about only
+    // part of the profile, and suggested what the rest already holds. Owner rows
+    // only: these suggestions are for the owner's own profile, and every
+    // contact's facts listed here too would grow the prompt with each person.
+    const existingEntries = await selectAllRows<{ label: string; value: string }>((from, to) =>
+      db
+        .from("profile_entries")
+        .select("label, value, category_id")
+        .eq("user_id", userId)
+        .is("contact_id", null)
+        .order("id")
+        .range(from, to)
+    );
 
-    const existingLabels = (existingEntries || []).map((e: any) => `${e.label}: ${e.value}`);
+    const existingLabels = existingEntries.map((e) => `${e.label}: ${e.value}`);
 
     const prompt = `You are analyzing a user's personal notes to suggest profile entries for the OWNER'S OWN personal profile.
 

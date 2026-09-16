@@ -24,6 +24,7 @@ import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
 } from "../_shared/profile-dedup.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -264,15 +265,21 @@ async function writeProfileEntrySafely(args: {
   const category = await resolveCategoryForWrite(db, userId, contactId, input, fact.categorySlug);
   if (!category?.id) return { ok: false, outcome: "rejected_duplicate", reason: "category_unresolved" };
 
-  const { data: entries } = await subjectFilter(
-    db.from("profile_entries").select("id, category_id, contact_id, label, value, sort_order, linked_note_id").eq("user_id", userId),
-    contactId,
+  // Paged: past 1,000 rows an unpaged read silently drops the rest, and the
+  // exact-match and dedup checks below would then admit a duplicate.
+  const entries = await selectAllRows<any>((from, to) =>
+    subjectFilter(
+      db.from("profile_entries").select("id, category_id, contact_id, label, value, sort_order, linked_note_id").eq("user_id", userId),
+      contactId,
+    ).order("id").range(from, to)
   );
-  const { data: categories } = await subjectFilter(
-    db.from("profile_categories").select("id, slug").eq("user_id", userId),
-    contactId,
+  const categories = await selectAllRows<{ id: string; slug: string }>((from, to) =>
+    subjectFilter(
+      db.from("profile_categories").select("id, slug").eq("user_id", userId),
+      contactId,
+    ).order("id").range(from, to)
   );
-  const slugById = new Map(((categories || []) as any[]).map((c) => [c.id, c.slug]));
+  const slugById = new Map(categories.map((c) => [c.id, c.slug]));
 
   const exact = ((entries || []) as any[]).find((entry) =>
     entry.category_id === category.id &&
@@ -281,13 +288,15 @@ async function writeProfileEntrySafely(args: {
   );
   if (exact?.id) return { ok: true, outcome: "already_exists", entryId: exact.id };
 
-  const queueQuery = db
-    .from("review_queue")
-    .select("id, payload, status")
-    .eq("user_id", userId)
-    .eq("suggestion_type", "add_profile_entry")
-    .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
-  const { data: queueRows } = reviewId ? await queueQuery.neq("id", reviewId) : await queueQuery;
+  const queueRows = await selectAllRows<any>((from, to) => {
+    const queueQuery = db
+      .from("review_queue")
+      .select("id, payload, status")
+      .eq("user_id", userId)
+      .eq("suggestion_type", "add_profile_entry")
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed"]);
+    return (reviewId ? queueQuery.neq("id", reviewId) : queueQuery).order("id").range(from, to);
+  });
 
   const dedupIndex = buildProfileTokenIndex(
     (entries || []) as any[],
@@ -368,11 +377,12 @@ async function writeProfileEntrySafely(args: {
   // either resolve it to the entry that absorbed the fact, or fail loudly so
   // the caller (and the user's toast) learns the fact was not stored.
   if (!inserted?.id) {
-    const { data: after } = await subjectFilter(
-      db.from("profile_entries").select("id, category_id, label, value").eq("user_id", userId),
-      contactId,
+    const rows = await selectAllRows<any>((from, to) =>
+      subjectFilter(
+        db.from("profile_entries").select("id, category_id, label, value").eq("user_id", userId),
+        contactId,
+      ).order("id").range(from, to)
     );
-    const rows = (after || []) as any[];
     const absorbing =
       rows.find(
         (entry) =>
@@ -520,15 +530,18 @@ async function sha256Hex(input: string): Promise<string> {
 }
 
 async function getProfileInputHash(db: any, userId: string, contactId: string | null): Promise<string> {
-  let query = db
-    .from("profile_entries")
-    .select("id, category_id, label, value, sort_order, linked_note_id, updated_at, created_at")
-    .eq("user_id", userId)
-    .order("id", { ascending: true });
-  query = contactId ? query.eq("contact_id", contactId) : query.is("contact_id", null);
-  const { data, error } = await query;
-  if (error) throw error;
-  return sha256Hex(JSON.stringify(data || []));
+  // Paged: a hash over the first 1,000 rows would not change when row 1,001
+  // does, and an unchanged hash skips the subject.
+  const data = await selectAllRows<Record<string, unknown>>((from, to) => {
+    let query = db
+      .from("profile_entries")
+      .select("id, category_id, label, value, sort_order, linked_note_id, updated_at, created_at")
+      .eq("user_id", userId)
+      .order("id", { ascending: true });
+    query = contactId ? query.eq("contact_id", contactId) : query.is("contact_id", null);
+    return query.range(from, to);
+  });
+  return sha256Hex(JSON.stringify(data));
 }
 
 async function readRunState(db: any, userId: string, contactId: string | null) {
@@ -579,12 +592,17 @@ async function explodeBags(
   stats: ExplodeStats,
 ): Promise<ExplodeStats> {
   for (const subj of subjects) {
-    const q = db
-      .from("profile_entries")
-      .select("id, category_id, label, value, origin, evidence_quote, linked_note_id, sort_order")
-      .eq("user_id", userId)
-      .limit(2000);
-    const { data: rows } = subj ? await q.eq("contact_id", subj) : await q.is("contact_id", null);
+    // `.limit(2000)` never returned more than the server's 1,000-row cap. The
+    // loop below deletes and re-inserts rows, so offsets would shift under a
+    // lazy pager: read the whole subject first, then change it.
+    const rows = await selectAllRows<any>((from, to) => {
+      const q = db
+        .from("profile_entries")
+        .select("id, category_id, label, value, origin, evidence_quote, linked_note_id, sort_order")
+        .eq("user_id", userId)
+        .order("id");
+      return (subj ? q.eq("contact_id", subj) : q.is("contact_id", null)).range(from, to);
+    });
 
     const catIds = [...new Set((rows || []).map((r: any) => r.category_id).filter(Boolean))];
     const slugById = new Map<string, string>();
@@ -677,17 +695,19 @@ serve(async (req) => {
     const presentedCron = req.headers.get("x-cron-key") || "";
     if (cronKey && presentedCron === cronKey) {
       if (action !== "explode_bags") return json({ error: "cron supports explode_bags only" }, 400);
-      const { data: owners } = await db
-        .from("profile_entries")
-        .select("user_id")
-        .limit(5000);
-      const userIds = [...new Set((owners || []).map((r: any) => r.user_id))];
+      // `.limit(5000)` was capped at 1,000 entry rows by the server, so the
+      // nightly sweep only ever reached the users owning the first 1,000 rows.
+      const owners = await selectAllRows<{ user_id: string }>((from, to) =>
+        db.from("profile_entries").select("user_id").order("user_id").order("id").range(from, to)
+      );
+      const userIds = [...new Set(owners.map((r) => r.user_id))];
       const stats: ExplodeStats = { examined: 0, exploded: 0, rerouted: 0, unfiled: 0, skipped: 0 };
       for (const uid of userIds) {
         const subjects: Array<string | null> = [null];
-        const { data: contacts } = await db
-          .from("contacts").select("id").eq("user_id", uid).is("merged_into", null).limit(500);
-        for (const c of (contacts || []) as any[]) subjects.push(c.id);
+        const contacts = await selectAllRows<{ id: string }>((from, to) =>
+          db.from("contacts").select("id").eq("user_id", uid).is("merged_into", null).order("id").range(from, to)
+        );
+        for (const c of contacts) subjects.push(c.id);
         await explodeBags(db, uid, subjects, stats);
       }
       return json({ ok: true, users: userIds.length, ...stats });
@@ -741,9 +761,11 @@ serve(async (req) => {
         subjects.push(contactId);
       } else if (scope === "all_contacts") {
         subjects.push(null);
-        const { data: contacts } = await db
-          .from("contacts").select("id").eq("user_id", userId).is("merged_into", null).limit(500);
-        for (const c of (contacts || []) as any[]) subjects.push(c.id);
+        // Deterministic re-filing costs no model call, so no contact is left out.
+        const contacts = await selectAllRows<{ id: string }>((from, to) =>
+          db.from("contacts").select("id").eq("user_id", userId).is("merged_into", null).order("id").range(from, to)
+        );
+        for (const c of contacts) subjects.push(c.id);
       } else {
         return json({ error: "invalid scope" }, 400);
       }

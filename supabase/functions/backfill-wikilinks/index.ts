@@ -1,6 +1,7 @@
 // Backfill manual_link rows in note_connections for all [[Title]] references
 // found in existing notes. Idempotent: only inserts missing rows, never deletes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,14 +32,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: notes, error: notesErr } = await supabase
-      .from("notes")
-      .select("id, title, content")
-      .eq("user_id", user.id)
-      .eq("is_trashed", false)
-      .eq("ai_visibility", "visible");
-
-    if (notesErr) throw notesErr;
+    // Paged: unpaged, notes past the first 1,000 were neither scanned nor
+    // resolvable as link targets. Oldest first, so a duplicated title resolves
+    // to the same note on every run.
+    const notes = await selectAllRows<{ id: string; title: string | null; content: string | null }>(
+      (from, to) =>
+        supabase
+          .from("notes")
+          .select("id, title, content")
+          .eq("user_id", user.id)
+          .eq("is_trashed", false)
+          .eq("ai_visibility", "visible")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      500,
+    );
 
     const titleMap = new Map<string, string>();
     for (const n of notes ?? []) {
@@ -48,11 +57,16 @@ Deno.serve(async (req) => {
     }
 
     // Existing manual_link pairs
-    const { data: existing } = await supabase
-      .from("note_connections")
-      .select("source_note_id, target_note_id")
-      .eq("user_id", user.id)
-      .eq("connection_type", "manual_link");
+    // Paged too: a truncated set re-inserts links that already exist.
+    const existing = await selectAllRows<{ source_note_id: string; target_note_id: string }>((from, to) =>
+      supabase
+        .from("note_connections")
+        .select("source_note_id, target_note_id")
+        .eq("user_id", user.id)
+        .eq("connection_type", "manual_link")
+        .order("id")
+        .range(from, to)
+    );
 
     const existingPairs = new Set(
       (existing ?? []).map((r: any) => `${r.source_note_id}|${r.target_note_id}`)

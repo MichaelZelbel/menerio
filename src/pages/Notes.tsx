@@ -470,15 +470,19 @@ export default function Notes() {
       destructive: true,
       onConfirm: async () => {
         try {
-          if (affectedNotes.length > 0) {
-            const ids = affectedNotes.map((n) => n.id);
-            const { error: nErr } = await supabase
-              .from("notes" as any)
-              .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-              .in("id", ids);
-            if (nErr) throw nErr;
-            if (selectedId && ids.includes(selectedId)) selectNote(null);
-          }
+          // Filtered on the server, not by the ids this page happens to
+          // hold: the list can lag the server or be missing rows, and every
+          // note under the folder must go to Trash with it. A folder whose
+          // notes stayed behind would leave them reachable only by search.
+          // RLS limits the update to the caller's own notes.
+          const { count: trashedCount, error: nErr } = await supabase
+            .from("notes" as any)
+            .update({ is_trashed: true, trashed_at: new Date().toISOString() }, { count: "exact" })
+            .eq("is_trashed", false)
+            .or(`folder_path.eq.${pgOrValue(path)},folder_path.like.${pgOrValue(escapeLike(path) + "/%")}`);
+          if (nErr) throw nErr;
+          const movedCount = trashedCount ?? affectedNotes.length;
+          if (selectedId && affectedNotes.some((n) => n.id === selectedId)) selectNote(null);
           const { error: fErr } = await supabase
             .from("note_folders" as any)
             .delete()
@@ -491,8 +495,8 @@ export default function Notes() {
             setActiveFolderPath(parent || null);
           }
           showToast.success(
-            affectedNotes.length > 0
-              ? `Folder deleted, ${affectedNotes.length} note${affectedNotes.length === 1 ? "" : "s"} moved to Trash`
+            movedCount > 0
+              ? `Folder deleted, ${movedCount} note${movedCount === 1 ? "" : "s"} moved to Trash`
               : "Folder deleted"
           );
         } catch (err) {

@@ -19,6 +19,17 @@ import {
 } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   ShieldAlert, Bot, BookType, Ban, RefreshCw, Loader2, Play, RotateCcw, Plus, Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -61,7 +72,13 @@ function ModerationLogTab() {
     setLoading(true);
     let query = supabase.from("moderation_events").select("*").order("created_at", { ascending: false }).limit(100);
     if (tierFilter !== "all") query = query.eq("tier", tierFilter);
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) {
+      // An empty table here would read as "no moderation events", not as a failed load.
+      showToast.error("Failed to load moderation events");
+      setLoading(false);
+      return;
+    }
     const rows = (data as any[]) || [];
     setEvents(rows);
     const names = await fetchProfileNames(rows.map((e) => e.user_id));
@@ -144,10 +161,15 @@ function AIReviewQueueTab() {
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
-    const [{ data, error }, { count }] = await Promise.all([
+    const [{ data, error }, { count, error: countError }] = await Promise.all([
       supabase.from("moderation_review_queue").select("*").order("created_at", { ascending: false }).limit(50),
       supabase.from("moderation_review_queue").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
+    if (error || countError) {
+      showToast.error("Failed to load the review queue");
+      setLoading(false);
+      return;
+    }
     const rows = (data as any[]) || [];
     setItems(rows);
     setPendingCount(count || 0);
@@ -172,7 +194,11 @@ function AIReviewQueueTab() {
   };
 
   const reReview = async (id: string) => {
-    await supabase.from("moderation_review_queue").update({ status: "pending", retry_count: 0, reviewed_at: null, ai_category: null, ai_confidence: null, ai_reason: null }).eq("id", id);
+    const { error } = await supabase.from("moderation_review_queue").update({ status: "pending", retry_count: 0, reviewed_at: null, ai_category: null, ai_confidence: null, ai_reason: null }).eq("id", id);
+    if (error) {
+      showToast.error("Failed to reset the item");
+      return;
+    }
     showToast.success("Item reset to pending");
     fetchItems();
   };
@@ -262,7 +288,12 @@ function StopwordsTab() {
 
   const fetchWords = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from("moderation_stopwords").select("*").order("category").order("word");
+    const { data, error } = await supabase.from("moderation_stopwords").select("*").order("category").order("word");
+    if (error) {
+      showToast.error("Failed to load stopwords");
+      setLoading(false);
+      return;
+    }
     setWords((data as any[]) || []);
     setLoading(false);
   }, []);
@@ -300,7 +331,11 @@ function StopwordsTab() {
   };
 
   const deleteWord = async (id: string) => {
-    await supabase.from("moderation_stopwords").delete().eq("id", id);
+    const { error } = await supabase.from("moderation_stopwords").delete().eq("id", id);
+    if (error) {
+      showToast.error("Failed to delete stopword");
+      return;
+    }
     showToast.deleted();
     fetchWords();
   };
@@ -383,9 +418,30 @@ function StopwordsTab() {
                     <TableCell><Badge variant="outline" className={`capitalize ${categoryColor(w.category)}`}>{w.category}</Badge></TableCell>
                     <TableCell className="text-sm capitalize">{w.severity}</TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteWord(w.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" aria-label={`Delete stopword ${w.word}`}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete stopword?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              "{w.word}" will no longer be blocked. This cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => deleteWord(w.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </TableCell>
                   </TableRow>
                 ))
@@ -407,7 +463,12 @@ function SuspensionsTab() {
 
   const fetchSuspensions = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from("user_suspensions").select("*").gt("strike_count", 0).order("strike_count", { ascending: false });
+    const { data, error } = await supabase.from("user_suspensions").select("*").gt("strike_count", 0).order("strike_count", { ascending: false });
+    if (error) {
+      showToast.error("Failed to load suspensions");
+      setLoading(false);
+      return;
+    }
     const rows = (data as any[]) || [];
     setSuspensions(rows);
     const names = await fetchProfileNames(rows.map((s) => s.user_id));
@@ -418,13 +479,21 @@ function SuspensionsTab() {
   useEffect(() => { fetchSuspensions(); }, [fetchSuspensions]);
 
   const unsuspend = async (id: string) => {
-    await supabase.from("user_suspensions").update({ suspended: false, suspended_at: null, suspended_until: null, suspension_reason: null }).eq("id", id);
+    const { error } = await supabase.from("user_suspensions").update({ suspended: false, suspended_at: null, suspended_until: null, suspension_reason: null }).eq("id", id);
+    if (error) {
+      showToast.error("Failed to unsuspend user");
+      return;
+    }
     showToast.success("User unsuspended");
     fetchSuspensions();
   };
 
   const resetStrikes = async (id: string) => {
-    await supabase.from("user_suspensions").update({ strike_count: 0, suspended: false, suspended_at: null, suspended_until: null, suspension_reason: null }).eq("id", id);
+    const { error } = await supabase.from("user_suspensions").update({ strike_count: 0, suspended: false, suspended_at: null, suspended_until: null, suspension_reason: null }).eq("id", id);
+    if (error) {
+      showToast.error("Failed to reset strikes");
+      return;
+    }
     showToast.success("Strikes reset to 0");
     fetchSuspensions();
   };

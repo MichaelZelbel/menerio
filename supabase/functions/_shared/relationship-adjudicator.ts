@@ -81,6 +81,8 @@ export async function adjudicateRelationship(args: {
   candidate: RelationshipCandidate;
   /** Called when the LLM judge itself could not be reached (credit limit, network, 5xx). */
   onJudgeUnavailable?: (error: unknown) => void;
+  /** Note, job and stage stamped onto the usage row when a pipeline pays for the judgement. */
+  attribution?: { noteId?: string | null; jobId?: string | null; revision?: string | null; stage?: string | null };
 }): Promise<RelationshipAdjudication> {
   const deterministic = deterministicRejection(args.candidate);
   if (deterministic) return deterministic;
@@ -89,6 +91,7 @@ export async function adjudicateRelationship(args: {
     const result = await runChat({
       db: args.db,
       userId: args.userId,
+      ...args.attribution,
       callSite: "relationship.adjudication",
       defaults: { provider: "openrouter", model: "deepseek/deepseek-v4-flash", systemPrompt: RELATIONSHIP_ADJUDICATION_PROMPT, temperature: 0, maxTokens: 2000 },
       messages: [{ role: "user", content: JSON.stringify(args.candidate) }],

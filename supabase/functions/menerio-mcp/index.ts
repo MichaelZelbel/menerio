@@ -12,7 +12,7 @@ import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_s
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
 import { lookupHubKey } from "../_shared/hub-auth.ts";
-import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
@@ -316,6 +316,13 @@ function isUuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+// Any 8-4-4-4-12 hex id, whatever its version bits. isUuid above only admits
+// versions 1-5, which would refuse a valid v7 id; use this where the check is
+// "is this shaped like an id at all" before handing it to a uuid column.
+function looksLikeUuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
 }
@@ -339,25 +346,37 @@ async function logMcpToolCall(toolName: string, input: Record<string, unknown>, 
   });
 }
 
-async function enforceMcpToolLimit(toolName: string, input: Record<string, unknown>) {
-  const since = new Date(Date.now() - 60_000).toISOString();
-  const { count, error } = await supabase
-    .from("mcp_call_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", getCurrentUserId())
-    .eq("tool_name", toolName)
-    .gte("created_at", since);
+const MCP_TOOL_LIMIT_PER_MINUTE = 60;
+
+async function enforceMcpToolLimit(toolName: string) {
+  // One statement counts the call and decides, inside the database.
+  //
+  // This used to count the last minute's rows in mcp_call_logs, and a log row
+  // is only written after the tool has run. Every call in a parallel burst read
+  // the same count and passed, so the limit only ever stopped a caller that
+  // waited politely for each answer. mcp_tool_bump_usage increments relative to
+  // the stored value in one INSERT ... ON CONFLICT, the same fix the Hub API
+  // limit got in 6cc47c64 (_shared/hub-rate-limit.ts).
+  const windowStart = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString();
+  const { data, error } = await supabase.rpc("mcp_tool_bump_usage", {
+    p_user_id: getCurrentUserId(),
+    p_tool_name: toolName,
+    p_window_start: windowStart,
+    p_limit: MCP_TOOL_LIMIT_PER_MINUTE,
+  });
   if (error) throw new Error(`Could not check MCP usage: ${error.message}`);
-  if ((count || 0) >= 60) {
-    const message = "Rate limit exceeded for this tool. Please wait a minute and try again.";
-    await logMcpToolCall(toolName, input, message, false);
-    throw new Error(message);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error("Could not check MCP usage: the usage counter returned no row");
+  if (row.allowed === false) {
+    // Logged once, by the caller's catch. It used to be logged here as well,
+    // so every refused call wrote two failure rows.
+    throw new Error("Rate limit exceeded for this tool. Please wait a minute and try again.");
   }
 }
 
 async function withLoggedCollectionTool(toolName: string, input: Record<string, unknown>, handler: () => Promise<unknown>) {
   try {
-    await enforceMcpToolLimit(toolName, input);
+    await enforceMcpToolLimit(toolName);
     const output = await handler();
     await logMcpToolCall(toolName, input, output, true);
     return jsonTool(output);
@@ -982,7 +1001,8 @@ server.registerTool(
         .from("notes")
         .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility, is_trashed, source_app")
         .eq("user_id", getCurrentUserId());
-      q = isUuid(note) ? q.eq("id", note) : q.ilike("title", note);
+      // "Exact title", case-insensitive: `%` and `_` in a title are literal.
+      q = isUuid(note) ? q.eq("id", note) : q.ilike("title", escapeLike(note));
       const { data, error } = await q.limit(1);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       const row = (data || [])[0];
@@ -1018,8 +1038,14 @@ type ListRecentArgs = {
   offset?: number;
   view?: "snippet" | "metadata";
 };
-const listRecentNotesHandler = async ({ limit, type, topic, person, days, offset = 0, view = "snippet" }: ListRecentArgs) => {
+const listRecentNotesHandler = async ({ limit: rawLimit, type, topic, person, days: rawDays, offset: rawOffset = 0, view = "snippet" }: ListRecentArgs) => {
   try {
+    // limit 0 made `.range(0, -1)`, a negative or fractional offset made an
+    // invalid range, and a non-numeric `days` made an Invalid Date whose
+    // toISOString() threw. Each failed the call instead of listing notes.
+    const limit = clampNumber(rawLimit, 1, 100, 10);
+    const offset = clampNumber(rawOffset, 0, Number.MAX_SAFE_INTEGER, 0);
+    const days = rawDays ? clampNumber(rawDays, 1, 36500, 30) : undefined;
     let q = supabase
       .from("notes")
       .select("id, title, content, metadata, tags, created_at, updated_at", { count: "exact" })
@@ -1424,30 +1450,30 @@ server.registerTool(
         q = q.in("status", ["open", "in_progress"]);
       }
       if (priority) q = q.eq("priority", priority);
+
+      // Filter by person in the database, before the limit. This used to take
+      // the 50 newest items and then keep the ones whose contact matched, so a
+      // person's items older than the 50th item of ANY person were never found
+      // and the tool answered "No action items found." for them.
+      if (person && person.trim()) {
+        const { data: contacts, error: contactErr } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("user_id", getCurrentUserId())
+          .is("merged_into", null)
+          .ilike("name", `%${escapeLike(person.trim())}%`)
+          .limit(200);
+        if (contactErr) return { content: [{ type: "text" as const, text: `Error: ${contactErr.message}` }], isError: true };
+        const contactIds = (contacts || []).map((c: any) => c.id);
+        if (contactIds.length === 0) return { content: [{ type: "text" as const, text: "No action items found." }] };
+        q = q.in("contact_id", contactIds);
+      }
       q = await applyVisibility(q, "action_items", supabase, getCurrentUserId());
 
       const { data, error } = await q.limit(50);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
 
-
-      let items = data || [];
-
-      // Filter by person name if requested
-      if (person && items.length > 0) {
-        const contactIds = items.filter((i: any) => i.contact_id).map((i: any) => i.contact_id);
-        if (contactIds.length > 0) {
-          const { data: contacts } = await supabase
-            .from("contacts")
-            .select("id, name")
-            .in("id", contactIds);
-          const matchIds = new Set(
-            (contacts || []).filter((c: any) => c.name.toLowerCase().includes(person.toLowerCase())).map((c: any) => c.id)
-          );
-          items = items.filter((i: any) => matchIds.has(i.contact_id));
-        } else {
-          items = [];
-        }
-      }
+      const items = data || [];
 
       if (!items.length) return { content: [{ type: "text" as const, text: "No action items found." }] };
 
@@ -1479,8 +1505,11 @@ server.registerTool(
       limit: z.number().optional().default(20),
     },
   },
-  async ({ name, limit }) => {
+  async ({ name, limit: rawLimit }) => {
     try {
+      // A model can send any number; `.limit(2.5)` or `.limit(-1)` is a
+      // PostgREST error and the whole tool call failed on it.
+      const limit = clampNumber(rawLimit, 1, 100, 20);
       // Two-pronged search: metadata filter + semantic
       const [metadataResult, semanticResult] = await Promise.all([
         (async () => {
@@ -1519,9 +1548,13 @@ server.registerTool(
           }
           const ids = Array.from(byNote.keys()).slice(0, limit);
           if (ids.length === 0) return { data: [], error: null };
+          // Trashed notes are left out here as they are on the metadata path;
+          // chunks of a trashed note can still match.
           const { data: rows } = await supabase
             .from("notes")
             .select("id, title, content, metadata, created_at, ai_visibility")
+            .eq("user_id", getCurrentUserId())
+            .eq("is_trashed", false)
             .in("id", ids);
           const filtered = await filterVisibleNotes(rows || [], supabase, getCurrentUserId());
           return { data: filtered, error: null };
@@ -1899,7 +1932,7 @@ server.registerTool(
     inputSchema: { limit: z.number().optional().default(100) },
   },
   async ({ limit }) => {
-    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, ai_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(limit);
+    let q = supabase.from("contacts").select("id, name, relationship, is_sensitive, ai_visibility, created_at").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name").limit(clampNumber(limit, 1, 1000, 100));
     q = await applyVisibility(q, "contacts", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
@@ -1915,7 +1948,7 @@ server.registerTool(
     inputSchema: { person_name: z.string().optional(), limit: z.number().optional().default(50) },
   },
   async ({ person_name, limit }) => {
-    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).order("happened_at", { ascending: false }).limit(limit);
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).order("happened_at", { ascending: false }).limit(clampNumber(limit, 1, 200, 50));
     if (person_name) {
       const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId()).ilike("name", `%${person_name}%`).is("merged_into", null);
       if (!matches?.length) return jsonTool({ message: "No people matching that name." });
@@ -1940,7 +1973,7 @@ server.registerTool(
     // kept the request valid at the cost of silently changing the search: a
     // query for "Q1 (draft)" actually searched for "Q1 draft". ilikeAnyColumn
     // quotes them instead, so the term is matched as typed.
-    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(ilikeAnyColumn(["title", "description"], query)).order("happened_at", { ascending: false }).limit(limit);
+    let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).or(ilikeAnyColumn(["title", "description"], query)).order("happened_at", { ascending: false }).limit(clampNumber(limit, 1, 200, 20));
     q = await applyVisibility(q, "moments", supabase, getCurrentUserId());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
@@ -2069,7 +2102,7 @@ server.registerTool(
         .eq("user_id", getCurrentUserId())
         .or(`source_note_id.eq.${noteId},target_note_id.eq.${noteId}`)
         .order("strength", { ascending: false })
-        .limit(limit);
+        .limit(clampNumber(limit, 1, 100, 20));
 
       if (!connections?.length) return { content: [{ type: "text" as const, text: "No connections found for this note." }] };
 
@@ -2315,18 +2348,28 @@ server.registerTool(
   },
   async ({ contact_name, type, summary, action_items, group_id_or_slug }) => {
     try {
-      const { data: contacts } = await supabase
+      // A merged-away duplicate is not a person any more: logging against it
+      // put the interaction where no profile shows it. `%` and `_` in the
+      // name are matched literally.
+      const { data: contacts, error: contactErr } = await supabase
         .from("contacts")
         .select("id, name")
         .eq("user_id", getCurrentUserId())
-        .ilike("name", `%${contact_name}%`)
+        .is("merged_into", null)
+        .ilike("name", `%${escapeLike(contact_name)}%`)
         .limit(1);
+      if (contactErr) {
+        return { content: [{ type: "text" as const, text: `Error: ${contactErr.message}` }], isError: true };
+      }
 
       if (!contacts?.length) {
         return { content: [{ type: "text" as const, text: `No contact found matching "${contact_name}". Create the contact first.` }] };
       }
 
       const contact = contacts[0] as any;
+      // Every other MCP write to a person goes through this gate; a person
+      // hidden from AI or marked sensitive must not be written to here either.
+      await assertWritable(supabase, getCurrentUserId(), "contact", contact.id);
       const today = new Date().toISOString().split("T")[0];
       const group = group_id_or_slug ? await resolveGroup(group_id_or_slug) : null;
 
@@ -2344,7 +2387,7 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `Failed to log: ${intError.message}` }], isError: true };
       }
 
-      await supabase.from("contacts").update({ last_contact_date: today }).eq("id", contact.id);
+      await supabase.from("contacts").update({ last_contact_date: today }).eq("user_id", getCurrentUserId()).eq("id", contact.id);
 
       let msg = `Logged ${type} with ${contact.name}${group ? ` in ${group.name}` : ""}`;
       if (action_items?.length) msg += ` | ${action_items.length} action item(s)`;
@@ -3190,6 +3233,15 @@ server.registerTool("log_group_interaction", { title: "Log Group Interaction", d
   try {
     const group = await resolveGroup(group_id_or_slug);
     const contact = await resolveContact({ contact_id, contact_name });
+    await assertWritable(supabase, getCurrentUserId(), "contact", contact.id);
+    if (note_id) {
+      // Stored with the service key, so check it is one of this user's notes
+      // rather than a pointer to nothing or to another account's note.
+      if (!looksLikeUuid(note_id)) throw new Error(`note_id is not a note id: ${note_id}`);
+      const { data: note, error: noteErr } = await supabase.from("notes").select("id").eq("user_id", getCurrentUserId()).eq("id", note_id).maybeSingle();
+      if (noteErr) throw new Error(noteErr.message);
+      if (!note) throw new Error(`No note with id ${note_id} in this account.`);
+    }
     const date = interaction_date || new Date().toISOString().slice(0, 10);
     const { data, error } = await supabase.from("contact_interactions").insert({ user_id: getCurrentUserId(), group_id: group.id, contact_id: contact.id, type, summary: summary || null, action_items: action_items || [], note_id: note_id || null, interaction_date: date }).select("*").single();
     if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
@@ -3665,7 +3717,7 @@ server.registerTool(
     inputSchema: { query: z.string().optional(), entity_type: z.string().optional(), limit: z.number().optional().default(25) },
   },
   async ({ query, entity_type, limit }) => {
-    let q = visibleEntities(supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", getCurrentUserId())).order("name").limit(limit);
+    let q = visibleEntities(supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", getCurrentUserId())).order("name").limit(clampNumber(limit, 1, 200, 25));
     if (entity_type) q = q.eq("entity_type", entity_type.trim().toLowerCase());
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
@@ -3797,6 +3849,25 @@ server.registerTool(
           resolvedId = entities[0]?.id ?? null;
         }
         if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for an entity claim." });
+        // A contact id is checked by assertWritable above; an entity id was
+        // stored as given, so any string (or another account's entity id)
+        // became a claim about nothing that no entity view would ever show.
+        if (subject_id) {
+          if (!looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an entity id: ${subject_id}` });
+          const { data: owned, error: entityErr } = await supabase
+            .from("entities").select("id").eq("user_id", userId).eq("id", subject_id).maybeSingle();
+          if (entityErr) return jsonTool({ error: `Could not check the entity: ${entityErr.message}` });
+          if (!owned) return jsonTool({ error: `No entity with id ${subject_id} in this account.` });
+        }
+      }
+      if (source_note_id) {
+        // Same for the source note: it is the claim's evidence link, so it
+        // must be one of this user's notes.
+        if (!looksLikeUuid(source_note_id)) return jsonTool({ error: `source_note_id is not a note id: ${source_note_id}` });
+        const { data: note, error: noteErr } = await supabase
+          .from("notes").select("id").eq("user_id", userId).eq("id", source_note_id).maybeSingle();
+        if (noteErr) return jsonTool({ error: `Could not check the source note: ${noteErr.message}` });
+        if (!note) return jsonTool({ error: `No note with id ${source_note_id} in this account.` });
       }
 
       const { claim, superseded } = await addClaimWithSupersede(supabase, {
@@ -3858,8 +3929,10 @@ server.registerTool(
       limit: z.number().optional().default(100),
     },
   },
-  async ({ subject_type, subject_name, subject_id, attribute, mode, since, limit }) => {
+  async ({ subject_type, subject_name, subject_id, attribute, mode, since, limit: rawLimit }) => {
     const userId = getCurrentUserId();
+    const limit = clampNumber(rawLimit, 1, 1000, 100);
+    if (subject_id && !looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an id: ${subject_id}` });
     // The mode filter runs on the rows below, so the database limit only
     // applies as-is for mode "all". For "current" and "changed_since" the
     // limit used to cut the rows before the filter, and a subject with more

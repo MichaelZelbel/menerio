@@ -4,6 +4,7 @@ import ts from "typescript";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import * as normalization from "../profile-normalization.ts";
+import { selectAllRows } from "../paged-select.ts";
 import { runChat, resolveConfig } from "../llm-router.ts";
 
 vi.mock("../llm-router.ts", async (importOriginal) => ({
@@ -35,6 +36,7 @@ function fixture(endpoint = "normalize-profile", options: { extraPass?: boolean;
     queries.push(record);
     let single = false;
     let patch: any;
+    let range: [number, number] | null = null;
     const q: any = new Proxy({}, { get: (_t, method) => {
       if (method === "then") return (resolve: any, reject: any) => {
         if (table === "profile_normalization_runs" && patch) state = { ...state, ...patch };
@@ -44,11 +46,13 @@ function fixture(endpoint = "normalize-profile", options: { extraPass?: boolean;
           : table === "profile_normalization_jobs" && options.jobs ? [{ id: "job", user_id: owner, contact_id: null, attempts: 0 }]
           : [];
         if (single) data = data[0] ?? null;
+        else if (range) data = data.slice(range[0], range[1] + 1);
         return Promise.resolve({ data, error: null, count: 0 }).then(resolve, reject);
       };
       return (...args: any[]) => {
         if (method === "maybeSingle" || method === "single") single = true;
         if (method === "update" || method === "insert") patch = args[0];
+        if (method === "range") range = [args[0], args[1]];
         if (method === "select") record.head = args[1]?.head === true;
         if (["eq", "is", "gt", "in"].includes(String(method))) record.filters.push([method, ...args]);
         return q;
@@ -66,7 +70,7 @@ function fixture(endpoint = "normalize-profile", options: { extraPass?: boolean;
   let handler!: (req: Request) => Promise<Response>;
   const background: Promise<unknown>[] = [];
   const bindings = {
-    ...normalization, z, createNormalizationSuggestions: calls,
+    ...normalization, z, selectAllRows, createNormalizationSuggestions: calls,
     serve: (fn: typeof handler) => { handler = fn; },
     createClient: (_url: string, key: string) => key === "fixture-anon"
       ? { auth: { getUser: async (token: string) => ({ data: { user: token === "fixture-user" ? { id: owner } : null }, error: null }) } } : db,

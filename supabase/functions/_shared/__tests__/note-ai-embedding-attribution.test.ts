@@ -1,3 +1,4 @@
+// @vitest-environment node
 import {it,expect,vi,afterEach} from 'vitest';
 import {getEmbeddingWithCredits} from '../llm-credits';
 afterEach(()=>vi.unstubAllGlobals());

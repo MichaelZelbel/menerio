@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -80,13 +81,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const delayMs = body.delay_ms || 2000;
 
     // Step 1: Scan all user's notes for media
-    const { data: notes, error: notesErr } = await supabase
-      .from("notes")
-      .select("id, content")
-      .eq("user_id", user.id)
-      .eq("is_trashed", false);
-
-    if (notesErr) throw notesErr;
+    // Paged: unpaged, notes past the first 1,000 were never scanned and the
+    // counts below looked complete.
+    const notes = await selectAllRows<{ id: string; content: string | null }>(
+      (from, to) =>
+        supabase
+          .from("notes")
+          .select("id, content")
+          .eq("user_id", user.id)
+          .eq("is_trashed", false)
+          .order("id")
+          .range(from, to),
+      500,
+    );
 
     // Step 2: Extract all media references
     const allMedia: { noteId: string; path: string; type: string }[] = [];
@@ -99,10 +106,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Step 3: Cross-reference with existing media_analysis records
-    const { data: existing } = await supabase
-      .from("media_analysis")
-      .select("storage_path")
-      .eq("user_id", user.id);
+    // Paged too: a truncated set sends already-analysed media to be billed again.
+    const existing = await selectAllRows<{ storage_path: string }>((from, to) =>
+      supabase
+        .from("media_analysis")
+        .select("storage_path")
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    );
 
     const existingPaths = new Set((existing || []).map((e: any) => e.storage_path));
     const unanalyzed = allMedia.filter((m) => !existingPaths.has(m.path));

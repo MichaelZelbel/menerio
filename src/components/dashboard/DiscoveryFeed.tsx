@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { showToast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles, Link2, X, Loader2 } from "lucide-react";
@@ -36,7 +37,7 @@ export function DiscoveryFeed() {
   const linkMutation = useMutation({
     mutationFn: async ({ sourceId, targetId, targetTitle }: { sourceId: string; targetId: string; targetTitle: string }) => {
       // Create manual_link connection in both directions
-      await supabase.from("note_connections" as any).upsert([
+      const { error } = await supabase.from("note_connections" as any).upsert([
         {
           user_id: user!.id,
           source_note_id: sourceId,
@@ -54,24 +55,29 @@ export function DiscoveryFeed() {
           metadata: { auto_linked: true },
         },
       ], { onConflict: "source_note_id,target_note_id,connection_type" });
+      // Supabase reports failure in the result; without this the click did nothing, silently.
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["daily-discoveries"] });
       queryClient.invalidateQueries({ queryKey: ["note-connections"] });
     },
+    onError: () => showToast.error("Could not link these notes"),
   });
 
   const dismissMutation = useMutation({
     mutationFn: async ({ sourceId, targetId }: { sourceId: string; targetId: string }) => {
-      await supabase.from("dismissed_suggestions" as any).insert({
+      const { error } = await supabase.from("dismissed_suggestions" as any).insert({
         user_id: user!.id,
         source_note_id: sourceId,
         target_note_id: targetId,
       });
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["daily-discoveries"] });
     },
+    onError: () => showToast.error("Could not dismiss this suggestion"),
   });
 
   const discoveries = data?.discoveries || [];

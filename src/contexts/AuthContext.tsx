@@ -12,6 +12,26 @@ import { getDb } from "@/sync/db";
 import { preserveUploadsBeforeAccountClear } from "@/sync/recovery";
 
 const LAST_USER_KEY = "menerio:last-user-id";
+const UPLOAD_FLUSH_TIMEOUT_MS = 5000;
+
+/**
+ * Give PowerSync a few seconds to upload queued edits before signing out, so
+ * an online sign-out does not leave a recovery notice behind. Anything still
+ * queued afterwards (offline, slow network) is moved into the recovery journal
+ * by the account transition before the local database is cleared.
+ */
+async function flushUploadsBeforeSignOut(): Promise<void> {
+  try {
+    const db = getDb();
+    if (!db.currentStatus?.connected) return;
+    const deadline = Date.now() + UPLOAD_FLUSH_TIMEOUT_MS;
+    while ((await db.getUploadQueueStats()).count > 0 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  } catch {
+    // Best effort only; the transition journals whatever is left.
+  }
+}
 
 export type AppRole = "free" | "premium" | "premium_gift" | "admin";
 
@@ -120,7 +140,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (OFFLINE_CORE) {
           const localOwner = localStorage.getItem("menerio:powersync-user");
           if (localOwner !== nextOwner) {
-            if (localOwner) await preserveUploadsBeforeAccountClear(localOwner);
+            // Journal both in-flight batches and the queued, never-uploaded
+            // transactions: disconnectAndClear drops PowerSync's upload queue.
+            if (localOwner) await preserveUploadsBeforeAccountClear(localOwner, getDb());
             await getDb().disconnectAndClear();
           }
           if (nextOwner) localStorage.setItem("menerio:powersync-user", nextOwner);
@@ -191,6 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    if (OFFLINE_CORE) await flushUploadsBeforeSignOut();
     const { error } = await supabase.auth.signOut();
     if (error) { handleAuthError(error); throw error; }
   };

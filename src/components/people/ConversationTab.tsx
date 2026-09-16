@@ -75,8 +75,15 @@ export function ConversationTab({ personId, personName, initialContext = "" }: C
   };
 
   const clearFields = async () => {
+    // A pending debounced save would write the old text back after the clear.
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    const { error } = await supabase.from("contacts" as any).update({ conversation_context: null, conversation_intent: null, conversation_preset_tone: null, conversation_custom_tone: null, conversation_updated_at: null }).eq("id", personId);
+    if (error) {
+      // Emptying the fields anyway would show a clear that never reached the database.
+      toast({ variant: "destructive", title: "Clear failed", description: error.message });
+      return;
+    }
     setContext(""); setIntent(""); setPresetTone(""); setCustomTone(""); setLastUpdated(null);
-    await supabase.from("contacts" as any).update({ conversation_context: null, conversation_intent: null, conversation_preset_tone: null, conversation_custom_tone: null, conversation_updated_at: null }).eq("id", personId);
     toast({ title: "Conversation fields cleared" });
   };
 

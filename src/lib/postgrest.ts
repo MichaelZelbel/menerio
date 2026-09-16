@@ -33,3 +33,28 @@ export function pgOrValue(value: string): string {
 export function ilikeContains(column: string, q: string): string {
   return `${column}.ilike.${pgOrValue(`%${escapeLike(q)}%`)}`;
 }
+
+/** PostgREST's default max-rows. An unpaged select silently stops here. */
+export const POSTGREST_PAGE_SIZE = 1000;
+
+/**
+ * Read every row of a query, one `.range()` page at a time.
+ *
+ * `page(from, to)` must build a fresh query with a TOTAL order (end with a
+ * unique column such as `id`), or rows can repeat or vanish between pages.
+ * `maxRows` is a runaway guard, not a display limit.
+ */
+export async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
+  { pageSize = POSTGREST_PAGE_SIZE, maxRows = 200_000 }: { pageSize?: number; maxRows?: number } = {},
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await page(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = (data as T[] | null) ?? [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+  return rows;
+}

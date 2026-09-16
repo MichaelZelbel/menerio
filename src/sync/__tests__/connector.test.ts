@@ -141,6 +141,34 @@ describe("durable recovery", () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it("journals queued transactions uploadData never started before the database is cleared", async () => {
+    // Offline edits sit in PowerSync's upload queue with no journal entry.
+    // disconnectAndClear drops that queue, so the drain must copy them first.
+    upsert.mockResolvedValueOnce({ error: null }).mockRejectedValueOnce(new Error("lost response"));
+    const started = [put("confirmed"), put("unconfirmed")];
+    await expect(new SupabaseConnector().uploadData(fakeDb(started, vi.fn()) as never)).rejects.toThrow("lost response");
+    const queuedOnly = [put("offline-edit", { title: "Written on the train" })];
+    const database = {
+      async *getCrudTransactions() {
+        yield { crud: started };
+        yield { crud: queuedOnly };
+      },
+    };
+
+    await preserveUploadsBeforeAccountClear("user-1", database as never);
+
+    // "confirmed" already reached the server and is not queued again;
+    // "unconfirmed" is kept once, not twice.
+    expect(await readRecovery("user-1")).toMatchObject([
+      { status: "recovery", kind: "transient", completed: 0, operations: [{ id: "unconfirmed" }] },
+      { status: "recovery", kind: "transient", completed: 0, operations: [{ id: "offline-edit" }] },
+    ]);
+    upsert.mockReset().mockResolvedValue({ error: null });
+    await new SupabaseConnector().retryRecovery();
+    expect(upsert.mock.calls.map(call => call[0].id)).toEqual(["unconfirmed", "offline-edit"]);
+    expect(await readRecovery("user-1")).toEqual([]);
+  });
+
   it("retains the transaction without a cross-tab lock", async () => {
     vi.stubGlobal("navigator", {});
     const complete = vi.fn();

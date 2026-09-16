@@ -9,6 +9,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -38,13 +49,17 @@ export function SlackIntegration() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("connected_apps" as any)
         .select("id, permissions")
         .eq("user_id", user.id)
         .eq("app_name", "slack")
-        .single();
-      if (data) {
+        .maybeSingle();
+      if (error) {
+        // An empty form here would read as "not connected", and saving it would
+        // try to create a second Slack connection.
+        showToast.error("Failed to load Slack settings");
+      } else if (data) {
         const d = data as any;
         const perms = d.permissions as Record<string, unknown> | null;
         setAppId(d.id);
@@ -68,14 +83,15 @@ export function SlackIntegration() {
       };
 
       if (appId) {
-        await supabase
+        const { error } = await supabase
           .from("connected_apps" as any)
           .update({ permissions, is_active: !!botToken.trim() })
           .eq("id", appId);
+        if (error) throw error;
       } else {
         const apiKey = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
         const keyPrefix = apiKey.slice(0, 12);
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("connected_apps" as any)
           .insert({
             user_id: user.id,
@@ -87,6 +103,7 @@ export function SlackIntegration() {
           })
           .select("id")
           .single();
+        if (error) throw error;
         if (data) setAppId((data as any).id);
       }
       setConnected(!!botToken.trim());
@@ -131,10 +148,14 @@ export function SlackIntegration() {
 
   const handleDisconnect = async () => {
     if (!appId) return;
-    await supabase
+    const { error } = await supabase
       .from("connected_apps" as any)
       .update({ is_active: false, permissions: {} })
       .eq("id", appId);
+    if (error) {
+      showToast.error("Failed to disconnect Slack");
+      return;
+    }
     setBotToken("");
     setChannelId("");
     setConnected(false);
@@ -266,9 +287,31 @@ export function SlackIntegration() {
             Test Connection
           </Button>
           {connected && (
-            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDisconnect}>
-              Disconnect
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                  Disconnect
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect Slack?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Messages in the channel stop being captured, and the saved bot token and channel ID are erased.
+                    To reconnect you will need to paste them again.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDisconnect}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Disconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </CardContent>

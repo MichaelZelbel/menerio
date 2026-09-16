@@ -5,6 +5,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScopeBadge, SCOPE_OPTIONS } from "./ScopeBadge";
 import type { AgentInstruction } from "@/hooks/useProfile";
 
@@ -71,6 +81,7 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
   const [scope, setScope] = useState("all");
+  const [pendingDelete, setPendingDelete] = useState<AgentInstruction | null>(null);
 
   const startEdit = (inst: AgentInstruction) => {
     setEditingId(inst.id);
@@ -177,7 +188,7 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(inst)}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(inst.id)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" aria-label="Delete instruction" onClick={() => setPendingDelete(inst)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -185,6 +196,30 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
           )
         )}
       </CardContent>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this instruction?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.instruction}" will no longer reach your AI tools. To pause it instead, use the switch.
+              This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) onDelete(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

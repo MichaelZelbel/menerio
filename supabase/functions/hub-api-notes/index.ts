@@ -9,6 +9,10 @@ import {
   handleOptions,
   parsePath,
   paginationParams,
+  isUuid,
+  readJsonObject,
+  pickTypedFields,
+  dbErrorResponse,
 } from "../_shared/hub-helpers.ts";
 
 /**
@@ -145,10 +149,24 @@ Deno.serve(async (req) => {
 
     // POST /hub-api-notes — Create
     if (req.method === "POST" && !action) {
-      const body = await req.json();
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
       if (!body.title || typeof body.title !== "string") {
         return errorJson("BAD_REQUEST", "title is required", 400);
       }
+      // Create treats null and empty as "use the default" (see noteData), so
+      // only a present, non-null value has a type to get wrong.
+      const present = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null));
+      const { error: fieldErr } = pickTypedFields(present, {
+        content: "string",
+        entity_type: "string",
+        metadata: "object",
+        structured_fields: "object",
+        source_app: "nullable-string",
+        source_id: "nullable-string",
+        source_url: "nullable-string",
+      });
+      if (fieldErr) return fieldErr;
 
       const noteData: Record<string, unknown> = {
         user_id: userId,
@@ -171,7 +189,7 @@ Deno.serve(async (req) => {
         .select("id, title, created_at, updated_at")
         .single();
 
-      if (error) return errorJson("INTERNAL", error.message, 500);
+      if (error) return dbErrorResponse(error);
 
       // Trigger background processing (embedding, metadata)
       fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`, {
@@ -188,17 +206,21 @@ Deno.serve(async (req) => {
 
     // PUT /hub-api-notes/{id} — Update
     if (req.method === "PUT" && action) {
-      const body = await req.json();
-      const updates: Record<string, unknown> = {};
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Note not found", 404);
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
 
-      if (body.title !== undefined) updates.title = body.title;
-      if (body.content !== undefined) updates.content = body.content;
-      if (body.tags !== undefined) updates.tags = body.tags;
-      if (body.entity_type !== undefined) updates.entity_type = body.entity_type;
-      if (body.metadata !== undefined) updates.metadata = body.metadata;
-      if (body.structured_fields !== undefined) updates.structured_fields = body.structured_fields;
-      if (body.is_favorite !== undefined) updates.is_favorite = body.is_favorite;
-      if (body.is_pinned !== undefined) updates.is_pinned = body.is_pinned;
+      const { updates, error: fieldErr } = pickTypedFields(body, {
+        title: "string",
+        content: "string",
+        tags: "string-array",
+        entity_type: "nullable-string",
+        metadata: "object",
+        structured_fields: "object",
+        is_favorite: "boolean",
+        is_pinned: "boolean",
+      });
+      if (fieldErr) return fieldErr;
       if (body.folder_path !== undefined) {
         updates.folder_path = normalizeFolderPath(body.folder_path);
       }
@@ -207,15 +229,19 @@ Deno.serve(async (req) => {
         return errorJson("BAD_REQUEST", "No valid fields to update", 400);
       }
 
+      // Trashed notes are invisible to every GET here, so a PUT must not be
+      // able to edit (and re-bill processing for) one either.
       const { data, error } = await supabase
         .from("notes")
         .update(updates)
         .eq("id", action)
         .eq("user_id", userId)
+        .eq("is_trashed", false)
         .select("id, title, updated_at")
-        .single();
+        .maybeSingle();
 
-      if (error) return errorJson("NOT_FOUND", "Note not found", 404);
+      if (error) return dbErrorResponse(error);
+      if (!data) return errorJson("NOT_FOUND", "Note not found", 404);
 
       // Re-process in background
       fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`, {
@@ -232,6 +258,7 @@ Deno.serve(async (req) => {
 
     // DELETE /hub-api-notes/{id} — Soft delete
     if (req.method === "DELETE" && action) {
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Note not found", 404);
       const { error } = await supabase
         .from("notes")
         .update({ is_trashed: true, trashed_at: new Date().toISOString() })

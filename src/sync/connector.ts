@@ -7,7 +7,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { captureNoteWithLexicon } from "@/lib/note-ai-enrollment";
 import { POWERSYNC_URL } from "./config";
-import { dependentGroups, readRecovery, writeRecovery, withRecoveryLock, type FailureKind, type RecoveryBatch } from "./recovery";
+import { dependentGroups, readRecovery, recoveryBatchId, writeRecovery, withRecoveryLock, type FailureKind, type RecoveryBatch } from "./recovery";
 
 // Columns stored as JSON text in SQLite that must be real JSON/arrays in Postgres.
 const JSON_COLUMNS: Record<string, string[]> = {
@@ -179,9 +179,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       const all = await readRecovery(owner);
       const current: RecoveryBatch[] = [];
       for (const operations of dependentGroups(transaction.crud)) {
-        // clientId is stable across retries. Include payload to avoid collisions
-        // after a local database reset under the same account.
-        const id = JSON.stringify(operations.map(op => [op.clientId, op.table, op.id, op.op, op.opData]));
+        const id = recoveryBatchId(operations);
         let batch = all.find(item => item.id === id);
         if (!batch) {
           // Keep later edits to a rejected row with its original operations.

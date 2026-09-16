@@ -5,8 +5,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Pencil, Trash2, X } from "lucide-react";
 import { FactsPanel } from "@/components/facts/FactsPanel";
+import { parseDateOnly } from "@/lib/local-date";
 import {
   useDeleteEntity,
   useEntityMoments,
@@ -118,9 +130,31 @@ export function EntityDetail({ entity, onDeleted }: EntityDetailProps) {
               <Button variant="ghost" size="icon" onClick={startEditing} title="Edit">
                 <Pencil className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" className="text-destructive" onClick={remove} title="Delete">
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-destructive" title="Delete" aria-label="Delete">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {entity.name}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      "{entity.name}" will be deleted and unlinked from its moments. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={remove}
+                      disabled={deleteEntity.isPending}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
         </div>
@@ -145,7 +179,7 @@ export function EntityDetail({ entity, onDeleted }: EntityDetailProps) {
                     {m.title}
                   </Link>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {m.happened_at ? new Date(m.happened_at).toLocaleDateString() : ""}
+                    {parseDateOnly(m.happened_at)?.toLocaleDateString() ?? ""}
                   </span>
                 </li>
               ))}

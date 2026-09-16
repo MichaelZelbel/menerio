@@ -6,6 +6,7 @@ import {
   matchProfileCategoryByLabel,
   CANONICAL_LABELS_FOR_PROMPT,
 } from "../_shared/profile-canonical-schema.ts";
+import { sanitizePromptText } from "../_shared/prompt-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -108,7 +109,13 @@ serve(async (req) => {
       .maybeSingle();
     if (contactErr) return json({ error: "Failed to load contact." }, 500);
     if (!contact) return json({ error: "Contact not found" }, 404);
-    const contactName = String((contact as { name?: string }).name || "this person");
+    // The name is interpolated into the SYSTEM prompt inside double quotes. Run it
+    // through the shared sanitiser, flatten it to one line and drop the quote
+    // character, so a stored name cannot close the quote or add rule lines.
+    const contactName = sanitizePromptText((contact as { name?: string }).name, 120)
+      .replace(/\s+/g, " ")
+      .replace(/"/g, "'")
+      .trim() || "this person";
 
     // --- Deterministic pre-pass: a label+value with a known structured label
     // resolves without an LLM call (fast + free). ---

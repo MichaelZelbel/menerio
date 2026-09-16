@@ -5,6 +5,16 @@ import { ProfileRow } from "@/components/profile/ProfileRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
 import { ALL_RELATIONSHIP_LABELS, getInverseLabel, impliedGenderFromLabel } from "@/lib/relationship-labels";
@@ -50,6 +60,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   const [expanded, setExpanded] = useState(true);
   const [proExpanded, setProExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [formLabel, setFormLabel] = useState("");
   const [formCustomLabel, setFormCustomLabel] = useState("");
   const [formTargetType, setFormTargetType] = useState<"contact" | "self">("contact");
@@ -378,7 +389,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive"
-                    onClick={() => handleDelete(rel.id)}
+                    aria-label="Remove relationship"
+                      onClick={() => setPendingDelete({ id: rel.id, name: description.otherName })}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -521,7 +533,8 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive"
-                      onClick={() => handleDelete(rel.id)}
+                      aria-label="Remove relationship"
+                      onClick={() => setPendingDelete({ id: rel.id, name: description.otherName })}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -545,6 +558,28 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
         )}
       </div>
     )}
+    <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove relationship?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The relationship with "{pendingDelete?.name}" will be deleted. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (pendingDelete) handleDelete(pendingDelete.id);
+              setPendingDelete(null);
+            }}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Remove
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }

@@ -8,6 +8,10 @@ import {
   handleOptions,
   parsePath,
   paginationParams,
+  isUuid,
+  readJsonObject,
+  pickTypedFields,
+  dbErrorResponse,
 } from "../_shared/hub-helpers.ts";
 
 Deno.serve(async (req) => {
@@ -57,6 +61,7 @@ Deno.serve(async (req) => {
 
     // POST /hub-api-contacts/{id}/interactions
     if (req.method === "POST" && action && subAction === "interactions") {
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Contact not found", 404);
       // Verify contact belongs to user
       const { data: contact } = await supabase
         .from("contacts")
@@ -67,9 +72,29 @@ Deno.serve(async (req) => {
 
       if (!contact) return errorJson("NOT_FOUND", "Contact not found", 404);
 
-      const body = await req.json();
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
       if (!body.type || typeof body.type !== "string") {
         return errorJson("BAD_REQUEST", "type is required", 400);
+      }
+      const { error: fieldErr } = pickTypedFields(body, {
+        summary: "nullable-string",
+        interaction_date: "nullable-date",
+        note_id: "nullable-uuid",
+      });
+      if (fieldErr) return fieldErr;
+
+      // The note id is stored as given with the service key; make sure it is
+      // one of this user's notes and not a pointer into someone else's.
+      if (body.note_id) {
+        const { data: note, error: noteErr } = await supabase
+          .from("notes")
+          .select("id")
+          .eq("id", body.note_id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (noteErr) return dbErrorResponse(noteErr);
+        if (!note) return errorJson("BAD_REQUEST", "note_id does not match any of your notes", 400);
       }
 
       const interactionData = {
@@ -88,7 +113,7 @@ Deno.serve(async (req) => {
         .select("id, type, summary, interaction_date, created_at")
         .single();
 
-      if (error) return errorJson("INTERNAL", error.message, 500);
+      if (error) return dbErrorResponse(error);
 
       // Update last_contact_date on the contact
       await supabase
@@ -150,7 +175,8 @@ Deno.serve(async (req) => {
 
     // POST /hub-api-contacts — Create
     if (req.method === "POST" && !action) {
-      const body = await req.json();
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
       if (!body.name || typeof body.name !== "string") {
         return errorJson("BAD_REQUEST", "name is required", 400);
       }
@@ -175,17 +201,32 @@ Deno.serve(async (req) => {
         .select("id, name, created_at, updated_at")
         .single();
 
-      if (error) return errorJson("INTERNAL", error.message, 500);
+      if (error) return dbErrorResponse(error);
       return json({ data }, 201);
     }
 
     // PUT /hub-api-contacts/{id} — Update
     if (req.method === "PUT" && action) {
-      const body = await req.json();
-      const updates: Record<string, unknown> = {};
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Contact not found", 404);
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
 
-      for (const field of ["name", "email", "phone", "company", "role", "relationship", "notes", "tags", "metadata", "contact_frequency_days", "last_contact_date"]) {
-        if (body[field] !== undefined) updates[field] = body[field];
+      const { updates, error: fieldErr } = pickTypedFields(body, {
+        name: "string",
+        email: "nullable-string",
+        phone: "nullable-string",
+        company: "nullable-string",
+        role: "nullable-string",
+        relationship: "nullable-string",
+        notes: "nullable-string",
+        tags: "string-array",
+        metadata: "object",
+        contact_frequency_days: "nullable-positive-int",
+        last_contact_date: "nullable-date",
+      });
+      if (fieldErr) return fieldErr;
+      if (typeof updates.name === "string" && updates.name.trim() === "") {
+        return errorJson("BAD_REQUEST", "name cannot be empty", 400);
       }
 
       if (Object.keys(updates).length === 0) {
@@ -198,14 +239,16 @@ Deno.serve(async (req) => {
         .eq("id", action)
         .eq("user_id", userId)
         .select("id, name, updated_at")
-        .single();
+        .maybeSingle();
 
-      if (error) return errorJson("NOT_FOUND", "Contact not found", 404);
+      if (error) return dbErrorResponse(error);
+      if (!data) return errorJson("NOT_FOUND", "Contact not found", 404);
       return json({ data });
     }
 
     // DELETE /hub-api-contacts/{id}
     if (req.method === "DELETE" && action) {
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Contact not found", 404);
       const { error } = await supabase
         .from("contacts")
         .delete()

@@ -10,9 +10,16 @@ const mocks = vi.hoisted(() => ({
   offline: false,
   preserve: vi.fn(),
   clearDb: vi.fn(),
+  queue: [] as number[],
+  connected: true,
+  signOut: vi.fn(),
 }));
 vi.mock("@/lib/flags", () => ({ get OFFLINE_CORE() { return mocks.offline; } }));
-vi.mock("@/sync/db", () => ({ getDb: () => ({ disconnectAndClear: mocks.clearDb }) }));
+vi.mock("@/sync/db", () => ({ getDb: () => ({
+  disconnectAndClear: mocks.clearDb,
+  get currentStatus() { return { connected: mocks.connected }; },
+  getUploadQueueStats: async () => ({ count: mocks.queue.length > 1 ? mocks.queue.shift()! : mocks.queue[0] ?? 0 }),
+}) }));
 vi.mock("@/sync/recovery", () => ({ preserveUploadsBeforeAccountClear: mocks.preserve }));
 vi.mock("@/lib/query-sync", () => ({ installQuerySyncListener: () => () => {} }));
 vi.mock("idb-keyval", () => ({ get: async () => undefined, set: async () => {}, del: async () => {}, keys: async () => [], delMany: async () => {} }));
@@ -20,6 +27,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: {
   auth: {
     onAuthStateChange: (cb: any) => { mocks.callback = cb; return { data: { subscription: { unsubscribe() {} } } }; },
     getSession: async () => ({ data: { session: null } }),
+    signOut: mocks.signOut,
   },
   from: (table: string) => ({ select: () => ({ eq: (_: string, id: string) => ({ single: () => new Promise(resolve => {
     (table === "profiles" ? mocks.profileResolvers : mocks.roleResolvers).set(id, resolve);
@@ -46,7 +54,7 @@ describe("AuthProvider account changes", () => {
     let release!: () => void;
     mocks.preserve.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
     await login("B");
-    expect(mocks.preserve).toHaveBeenCalledWith("A");
+    expect(mocks.preserve).toHaveBeenCalledWith("A", expect.anything());
     expect(mocks.clearDb).not.toHaveBeenCalled();
     expect(screen.queryByText(/B-group/)).toBeNull();
     await act(async () => { release(); });
@@ -86,6 +94,32 @@ describe("AuthProvider account changes", () => {
       mocks.roleResolvers.get("B")!({ data: { role: "free" } });
     });
     await screen.findByText(/B-name\|free\|B-group/);
+  });
+  it("lets queued uploads finish before signing out", async () => {
+    let signOut!: () => Promise<void>;
+    function Grab() { signOut = useAuth().signOut; return null; }
+    render(<AuthProvider><Grab /></AuthProvider>);
+    await waitFor(() => expect(signOut).toBeTypeOf("function"));
+    mocks.offline = true;
+    mocks.connected = true;
+    mocks.queue = [2, 1, 0];
+    const counts: number[] = [];
+    mocks.signOut.mockReset().mockImplementation(async () => { counts.push(mocks.queue[0]); return { error: null }; });
+    await act(async () => { await signOut(); });
+    expect(mocks.signOut).toHaveBeenCalledOnce();
+    expect(counts).toEqual([0]);
+  });
+  it("does not stall sign-out while offline", async () => {
+    let signOut!: () => Promise<void>;
+    function Grab() { signOut = useAuth().signOut; return null; }
+    render(<AuthProvider><Grab /></AuthProvider>);
+    await waitFor(() => expect(signOut).toBeTypeOf("function"));
+    mocks.offline = true;
+    mocks.connected = false;
+    mocks.queue = [3];
+    mocks.signOut.mockReset().mockResolvedValue({ error: null });
+    await act(async () => { await signOut(); });
+    expect(mocks.signOut).toHaveBeenCalledOnce();
   });
   it("preserves the same account cache on token refresh", async () => {
     render(<AuthProvider><Content /></AuthProvider>);

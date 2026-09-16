@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { isPastDay, parseDateOnly } from "@/lib/local-date";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -383,7 +384,7 @@ export default function Actions() {
                     const pInfo = priorityIcon[item.priority] || priorityIcon.normal;
                     const cName = contactName(item.contact_id);
                     const nTitle = noteTitle(item.source_note_id);
-                    const isOverdue = item.due_date && new Date(item.due_date) < new Date() && item.status !== "done";
+                    const isOverdue = isPastDay(item.due_date) && item.status !== "done";
 
                     return (
                       <div
@@ -408,7 +409,7 @@ export default function Actions() {
                                   variant="outline"
                                   className={`text-[10px] ${isOverdue ? "text-destructive border-destructive/30" : ""}`}
                                 >
-                                  {new Date(item.due_date).toLocaleDateString()}
+                                  {parseDateOnly(item.due_date)?.toLocaleDateString()}
                                 </Badge>
                               )}
                               {cName && (

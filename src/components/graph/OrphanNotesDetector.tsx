@@ -39,10 +39,12 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      await supabase.functions.invoke("compute-connections", {
+      const { error } = await supabase.functions.invoke("compute-connections", {
         body: { note_id: noteId },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
+      // functions.invoke reports failure in the result, it does not throw.
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["graph-data"] });
       queryClient.invalidateQueries({ queryKey: ["orphan-notes"] });
       showToast.success("Connections computed");

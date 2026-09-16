@@ -91,3 +91,22 @@ describe("CompactCategorySection — empty custom category affordance (regressio
     ).toBeInTheDocument();
   });
 });
+
+describe("CompactCategorySection — entry delete asks first (regression: single-click delete)", () => {
+  it("does not delete on the trash click; deletes only after confirming", () => {
+    const handlers = renderSection({ entries: [entry()] });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete entry" })[0]);
+    expect(handlers.onDeleteEntry).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(handlers.onDeleteEntry).toHaveBeenCalledWith("e1");
+  });
+
+  it("cancel leaves the entry alone", () => {
+    const handlers = renderSection({ entries: [entry()] });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete entry" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(handlers.onDeleteEntry).not.toHaveBeenCalled();
+  });
+});

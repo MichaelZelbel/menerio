@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { localDateISO } from "@/lib/local-date";
 
 export type GroupPulseItem = {
   id: string;
@@ -27,7 +28,7 @@ export function useGroupPulse() {
       weekEnd.setDate(weekEnd.getDate() + 7);
       const [{ data: memberships, error: membershipError }, { data: actions, error: actionError }] = await Promise.all([
         supabase.from("contact_group_memberships").select("group_id, last_movement_at").in("group_id", groupIds).is("archived_at", null),
-        supabase.from("action_items").select("due_date, status, metadata").eq("user_id", user!.id).neq("status", "done").lte("due_date", weekEnd.toISOString().slice(0, 10)),
+        supabase.from("action_items").select("due_date, status, metadata").eq("user_id", user!.id).neq("status", "done").lte("due_date", localDateISO(weekEnd)),
       ]);
       if (membershipError) throw membershipError;
       if (actionError) throw actionError;

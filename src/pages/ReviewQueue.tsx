@@ -126,7 +126,7 @@ export default function ReviewQueue() {
   const createSuppression = async (item: ReviewItem) => {
     const normalizedValue = String(item.extracted_value || item.payload?.name || item.payload?.value || item.payload?.alias || item.title).trim().toLowerCase();
     const suppressionKey = item.suppression_key || `${item.suggestion_type}:${item.target_entity_type || "none"}:${item.target_entity_id || "none"}:${normalizedValue}`;
-    await supabase.from("ai_suggestion_suppressions" as any).upsert({
+    const { error } = await supabase.from("ai_suggestion_suppressions" as any).upsert({
       user_id: item.user_id,
       suggestion_type: item.suggestion_type,
       target_entity_type: item.target_entity_type,
@@ -135,6 +135,8 @@ export default function ReviewQueue() {
       source_category: typeof item.payload?.category_slug === "string" ? item.payload.category_slug : null,
       suppression_key: suppressionKey,
     } as any, { onConflict: "user_id,suppression_key" });
+    // Without this the item is marked "blocked" while nothing stops it coming back.
+    if (error) throw error;
   };
 
   const invalidateProfileQueries = () => {
@@ -167,26 +169,33 @@ export default function ReviewQueue() {
 
 
     if (item.suggestion_type === "add_contact" && item.target_entity_id) {
-      await supabase.from("contacts").delete().eq("id", item.target_entity_id);
+      // Each revert throws on failure: handleRemove/handleBlock would otherwise
+      // mark the item removed while the change it made is still there.
+      const { error } = await supabase.from("contacts").delete().eq("id", item.target_entity_id);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
       return;
     }
 
     if (item.suggestion_type === "add_profile_entry" && item.target_entity_id) {
-      await supabase.from("profile_entries").delete().eq("id", item.target_entity_id);
+      const { error } = await supabase.from("profile_entries").delete().eq("id", item.target_entity_id);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       return;
     }
 
     if (item.suggestion_type === "add_relationship" && item.target_entity_id) {
-      await supabase.from("contact_relationships").delete().eq("id", item.target_entity_id);
+      const { error } = await supabase.from("contact_relationships").delete().eq("id", item.target_entity_id);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
       return;
     }
 
     if (item.suggestion_type === "add_moment" && item.target_entity_id) {
-      await supabase.from("moment_participants").delete().eq("moment_id", item.target_entity_id);
-      await supabase.from("moments").delete().eq("id", item.target_entity_id);
+      const { error: participantsError } = await supabase.from("moment_participants").delete().eq("moment_id", item.target_entity_id);
+      if (participantsError) throw participantsError;
+      const { error } = await supabase.from("moments").delete().eq("id", item.target_entity_id);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["moments"] });
       queryClient.invalidateQueries({ queryKey: ["timeline"] });
       return;
@@ -195,9 +204,13 @@ export default function ReviewQueue() {
     if (item.suggestion_type === "add_alias") {
       const { contact_id, alias } = item.payload as any;
       if (!contact_id || !alias) return;
-      const { data: contact } = await supabase.from("contacts").select("aliases").eq("id", contact_id).maybeSingle();
-      const aliases = Array.isArray(contact?.aliases) ? contact.aliases : [];
-      await supabase.from("contacts").update({ aliases: aliases.filter((a: string) => a.toLowerCase() !== String(alias).toLowerCase()) }).eq("id", contact_id);
+      const { data: contact, error: readError } = await supabase.from("contacts").select("aliases").eq("id", contact_id).maybeSingle();
+      // A failed read must not become an empty alias list written back over the real one.
+      if (readError) throw readError;
+      if (!contact) return;
+      const aliases = Array.isArray(contact.aliases) ? contact.aliases : [];
+      const { error } = await supabase.from("contacts").update({ aliases: aliases.filter((a: string) => a.toLowerCase() !== String(alias).toLowerCase()) }).eq("id", contact_id);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
       return;
     }
@@ -205,7 +218,8 @@ export default function ReviewQueue() {
     if (item.suggestion_type === "group_member_suggestion") {
       const membershipId = item.target_entity_id;
       if (!membershipId) return;
-      await supabase.from("contact_group_memberships").delete().eq("id", membershipId);
+      const { error } = await supabase.from("contact_group_memberships").delete().eq("id", membershipId);
+      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contact_group_memberships"] });
       queryClient.invalidateQueries({ queryKey: ["contact_groups"] });
     }
@@ -330,11 +344,15 @@ export default function ReviewQueue() {
       const partRows = participants
         .filter((x) => x.contact_id)
         .map((x) => ({ moment_id: inserted.id, person_id: x.contact_id }));
+      let participantsFailed = false;
       if (partRows.length > 0) {
-        await supabase.from("moment_participants").insert(partRows as any);
+        const { error: participantsError } = await supabase.from("moment_participants").insert(partRows as any);
+        participantsFailed = !!participantsError;
       }
       queryClient.invalidateQueries({ queryKey: ["moments"] });
       queryClient.invalidateQueries({ queryKey: ["timeline"] });
+      // The moment exists either way, so the item is kept (retrying would add a
+      // duplicate); a failed participant link is said out loud instead of hidden.
       updateStatus.mutate({
         id: item.id,
         status: "kept",
@@ -344,7 +362,11 @@ export default function ReviewQueue() {
           applied_at: new Date().toISOString(),
         },
       });
-      showToast.success(`Added moment: ${title}`);
+      if (participantsFailed) {
+        showToast.warning(`Added moment "${title}", but its people could not be linked. Add them on the moment.`);
+      } else {
+        showToast.success(`Added moment: ${title}`);
+      }
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }
@@ -421,9 +443,12 @@ export default function ReviewQueue() {
       }
 
       // Only create a mirror suggestion for asymmetric labels.
+      // The relationship itself is already written, so follow-up failures are
+      // reported as a warning instead of being hidden behind the success toast.
+      const followUpFailures: string[] = [];
       if (inverse_label && !isSymmetricLabel(canonical)) {
         const inverseTitle = `Add relationship: ${contact_name_b || "?"} → ${contact_name_a || "?"} (${inverse_label})`;
-        await supabase.from("review_queue").insert({
+        const { error: mirrorError } = await supabase.from("review_queue").insert({
           user_id: user!.id,
           source_note_id: item.source_note_id,
           suggestion_type: "add_relationship",
@@ -440,14 +465,16 @@ export default function ReviewQueue() {
           },
           status: "pending_review",
         });
+        if (mirrorError) followUpFailures.push("the mirror suggestion could not be queued");
       }
 
       if (insertedId && item.payload?.evidence_id) {
-        await supabase
+        const { error: evidenceError } = await supabase
           .from("relationship_evidence" as any)
           .update({ relationship_id: insertedId } as any)
           .eq("id", item.payload.evidence_id)
           .eq("user_id", user!.id);
+        if (evidenceError) followUpFailures.push("its evidence could not be linked");
       }
 
       queryClient.invalidateQueries({ queryKey: ["contact-relationships"] });
@@ -456,7 +483,11 @@ export default function ReviewQueue() {
         status: "kept",
         extra: insertedId ? { target_entity_type: "relationship", target_entity_id: insertedId, applied_at: new Date().toISOString() } : undefined,
       });
-      showToast.success(`Relationship added: ${contact_name_a} → ${canonical} → ${contact_name_b}`);
+      if (followUpFailures.length > 0) {
+        showToast.warning(`Relationship added: ${contact_name_a} → ${canonical} → ${contact_name_b}, but ${followUpFailures.join(" and ")}.`);
+      } else {
+        showToast.success(`Relationship added: ${contact_name_a} → ${canonical} → ${contact_name_b}`);
+      }
     } catch (err: any) {
       showToast.error("Error: " + (err.message || "Unknown error"));
     }
@@ -804,8 +835,11 @@ export default function ReviewQueue() {
       return;
     }
 
-    updateStatus.mutate({ id: item.id, status: "kept" });
-    showToast.success("Change kept");
+    // Here the status write is the whole action, so its result decides the toast.
+    updateStatus.mutate({ id: item.id, status: "kept" }, {
+      onSuccess: () => showToast.success("Change kept"),
+      onError: (error) => showToast.error("Could not keep change: " + (error.message || "Unknown error")),
+    });
   };
 
   // One action per item at a time. The accept paths insert their rows BEFORE
@@ -834,8 +868,10 @@ export default function ReviewQueue() {
     // of this page only flipped status without inserting.
     const alreadyApplied = !!item.target_entity_id && !!item.applied_at;
     if (!alreadyApplied) return handleAccept(item);
-    updateStatus.mutate({ id: item.id, status: "kept" });
-    showToast.success("Change kept");
+    updateStatus.mutate({ id: item.id, status: "kept" }, {
+      onSuccess: () => showToast.success("Change kept"),
+      onError: (error) => showToast.error("Could not keep change: " + (error.message || "Unknown error")),
+    });
   });
 
   const handleRemove = (item: ReviewItem) => runOnce(item, async () => {

@@ -8,6 +8,7 @@ import {
   intParam,
   parsePath,
 } from "../_shared/hub-helpers.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return handleOptions();
@@ -85,15 +86,24 @@ Deno.serve(async (req) => {
       const days = intParam(url, "days", 30, 1, 365);
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: events, error } = await supabase
-        .from("activity_events")
-        .select("action, item_type, created_at")
-        .eq("actor_id", userId)
-        .gte("created_at", since)
-        .order("created_at", { ascending: true })
-        .limit(1000);
-
-      if (error) return errorJson("INTERNAL", error.message, 500);
+      // Every event in the window, not the first 1,000: with `.limit(1000)` a
+      // busy month stopped counting partway through, the later days read as
+      // quiet, and total_events reported 1000 as if that were the real number.
+      let events: Array<{ created_at: string }>;
+      try {
+        events = await selectAllRows<{ created_at: string }>((from, to) =>
+          supabase
+            .from("activity_events")
+            .select("created_at")
+            .eq("actor_id", userId)
+            .gte("created_at", since)
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to)
+        );
+      } catch (error) {
+        return errorJson("INTERNAL", (error as { message?: string }).message ?? String(error), 500);
+      }
 
       // Group by day
       const dailyCounts: Record<string, number> = {};

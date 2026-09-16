@@ -5,6 +5,7 @@ import {
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
 import { parseModelJson, runChat, runOcr } from "../_shared/llm-router.ts";
+import { countPdfPages } from "../_shared/pdf-page-count.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -14,6 +15,13 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OCR_MODEL = "mistral-ocr-latest";
 const VISION_MODEL = "pixtral-12b-2409";
 const TEXT_MODEL = "mistral-small-latest";
+
+/**
+ * Most pages of one PDF sent to OCR. Each page is billed by the OCR provider and
+ * then costs a summary call, up to three image descriptions and an embedding.
+ * Pages past the cap are not analysed, and the result says so.
+ */
+const MAX_PDF_OCR_PAGES = 50;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -49,17 +57,24 @@ function mimeFromExt(path: string): string {
   return map[ext] || "application/octet-stream";
 }
 
-async function fileToBase64DataUrl(
-  storagePath: string,
-  mimeType: string
-): Promise<string> {
+async function downloadFile(storagePath: string): Promise<Uint8Array> {
   const { data, error } = await supabase.storage
     .from("note-attachments")
     .download(storagePath);
   if (error || !data) {
     throw new Error(`Failed to download file: ${error?.message || "no data"}`);
   }
-  const buf = new Uint8Array(await data.arrayBuffer());
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+async function fileToBase64DataUrl(
+  storagePath: string,
+  mimeType: string
+): Promise<string> {
+  return bytesToDataUrl(await downloadFile(storagePath), mimeType);
+}
+
+function bytesToDataUrl(buf: Uint8Array, mimeType: string): string {
   // chunk to avoid stack overflow on large files
   let binary = "";
   const CHUNK = 0x8000;
@@ -270,19 +285,54 @@ async function processPdf(
   storagePath: string,
   originalFilename: string | null
 ) {
-  const dataUrl = await fileToBase64DataUrl(storagePath, "application/pdf");
+  const bytes = await downloadFile(storagePath);
+  const dataUrl = bytesToDataUrl(bytes, "application/pdf");
 
-  const ocrResult = await runOcr({
-    db: supabase,
-    userId,
-    callSite: "analyze-media.ocr",
-    noteId,
-    document: { type: "document_url", document_url: dataUrl },
-    extra: { include_image_base64: true },
-    defaults: { model: OCR_MODEL },
-  });
+  // OCR bills per page, and every page then costs a summary call, up to three
+  // image descriptions and an embedding. Without a cap one long upload (a
+  // 600-page manual) was billed in full. Ask the provider for the first
+  // MAX_PDF_OCR_PAGES pages only, and say so on the result.
+  const pageCount = await countPdfPages(bytes);
+  const capRange = { pages: `0-${MAX_PDF_OCR_PAGES - 1}` };
+  const runPdfOcr = async (extra: Record<string, unknown>) => {
+    return await runOcr({
+      db: supabase,
+      userId,
+      callSite: "analyze-media.ocr",
+      noteId,
+      document: { type: "document_url", document_url: dataUrl },
+      extra: { include_image_base64: true, ...extra },
+      defaults: { model: OCR_MODEL },
+    });
+  };
+  let ocrResult;
+  if (pageCount !== null && pageCount <= MAX_PDF_OCR_PAGES) {
+    ocrResult = await runPdfOcr({});
+  } else if (pageCount !== null) {
+    ocrResult = await runPdfOcr(capRange);
+  } else {
+    // Page count unreadable: still cap. If the provider refuses the range
+    // because the document is shorter than it, the document is short, so
+    // asking again without a range cannot run up a long bill.
+    try {
+      ocrResult = await runPdfOcr(capRange);
+    } catch (err) {
+      const message = (err as Error).message || "";
+      if (!/\((400|422)\)/.test(message) || !/page/i.test(message)) throw err;
+      ocrResult = await runPdfOcr({});
+    }
+  }
   const ocrResp = ocrResult.raw;
-  const pages = ocrResult.pages;
+  const pages = ocrResult.pages.slice(0, MAX_PDF_OCR_PAGES);
+  const truncated = pageCount !== null
+    ? pageCount > MAX_PDF_OCR_PAGES
+    : ocrResult.pages.length >= MAX_PDF_OCR_PAGES;
+  const truncationNote = truncated
+    ? pageCount !== null
+      ? `Only the first ${MAX_PDF_OCR_PAGES} of ${pageCount} pages were analysed (page limit per PDF).`
+      : `Only the first ${MAX_PDF_OCR_PAGES} pages were analysed (page limit per PDF); the document may have more.`
+    : "";
+  if (truncated) console.warn(`analyze-media: PDF page cap applied note=${noteId} path=${storagePath} pages=${pageCount ?? "unknown"}`);
 
   if (pages.length === 0) {
     throw new Error("OCR returned no pages");
@@ -315,6 +365,8 @@ async function processPdf(
       imageDescriptions.length
         ? `Images: ${imageDescriptions.join(" ")}`
         : "",
+      // The last analysed page carries the cap notice, where the user reads it.
+      i === pages.length - 1 ? truncationNote : "",
     ]
       .filter(Boolean)
       .join(" ")
@@ -335,6 +387,9 @@ async function processPdf(
         page_index: page.index,
         images: rawImages,
         summary,
+        page_cap: MAX_PDF_OCR_PAGES,
+        pages_total: pageCount,
+        truncated,
       },
     });
   }

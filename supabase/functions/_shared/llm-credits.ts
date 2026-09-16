@@ -4,6 +4,7 @@
  */
 
 import { sha256Hex } from "./sha256.ts";
+import { providerFetch } from "./provider-fetch.ts";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
@@ -345,7 +346,7 @@ export async function openRouterWithCredits(
     Authorization: `Bearer ${apiKey}`,
   };
 
-  const r = await fetch(url, {
+  const r = await providerFetch(`OpenRouter ${endpoint}`, url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),

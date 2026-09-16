@@ -1,6 +1,17 @@
 import { Link } from "react-router-dom";
 import { Archive, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -68,7 +79,28 @@ export function MembershipSheet({ group, membership, notes, open, onOpenChange }
           </div>
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => archiveMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.contact_id }, { onSuccess: () => { showToast.success("Membership archived"); onOpenChange(false); } })}><Archive className="mr-2 h-4 w-4" /> Archive</Button>
-            <Button variant="destructive" className="flex-1" onClick={() => removeMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.contact_id }, { onSuccess: () => { showToast.success("Removed from group"); onOpenChange(false); } })}><Trash2 className="mr-2 h-4 w-4" /> Remove</Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="flex-1"><Trash2 className="mr-2 h-4 w-4" /> Remove</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Remove from {group.name}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This membership, with its stage, attributes and notes, will be deleted. Archive keeps it instead. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => removeMembership.mutate({ id: membership.id, groupId: group.id, personId: membership.contact_id }, { onSuccess: () => { showToast.success("Removed from group"); onOpenChange(false); } })}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Remove
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </SheetContent>

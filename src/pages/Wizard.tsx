@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { avatarPublicUrl } from "@/lib/avatar-url";
 import { supabase } from "@/integrations/supabase/client";
+import { showToast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -119,10 +120,15 @@ export default function Wizard() {
 
   const saveProfile = async () => {
     if (!user) return;
-    await supabase.from("profiles").update({
+    const { error } = await supabase.from("profiles").update({
       display_name: displayName || null,
       avatar_url: avatarUrl,
     }).eq("id", user.id);
+    if (error) {
+      // Moving on anyway would drop the name and photo without a word.
+      showToast.error("Could not save your profile. Please try again.");
+      return;
+    }
     await refreshProfile();
     goNext();
   };
@@ -138,7 +144,8 @@ export default function Wizard() {
     // getPublicUrl() when they render it and pass it to storage.remove() when
     // replacing it. Storing the full URL here produced a doubled, broken URL
     // on those pages and an old file that was never deleted.
-    if (!error) setAvatarUrl(path);
+    if (error) showToast.error("Could not upload the photo. Please try again.");
+    else setAvatarUrl(path);
     setUploading(false);
   };
 

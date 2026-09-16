@@ -6,6 +6,7 @@ import { softStructure } from "../_shared/wiki-structure.ts";
 import { createNoteAIJobs, classifyNoteAIError, NoteAIJobError } from "../_shared/note-ai-jobs.ts";
 import { runWikiStage, dispatchWikiRequest } from "../_shared/wiki-ingest-jobs.ts";
 import { shouldExtractFacts } from "../_shared/hub-source.ts";
+import { sanitizePromptText, taggedPrompt } from "../_shared/prompt-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -470,19 +471,26 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
       .filter((candidate: any) => shouldExtractFacts(candidate.source_app))
       .filter((candidate: any) => extractPeopleFromMetadata(candidate.metadata).some((person) => people.includes(person)))
       .slice(0, 12)
-      .map((candidate: any) => `- ${candidate.title || "Untitled"}: ${noteContentToText(candidate.content).slice(0, 500)}`)
-      .join("\n") || "None";
+      .map((candidate: any) => ({ title: candidate.title || "Untitled", excerpt: sanitizePromptText(noteContentToText(candidate.content), 500) }));
 
-    const context = [
-      `Group: ${group.name}`,
-      `Mentioned people: ${people.join(", ")}`,
-      `Current note excerpt:\n${contentText.slice(0, 2500)}`,
-      `Recent interactions:\n${(interactions || []).map((item: any) => `- ${item.interaction_date} ${item.type}: ${item.summary || ""}`).join("\n") || "None"}`,
-      `Related note excerpts from the last 30 days:\n${noteExcerpts}`,
-      `Existing page content:\n${page.content}`,
-    ].join("\n\n");
+    // Contact names, interaction summaries, other notes and the page itself are
+    // stored text, framed as tagged data rather than pasted in as prose, the
+    // same wrapper the group AI functions use (`prompt-safety.ts`). The long
+    // fields are sanitised here with their own caps, under keys the wrapper
+    // does not cut to 500 characters.
+    const context = taggedPrompt({
+      group: { name: group.name },
+      mentioned_people: people.map((name) => ({ name })),
+      current_note_excerpt: sanitizePromptText(contentText, 2500),
+      recent_interactions: (interactions || []).map((item: any) => ({ date: item.interaction_date, type: item.type, summary: item.summary || "" })),
+      related_note_excerpts_last_30_days: noteExcerpts,
+      existing_page_content: sanitizePromptText(page.content, 20_000),
+    });
 
-    const saved = await runWikiStage(db, job, `wiki-group:${group.id}`, async () => {
+    // Only the reply is checkpointed. The page is read fresh on every attempt:
+    // a checkpointed copy made a retry after "Lexicon page changed" compare
+    // against the same stale baseline and fail the same way every time.
+    const { raw } = await runWikiStage(db, job, `wiki-group:${group.id}`, async () => {
       await jobs.assertCurrent(job);
       const { raw } = await callSynthesis(
         db,
@@ -492,18 +500,17 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
         context,
         undefined, job, `wiki-group:${group.id}`,
       );
-      return { raw, page };
+      return { raw };
     });
-    const { raw } = saved;
     // The checkpointed `raw` is replayed on every retry, so a reply this could
     // not parse failed the job three times over and the paid main synthesis
     // was never applied. An unparseable reply now means "no insights".
     const parsed = parseModelJson<Record<string, unknown>>(raw) ?? {};
     const insights = typeof parsed.insights === "string" && parsed.insights.trim() ? parsed.insights : "_No synthesized insights yet._";
-    const nextContent = replaceInsightsSection(saved.page.content || "", insights);
+    const nextContent = replaceInsightsSection(page.content || "", insights);
 
-    actions.push({ op: "update", slug: saved.page.slug, patch: nextContent,
-      expected: saved.page, group_insights: true,
+    actions.push({ op: "update", slug: page.slug, patch: nextContent,
+      expected: page, group_insights: true,
       change_summary: "Updated group insights from recent member context" });
   }
 
@@ -533,32 +540,40 @@ async function processIngest(
     return { finished: true, skipped: "note_too_short" };
   }
 
-  const { raw, existingPages } = await runWikiStage(db, job, "wiki-main", async () => {
+  // The checkpoint holds the model's reply and nothing else. It used to hold
+  // the user's whole Lexicon (every page's content): the 1 MB stage-result cap
+  // refused that for a large Lexicon after the call was paid, failing every
+  // ingest; and a retry after "Lexicon page changed" replayed the stale copy as
+  // the apply baseline, so it failed again the same way. The pages are read
+  // after the stage instead, on every attempt.
+  const { raw } = await runWikiStage(db, job, "wiki-main", async () => {
     await jobs.assertCurrent(job);
-    const { data: existingPages, error: pagesError } = await db
+    const { data: indexPages, error: pagesError } = await db
       .from("wiki_pages")
-      .select("id, slug, title, page_type, summary, content, protected_sections, updated_at")
+      .select("slug, title, page_type, summary")
       .eq("user_id", userId)
       .order("page_type", { ascending: true })
       .order("title", { ascending: true });
     if (pagesError) throw pagesError;
-
 
     // Pre-filter the index: only show pages whose title or slug-words appear in the note,
     // plus all overview/synthesis pages (which legitimately span multiple notes).
     // This prevents the model from "shopping" topically-related pages and twisting them
     // to fit a different subject.
     const normalizedNoteForIndex = normalizeForMatch(`${note.title || ""} ${contentText}`);
-    const relevantPages = (existingPages || []).filter((page: any) => {
+    const relevantPages = (indexPages || []).filter((page: any) => {
       if (page.page_type === "overview" || page.page_type === "synthesis") return true;
       const titleMatch = page.title ? normalizedNoteForIndex.includes(normalizeForMatch(page.title)) : false;
       const slugMatch = normalizedNoteForIndex.includes(normalizeForMatch(slugToWords(page.slug)));
       return titleMatch || slugMatch;
   });
 
+  // Titles and summaries are stored text going into the SYSTEM prompt. One line
+  // each and sanitised, so a title cannot start a second index row or close a fence.
+  const indexField = (value: unknown, max: number) => sanitizePromptText(String(value ?? "").replace(/\s+/g, " ").trim(), max);
   const index = relevantPages.length > 0
     ? relevantPages
-        .map((page: any) => `${page.slug} | ${page.title} | ${page.page_type} | ${page.summary || ""}`)
+        .map((page: any) => `${page.slug} | ${indexField(page.title, 200)} | ${page.page_type} | ${indexField(page.summary, 300)}`)
         .join("\n")
     : "No existing pages match this note. You may only `create` a new page or return empty actions.";
 
@@ -573,8 +588,13 @@ async function processIngest(
     { existingPagesIndex: index },
     job, "wiki-main",
   );
-  return { raw, existingPages: existingPages || [] };
+  return { raw };
   });
+  const { data: existingPages, error: existingPagesError } = await db
+    .from("wiki_pages")
+    .select("id, slug, title, page_type, summary, content, protected_sections, updated_at")
+    .eq("user_id", userId);
+  if (existingPagesError) throw existingPagesError;
   const existingBySlug = new Map<string, { title: string; page_type: string; content: string; protected_sections: string[] }>();
   for (const page of existingPages || []) {
     existingBySlug.set(page.slug, {
@@ -649,7 +669,7 @@ async function processIngest(
 
   const groupInsightsResult = await synthesizeGroupInsights(db, userId, note, noteId, contentText, job, jobs);
   const actions = parsed.actions.map((action) => ({ ...action,
-    expected: existingPages.find((page: any) => page.slug === action.slug) || null,
+    expected: (existingPages || []).find((page: any) => page.slug === action.slug) || null,
   }));
   for (const groupAction of groupInsightsResult.actions) {
     const existingAction = actions.find((action: any) => action.slug === groupAction.slug);
@@ -661,10 +681,26 @@ async function processIngest(
     parsed.source_links.push({ note_id: noteId, page_slugs: [groupAction.slug] });
   }
   const args = { _user_id: userId, _job_id: job.id, _lease_id: job.lease_id };
-  const stage = await db.rpc("begin_note_ai_stage", { ...args, _stage: "wiki-apply" });
+  let stage = await db.rpc("begin_note_ai_stage", { ...args, _stage: "wiki-apply" });
   if (stage.error) throw stage.error;
   if (!stage.data) throw new NoteAIJobError("stale", "lease_lost");
   if (stage.data.status === "uncertain") throw new NoteAIJobError("uncertain", "uncertain");
+  if (stage.data.status === "checkpointed") {
+    // An apply plan from an earlier attempt that never landed: that attempt
+    // died, or `wiki_apply_note_ai_result` refused the plan with 40001 because
+    // a page changed after its baseline was read. Replaying it can only fail the
+    // same way. Rebuilding it costs nothing (the paid replies are checkpointed
+    // above), so the stale row goes and the plan built from the pages just read
+    // replaces it. No RPC re-checkpoints a checkpointed stage; the table is
+    // service-only, and this client is the service role.
+    await jobs.assertCurrent(job);
+    const { error: resetError } = await db.from("note_ai_stage_results").delete()
+      .eq("job_id", job.id).eq("fingerprint", job.fingerprint).eq("stage", "wiki-apply").eq("status", "checkpointed");
+    if (resetError) throw resetError;
+    stage = await db.rpc("begin_note_ai_stage", { ...args, _stage: "wiki-apply" });
+    if (stage.error) throw stage.error;
+    if (!stage.data) throw new NoteAIJobError("stale", "lease_lost");
+  }
   if (stage.data.status === "started") {
     const saved = await db.rpc("checkpoint_note_ai_stage", { ...args, _stage: "wiki-apply",
       _result: { actions, source_links: parsed.source_links } });

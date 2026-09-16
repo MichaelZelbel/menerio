@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeLike, pgOrValue, ilikeContains } from "../postgrest";
+import { escapeLike, pgOrValue, ilikeContains, fetchAllPages } from "../postgrest";
 
 describe("escapeLike", () => {
   it("escapes LIKE wildcards so they match literally", () => {
@@ -39,5 +39,39 @@ describe("ilikeContains", () => {
   it("keeps user wildcards literal while preserving the surrounding contains-globs", () => {
     // The user's % is escaped (\%) so it matches literally; the outer %…% remain wildcards.
     expect(ilikeContains("content", "100%")).toBe('content.ilike."%100\\\\%%"');
+  });
+});
+
+describe("fetchAllPages", () => {
+  const source = Array.from({ length: 2500 }, (_, i) => ({ id: i }));
+  const page = (from: number, to: number) =>
+    Promise.resolve({ data: source.slice(from, to + 1), error: null });
+
+  it("reads past the 1,000-row cap until a short page", async () => {
+    const calls: Array<[number, number]> = [];
+    const rows = await fetchAllPages<{ id: number }>((from, to) => {
+      calls.push([from, to]);
+      return page(from, to);
+    });
+    expect(rows).toHaveLength(2500);
+    expect(calls).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+  });
+
+  it("stops after one extra empty page when the total is an exact multiple", async () => {
+    let n = 0;
+    const rows = await fetchAllPages<{ id: number }>((from, to) => {
+      n++;
+      return Promise.resolve({ data: source.slice(0, 2000).slice(from, to + 1), error: null });
+    });
+    expect(rows).toHaveLength(2000);
+    expect(n).toBe(3);
+  });
+
+  it("throws the query error instead of returning a partial list", async () => {
+    await expect(
+      fetchAllPages((from) =>
+        Promise.resolve(from === 0 ? { data: source.slice(0, 1000), error: null } : { data: null, error: new Error("boom") }),
+      ),
+    ).rejects.toThrow("boom");
   });
 });

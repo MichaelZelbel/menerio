@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
-import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue } from "@/lib/postgrest";
+import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue, fetchAllPages } from "@/lib/postgrest";
 import { extractSearchTerms, rankNotesByTerms, trailingPrefix } from "@/lib/search-terms";
 
 import { OFFLINE_CORE } from "@/lib/flags";
@@ -121,25 +121,29 @@ function useNotesRemote(
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
+      // Paged: an unpaged select stops at PostgREST's 1,000-row cap, and this
+      // list is what the tree, the counts and folder actions treat as "all".
+      // The trailing id order makes the pages a total order.
+      return fetchAllPages<Note>((from, to) => {
+        let query = supabase
+          .from("notes" as any)
+          .select(NOTE_COLUMNS)
+          .eq("user_id", user!.id);
 
-      let query = supabase
-        .from("notes" as any)
-        .select(NOTE_COLUMNS)
-        .eq("user_id", user!.id)
-        .order("is_pinned", { ascending: false })
-        .order("updated_at", { ascending: false });
+        if (filter === "trash") {
+          query = query.eq("is_trashed", true);
+        } else if (filter === "favorites") {
+          query = query.eq("is_trashed", false).eq("is_favorite", true);
+        } else {
+          query = query.eq("is_trashed", false);
+        }
 
-      if (filter === "trash") {
-        query = query.eq("is_trashed", true);
-      } else if (filter === "favorites") {
-        query = query.eq("is_trashed", false).eq("is_favorite", true);
-      } else {
-        query = query.eq("is_trashed", false);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as unknown as Note[]) || [];
+        return query
+          .order("is_pinned", { ascending: false })
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+      });
     },
   });
 }

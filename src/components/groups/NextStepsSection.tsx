@@ -17,6 +17,7 @@ import type { GroupMembershipWithPerson } from "@/hooks/useGroupMemberships";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
+import { localDateISO, parseDateOnly } from "@/lib/local-date";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -27,7 +28,8 @@ type NextStepSuggestion = { title: string; due_date_offset_days: number; priorit
 
 function formatDateInput(date: Date | undefined) {
   if (!date) return "";
-  return date.toISOString().slice(0, 10);
+  // Local calendar day: toISOString would store the day before east of UTC.
+  return localDateISO(date);
 }
 
 export function NextStepsSection({ group, membership }: { group: ContactGroup; membership: GroupMembershipWithPerson }) {
@@ -123,7 +125,7 @@ export function NextStepsSection({ group, membership }: { group: ContactGroup; m
       </div>
       <div className="min-h-6">
         {isLoading ? <div className="flex h-6 items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading next steps...</div> : nextSteps.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">No next steps yet.</p> : (
-          <div className="space-y-2">{nextSteps.map((item) => <button key={item.id} type="button" onClick={() => navigate("/dashboard/actions")} className="block w-full rounded-md border p-3 text-left text-sm hover:bg-accent"><span className="font-medium">{item.content.split("\n")[0]}</span><span className="mt-2 flex flex-wrap gap-2"><Badge variant="secondary" className="text-[10px] capitalize">{item.status}</Badge><Badge variant="outline" className="text-[10px] capitalize">{item.priority}</Badge>{item.due_date && <Badge variant="outline" className="text-[10px]">{new Date(item.due_date).toLocaleDateString()}</Badge>}</span></button>)}</div>
+          <div className="space-y-2">{nextSteps.map((item) => <button key={item.id} type="button" onClick={() => navigate("/dashboard/actions")} className="block w-full rounded-md border p-3 text-left text-sm hover:bg-accent"><span className="font-medium">{item.content.split("\n")[0]}</span><span className="mt-2 flex flex-wrap gap-2"><Badge variant="secondary" className="text-[10px] capitalize">{item.status}</Badge><Badge variant="outline" className="text-[10px] capitalize">{item.priority}</Badge>{item.due_date && <Badge variant="outline" className="text-[10px]">{parseDateOnly(item.due_date)?.toLocaleDateString()}</Badge>}</span></button>)}</div>
         )}
       </div>
     </div>

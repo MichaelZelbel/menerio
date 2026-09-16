@@ -7,7 +7,14 @@ import {
   handleOptions,
   parsePath,
   paginationParams,
+  isUuid,
+  readJsonObject,
+  pickTypedFields,
+  dbErrorResponse,
 } from "../_shared/hub-helpers.ts";
+
+const ACTION_STATUSES = ["open", "in_progress", "done", "dismissed"];
+const ACTION_PRIORITIES = ["low", "normal", "high", "urgent"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return handleOptions();
@@ -98,21 +105,54 @@ Deno.serve(async (req) => {
 
     // PUT /hub-api-actions/{id} — Update
     if (req.method === "PUT" && action) {
-      const body = await req.json();
-      const updates: Record<string, unknown> = {};
+      if (!isUuid(action)) return errorJson("NOT_FOUND", "Action item not found", 404);
+      const { body, error: bodyErr } = await readJsonObject(req);
+      if (bodyErr) return bodyErr;
 
-      for (const field of ["content", "status", "priority", "due_date", "tags", "contact_id"]) {
-        if (body[field] !== undefined) updates[field] = body[field];
+      const { updates, error: fieldErr } = pickTypedFields(body, {
+        content: "string",
+        status: "string",
+        priority: "string",
+        due_date: "nullable-date",
+        tags: "string-array",
+        contact_id: "nullable-uuid",
+        completed_at: "nullable-timestamp",
+      });
+      if (fieldErr) return fieldErr;
+
+      // "completed" is what this endpoint used to test for, but the app and
+      // the MCP tools only know "done": an item set to "completed" vanished
+      // from every column of the Actions board, and one set to "done" through
+      // here never got its completed_at. Accept the old word, store the real one.
+      if (updates.status === "completed") updates.status = "done";
+      if (updates.status !== undefined && !ACTION_STATUSES.includes(updates.status as string)) {
+        return errorJson("BAD_REQUEST", `status must be one of: ${ACTION_STATUSES.join(", ")}`, 400);
+      }
+      if (updates.priority !== undefined && !ACTION_PRIORITIES.includes(updates.priority as string)) {
+        return errorJson("BAD_REQUEST", `priority must be one of: ${ACTION_PRIORITIES.join(", ")}`, 400);
       }
 
-      // Handle completion
-      if (body.status === "completed" && !body.completed_at) {
-        updates.completed_at = new Date().toISOString();
+      // Same rule as the Actions board: done stamps completed_at, any other
+      // status clears it, and an explicit completed_at in the body wins.
+      if (updates.status !== undefined && body.completed_at === undefined) {
+        updates.completed_at = updates.status === "done" ? new Date().toISOString() : null;
       }
-      if (body.completed_at !== undefined) updates.completed_at = body.completed_at;
 
       if (Object.keys(updates).length === 0) {
         return errorJson("BAD_REQUEST", "No valid fields to update", 400);
+      }
+
+      // A contact id is stored as given with the service key, so check it is
+      // one of this user's people rather than linking the item to a stranger's.
+      if (typeof updates.contact_id === "string") {
+        const { data: contact, error: contactErr } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("id", updates.contact_id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (contactErr) return dbErrorResponse(contactErr);
+        if (!contact) return errorJson("BAD_REQUEST", "contact_id does not match any of your contacts", 400);
       }
 
       const { data, error } = await supabase
@@ -121,9 +161,10 @@ Deno.serve(async (req) => {
         .eq("id", action)
         .eq("user_id", userId)
         .select("id, content, status, priority, updated_at")
-        .single();
+        .maybeSingle();
 
-      if (error) return errorJson("NOT_FOUND", "Action item not found", 404);
+      if (error) return dbErrorResponse(error);
+      if (!data) return errorJson("NOT_FOUND", "Action item not found", 404);
       return json({ data });
     }
 

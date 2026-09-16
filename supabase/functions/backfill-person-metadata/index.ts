@@ -11,6 +11,7 @@
 // POST body: { user_id?: string }  (defaults to the caller)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -41,16 +42,28 @@ Deno.serve(async (req: Request) => {
 
     const userId = user.id;
 
-    const { data: contacts } = await supabase
-      .from("contacts")
-      .select("id, name, aliases")
-      .eq("user_id", userId);
+    // Paged: an unpaged select stops at 1,000 rows, so contacts past that were
+    // never linked and notes past that were never matched, with "ok" reported.
+    const contacts = await selectAllRows<{ id: string; name: string; aliases: string[] | null }>((from, to) =>
+      supabase
+        .from("contacts")
+        .select("id, name, aliases")
+        .eq("user_id", userId)
+        .order("id")
+        .range(from, to)
+    );
 
-    const { data: notes } = await supabase
-      .from("notes")
-      .select("id, title, metadata")
-      .eq("user_id", userId)
-      .eq("is_trashed", false);
+    // Oldest first, so the first note with a given title wins on every run.
+    const notes = await selectAllRows<{ id: string; title: string; metadata: unknown }>((from, to) =>
+      supabase
+        .from("notes")
+        .select("id, title, metadata")
+        .eq("user_id", userId)
+        .eq("is_trashed", false)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
 
     if (!contacts?.length || !notes?.length) {
       return json({ ok: true, updated: 0, reason: "nothing to do" });

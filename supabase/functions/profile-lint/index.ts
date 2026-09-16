@@ -12,6 +12,7 @@ import {
   recoverRelationshipEvidence,
   type RelationshipAdjudication,
 } from "../_shared/relationship-adjudicator.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -90,8 +91,10 @@ async function processRelationshipRepairBatch(userId: string, runId: string, bat
     return completed;
   }
 
-  const { data: contacts } = await admin.from("contacts").select("id,name").eq("user_id", userId);
-  const names = new Map((contacts || []).map((contact: ContactRow) => [contact.id, contact.name || "Unnamed"]));
+  const contacts = await selectAllRows<ContactRow>((from, to) =>
+    admin.from("contacts").select("id,name").eq("user_id", userId).order("id").range(from, to)
+  );
+  const names = new Map(contacts.map((contact) => [contact.id, contact.name || "Unnamed"]));
   const counters = { kept_count: 0, removed_count: 0, merged_count: 0, relabeled_count: 0, queued_count: 0, failed_count: 0 };
 
   // Read-side pre-filter: evidence already written at the current adjudication
@@ -287,18 +290,20 @@ function normalizeName(name: string | null | undefined): string {
 }
 
 async function lintUser(userId: string, contactId: string | null, repair: boolean, queueReview: boolean) {
-  const [relationshipsResult, entriesResult, contactsResult] = await Promise.all([
-    admin.from("contact_relationships").select("id,user_id,source_type,source_id,target_type,target_id,label,custom_label,pair_key").eq("user_id", userId),
-    admin.from("profile_entries").select("id,contact_id,category_id,label,value").eq("user_id", userId),
-    admin.from("contacts").select("id,name").eq("user_id", userId),
+  // Paged: an unpaged select stops at 1,000 rows without saying so, and a lint
+  // that never saw the rest reports a clean profile. Relationships are read in
+  // creation order so "duplicate_pair" flags the newer row, not an arbitrary one.
+  const [relationships, entries, contacts] = await Promise.all([
+    selectAllRows<RelationshipRow>((from, to) =>
+      admin.from("contact_relationships").select("id,user_id,source_type,source_id,target_type,target_id,label,custom_label,pair_key").eq("user_id", userId).order("created_at").order("id").range(from, to)
+    ),
+    selectAllRows<{ id: string; contact_id: string | null; category_id: string; label: string; value: string }>((from, to) =>
+      admin.from("profile_entries").select("id,contact_id,category_id,label,value").eq("user_id", userId).order("id").range(from, to)
+    ),
+    selectAllRows<ContactRow>((from, to) =>
+      admin.from("contacts").select("id,name").eq("user_id", userId).order("id").range(from, to)
+    ),
   ]);
-  if (relationshipsResult.error) throw relationshipsResult.error;
-  if (entriesResult.error) throw entriesResult.error;
-  if (contactsResult.error) throw contactsResult.error;
-
-  const relationships = (relationshipsResult.data || []) as RelationshipRow[];
-  const entries = (entriesResult.data || []) as Array<{ id: string; contact_id: string | null; category_id: string; label: string; value: string }>;
-  const contacts = (contactsResult.data || []) as ContactRow[];
   const contactName = new Map(contacts.map((c) => [c.id, c.name || "Unnamed"]));
 
   const relationshipViolations: Violation[] = [];
@@ -468,9 +473,8 @@ serve(async (req) => {
     if (action === "start_relationship_repair") {
       if (scope === "all_users") {
         if (!isService) return json({ error: "Forbidden" }, 403);
-        const { data: profiles, error } = await admin.from("profiles").select("id");
-        if (error) throw error;
-        const ids = (profiles || []).map((profile: { id: string }) => profile.id);
+        const profiles = await selectAllRows<{ id: string }>((from, to) => admin.from("profiles").select("id").order("id").range(from, to));
+        const ids = profiles.map((profile) => profile.id);
         EdgeRuntime.waitUntil((async () => {
           for (const id of ids) {
             try {
@@ -532,9 +536,8 @@ serve(async (req) => {
 
     if (scope === "all_users") {
       if (!isService) return json({ error: "Forbidden" }, 403);
-      const { data: profiles, error } = await admin.from("profiles").select("id");
-      if (error) throw error;
-      const ids = (profiles || []).map((p: { id: string }) => p.id);
+      const profiles = await selectAllRows<{ id: string }>((from, to) => admin.from("profiles").select("id").order("id").range(from, to));
+      const ids = profiles.map((p) => p.id);
       // Background: a full sweep must never block (or time out) the request.
       EdgeRuntime.waitUntil((async () => {
         for (const id of ids) {

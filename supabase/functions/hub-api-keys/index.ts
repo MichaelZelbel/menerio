@@ -6,6 +6,20 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const VALID_SCOPES = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world", "lexicon", "collections"];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The JSON body as an object, or null when it is malformed or not an object. */
+async function readBody(req: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = await req.json();
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -44,7 +58,8 @@ Deno.serve(async (req) => {
   try {
     // POST /hub-api-keys/generate — Generate a new API key
     if (req.method === "POST" && action === "generate") {
-      const body = await req.json();
+      const body = await readBody(req);
+      if (!body) return new Response(JSON.stringify({ error: "Request body must be a JSON object" }), { status: 400, headers });
       const { name, scopes } = body;
 
       if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -53,7 +68,7 @@ Deno.serve(async (req) => {
 
       // "hub" is the retired connector scope: every key connects now, so an old
       // client still sending it gets it silently dropped rather than an error.
-      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world", "lexicon", "collections"];
+      const validScopes = VALID_SCOPES;
       const requestedScopes = Array.isArray(scopes) ? scopes.filter((s: string) => s !== "hub") : scopes;
       if (!Array.isArray(requestedScopes) || requestedScopes.length === 0 || !requestedScopes.every((s: string) => validScopes.includes(s))) {
         return new Response(
@@ -118,14 +133,25 @@ Deno.serve(async (req) => {
 
     // DELETE /hub-api-keys/<id> — Revoke a key
     if (req.method === "DELETE" && action) {
-      const { error } = await supabaseAdmin
+      if (!UUID_PATTERN.test(action)) {
+        return new Response(JSON.stringify({ error: "Key not found" }), { status: 404, headers });
+      }
+      // Revoking an id that is not one of this user's keys used to answer
+      // success, so a client revoking the wrong id believed a leaked key was
+      // dead while it kept working.
+      const { data: revoked, error } = await supabaseAdmin
         .from("hub_api_keys")
         .update({ is_active: false })
         .eq("id", action)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+      }
+      if (!revoked) {
+        return new Response(JSON.stringify({ error: "Key not found" }), { status: 404, headers });
       }
 
       return new Response(JSON.stringify({ success: true }), { status: 200, headers });
@@ -133,16 +159,28 @@ Deno.serve(async (req) => {
 
     // PATCH /hub-api-keys/<id> — Update name or scopes
     if (req.method === "PATCH" && action) {
-      const body = await req.json();
+      if (!UUID_PATTERN.test(action)) {
+        return new Response(JSON.stringify({ error: "Key not found" }), { status: 404, headers });
+      }
+      const body = await readBody(req);
+      if (!body) return new Response(JSON.stringify({ error: "Request body must be a JSON object" }), { status: 400, headers });
       const updates: Record<string, unknown> = {};
 
-      if (body.name && typeof body.name === "string") {
+      if (typeof body.name === "string" && body.name.trim().length > 0) {
         updates.name = body.name.trim();
       }
 
-      const validScopes = ["profile", "notes", "contacts", "actions", "graph", "media", "stats", "world", "lexicon", "collections"];
-      const patchScopes = Array.isArray(body.scopes) ? body.scopes.filter((s: string) => s !== "hub") : body.scopes;
-      if (Array.isArray(patchScopes) && patchScopes.length > 0 && patchScopes.every((s: string) => validScopes.includes(s))) {
+      // Invalid scopes used to be dropped without a word: a PATCH carrying a
+      // new name and a misspelt scope answered 200 with the old scopes kept,
+      // so the caller believed the key's access had changed when it had not.
+      if (body.scopes !== undefined) {
+        const patchScopes = Array.isArray(body.scopes) ? body.scopes.filter((s: unknown) => s !== "hub") : body.scopes;
+        if (!Array.isArray(patchScopes) || patchScopes.length === 0 || !patchScopes.every((s: unknown) => typeof s === "string" && VALID_SCOPES.includes(s))) {
+          return new Response(
+            JSON.stringify({ error: `scopes must be a non-empty array of: ${VALID_SCOPES.join(", ")}` }),
+            { status: 400, headers }
+          );
+        }
         updates.scopes = patchScopes;
       }
 
@@ -156,10 +194,13 @@ Deno.serve(async (req) => {
         .eq("id", action)
         .eq("user_id", userId)
         .select("id, name, key_prefix, scopes, is_active")
-        .single();
+        .maybeSingle();
 
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+      }
+      if (!updated) {
+        return new Response(JSON.stringify({ error: "Key not found" }), { status: 404, headers });
       }
 
       return new Response(JSON.stringify(updated), { status: 200, headers });

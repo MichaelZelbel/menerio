@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { ClaimRow } from "@/lib/world-claims";
+import { fetchAllPages } from "@/lib/postgrest";
 
 /**
  * World reads three database views, and the views read the tables that were
@@ -10,6 +11,9 @@ import type { ClaimRow } from "@/lib/world-claims";
  * There is no `world` table and there is no extractor filling one. A second
  * store would have meant a second copy of all 226 contacts, and every name
  * would exist twice. This is the rule the whole World design rests on.
+ *
+ * Every list is read to the end, a page at a time. The tabs show a count, and
+ * a silent 500 or 2,000 row cap made that count a lie for a large vault.
  */
 
 export interface WorldEntityRow {
@@ -51,13 +55,16 @@ export function useWorldEntities() {
     queryKey: ["world-entities", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await db
-        .from("world_entities")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("name");
-      if (error) throw error;
-      return ((data || []) as any[]).map((row) => ({
+      const data = await fetchAllPages<any>((from, to) =>
+        db
+          .from("world_entities")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
+      return data.map((row) => ({
         ...row,
         aliases: row.aliases || [],
       })) as WorldEntityRow[];
@@ -72,14 +79,15 @@ export function useWorldEvents() {
     queryKey: ["world-events", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await db
-        .from("world_events")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("happened_at", { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return (data || []) as WorldEventRow[];
+      return fetchAllPages<WorldEventRow>((from, to) =>
+        db
+          .from("world_events")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("happened_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 }
@@ -91,14 +99,15 @@ export function useWorldClaims() {
     queryKey: ["world-claims", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await db
-        .from("world_claims")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("updated_at", { ascending: false })
-        .limit(2000);
-      if (error) throw error;
-      return (data || []) as ClaimRow[];
+      return fetchAllPages<ClaimRow>((from, to) =>
+        db
+          .from("world_claims")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("updated_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 }

@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { parseDateOnly } from "@/lib/local-date";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import AddEventDialog, { type EditMomentData, type TimelineContact } from "@/components/timeline/AddEventDialog";
 
@@ -87,7 +88,7 @@ export function PersonTimeline({ personId, personName, people, onAskMira }: Pers
     loadTimeline();
   };
 
-  const formatDate = (value: string) => format(new Date(value), "MMMM d, yyyy");
+  const formatDate = (value: string) => format(parseDateOnly(value) ?? new Date(value), "MMMM d, yyyy");
   const filteredEntries = viewMode === "milestones" ? entries.filter((entry) => entry.impact_level >= 3) : entries;
 
   return (

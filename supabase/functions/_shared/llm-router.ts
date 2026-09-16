@@ -14,6 +14,7 @@ import {
   type CreditInfo,
 } from "./llm-credits.ts";
 import { sha256Hex } from "./sha256.ts";
+import { providerFetch } from "./provider-fetch.ts";
 
 export type Provider = "lovable" | "openrouter" | "openai" | "anthropic" | "gemini" | "mistral";
 
@@ -171,7 +172,7 @@ async function callOpenAICompatible(opts: {
   if (opts.temperature != null) body.temperature = opts.temperature;
   if (opts.maxTokens != null) body.max_tokens = opts.maxTokens;
 
-  const r = await fetch(opts.url, {
+  const r = await providerFetch(`LLM call to ${new URL(opts.url).host}`, opts.url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${opts.apiKey}`,
@@ -203,7 +204,7 @@ async function callAnthropic(opts: {
     messages: conv.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
   };
   if (opts.temperature != null) body.temperature = opts.temperature;
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  const r = await providerFetch("Anthropic call", "https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "x-api-key": opts.apiKey,
@@ -248,7 +249,7 @@ async function callGemini(opts: {
   if (Object.keys(genCfg).length) body.generationConfig = genCfg;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(opts.model)}:generateContent?key=${opts.apiKey}`;
-  const r = await fetch(url, {
+  const r = await providerFetch("Gemini call", url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -642,7 +643,7 @@ export async function runOcr(args: {
     ...(effective.extra_options ?? {}),
     ...(args.extra ?? {}),
   };
-  const r = await fetch("https://api.mistral.ai/v1/ocr", {
+  const r = await providerFetch("Mistral OCR", "https://api.mistral.ai/v1/ocr", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,

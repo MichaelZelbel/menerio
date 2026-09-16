@@ -63,6 +63,12 @@ export type LlmGroup = {
 export type LlmAuditResponse = {
   groups?: LlmGroup[];
   none?: boolean;
+  /**
+   * The reply was not the JSON object the prompt asks for. This is NOT "no
+   * duplicates": an empty group list from an unreadable answer would mark a
+   * profile clean that nobody actually audited. The caller must fail the round.
+   */
+  unparseable?: boolean;
 };
 
 export type MergePlanItem = {
@@ -189,19 +195,23 @@ function labelKey(label: string): string {
 
 /** Parse a raw LLM answer into a validated response object. */
 export function parseAuditResponse(raw: string): LlmAuditResponse {
-  if (!raw) return { groups: [], none: true };
+  const unparseable: LlmAuditResponse = { groups: [], none: false, unparseable: true };
+  if (!raw || !raw.trim()) return unparseable;
   let text = raw.trim();
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) text = fence[1].trim();
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return { groups: [], none: true };
+  if (start === -1 || end === -1 || end <= start) return unparseable;
   try {
     const parsed = JSON.parse(text.slice(start, end + 1));
+    // An object with neither a group list nor an explicit "none" is not an
+    // answer to the question that was asked.
+    if (!Array.isArray(parsed?.groups) && parsed?.none !== true) return unparseable;
     const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
     return { groups, none: Boolean(parsed?.none) && groups.length === 0 };
   } catch {
-    return { groups: [], none: true };
+    return unparseable;
   }
 }
 

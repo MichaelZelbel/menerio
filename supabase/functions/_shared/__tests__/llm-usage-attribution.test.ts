@@ -1,3 +1,4 @@
+// @vitest-environment node
 
 import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { deductTokens } from "../llm-credits.ts";

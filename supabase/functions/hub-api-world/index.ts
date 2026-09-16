@@ -133,17 +133,20 @@ Deno.serve(async (req) => {
         .range(offset, offset + limit - 1);
       if (since.value) q = q.gte("updated_at", since.value);
       if (hideIds.length > 0) {
+        // A claim about a sensitive person, or pointing at one through
+        // `object_id`, is left out. Both conditions go to the database as one
+        // nested filter. The object_id half used to run in memory AFTER
+        // `.range()`, so a page came back shorter than `limit` whenever it held
+        // such a claim, and a client paging until it gets a short page stopped
+        // early and never saw the rest.
         const list = notInList(hideIds);
-        q = q.or(`subject_id.is.null,subject_id.not.in.${list}`);
+        q = q.or(
+          `and(or(subject_id.is.null,subject_id.not.in.${list}),or(object_id.is.null,object_id.not.in.${list}))`,
+        );
       }
       const { data, error } = await q;
       if (error) throw error;
-      const rows = (data || []).map(toWorldClaim);
-      // A claim pointing at a sensitive person is dropped too, and the
-      // pointer is `object_id`, which a single `or` filter cannot also cover.
-      if (hideIds.length === 0) return rows;
-      const hidden = new Set(hideIds);
-      return rows.filter((c) => !(c.object_id && hidden.has(c.object_id)));
+      return (data || []).map(toWorldClaim);
     };
 
     if (kind === "entities") return json({ data: await fetchEntities() });

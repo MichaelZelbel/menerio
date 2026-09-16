@@ -49,24 +49,26 @@ export function LinkToNoteDialog({
     setLinking(true);
     try {
       // Append a wikilink to the source note's content
-      const { data: sourceNote } = await supabase
+      const { data: sourceNote, error: readError } = await supabase
         .from("notes")
         .select("content")
         .eq("id", sourceNoteId)
         .single();
 
+      if (readError) throw readError;
       if (!sourceNote) throw new Error("Note not found");
 
       const wikilinkHtml = `<p><span data-type="wikilink" data-note-id="${targetNoteId}" data-note-title="${targetNoteTitle}" data-display-text="">${targetNoteTitle}</span></p>`;
       const updatedContent = sourceNote.content + "\n" + wikilinkHtml;
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("notes")
         .update({ content: updatedContent })
         .eq("id", sourceNoteId);
+      if (updateError) throw updateError;
 
       // Create the connection
-      await supabase.from("note_connections" as any).upsert(
+      const { error: connectionError } = await supabase.from("note_connections" as any).upsert(
         {
           user_id: user.id,
           source_note_id: sourceNoteId,
@@ -77,6 +79,7 @@ export function LinkToNoteDialog({
         },
         { onConflict: "user_id,source_note_id,target_note_id,connection_type" }
       );
+      if (connectionError) throw connectionError;
 
       queryClient.invalidateQueries({ queryKey: ["backlinks"] });
       queryClient.invalidateQueries({ queryKey: ["note-connections"] });
