@@ -603,9 +603,17 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
 
       const factDecision = profileValueDecision(categorySlug, label, value);
       if (!factDecision.ok) return { ...suggestion, status: "removed" };
+      // The same evidence gate the relationship branch applies, checked here
+      // rather than left to the profile_entries trigger: the trigger refuses an
+      // automated fact whose quote is under ten characters, and under the
+      // durable pipeline a refused insert fails the whole analysis job. An ID
+      // card scan ("DEUTSCH", "181 cm", "47804") lost all nine of its facts
+      // that way. A short quote waits for a human instead.
+      const factEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
+      if (factEvidenceQuote.length < 10) return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("profile_entries")
-        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: String((suggestion.payload as any)?.evidence_quote || "").trim(), linked_note_id: (suggestion as any).source_note_id || null })
+        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: factEvidenceQuote, linked_note_id: (suggestion as any).source_note_id || null })
         .select("id")
         .maybeSingle();
       if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
