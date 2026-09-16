@@ -198,3 +198,28 @@ verify_jwt = false
 
 [functions.gdrive-watch-maintenance]
 verify_jwt = false
+
+# Every deployed function on this project runs with verify_jwt = false and
+# authenticates inside the handler (checked live 2026-09-16: 91 of 91). A deploy
+# applies this file, and a function with no entry flips to verify_jwt = true, so
+# each function redeployed that day is pinned to the setting it already had.
+[functions.admin-llm-config]
+verify_jwt = false
+
+[functions.backfill-embeddings]
+verify_jwt = false
+
+[functions.classify-profile-fact]
+verify_jwt = false
+
+[functions.collection-chat]
+verify_jwt = false
+
+[functions.conversation-chat]
+verify_jwt = false
+
+[functions.promote-profile-entries]
+verify_jwt = false
+
+[functions.weekly-review]
+verify_jwt = false
