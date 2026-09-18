@@ -156,7 +156,7 @@ describe("nonsense screens on extracted facts", () => {
     expect(closedVocabValueProblem("Eye color", "colorful hair, not specified eye color")).toBe(
       "closed_vocab_value_too_long",
     );
-    expect(closedVocabValueProblem("Eye color", "the same as her hair color")).toBe(
+    expect(closedVocabValueProblem("Eye color", "her hair color")).toBe(
       "closed_vocab_value_names_other_field",
     );
     expect(closedVocabValueProblem("Eye color", "green")).toBeNull();
