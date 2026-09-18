@@ -181,6 +181,13 @@ SOURCE QUOTES ARE MANDATORY, AND THEY ARE CHECKED:
 - Every relationship MUST include an exact source_quote. If no exact quote proves the relationship, do not emit that relationship.
 - A source_quote must be copied character for character out of the note text, and must be at least 4 characters long. Do not paraphrase it, do not repair spelling or punctuation, do not join two separate passages, and never quote from these instructions. Anything whose quote cannot be found verbatim in the note is discarded before it reaches the user.
 
+VALUES MUST BE COPIED OUT OF THE NOTE, AND THIS IS CHECKED:
+- The "value" must appear in the note text (case-insensitive). Do not translate it, do not rephrase it, do not summarise it, do not infer it. The only exception is a date of birth you compute from an explicit age or "Nth birthday" statement in the note.
+- Never emit a hedge as a value: "not specified", "unspecified", "not mentioned", "no information", "unclear", "unknown", "n/a", "not stated". If you do not know the value, omit the whole fact.
+- For a single-value field with a small vocabulary (eye color, hair color, gender, pronouns, blood type, marital status), the value is one short term from that vocabulary. It must never mention another field or describe what is missing.
+- Never emit a bare number as a value unless the label is inherently numeric (age, height, weight, postal code, income). "Expense: 3" is not a fact.
+Anything breaking these rules is discarded before it reaches the user.
+
 CANONICAL LABELS — prefer these EXACT label names when one fits the fact:
 ${CANONICAL_LABELS_FOR_PROMPT}
 When one of these canonical labels fits the fact, USE IT EXACTLY. Only invent a new label if none fits. For open-ended categories (personality, principles, hobbies, food, entertainment, travel, goals, preferences) keep using short natural labels — do not force them onto this list.

@@ -24,6 +24,7 @@
 import {
   canonicalProfileLabel,
   correctProfileCategory,
+  PROFILE_CANONICAL_SCHEMA,
 } from "./profile-canonical-schema.ts";
 
 export type FactType =
@@ -322,6 +323,91 @@ export function splitEmbeddedLabelRuns(value: string): string[] {
     if (piece) out.push(piece);
   }
   return out;
+}
+
+/* ── Nonsense screens ──────────────────────────────────────────────────────
+ * These run on freshly EXTRACTED facts (before they become review-queue
+ * suggestions), not only when a suggestion is accepted. Everything here is
+ * deterministic so the frontend mirror behaves identically.
+ */
+
+/**
+ * Hedging language the model emits when it has nothing: "not specified",
+ * "unknown (has hair parts)", "N/A". Matches anywhere inside the value, not
+ * just as the whole value.
+ */
+export const PLACEHOLDER_PHRASE_RE =
+  /(^|[^\p{L}])(not\s+specified|unspecified|not\s+mentioned|no\s+information|not\s+available|unclear|unknown|n\s*\/\s*a|not\s+stated|not\s+provided|keine\s+angabe|nicht\s+angegeben)($|[^\p{L}])/iu;
+
+export function containsPlaceholderPhrase(value: string): boolean {
+  return PLACEHOLDER_PHRASE_RE.test(String(value || ""));
+}
+
+/** Labels whose value may legitimately be a bare number. */
+const NUMERIC_SHAPE_LABELS = new Set([
+  "age", "height", "weight", "shoe size", "clothing size", "postal code",
+  "graduation year", "income", "salary", "net worth", "phone", "number of children",
+  "blood pressure", "resting heart rate", "steps per day", "year founded",
+]);
+
+/**
+ * "Expense: 3". A bare number under a label with no numeric shape carries no
+ * meaning and cannot be corrected later — refuse it.
+ */
+export function isBareNumberWithoutShape(canonicalLabel: string, value: string): boolean {
+  const v = String(value || "").trim();
+  if (!/^[\d]+([.,]\d+)?$/.test(v)) return false;
+  return !NUMERIC_SHAPE_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
+}
+
+/**
+ * Single-value closed-vocabulary fields: eye colour, hair colour, gender …
+ * Their value is a short term from a small vocabulary. Anything long, or
+ * anything that names a DIFFERENT profile field, is a model hedge
+ * ("Eye color: colorful hair, not specified eye color") and is refused.
+ */
+const CLOSED_VOCAB_LABELS = new Set([
+  "eye color", "hair color", "gender", "pronouns", "blood type",
+  "marital status", "skin tone", "handedness", "zodiac sign", "timezone",
+]);
+
+const ALL_CANONICAL_LABELS_LOWER: string[] = Object.values(PROFILE_CANONICAL_SCHEMA)
+  .flatMap((c) => c.labels.map((l) => l.canonical.toLowerCase()))
+  .filter((l) => l.length >= 5);
+
+export function isClosedVocabLabel(canonicalLabel: string): boolean {
+  return CLOSED_VOCAB_LABELS.has(String(canonicalLabel || "").trim().toLowerCase());
+}
+
+/** `null` when the value is acceptable, otherwise a drop reason. */
+export function closedVocabValueProblem(canonicalLabel: string, value: string): string | null {
+  const label = String(canonicalLabel || "").trim().toLowerCase();
+  if (!CLOSED_VOCAB_LABELS.has(label)) return null;
+  const v = String(value || "").trim();
+  if (!v) return "empty";
+  if (v.length > 40 || v.split(/\s+/).length > 4) return "closed_vocab_value_too_long";
+  const lower = v.toLowerCase();
+  for (const other of ALL_CANONICAL_LABELS_LOWER) {
+    if (other === label) continue;
+    if (lower.includes(other)) return "closed_vocab_value_names_other_field";
+  }
+  return null;
+}
+
+/**
+ * The extracted value must actually occur in the note (case-insensitive), the
+ * same rule moment extraction already applies. Exact substring first, then a
+ * token fallback so "Green/gray" still matches "green gray".
+ */
+export function valueAppearsInSource(value: string, source: string): boolean {
+  const v = String(value || "").toLowerCase().trim();
+  const s = String(source || "").toLowerCase();
+  if (!v || !s) return false;
+  if (s.includes(v)) return true;
+  const tokens = v.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3);
+  if (tokens.length === 0) return false;
+  const hits = tokens.filter((t) => s.includes(t)).length;
+  return hits / tokens.length >= 0.8;
 }
 
 /** Convenience: split a stored bag and route every resulting fact. */

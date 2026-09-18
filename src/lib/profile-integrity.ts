@@ -31,6 +31,12 @@ const PLACEHOLDER_VALUES = new Set([
   "none", "n/a", "na", "unknown", "unspecified", "-", "—", "null",
 ]);
 
+// Exact matches were never enough: the model hedges inside a longer value
+// ("unknown (has hair parts)", "colorful hair, not specified eye color").
+// Any value CONTAINING one of these phrases is a non-fact.
+const PLACEHOLDER_PHRASE_PATTERN =
+  /(^|[^\p{L}])(not\s+specified|unspecified|not\s+mentioned|no\s+information|not\s+available|unclear|unknown|n\s*\/\s*a|not\s+stated|not\s+provided|keine\s+angabe|nicht\s+angegeben)($|[^\p{L}])/iu;
+
 export type RelationshipWriteInput = {
   userId: string;
   sourceType: "contact" | "self";
@@ -78,6 +84,9 @@ export function profileValueDecision(categorySlug: string, label: string, value:
   if (isBlockedProfileLabel(canonical)) return { ok: false as const, reason: "blocked_profile_label" };
   if (PLACEHOLDER_VALUES.has(valueKey) || valueKey === canonical.toLowerCase()) {
     return { ok: false as const, reason: "placeholder_or_label_value" };
+  }
+  if (PLACEHOLDER_PHRASE_PATTERN.test(normalizedValue)) {
+    return { ok: false as const, reason: "placeholder_phrase_value" };
   }
   if (normalizedValue.length < 2) return { ok: false as const, reason: "value_too_short" };
   return { ok: true as const, label: canonical, value: normalizedValue };

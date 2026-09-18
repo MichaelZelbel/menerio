@@ -40,7 +40,13 @@ import {
 } from "../_shared/profile-fields-registry.ts";
 import { isSkillLabel, routeSkillValue } from "../_shared/profile-skill-guard.ts";
 import { guardNameValue, isNameLabel } from "../_shared/profile-name-guard.ts";
-import { gateStoredValue } from "../_shared/profile-fact-gate.ts";
+import {
+  gateStoredValue,
+  containsPlaceholderPhrase,
+  closedVocabValueProblem,
+  isBareNumberWithoutShape,
+  valueAppearsInSource,
+} from "../_shared/profile-fact-gate.ts";
 
 import {
   applyNormalization,
@@ -879,7 +885,9 @@ function deriveCanonicalFacts(
         const day = ageDateMatch[4];
         if (age > 0 && age < 130 && refYear > 1900 && refYear < 2200) {
           const birthYear = refYear - age;
-          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}` });
+          // Derived from an explicit age / Nth-birthday phrase — exempt from the
+          // "value must appear in the note" rule below.
+          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}`, _derivedFromAge: true } as any);
           continue;
         }
       }
@@ -893,7 +901,7 @@ function deriveCanonicalFacts(
           const birthYear = ref.getUTCFullYear() - age;
           const month = String(ref.getUTCMonth() + 1).padStart(2, "0");
           const day = String(ref.getUTCDate()).padStart(2, "0");
-          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}` });
+          out.push({ ...f, label: "Date of birth", value: `${birthYear}-${month}-${day}`, _derivedFromAge: true } as any);
           continue;
         }
       }
@@ -1507,6 +1515,16 @@ async function generateProfileSuggestions(
 
     const keyFor = (t: Target) => t.contact_id || OWNER_KEY;
 
+    // Per-reason drop counters, logged once per note so a regression in any of
+    // the screens below is visible without re-reading every line of the log.
+    const factDropCounts: Record<string, number> = {};
+    const countDrop = (reason: string, label: string, value: string) => {
+      factDropCounts[reason] = (factDropCounts[reason] || 0) + 1;
+      console.log(`[profile-extract] Dropping fact "${label}: ${value}" (${reason})`);
+    };
+    // The note text every extracted value must be found in.
+    const factSourceText = `${noteTitle || ""}\n${cleanContent || ""}`;
+
     const validFacts: Array<{ contact_name: string; category_slug: string; label: string; value: string; source_quote?: string; _target: Target }> = [];
     for (const f of extractedFacts) {
       if (!f.contact_name || !f.category_slug || !f.label || !f.value) continue;
@@ -1660,9 +1678,36 @@ async function generateProfileSuggestions(
       });
       for (const g of gated) {
         if (!g.accepted) {
-          console.log(`[profile-extract] Dropping fact "${f.label}: ${g.value}" (${g.reason})`);
+          countDrop(g.reason || "gate_refused", f.label, g.value);
           continue;
         }
+
+        // Nonsense screens. These exist because the review queue filled up with
+        // values the note never contained ("Not specified", "unknown (has hair
+        // parts)", "Expense: 3", "Eye color: colorful hair, not specified eye
+        // color"). A suggestion that fails here is never created at all.
+        if (containsPlaceholderPhrase(g.value)) {
+          countDrop("placeholder_phrase_value", g.label, g.value);
+          continue;
+        }
+        const closedVocabProblem = closedVocabValueProblem(g.label, g.value);
+        if (closedVocabProblem) {
+          countDrop(closedVocabProblem, g.label, g.value);
+          continue;
+        }
+        if (isBareNumberWithoutShape(g.label, g.value)) {
+          countDrop("bare_number_without_shape", g.label, g.value);
+          continue;
+        }
+        // The value must be readable in the note. Only a date of birth DERIVED
+        // from an explicit age / Nth-birthday phrase is exempt, since that ISO
+        // date is computed and by definition not in the text.
+        const isDerivedDob = (f as any)._derivedFromAge === true && g.label === "Date of birth";
+        if (!isDerivedDob && !valueAppearsInSource(g.value, factSourceText)) {
+          countDrop("value_not_in_note_text", g.label, g.value);
+          continue;
+        }
+
         if (g.label !== f.label || g.categorySlug !== f.category_slug) {
           console.log(`[profile-extract] Refiled "${f.label}" → "${g.label}" (${g.categorySlug})`);
         }
@@ -1677,7 +1722,9 @@ async function generateProfileSuggestions(
 
     }
 
-    console.log(`[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}`);
+    console.log(
+      `[profile-extract] ${extractedFacts.length} parsed → ${validFacts.length} valid for note ${noteId}; drops=${JSON.stringify(factDropCounts)}`,
+    );
 
     if (validFacts.length === 0 && extractedRelationships.length === 0) {
       return;

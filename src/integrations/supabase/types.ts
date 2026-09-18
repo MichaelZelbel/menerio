@@ -14,103 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      // BEGIN GENERATED CONTACT TOPIC TABLES
-      contact_topics: {
-        Row: {
-          archived_at: string | null
-          completed_at: string | null
-          contact_id: string
-          created_at: string
-          id: string
-          last_discussed_at: string | null
-          mode: string
-          priority: string
-          status: string
-          title: string
-          updated_at: string
-          user_id: string
-          version: number
-        }
-        Insert: {
-          archived_at?: string | null
-          completed_at?: string | null
-          contact_id: string
-          created_at?: string
-          id?: string
-          last_discussed_at?: string | null
-          mode?: string
-          priority?: string
-          status?: string
-          title: string
-          updated_at?: string
-          user_id: string
-          version?: number
-        }
-        Update: {
-          archived_at?: string | null
-          completed_at?: string | null
-          contact_id?: string
-          created_at?: string
-          id?: string
-          last_discussed_at?: string | null
-          mode?: string
-          priority?: string
-          status?: string
-          title?: string
-          updated_at?: string
-          user_id?: string
-          version?: number
-        }
-        Relationships: [
-          { foreignKeyName: "contact_topics_user_id_contact_id_fkey"; columns: ["user_id","contact_id"]; isOneToOne: false; referencedRelation: "contacts"; referencedColumns: ["user_id","id"] },
-        ]
-      }
-      contact_topic_events: {
-        Row: {
-          action: string
-          after_state: Json
-          before_state: Json | null
-          created_at: string
-          happened_at: string
-          id: string
-          request_hash: string
-          request_id: string
-          reverses_event_id: string | null
-          topic_id: string
-          user_id: string
-        }
-        Insert: {
-          action: string
-          after_state: Json
-          before_state?: Json | null
-          created_at?: string
-          happened_at: string
-          id?: string
-          request_hash: string
-          request_id: string
-          reverses_event_id?: string | null
-          topic_id: string
-          user_id: string
-        }
-        Update: {
-          action?: string
-          after_state?: Json
-          before_state?: Json | null
-          created_at?: string
-          happened_at?: string
-          id?: string
-          request_hash?: string
-          request_id?: string
-          reverses_event_id?: string | null
-          topic_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          { foreignKeyName: "contact_topic_events_reverses_event_id_fkey"; columns: ["reverses_event_id"]; isOneToOne: false; referencedRelation: "contact_topic_events"; referencedColumns: ["id"] },
-          { foreignKeyName: "contact_topic_events_user_id_topic_id_fkey"; columns: ["user_id","topic_id"]; isOneToOne: false; referencedRelation: "contact_topics"; referencedColumns: ["user_id","id"] },
-        ]
-      }
-      // END GENERATED CONTACT TOPIC TABLES
       action_items: {
         Row: {
           ai_visibility: string
@@ -899,7 +802,7 @@ export type Database = {
       contact_interactions: {
         Row: {
           action_items: string[] | null
-          contact_id: string
+          contact_id: string | null
           created_at: string | null
           group_id: string | null
           id: string
@@ -911,7 +814,7 @@ export type Database = {
         }
         Insert: {
           action_items?: string[] | null
-          contact_id: string
+          contact_id?: string | null
           created_at?: string | null
           group_id?: string | null
           id?: string
@@ -923,7 +826,7 @@ export type Database = {
         }
         Update: {
           action_items?: string[] | null
-          contact_id?: string
+          contact_id?: string | null
           created_at?: string | null
           group_id?: string | null
           id?: string
@@ -954,6 +857,74 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "notes"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_merge_receipts: {
+        Row: {
+          created_at: string
+          payload: Json
+          request_id: string
+          result: Json
+          source_snapshot: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          payload: Json
+          request_id: string
+          result: Json
+          source_snapshot: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          payload?: Json
+          request_id?: string
+          result?: Json
+          source_snapshot?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
+      contact_merge_vault_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          request_id: string
+          source_contact_id: string
+          status: string
+          target_contact_id: string | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          request_id: string
+          source_contact_id: string
+          status?: string
+          target_contact_id?: string | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          request_id?: string
+          source_contact_id?: string
+          status?: string
+          target_contact_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_merge_vault_jobs_user_id_request_id_fkey"
+            columns: ["user_id", "request_id"]
+            isOneToOne: true
+            referencedRelation: "contact_merge_receipts"
+            referencedColumns: ["user_id", "request_id"]
           },
         ]
       }
@@ -1049,9 +1020,121 @@ export type Database = {
           },
         ]
       }
+      contact_topic_events: {
+        Row: {
+          action: string
+          after_state: Json
+          before_state: Json | null
+          created_at: string
+          happened_at: string
+          id: string
+          request_hash: string
+          request_id: string
+          reverses_event_id: string | null
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          after_state: Json
+          before_state?: Json | null
+          created_at?: string
+          happened_at: string
+          id?: string
+          request_hash: string
+          request_id: string
+          reverses_event_id?: string | null
+          topic_id: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          after_state?: Json
+          before_state?: Json | null
+          created_at?: string
+          happened_at?: string
+          id?: string
+          request_hash?: string
+          request_id?: string
+          reverses_event_id?: string | null
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_topic_events_reverses_event_id_fkey"
+            columns: ["reverses_event_id"]
+            isOneToOne: true
+            referencedRelation: "contact_topic_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_topic_events_user_id_topic_id_fkey"
+            columns: ["user_id", "topic_id"]
+            isOneToOne: false
+            referencedRelation: "contact_topics"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      contact_topics: {
+        Row: {
+          archived_at: string | null
+          completed_at: string | null
+          contact_id: string
+          created_at: string
+          id: string
+          last_discussed_at: string | null
+          mode: string
+          priority: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          archived_at?: string | null
+          completed_at?: string | null
+          contact_id: string
+          created_at?: string
+          id?: string
+          last_discussed_at?: string | null
+          mode?: string
+          priority?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          archived_at?: string | null
+          completed_at?: string | null
+          contact_id?: string
+          created_at?: string
+          id?: string
+          last_discussed_at?: string | null
+          mode?: string
+          priority?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_topics_user_id_contact_id_fkey"
+            columns: ["user_id", "contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
-          topic_self_merge_pending: boolean
           ai_visibility: string
           aliases: string[] | null
           app_mappings: Json | null
@@ -1082,11 +1165,11 @@ export type Database = {
           relationship: string | null
           role: string | null
           tags: string[] | null
+          topic_self_merge_pending: boolean
           updated_at: string | null
           user_id: string
         }
         Insert: {
-          topic_self_merge_pending?: boolean
           ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null
@@ -1117,11 +1200,11 @@ export type Database = {
           relationship?: string | null
           role?: string | null
           tags?: string[] | null
+          topic_self_merge_pending?: boolean
           updated_at?: string | null
           user_id?: string
         }
         Update: {
-          topic_self_merge_pending?: boolean
           ai_visibility?: string
           aliases?: string[] | null
           app_mappings?: Json | null
@@ -1152,6 +1235,7 @@ export type Database = {
           relationship?: string | null
           role?: string | null
           tags?: string[] | null
+          topic_self_merge_pending?: boolean
           updated_at?: string | null
           user_id?: string
         }
@@ -1458,10 +1542,14 @@ export type Database = {
           github_username: string | null
           id: string
           last_sync_at: string | null
+          last_sync_attempt_at: string | null
+          last_sync_error: string | null
           repo_name: string | null
           repo_owner: string | null
           sync_direction: string | null
           sync_enabled: boolean | null
+          sync_lease_id: string | null
+          sync_lease_until: string | null
           sync_people: boolean
           updated_at: string | null
           user_id: string
@@ -1475,10 +1563,14 @@ export type Database = {
           github_username?: string | null
           id?: string
           last_sync_at?: string | null
+          last_sync_attempt_at?: string | null
+          last_sync_error?: string | null
           repo_name?: string | null
           repo_owner?: string | null
           sync_direction?: string | null
           sync_enabled?: boolean | null
+          sync_lease_id?: string | null
+          sync_lease_until?: string | null
           sync_people?: boolean
           updated_at?: string | null
           user_id: string
@@ -1492,10 +1584,14 @@ export type Database = {
           github_username?: string | null
           id?: string
           last_sync_at?: string | null
+          last_sync_attempt_at?: string | null
+          last_sync_error?: string | null
           repo_name?: string | null
           repo_owner?: string | null
           sync_direction?: string | null
           sync_enabled?: boolean | null
+          sync_lease_id?: string | null
+          sync_lease_until?: string | null
           sync_people?: boolean
           updated_at?: string | null
           user_id?: string
@@ -1553,6 +1649,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "notes"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "github_sync_log_note_owner_fkey"
+            columns: ["note_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id", "user_id"]
           },
         ]
       }
@@ -1744,11 +1847,14 @@ export type Database = {
           feature: string
           id: string
           idempotency_key: string | null
+          job_id: string | null
           metadata: Json | null
           model: string | null
           note_id: string | null
           prompt_tokens: number
           provider: string | null
+          revision: string | null
+          stage: string | null
           total_tokens: number
           user_id: string
         }
@@ -1761,11 +1867,14 @@ export type Database = {
           feature: string
           id?: string
           idempotency_key?: string | null
+          job_id?: string | null
           metadata?: Json | null
           model?: string | null
           note_id?: string | null
           prompt_tokens?: number
           provider?: string | null
+          revision?: string | null
+          stage?: string | null
           total_tokens?: number
           user_id: string
         }
@@ -1778,11 +1887,14 @@ export type Database = {
           feature?: string
           id?: string
           idempotency_key?: string | null
+          job_id?: string | null
           metadata?: Json | null
           model?: string | null
           note_id?: string | null
           prompt_tokens?: number
           provider?: string | null
+          revision?: string | null
+          stage?: string | null
           total_tokens?: number
           user_id?: string
         }
@@ -1878,6 +1990,27 @@ export type Database = {
           hide_sensitive_from_ai?: boolean
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      mcp_tool_usage: {
+        Row: {
+          request_count: number
+          tool_name: string
+          user_id: string
+          window_start: string
+        }
+        Insert: {
+          request_count?: number
+          tool_name: string
+          user_id: string
+          window_start: string
+        }
+        Update: {
+          request_count?: number
+          tool_name?: string
+          user_id?: string
+          window_start?: string
         }
         Relationships: []
       }
@@ -2304,6 +2437,177 @@ export type Database = {
         }
         Relationships: []
       }
+      note_ai_completions: {
+        Row: {
+          completed_at: string
+          fingerprint: string
+          generation: number
+          job_id: string
+        }
+        Insert: {
+          completed_at?: string
+          fingerprint: string
+          generation: number
+          job_id: string
+        }
+        Update: {
+          completed_at?: string
+          fingerprint?: string
+          generation?: number
+          job_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_ai_completions_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "note_ai_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_ai_jobs: {
+        Row: {
+          attempts: number
+          captured_generation: number | null
+          desired_fingerprint: string
+          desired_generation: number
+          execution_started_at: string | null
+          fingerprint: string | null
+          first_dirty_at: string
+          id: string
+          last_automatic_start: string | null
+          last_claimed_at: string | null
+          last_dirty_at: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_id: string | null
+          next_eligible_at: string
+          note_id: string
+          pipeline: string
+          policy_epoch: number
+          priority: boolean
+          snapshot: Json | null
+          state: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          captured_generation?: number | null
+          desired_fingerprint: string
+          desired_generation?: number
+          execution_started_at?: string | null
+          fingerprint?: string | null
+          first_dirty_at?: string
+          id?: string
+          last_automatic_start?: string | null
+          last_claimed_at?: string | null
+          last_dirty_at?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          next_eligible_at?: string
+          note_id: string
+          pipeline: string
+          policy_epoch?: number
+          priority?: boolean
+          snapshot?: Json | null
+          state?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          captured_generation?: number | null
+          desired_fingerprint?: string
+          desired_generation?: number
+          execution_started_at?: string | null
+          fingerprint?: string | null
+          first_dirty_at?: string
+          id?: string
+          last_automatic_start?: string | null
+          last_claimed_at?: string | null
+          last_dirty_at?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          next_eligible_at?: string
+          note_id?: string
+          pipeline?: string
+          policy_epoch?: number
+          priority?: boolean
+          snapshot?: Json | null
+          state?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_ai_jobs_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_ai_stage_results: {
+        Row: {
+          fingerprint: string
+          job_id: string
+          lease_id: string
+          result: Json | null
+          stage: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          fingerprint: string
+          job_id: string
+          lease_id: string
+          result?: Json | null
+          stage: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          fingerprint?: string
+          job_id?: string
+          lease_id?: string
+          result?: Json | null
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_ai_stage_results_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "note_ai_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_ai_worker_settings: {
+        Row: {
+          enabled: boolean
+          id: boolean
+          updated_at: string
+          user_ids: string[] | null
+        }
+        Insert: {
+          enabled?: boolean
+          id?: boolean
+          updated_at?: string
+          user_ids?: string[] | null
+        }
+        Update: {
+          enabled?: boolean
+          id?: boolean
+          updated_at?: string
+          user_ids?: string[] | null
+        }
+        Relationships: []
+      }
       note_attachments: {
         Row: {
           created_at: string
@@ -2348,6 +2652,24 @@ export type Database = {
           source?: string
           storage_path?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      note_capture_receipts: {
+        Row: {
+          created_at: string
+          note_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          note_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          note_id?: string
           user_id?: string
         }
         Relationships: []
@@ -2989,6 +3311,36 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_normalization_inputs: {
+        Row: {
+          attempts: number
+          completed_at: string | null
+          evaluated_at: string | null
+          fingerprint: string
+          result: Json | null
+          subject_key: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          completed_at?: string | null
+          evaluated_at?: string | null
+          fingerprint: string
+          result?: Json | null
+          subject_key: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          completed_at?: string | null
+          evaluated_at?: string | null
+          fingerprint?: string
+          result?: Json | null
+          subject_key?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profile_normalization_jobs: {
         Row: {
           attempts: number
@@ -3033,6 +3385,30 @@ export type Database = {
           status?: string
           subject_type?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profile_normalization_leases: {
+        Row: {
+          fingerprint: string | null
+          lease_expires_at: string | null
+          lease_id: string | null
+          subject_key: string
+          user_id: string
+        }
+        Insert: {
+          fingerprint?: string | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          subject_key: string
+          user_id: string
+        }
+        Update: {
+          fingerprint?: string | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          subject_key?: string
           user_id?: string
         }
         Relationships: []
@@ -3613,6 +3989,13 @@ export type Database = {
             referencedRelation: "notes"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "shared_notes_note_owner_fkey"
+            columns: ["note_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id", "user_id"]
+          },
         ]
       }
       sync_log: {
@@ -4079,6 +4462,36 @@ export type Database = {
       }
     }
     Views: {
+      llm_spend_daily: {
+        Row: {
+          calls: number | null
+          credits_ceil: number | null
+          credits_exact: number | null
+          day: string | null
+          feature: string | null
+          max_runs_per_note: number | null
+          notes: number | null
+          tokens: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      llm_usage_models: {
+        Row: {
+          model: string | null
+        }
+        Relationships: []
+      }
+      llm_usage_totals: {
+        Row: {
+          completion_tokens: number | null
+          credits_charged: number | null
+          events: number | null
+          prompt_tokens: number | null
+          total_tokens: number | null
+        }
+        Relationships: []
+      }
       v_ai_allowance_current: {
         Row: {
           credits_granted: number | null
@@ -4188,28 +4601,6 @@ export type Database = {
       }
     }
     Functions: {
-      // BEGIN GENERATED CONTACT TOPIC FUNCTIONS
-      apply_contact_topic_command: {
-        Args: { p_request_id: string; p_command: Json }
-        Returns: Json
-      }
-      apply_contact_topic_command_for_user: {
-        Args: { p_user_id: string; p_request_id: string; p_command: Json }
-        Returns: Json
-      }
-      apply_contact_topic_command_internal: {
-        Args: { p_user_id: string; p_request_id: string; p_command: Json }
-        Returns: Json
-      }
-      reassign_contact_topics: {
-        Args: { p_source_contact_id: string; p_target_contact_id: string }
-        Returns: number
-      }
-      reassign_contact_topics_for_user: {
-        Args: { p_user_id: string; p_source_contact_id: string; p_target_contact_id: string }
-        Returns: number
-      }
-      // END GENERATED CONTACT TOPIC FUNCTIONS
       ai_can_see: {
         Args: { _id: string; _kind: string; _user_id: string }
         Returns: boolean
@@ -4225,7 +4616,116 @@ export type Database = {
           notes_hidden: number
         }[]
       }
+      apply_contact_topic_command: {
+        Args: { p_command: Json; p_request_id: string }
+        Returns: Json
+      }
+      apply_contact_topic_command_for_user: {
+        Args: { p_command: Json; p_request_id: string; p_user_id: string }
+        Returns: Json
+      }
+      apply_contact_topic_command_internal: {
+        Args: { p_command: Json; p_request_id: string; p_user_id: string }
+        Returns: Json
+      }
+      apply_note_ai_output: {
+        Args: {
+          _embedding?: Json
+          _finish?: boolean
+          _job_id: string
+          _lease_id: string
+          _metadata?: Json
+          _processed_hash?: string
+          _title?: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      apply_note_ai_stage: {
+        Args: {
+          _job_id: string
+          _lease_id: string
+          _stage: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
       backfill_accumulator_profile_entries: { Args: never; Returns: Json }
+      begin_note_ai_stage: {
+        Args: {
+          _job_id: string
+          _lease_id: string
+          _stage: string
+          _user_id: string
+        }
+        Returns: Json
+      }
+      capture_note_with_lexicon: { Args: { _note: Json }; Returns: Json }
+      check_profile_normalization_input: {
+        Args: {
+          p_contact_id: string
+          p_fingerprint: string
+          p_lease_id: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
+      checkpoint_note_ai_stage: {
+        Args: {
+          _job_id: string
+          _lease_id: string
+          _result: Json
+          _stage: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      claim_note_ai_execution: {
+        Args: { _job_id: string; _lease_id: string; _user_id: string }
+        Returns: boolean
+      }
+      claim_note_ai_jobs: {
+        Args: { _lease_seconds?: number; _limit?: number; _user_id?: string }
+        Returns: {
+          attempts: number
+          captured_generation: number | null
+          desired_fingerprint: string
+          desired_generation: number
+          execution_started_at: string | null
+          fingerprint: string | null
+          first_dirty_at: string
+          id: string
+          last_automatic_start: string | null
+          last_claimed_at: string | null
+          last_dirty_at: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_id: string | null
+          next_eligible_at: string
+          note_id: string
+          pipeline: string
+          policy_epoch: number
+          priority: boolean
+          snapshot: Json | null
+          state: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "note_ai_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      claim_profile_normalization_input: {
+        Args: {
+          p_contact_id: string
+          p_fingerprint: string
+          p_manual?: boolean
+          p_user_id: string
+        }
+        Returns: Json
+      }
       cleanup_profile_duplicates: {
         Args: { _contact_id: string; _user_id: string }
         Returns: Json
@@ -4260,15 +4760,90 @@ export type Database = {
             }
             Returns: Json
           }
+      deduct_ai_tokens_attributed: {
+        Args: {
+          p_call_site?: string
+          p_completion_tokens?: number
+          p_config_source?: string
+          p_feature: string
+          p_idempotency_key?: string
+          p_job_id?: string
+          p_model?: string
+          p_note_id?: string
+          p_prompt_tokens?: number
+          p_provider?: string
+          p_revision?: string
+          p_stage?: string
+          p_tokens: number
+          p_usage_source?: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      defer_profile_normalization_input: {
+        Args: {
+          p_contact_id: string
+          p_fingerprint: string
+          p_lease_id: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
+      enqueue_note_ai_job: {
+        Args: {
+          _note_id: string
+          _pipeline: string
+          _reason?: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       enqueue_profile_normalization_job: {
         Args: { p_contact_id: string; p_reason?: string; p_user_id: string }
         Returns: undefined
       }
+      fail_note_ai_job: {
+        Args: {
+          _job_id: string
+          _kind: string
+          _lease_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      finish_note_ai_job: {
+        Args: { _job_id: string; _lease_id: string; _user_id: string }
+        Returns: boolean
+      }
+      finish_profile_normalization_input: {
+        Args: {
+          p_contact_id: string
+          p_fingerprint: string
+          p_lease_id: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
       get_cron_secret: { Args: never; Returns: string }
+      get_note_ai_job_snapshot: {
+        Args: { _job_id: string; _lease_id: string; _user_id: string }
+        Returns: Json
+      }
       get_shared_note_by_token: { Args: { p_token: string }; Returns: Json }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
+      }
+      github_sync_lease: {
+        Args: {
+          p_action: string
+          p_connection: string
+          p_error?: string
+          p_lease: string
+          p_success?: boolean
+          p_user: string
+        }
+        Returns: boolean
       }
       has_role: {
         Args: {
@@ -4276,6 +4851,13 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      hub_api_bump_usage: {
+        Args: { p_key_id: string; p_limit: number; p_window_start: string }
+        Returns: {
+          allowed: boolean
+          request_count: number
+        }[]
       }
       increment_collection_template_usage: {
         Args: { p_slug: string }
@@ -4419,11 +5001,61 @@ export type Database = {
         Args: { _user_id: string }
         Returns: string[]
       }
+      mcp_tool_bump_usage: {
+        Args: {
+          p_limit: number
+          p_tool_name: string
+          p_user_id: string
+          p_window_start: string
+        }
+        Returns: {
+          allowed: boolean
+          request_count: number
+        }[]
+      }
+      merge_contacts_atomic: {
+        Args: {
+          p_merge_into_self?: boolean
+          p_request_id: string
+          p_source_contact_id: string
+          p_target_contact_id?: string
+        }
+        Returns: Json
+      }
       move_note_folder: {
         Args: { p_source_path: string; p_target_parent_path: string }
         Returns: Json
       }
+      note_ai_fingerprint: { Args: { _input: Json }; Returns: string }
+      note_ai_input: {
+        Args: { _note_id: string; _pipeline: string; _user_id: string }
+        Returns: Json
+      }
+      note_ai_next_eligible: {
+        Args: {
+          _first: string
+          _job_id: string
+          _last: string
+          _last_auto: string
+          _pipeline: string
+        }
+        Returns: string
+      }
+      note_ai_normalize_text: { Args: { _text: string }; Returns: string }
+      note_ai_spacing: {
+        Args: { _job_id: string; _pipeline: string }
+        Returns: string
+      }
       note_folder_normalize_path: { Args: { p_path: string }; Returns: string }
+      notes_mentioning_people: {
+        Args: { p_limit?: number; p_names: string[] }
+        Returns: {
+          created_at: string
+          id: string
+          metadata: Json
+          title: string
+        }[]
+      }
       profile_audit_apply_merge: {
         Args: {
           _keep_id: string
@@ -4541,6 +5173,22 @@ export type Database = {
       }
       profile_value_is_identifier: { Args: { t: string }; Returns: boolean }
       profile_value_norm_key: { Args: { t: string }; Returns: string }
+      reanalyze_note_ai_job: {
+        Args: { _note_id: string; _pipeline: string; _user_id: string }
+        Returns: Json
+      }
+      reassign_contact_topics: {
+        Args: { p_source_contact_id: string; p_target_contact_id: string }
+        Returns: number
+      }
+      reassign_contact_topics_for_user: {
+        Args: {
+          p_source_contact_id: string
+          p_target_contact_id: string
+          p_user_id: string
+        }
+        Returns: number
+      }
       reconcile_note_folders: { Args: never; Returns: Json }
       relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
@@ -4579,11 +5227,40 @@ export type Database = {
         Args: { p_content: string; p_members_section: string }
         Returns: string
       }
+      replace_note_ai_chunks: {
+        Args: {
+          _chunks: Json
+          _job_id: string
+          _lease_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
       review_queue_relationship_block_reason: {
         Args: { p_payload: Json; p_user_id: string }
         Returns: string
       }
+      search_contacts_page: {
+        Args: {
+          after_id?: string
+          after_name?: string
+          exclude_contact_id?: string
+          page_size?: number
+          search_text?: string
+        }
+        Returns: Json
+      }
       slugify_collection_name: { Args: { p_name: string }; Returns: string }
+      stage_profile_normalization_input: {
+        Args: {
+          p_contact_id: string
+          p_fingerprint: string
+          p_lease_id: string
+          p_result: Json
+          p_user_id: string
+        }
+        Returns: boolean
+      }
       sync_group_wiki_members: {
         Args: { p_force?: boolean; p_group_id: string }
         Returns: Json
@@ -4592,6 +5269,10 @@ export type Database = {
       wiki_apply_ingest: {
         Args: { p_actions: Json; p_note_id: string; p_source_links: Json }
         Returns: Json
+      }
+      wiki_apply_note_ai_result: {
+        Args: { _job_id: string; _lease_id: string; _user_id: string }
+        Returns: boolean
       }
       wiki_resync_links: { Args: { p_page_id: string }; Returns: undefined }
       wiki_rollback_revision: { Args: { p_revision_id: string }; Returns: Json }
