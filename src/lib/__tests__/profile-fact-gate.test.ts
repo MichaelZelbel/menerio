@@ -4,6 +4,10 @@ import {
   routeFact,
   splitToFacts,
   typeOfValue,
+  containsPlaceholderPhrase,
+  closedVocabValueProblem,
+  isBareNumberWithoutShape,
+  valueAppearsInSource,
 } from "@/lib/profile-fact-gate";
 
 describe("typeOfValue", () => {
@@ -127,5 +131,41 @@ describe("gateStoredValue", () => {
       "Yumei",
       "Yasmin",
     ]);
+  });
+});
+
+describe("nonsense screens on extracted facts", () => {
+  it("rejects hedging values anywhere in the string", () => {
+    expect(containsPlaceholderPhrase("Not specified")).toBe(true);
+    expect(containsPlaceholderPhrase("unknown (has hair parts)")).toBe(true);
+    expect(containsPlaceholderPhrase("colorful hair, not specified eye color")).toBe(true);
+    expect(containsPlaceholderPhrase("N/A")).toBe(true);
+    expect(containsPlaceholderPhrase("Berlin")).toBe(false);
+    expect(containsPlaceholderPhrase("Unknown Pleasures")).toBe(true);
+  });
+
+  it("rejects bare numbers on fields with no numeric shape", () => {
+    expect(isBareNumberWithoutShape("Expense", "3")).toBe(true);
+    expect(isBareNumberWithoutShape("Goal", "000")).toBe(true);
+    expect(isBareNumberWithoutShape("Age", "55")).toBe(false);
+    expect(isBareNumberWithoutShape("Height", "162")).toBe(false);
+    expect(isBareNumberWithoutShape("Expense", "3 euros")).toBe(false);
+  });
+
+  it("requires a short, on-topic value for closed-vocabulary fields", () => {
+    expect(closedVocabValueProblem("Eye color", "colorful hair, not specified eye color")).toBe(
+      "closed_vocab_value_too_long",
+    );
+    expect(closedVocabValueProblem("Eye color", "the same as her hair color")).toBe(
+      "closed_vocab_value_names_other_field",
+    );
+    expect(closedVocabValueProblem("Eye color", "green")).toBeNull();
+    expect(closedVocabValueProblem("Hobbies", "a very long list of many different things indeed")).toBeNull();
+  });
+
+  it("requires the value to occur in the note text", () => {
+    const note = "Wir waren in Berlin, sie hat grüne Augen.";
+    expect(valueAppearsInSource("Berlin", note)).toBe(true);
+    expect(valueAppearsInSource("Publish my book", note)).toBe(false);
   });
 });
