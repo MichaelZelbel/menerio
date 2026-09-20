@@ -43,13 +43,14 @@ async function ilikeFallback(userId: string, query: string, limit: number, calle
   return (data || []).map((n: Record<string, unknown>) => ({
     ...n,
     id: String(n.id),
+    source_app: (n.source_app ?? null) as string | null,
     similarity: null,
     match_source: "note" as const,
   }))
     // Nothing here has a similarity to discount, so the hub policy is the
     // other half of it: a mirrored hub file sorts after the notes the user
     // wrote. Array.sort is stable, so recency still orders each group.
-    .sort((a, b) => compareNativeFirst(a.source_app as string | null, b.source_app as string | null));
+    .sort((a, b) => compareNativeFirst(a.source_app, b.source_app));
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
