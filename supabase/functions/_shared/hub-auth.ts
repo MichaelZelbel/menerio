@@ -4,17 +4,32 @@ export interface HubAuthResult {
   userId: string;
   scopes: string[];
   keyId: string;
+  /** The hub connection this key was made for, or null for a key made by hand. */
+  connectionId: string | null;
 }
+
+/** Why a key was refused, for a caller that has to act on it rather than show it. */
+export type HubKeyRefusal = "invalid" | "revoked" | "expired" | "connection_ended" | "unavailable";
 
 export interface HubKeyLookup {
   /** The key's owner and scopes, or null when the key was refused. */
   result: HubAuthResult | null;
   /** Why the key was refused, in words a caller can show. Null when accepted. */
   errorMessage: string | null;
+  /** The same reason as a fixed word. Null when accepted. */
+  errorCode: HubKeyRefusal | null;
 }
 
-// The admin client is only ever used for the two hub_api_keys statements below,
-// so callers may hand in one they already hold instead of us building a second.
+export const HUB_CONNECTION_ENDED_MESSAGE = "This hub's connection to Menerio was ended.";
+
+const refused = (errorCode: HubKeyRefusal, errorMessage: string): HubKeyLookup =>
+  ({ result: null, errorMessage, errorCode });
+
+const LEGACY_KEY_COLUMNS = "id, user_id, scopes, is_active, expires_at";
+
+// The admin client is only ever used for the hub_api_keys statements below (and
+// one read of hub_connections for a connected hub's key), so callers may hand in
+// one they already hold instead of us building a second.
 // deno-lint-ignore no-explicit-any
 type AdminClient = any;
 
@@ -39,10 +54,7 @@ export async function lookupHubKey(
   const key = (apiKey ?? "").trim();
 
   if (!key.startsWith("mnr_")) {
-    return {
-      result: null,
-      errorMessage: "Missing or invalid API key. Expected 'Bearer mnr_...' header.",
-    };
+    return refused("invalid", "Missing or invalid API key. Expected 'Bearer mnr_...' header.");
   }
 
   const keyHash = await sha256Hex(key);
@@ -53,22 +65,66 @@ export async function lookupHubKey(
   );
 
   // Look up the key
-  const { data: keyRow, error } = await supabaseAdmin
+  let { data: keyRow, error } = await supabaseAdmin
     .from("hub_api_keys")
-    .select("id, user_id, scopes, is_active, expires_at")
+    .select(`${LEGACY_KEY_COLUMNS}, hub_connection_id, generation`)
     .eq("key_hash", keyHash)
     .maybeSingle();
 
-  if (error || !keyRow) {
-    return { result: null, errorMessage: "Invalid API key." };
+  // 42703 is "no such column": this code reached a database that does not have
+  // the hub connection columns yet. Without them no key can belong to a
+  // connection, so every key is read the way it always was. Answering "Invalid
+  // API key." here instead would lock out every hub and every MCP client for as
+  // long as the function and the migration are out of step.
+  if (error?.code === "42703") {
+    ({ data: keyRow, error } = await supabaseAdmin
+      .from("hub_api_keys")
+      .select(LEGACY_KEY_COLUMNS)
+      .eq("key_hash", keyHash)
+      .maybeSingle());
   }
 
+  if (error || !keyRow) {
+    return refused("invalid", "Invalid API key.");
+  }
+
+  // A key made by connecting a hub lives and dies with that connection. Its
+  // owner sees one thing in Settings, the connected hub, so that is what every
+  // refusal names, whichever of the checks below caught it.
+  const connectionId: string | null = keyRow.hub_connection_id ?? null;
+
   if (!keyRow.is_active) {
-    return { result: null, errorMessage: "API key has been revoked." };
+    return connectionId
+      ? refused("connection_ended", HUB_CONNECTION_ENDED_MESSAGE)
+      : refused("revoked", "API key has been revoked.");
   }
 
   if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
-    return { result: null, errorMessage: "API key has expired." };
+    return refused("expired", "API key has expired.");
+  }
+
+  if (connectionId) {
+    // Accepted only while the connection is active AND this key is of its
+    // current generation. Disconnecting, or connecting the same hub again,
+    // also switches the older keys off; this check is what makes that hold
+    // for a device that still carries the old value, on its very next request,
+    // even if such a key were ever switched back on. The user_id filter means
+    // a key can never borrow another account's connection.
+    const { data: connection, error: connectionError } = await supabaseAdmin
+      .from("hub_connections")
+      .select("status, generation")
+      .eq("id", connectionId)
+      .eq("user_id", keyRow.user_id)
+      .maybeSingle();
+
+    if (connectionError) {
+      // Not "ended": a hub told its connection was ended takes its setup apart,
+      // and a database hiccup is no reason for that.
+      return refused("unavailable", "Could not check this hub's connection right now. Try again in a moment.");
+    }
+    if (!connection || connection.status !== "active" || connection.generation !== keyRow.generation) {
+      return refused("connection_ended", HUB_CONNECTION_ENDED_MESSAGE);
+    }
   }
 
   // Update last_used_at (fire-and-forget)
@@ -83,8 +139,10 @@ export async function lookupHubKey(
       userId: keyRow.user_id,
       scopes: keyRow.scopes || [],
       keyId: keyRow.id,
+      connectionId,
     },
     errorMessage: null,
+    errorCode: null,
   };
 }
 
@@ -106,14 +164,16 @@ export async function authenticateHubKey(
     };
   }
 
-  const { result, errorMessage } = await lookupHubKey(authHeader.replace("Bearer ", ""));
+  const { result, errorMessage, errorCode } = await lookupHubKey(authHeader.replace("Bearer ", ""));
 
   if (!result) {
     return {
       result: null,
       error: new Response(
         JSON.stringify({ error: errorMessage ?? "Invalid API key." }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
+        // 503 only for a connected hub's key whose connection could not be read;
+        // every refusal a key could get before connections existed is still 401.
+        { status: errorCode === "unavailable" ? 503 : 401, headers: { "Content-Type": "application/json" } }
       ),
     };
   }
