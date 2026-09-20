@@ -17,3 +17,13 @@ export const HUB_SOURCE_APP = "hub";
 export function shouldExtractFacts(sourceApp?: string | null): boolean {
   return (sourceApp ?? "").trim().toLowerCase() !== HUB_SOURCE_APP;
 }
+
+/**
+ * True for a note that is a mirrored hub file rather than something the user
+ * wrote. The same test as above, named for the callers that are not about
+ * extraction at all: search ranks a mirrored file lower, and the GitHub export
+ * leaves it out, because the hub's own git folder is already its Markdown home.
+ */
+export function isHubMirror(sourceApp?: string | null): boolean {
+  return !shouldExtractFacts(sourceApp);
+}
