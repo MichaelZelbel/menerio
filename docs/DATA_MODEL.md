@@ -114,6 +114,9 @@ API keys for programmatic access to Menerio. Keys are stored as hashes with a vi
 ### Hub API Usage (`hub_api_usage`)
 Rate-limiting counters per API key per time window.
 
+### Hub Connections (`hub_connections`, `hub_devices`, `hub_connect_requests`)
+A hub connected through the approval page instead of a pasted key. `hub_connections` holds one row per (account, hub) with a `generation` and a status (`active`, `revoked`); the owner may read it, only the `hub_connect_*` functions write it. `hub_devices` records the last contact of each computer of that hub and what each assistant on it reported; the owner may read it. `hub_connect_requests` holds the ten-minute requests of the flow and has no policy at all (service role only). `hub_api_keys.hub_connection_id` and `hub_api_keys.generation` tie a key to its connection; both are NULL for a key made by hand. The flow and the generation rule are described in ARCHITECTURE.md, "Connecting a hub".
+
 ### MCP API Tokens (`mcp_api_tokens`)
 Long-lived personal MCP tokens for external AI clients. Raw tokens are shown only once; the database stores token hashes, prefixes, expiration, revocation state, and last-used timestamps.
 

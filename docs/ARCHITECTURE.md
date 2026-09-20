@@ -69,7 +69,7 @@ Key authenticated routes:
 | **Connections / Graph** | `compute-connections`, `find-connections`, `suggest-connections`, `recompute-all-connections`, `get-graph-data` |
 | **Groups** | `suggest-group-members`, `generate-group-briefing`, `suggest-group-next-step` |
 | **Lexicon** | `wiki-ingest`, `wiki-lint` |
-| **Hub API** | `hub-api-keys`, `hub-api-notes`, `hub-api-contacts`, `hub-api-actions`, `hub-api-stats` |
+| **Hub API** | `hub-api-keys`, `hub-api-notes`, `hub-api-contacts`, `hub-api-actions`, `hub-api-stats`, `hub-api-world`, `hub-connect` |
 | **MCP Server** | `menerio-mcp` |
 | **Sync / Import** | `github-sync-export`, `github-sync-pull`, `github-import-vault`, `github-sync-scheduled` |
 | **Capture** | `quick-capture`, `ingest-thought`, `telegram-capture`, `discord-capture`, `slack-capture`, `receive-note` |
@@ -90,6 +90,24 @@ A user's hub (a git folder of Markdown files their AI assistants work from) can 
 | Labelled `[hub file: <source_id>]` in MCP results; `search_notes` takes `source: all \| native \| hub` | `menerio-mcp` |
 | Not exported to the GitHub vault (bulk and single note). Files an earlier export pushed under `hub/` are left in place, not deleted | `github-sync-export` |
 | Nothing else may be filed in or under the `hub` folder | MCP `capture_note`, `update_note` |
+
+### Connecting a hub
+
+A hub can get its key without anyone copying one. The hub asks (`hub-connect` `POST /start`), opens `/connect-hub?request=...&code=...` in the browser, the signed-in person compares the code and confirms, and the hub collects the key (`POST /token`). The key is minted the same way as one made under Settings, API Keys (`_shared/hub-key-mint.ts`), stored only as a hash, and returned exactly once.
+
+| Route | Who calls it | Proof |
+|-------|--------------|-------|
+| `POST /start` | the hub | none; ten an hour per caller address (stored as a keyed hash) |
+| `GET /request`, `POST /approve` | the approval page | the person's session. The first account to open a request owns it; any other account gets 404 |
+| `POST /token` | the hub, every 3 seconds | the PKCE verifier (S256) whose challenge `/start` was given |
+| `GET /status` | every device of the hub | `Bearer mnr_...`; records last contact and what each assistant reported |
+| `POST /disconnect` | the hub, or Settings | `Bearer mnr_...` of that connection, or the session plus `connection_id` |
+
+A request lasts ten minutes. Five wrong comparison codes deny it, five wrong verifiers end it, and a key can be collected once; afterwards `/token` answers `expired_token`. The numbers, the code alphabet, the status table and the error codes are in `_shared/hub-connect-protocol.ts` (pure, tested under vitest). Everything that changes more than one row is a `hub_connect_*` SQL function (migration `20260920120000_hub_connections.sql`): one transaction each, the request row locked while it is decided so the limits hold for parallel guesses, executable by the service role only, and each told who is acting rather than trusting an id.
+
+**The generation rule.** `hub_connections` has one row per (account, hub) with a `generation` that rises by one on every fresh approval. A key minted through this flow carries `hub_connection_id` and `generation`. `lookupHubKey` in `_shared/hub-auth.ts`, the one function in front of `menerio-mcp`, every `hub-api-*` function and `singlefile-capture`, accepts such a key only while its connection is `active` and the two generations are equal; otherwise the answer is 401 "This hub's connection to Menerio was ended." So connecting again, or disconnecting, cuts off every device that still carries the old key on its next request, whatever that device has on disk. Approving and disconnecting also set `is_active = false` on the affected keys, so Settings, API Keys tells the same story. A key with no `hub_connection_id` (every key made by hand) is read exactly as before and is never touched by any of this; `/status` answers `{ "connected": true, "legacy_key": true }` for it.
+
+`hub_devices` is status for the Connected hubs card in Settings, Integrations (`ConnectedHubsCard.tsx`), never a security boundary: revocation is per hub. `scripts/test-hub-connect.mjs` runs the whole flow, the limits under parallel bursts, the generation rule through the real `lookupHubKey`, and row-level security against a disposable local Postgres.
 
 ### MCP note filing
 
