@@ -5,6 +5,7 @@
 
 import { sha256Hex } from "./sha256.ts";
 import { providerFetch } from "./provider-fetch.ts";
+import { ensureAllowanceForUser } from "./ensure-allowance.ts";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
@@ -113,7 +114,25 @@ export async function checkBalance(
     };
   }
 
-  const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  let row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  if (!row) {
+    // Zero rows is "nobody has created this month's allowance yet", not "no credits".
+    // Only the web app used to create it, so an account whose owner lets an assistant
+    // keep the notebook lost meaning search at every month start. Create it here, once,
+    // and read again. If this client may not write the table, behave exactly as before.
+    try {
+      await ensureAllowanceForUser(db, userId);
+      const again = await db
+        .from("v_ai_allowance_current")
+        .select("remaining_tokens, remaining_credits, period_start")
+        .eq("user_id", userId)
+        .order("period_start", { ascending: false })
+        .limit(1);
+      row = Array.isArray(again.data) && again.data.length > 0 ? again.data[0] : null;
+    } catch (e) {
+      console.warn(`[llm-credits] could not create this month's allowance for user=${userId}: ${(e as Error).message}`);
+    }
+  }
   if (!row) {
     console.warn(
       `[llm-credits] no active allowance period for user=${userId} (view readable, zero rows)`

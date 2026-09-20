@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { ensureAllowanceForUser } from "../_shared/ensure-allowance.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,120 +76,9 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    // --- Period dates (1st of current month → 1st of next month, UTC) ---
-    function getPeriodDates() {
-      const now = new Date();
-      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-      const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-      return { period_start: start.toISOString(), period_end: end.toISOString() };
-    }
-
-    // --- Fetch settings ---
-    async function getSettings() {
-      const { data, error } = await db
-        .from("ai_credit_settings")
-        .select("key, value_int");
-      if (error) throw error;
-      const map: Record<string, number> = {};
-      for (const row of data!) map[row.key] = row.value_int;
-      return map;
-    }
-
-    // --- Ensure allowance for a single user ---
-    async function ensureForUser(userId: string) {
-      const { period_start, period_end } = getPeriodDates();
-
-      // Check existing period
-      const { data: existing } = await db
-        .from("ai_allowance_periods")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("period_end", new Date().toISOString())
-        .lte("period_start", new Date().toISOString())
-        .maybeSingle();
-
-      if (existing) return existing;
-
-      // Get user role
-      const { data: roleData } = await db.rpc("get_user_role", { _user_id: userId });
-      const role = roleData || "free";
-
-      // Get settings
-      const settings = await getSettings();
-      const tokensPerCredit = settings["tokens_per_credit"] || 200;
-
-      let creditsPerMonth = 0;
-      if (role === "premium" || role === "premium_gift" || role === "admin") {
-        creditsPerMonth = settings["credits_premium_per_month"] || 1500;
-      } else {
-        creditsPerMonth = settings["credits_free_per_month"] || 0;
-      }
-
-      const baseTokens = creditsPerMonth * tokensPerCredit;
-
-      // Previous period rollover (unused tokens, capped at baseTokens)
-      let rolloverTokens = 0;
-      const prevEnd = period_start; // previous period ended when current starts
-      const { data: prevPeriod } = await db
-        .from("ai_allowance_periods")
-        .select("tokens_granted, tokens_used")
-        .eq("user_id", userId)
-        .lt("period_end", prevEnd)
-        .order("period_end", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (prevPeriod) {
-        const unused = Math.max(0, prevPeriod.tokens_granted - prevPeriod.tokens_used);
-        rolloverTokens = Math.min(unused, baseTokens);
-      }
-
-      const tokensGranted = baseTokens + rolloverTokens;
-
-      const source = role === "free" ? "free_tier" : "role_based";
-
-      // Race-safe insert: relies on the unique index (user_id, period_start, period_end).
-      // If a concurrent caller just inserted a row, ignoreDuplicates returns no rows
-      // and we re-select the existing one.
-      const { data: inserted, error: insertErr } = await db
-        .from("ai_allowance_periods")
-        .upsert(
-          {
-            user_id: userId,
-            tokens_granted: tokensGranted,
-            tokens_used: 0,
-            period_start,
-            period_end,
-            source,
-            metadata: {
-              base_tokens: baseTokens,
-              rollover_tokens: rolloverTokens,
-              credits_per_month: creditsPerMonth,
-              tokens_per_credit: tokensPerCredit,
-              role,
-            },
-          },
-          { onConflict: "user_id,period_start,period_end", ignoreDuplicates: true }
-        )
-        .select()
-        .maybeSingle();
-
-      if (insertErr) throw insertErr;
-
-      if (inserted) return inserted;
-
-      // Conflict path: another request inserted concurrently. Re-select the winning row.
-      const { data: winner, error: reselectErr } = await db
-        .from("ai_allowance_periods")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("period_start", period_start)
-        .eq("period_end", period_end)
-        .maybeSingle();
-
-      if (reselectErr) throw reselectErr;
-      return winner;
-    }
+    // The allowance itself is created by the shared helper, which the credit check
+    // also calls, so an account nobody opened this month still gets its row.
+    const ensureForUser = (userId: string) => ensureAllowanceForUser(db, userId);
 
     // --- Batch init ---
     if (batchInit) {
