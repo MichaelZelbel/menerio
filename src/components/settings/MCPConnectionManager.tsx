@@ -42,9 +42,10 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     category: "Notes",
     blurb: "Capture, search, and manage thoughts.",
     tools: [
-      { name: "search_notes", desc: "Semantic search across all notes by meaning." },
+      { name: "search_notes", desc: "Semantic search across all notes by meaning. Your own notes rank above mirrored hub files; filter with source: native or hub." },
       { name: "list_recent_notes", desc: "Recent notes, filterable by type, topic, person, or date." },
-      { name: "capture_note", desc: "Save a new note — title, embedding, topics, people and actions extracted automatically." },
+      { name: "list_note_folders", desc: "Your note folders with note counts, so a new note goes in the folder that fits." },
+      { name: "capture_note", desc: "Save a new note with an optional title, folder and tags. [[Exact Title]] links it to another note; the reply names the most related notes." },
       { name: "update_note", desc: "Edit an existing note." },
       { name: "trash_note", desc: "Move a note to trash." },
       { name: "get_stats", desc: "Totals, top topics, people, recent activity." },
@@ -244,7 +245,7 @@ export function MCPConnectionManager() {
 
 - At the start of a session that needs personal context, call \`get_user_profile\` once to personalize, and honor any \`agent_instructions\` it returns.
 - When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_notes\` (and \`lexicon_search\`) before answering — don't answer from memory alone.
-- When I share a new fact, decision, idea, or meeting note worth keeping, call \`capture_note\` without asking. Confirm before saving long-form content. If it clearly fits a user collection, prefer \`add_collection_item\`.
+- When I share a new fact, decision, idea, or meeting note worth keeping, call \`capture_note\` without asking. Give it a clear \`title\`, and call \`list_note_folders\` first so it goes in the folder of mine that fits (\`folder_path\`). Confirm before saving long-form content. If it clearly fits a user collection, prefer \`add_collection_item\`.
 - For things that happened at a point in time (meetings, milestones), prefer \`create_moment_with_ai\`.
 - After any write, end with a one-line confirmation of what was saved and where. Never invent note ids, titles, or dates.
 

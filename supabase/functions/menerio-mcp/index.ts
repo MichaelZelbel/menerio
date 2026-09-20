@@ -14,7 +14,9 @@ import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribut
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
-import { hubFileLabel, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/hub-ranking.ts";
+import { hubFileLabel, isHubFolderPath, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/hub-ranking.ts";
+import { syncWikilinkConnections } from "../_shared/wikilinks.ts";
+import { HUB_FOLDER_REFUSAL, registerNoteFilingTools } from "./note-filing-tools.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
   applyVisibility,
@@ -562,6 +564,7 @@ const TOOL_SCOPES: Record<string, string> = {
   get_note: "notes",
   list_recent_notes: "notes",
   capture_note: "notes",
+  list_note_folders: "notes",
   update_note: "notes",
   trash_note: "notes",
   get_person_notes: "notes",
@@ -1132,97 +1135,26 @@ server.registerTool(
 );
 
 
-// Tool 3: Capture Note
-const captureNoteHandler = async ({ content }: { content: string }) => {
-  try {
-    const metadata = await extractMetadata(content);
-
-    const firstLine = content.split("\n")[0];
-    const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-
-    const { data: inserted, error } = await supabase.from("notes").insert({
-      user_id: getCurrentUserId(),
-      content,
-      title,
-      metadata: { ...metadata, source: "mcp" },
-      tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
-    }).select("id").single();
-
-    if (error || !inserted) {
-      return { content: [{ type: "text" as const, text: `Failed to capture: ${error?.message || "insert failed"}` }], isError: true };
-    }
-
-    // Build chunks + embeddings synchronously so the note is searchable immediately.
-    let indexingNote = "";
-    try {
-      const res = await embedAndStoreNoteChunks(
-        supabase,
-        OPENROUTER_API_KEY,
-        getCurrentUserId(),
-        inserted.id,
-        title,
-        content,
-        "mcp-capture",
-      );
-      if (res.firstChunkEmbedding) {
-        await supabase.from("notes").update({ embedding: res.firstChunkEmbedding }).eq("id", inserted.id);
-      }
-      if (res.insufficientCredits) {
-        indexingNote = " (indexing deferred — insufficient credits, will catch up later)";
-      } else if (res.failures > 0 && res.chunkCount === 0) {
-        indexingNote = " (indexing failed — background job will retry)";
-      }
-    } catch (idxErr) {
-      console.warn("chunk indexing failed on capture", (idxErr as Error).message);
-      indexingNote = " (indexing will catch up in the background)";
-    }
-
-    // Fire-and-forget: trigger full process-note pipeline (metadata, profile facts,
-    // moments, relationships, connections). Mirrors receive-note / hub-api-notes.
-    try {
-      fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ note_id: inserted.id }),
-      }).catch((e) => console.warn("process-note trigger failed (capture):", (e as Error).message));
-    } catch (e) {
-      console.warn("process-note trigger failed (capture):", (e as Error).message);
-    }
-
-
-
-    const meta = metadata as Record<string, unknown>;
-    let confirmation = `Captured as ${meta.type || "note"}`;
-    if (Array.isArray(meta.topics) && meta.topics.length)
-      confirmation += ` — ${(meta.topics as string[]).join(", ")}`;
-    if (Array.isArray(meta.people) && meta.people.length)
-      confirmation += ` | People: ${(meta.people as string[]).join(", ")}`;
-    if (Array.isArray(meta.action_items) && meta.action_items.length)
-      confirmation += ` | Actions: ${(meta.action_items as string[]).join("; ")}`;
-    confirmation += indexingNote;
-
-    return { content: [{ type: "text" as const, text: confirmation }] };
-  } catch (err: unknown) {
-    return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
-  }
-};
-
-
-server.registerTool(
-  "capture_note",
-  {
-    title: "Capture Note",
-    description:
-      "Save a new note to the user's brain. Generates an embedding and extracts metadata automatically. Use this when the user wants to save something directly from any AI client.",
-    inputSchema: {
-      content: z.string().describe("The note content to capture (Markdown)"),
-    },
+// Tool 3: Capture Note, plus list_note_folders and the capture_thought alias.
+// They live in note-filing-tools.ts so they can be run through the SDK's own
+// transport in a Node test; the three things that need this runtime are handed in.
+registerNoteFilingTools(server, supabase, getCurrentUserId, {
+  extractMetadata,
+  embedChunks: (noteId, title, content) =>
+    embedAndStoreNoteChunks(supabase, OPENROUTER_API_KEY, getCurrentUserId(), noteId, title, content, "mcp-capture"),
+  // Fire-and-forget: trigger full process-note pipeline (metadata, profile facts,
+  // moments, relationships, connections). Mirrors receive-note / hub-api-notes.
+  triggerProcessNote: (noteId) => {
+    fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ note_id: noteId }),
+    }).catch((e) => console.warn("process-note trigger failed (capture):", (e as Error).message));
   },
-  captureNoteHandler
-);
+});
 
 // Tool: Update Note
 server.registerTool(
@@ -1230,7 +1162,7 @@ server.registerTool(
   {
     title: "Update Note",
     description:
-      "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
+      "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. To move a note, pass `folder_path` (see `list_note_folders`; anything under `hub` is refused, that tree is a read-only mirror). `[[Exact Title]]` of an existing note in `content` becomes a real link in the graph and backlinks; the response lists which wikilinks resolved. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
     inputSchema: {
       note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       title: z.string().optional(),
@@ -1266,7 +1198,13 @@ server.registerTool(
       if (tags !== undefined) updates.tags = tags;
       // Same normalisation as note creation and the Hub API: a leading slash
       // stored verbatim puts the note in a nameless folder above the real one.
-      if (folder_path !== undefined) updates.folder_path = normalizeFolderPath(folder_path);
+      if (folder_path !== undefined) {
+        const normalized = normalizeFolderPath(folder_path);
+        // The mirror's tree is rewritten by the sync; a note moved into it
+        // would sit among files it does not belong to. Same refusal as capture.
+        if (isHubFolderPath(normalized)) return jsonTool({ error: HUB_FOLDER_REFUSAL.replace("Nothing was saved.", "Nothing was changed.") });
+        updates.folder_path = normalized;
+      }
       if (is_favorite !== undefined) updates.is_favorite = is_favorite;
       if (is_pinned !== undefined) updates.is_pinned = is_pinned;
 
@@ -1300,7 +1238,21 @@ server.registerTool(
         }
       }
 
-      return jsonTool({ ok: true, note: data });
+      // A new body may name other notes as [[Exact Title]]. The editor turns
+      // those into manual_link rows when it saves and process-note does not,
+      // so this path does it itself (see _shared/wikilinks.ts). Only when the
+      // body was part of this edit: a rename must not rewrite links.
+      let wikilinks: { linked: { title: string; note_id: string }[]; unresolved: string[] } | undefined;
+      if (content !== undefined) {
+        try {
+          const res = await syncWikilinkConnections(supabase, getCurrentUserId(), note_id, content);
+          if (res.linked.length || res.unresolved.length) wikilinks = { linked: res.linked, unresolved: res.unresolved };
+        } catch (e) {
+          console.warn("wikilink sync failed (update):", (e as Error).message);
+        }
+      }
+
+      return jsonTool({ ok: true, note: data, ...(wikilinks ? { wikilinks } : {}) });
     } catch (err: unknown) {
       return jsonTool({ error: (err as Error).message });
     }
@@ -3616,15 +3568,8 @@ server.registerTool(
   listRecentNotesHandler
 );
 
-server.registerTool(
-  "capture_thought",
-  {
-    title: "Capture Thought (deprecated alias)",
-    description: "Deprecated alias for `capture_note`. Use `capture_note` instead.",
-    inputSchema: { content: z.string() },
-  },
-  captureNoteHandler
-);
+// capture_thought (deprecated alias for capture_note) is registered with
+// capture_note itself, in note-filing-tools.ts.
 
 
 // ============================================================
