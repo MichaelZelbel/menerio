@@ -118,6 +118,9 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const res = await supabase.functions.invoke("hub-api-keys", {
+          // Without a method, invoke sends POST, and the function answers a bare POST with
+          // 404: the overview then counted zero keys for everybody. Seen in the console 2026-09-21.
+          method: "GET",
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
         const list = (res.data?.keys || res.data || []) as Array<{ is_active?: boolean; scopes?: string[]; name?: string }>;
