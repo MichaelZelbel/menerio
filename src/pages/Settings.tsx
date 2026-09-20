@@ -42,6 +42,7 @@ import { GoogleDriveScans } from "@/components/settings/GoogleDriveScans";
 import { LocalReplicaPanel } from "@/components/settings/LocalReplicaPanel";
 
 import { ApiKeysManager } from "@/components/settings/ApiKeysManager";
+import { ConnectedHubsCard } from "@/components/settings/ConnectedHubsCard";
 import { AISuggestionPreferences } from "@/components/settings/AISuggestionPreferences";
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
@@ -374,8 +375,9 @@ export default function Settings() {
         </TabsContent>
 
         {/* ── Integrations Hub ── */}
-        <TabsContent value="hub">
+        <TabsContent value="hub" className="space-y-6">
           <IntegrationsOverview onOpenTab={handleTabChange} />
+          <ConnectedHubsCard />
         </TabsContent>
 
         {/* ── Import Tab ── */}
