@@ -3,6 +3,8 @@ import { checkedDatabase } from "./sync-database.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildBlobLookup, importNoteAttachments } from "./obsidian-attachments.ts";
 import { parseFrontmatter } from "./frontmatter.ts";
+import { isHubMirror } from "./hub-source.ts";
+import { isHubFolderPath } from "./hub-ranking.ts";
 import {
   ensureGithubRepository,
   githubFetch,
@@ -360,6 +362,10 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
     for (const [path, remoteFile] of (ghConn.sync_direction === "export" ? new Map() : remoteByPath)) {
       if (trackedPaths.has(path)) continue;
       if (isPeopleSpacePath(path)) continue; // handled by pullPeopleAndGroups
+      // The hub mirror is not a vault. Before 2026-09-20 the export pushed mirrored hub
+      // files to `hub/...`; importing one back would create a second note with
+      // source_app "obsidian", which IS mined for facts, out of text a machine wrote.
+      if (isHubFolderPath(filePathToFolderPath(path, basePath))) continue;
 
       try {
         const content = await githubGetFileContent(ghToken, owner, repo, path, branch);
@@ -468,10 +474,13 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
     }
 
     // 5. Push pending local changes (notes updated since last sync)
-    const allNotes = await selectAllRows<any>((from, to) => serviceClient.from("notes").select("id, title, content, metadata, tags, folder_path, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed").eq("user_id", userId).eq("is_trashed", false).order("id").range(from, to));
+    const allNotes = await selectAllRows<any>((from, to) => serviceClient.from("notes").select("id, title, content, metadata, tags, folder_path, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed, source_app").eq("user_id", userId).eq("is_trashed", false).order("id").range(from, to));
 
     let pushed = 0;
     for (const note of (["export", "bidirectional"].includes(ghConn.sync_direction) ? allNotes : []) || []) {
+      // Menerio does not keep hub mirror notes as Markdown files: the hub's own git
+      // repository is where those files live. Same rule as github-sync-export.
+      if (isHubMirror(note.source_app)) continue;
       const syncEntry = syncByNoteId.get(note.id);
       if (syncEntry?.sync_status === "conflict") continue; // Don't push conflicted notes
 

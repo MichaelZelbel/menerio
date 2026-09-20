@@ -86,7 +86,7 @@ A user's hub (a git folder of Markdown files their AI assistants work from) can 
 | Rule | Where |
 |------|-------|
 | Indexed for search, never mined for facts | `process-note` index-only path (`shouldExtractFacts`) |
-| Ranked below native notes: similarity × 0.85 for ordering, one tier lower where ranking is tiered, native first inside a tier | MCP `search_notes` / `search_brain`, `search-notes-semantic`, `hub-api-notes` `GET /search`, the app's keyword scorer (`src/lib/search-terms.ts`) |
+| Ranked below native notes: similarity × 0.85 for ordering, one tier lower where ranking is tiered, native first only on a tie | MCP `search_notes` / `search_brain`, `search-notes-semantic`, `hub-api-notes` `GET /search`, the app's keyword scorer (`src/lib/search-terms.ts`) |
 | Labelled `[hub file: <source_id>]` in MCP results; `search_notes` takes `source: all \| native \| hub` | `menerio-mcp` |
 | Not exported to the GitHub vault (bulk and single note). Files an earlier export pushed under `hub/` are left in place, not deleted | `github-sync-export` |
 | Nothing else may be filed in or under the `hub` folder | MCP `capture_note`, `update_note` |

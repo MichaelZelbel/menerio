@@ -107,16 +107,24 @@ describe("rankHybridRows", () => {
       { id: "native-contains", title: "My Berlin trip", source_app: "web", similarity: 0.5 },
       { id: "native-prefix", title: "Berlin trip", source_app: "web", similarity: 0.3 },
     ];
-    // hub-exact earned tier 0, sorts in tier 1, and inside tier 1 native is first.
-    expect(ids(rankHybridRows(rows, "berlin"))).toEqual(["native-prefix", "hub-exact", "native-contains"]);
+    // hub-exact earned tier 0 and sorts in tier 1. Inside tier 1 its discounted
+    // similarity (0.9 * 0.85) still beats the native prefix title's 0.3.
+    expect(ids(rankHybridRows(rows, "berlin"))).toEqual(["hub-exact", "native-prefix", "native-contains"]);
   });
 
-  it("puts native first inside a tier even when the hub file is more similar", () => {
+  it("inside a tier the discounted similarity decides, and native wins only a tie", () => {
     const rows = [
       { id: "hub", title: "a", source_app: "hub", similarity: 0.95 },          // tier 4 -> 5
       { id: "native-text", title: "b", source_app: "web", similarity: null },  // tier 5
     ];
-    expect(ids(rankHybridRows(rows, "zzz"))).toEqual(["native-text", "hub"]);
+    // A hub file that matches by meaning is not hidden behind a bare text hit.
+    expect(ids(rankHybridRows(rows, "zzz"))).toEqual(["hub", "native-text"]);
+
+    const tie = [
+      { id: "hub", title: "a", source_app: "hub", similarity: 0.8 },            // 0.8 * 0.85 = 0.68, tier 5
+      { id: "native", title: "b", source_app: "web", similarity: 0.68 },       // tier 4
+    ];
+    expect(ids(rankHybridRows(tie, "zzz"))).toEqual(["native", "hub"]);
   });
 
   it("orders natives by similarity and hub files by similarity, separately", () => {

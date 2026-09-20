@@ -118,8 +118,14 @@ export function hybridMatchTier(row: HybridRankable, query: string): number {
 
 /**
  * Deterministic order for merged semantic + text rows: tier (hub demoted),
- * native before hub inside a tier, discounted similarity, recency, then the
- * order the rows arrived in so equal rows never swap between calls.
+ * discounted similarity, native before hub on a tie, recency, then the order
+ * the rows arrived in so equal rows never swap between calls.
+ *
+ * Native-first is the TIE-break, not the second key. Almost every question an
+ * assistant asks is a sentence, so almost every row lands in the similarity
+ * tier; with native-first ahead of similarity a hub file could only ever show
+ * after every native hit of that tier, which is hidden, not "less relevant".
+ * The demotion and the 0.85 factor are the whole penalty.
  */
 export function rankHybridRows<T extends HybridRankable>(rows: T[], query: string): T[] {
   const time = (r: HybridRankable) => new Date(r.updated_at || r.created_at || 0).getTime() || 0;
@@ -127,9 +133,9 @@ export function rankHybridRows<T extends HybridRankable>(rows: T[], query: strin
     .map((r, idx) => ({ r, idx, tier: demoteTier(hybridMatchTier(r, query), r.source_app) }))
     .sort((a, b) =>
       a.tier - b.tier ||
-      compareNativeFirst(a.r.source_app, b.r.source_app) ||
       ((rankingSimilarity(b.r.similarity, b.r.source_app) ?? -1) -
         (rankingSimilarity(a.r.similarity, a.r.source_app) ?? -1)) ||
+      compareNativeFirst(a.r.source_app, b.r.source_app) ||
       (time(b.r) - time(a.r)) ||
       (a.idx - b.idx)
     )
