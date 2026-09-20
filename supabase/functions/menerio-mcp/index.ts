@@ -14,6 +14,7 @@ import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribut
 import { lookupHubKey } from "../_shared/hub-auth.ts";
 import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
+import { hubFileLabel, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/hub-ranking.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
   applyVisibility,
@@ -251,6 +252,8 @@ function formatNoteResult(
     updated_at?: string;
     tags?: string[];
     chunk_snippet?: string;
+    source_app?: string | null;
+    source_id?: string | null;
   },
   i: number,
   score?: number,
@@ -263,6 +266,12 @@ function formatNoteResult(
   parts.push(`--- Result ${i + 1}${scoreStr} ---`);
   parts.push(`Title: ${t.title || "Untitled"}`);
   parts.push(`ID: ${t.id || ""}`);
+  // A mirrored hub file says so, in both views. The search descriptions tell a
+  // model to treat a note as the user's own first-person statement; a file an
+  // assistant generated about the user is not that, and only this line lets
+  // the reader tell the two apart.
+  const hubLabel = hubFileLabel(t.source_app, t.source_id);
+  if (hubLabel) parts.push(`Source: ${hubLabel} (mirrored from the user's hub, machine-maintained, not a note the user wrote)`);
   const dateStr = t.updated_at || t.created_at;
   parts.push(`Updated: ${dateStr ? new Date(dateStr).toISOString().slice(0, 10) : "unknown"}`);
   parts.push(`Type: ${(m.type as string) || "unknown"}`);
@@ -718,8 +727,10 @@ function buildBoostPhrases(query: string): string[] {
   return Array.from(phrases);
 }
 
-// Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain
-async function hybridSearchNotes(query: string, limit: number, threshold: number): Promise<{ rows: any[]; total: number; mode: string }> {
+// Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain.
+// `source` narrows to the notes the user wrote ("native") or to the mirrored hub
+// files ("hub"). Whatever it is, ordering follows _shared/hub-ranking.ts.
+async function hybridSearchNotes(query: string, limit: number, threshold: number, source: NoteSourceFilter = "all"): Promise<{ rows: any[]; total: number; mode: string }> {
   let semanticResults: any[] = [];
   let semanticOk = false;
   try {
@@ -728,7 +739,10 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     const { data, error } = await supabase.rpc("match_note_chunks", {
       query_embedding: qEmb,
       match_threshold: threshold,
-      match_count: Math.max(CANDIDATE_CAP, 30),
+      // The RPC cannot filter by source, so a source filter throws candidates
+      // away after the fact. Ask for more when one is set, or a large mirror
+      // leaves "native" with almost nothing to rank.
+      match_count: source === "all" ? Math.max(CANDIDATE_CAP, 30) : CANDIDATE_CAP * 4,
       p_user_id: getCurrentUserId(),
     });
     if (!error && data) {
@@ -751,14 +765,16 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("notes")
-          .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
+          .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility, source_app, source_id")
           .in("id", ids);
         for (const r of (rows || []) as any[]) {
           const ex = byNote.get(r.id);
           if (ex) byNote.set(r.id, { ...r, ...ex, content: r.content });
         }
       }
-      semanticResults = Array.from(byNote.values()).sort((a, b) => b.similarity - a.similarity);
+      semanticResults = Array.from(byNote.values())
+        .filter((r) => matchesSourceFilter(r.source_app, source))
+        .sort((a, b) => b.similarity - a.similarity);
       semanticOk = true;
     }
   } catch (_embErr) {
@@ -771,14 +787,19 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   const q = query.replace(/[,()'"\\*]/g, " ").replace(/\s+/g, " ").trim();
   let textQuery = supabase
     .from("notes")
-    .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility")
+    .select("id, title, content, metadata, tags, created_at, updated_at, ai_visibility, source_app, source_id")
     .eq("user_id", getCurrentUserId())
     .eq("is_trashed", false)
     .or(ilikeAnyColumn(["title", "content"], q))
     .order("updated_at", { ascending: false })
     .limit(CANDIDATE_CAP);
+  // Narrow in the query so the row cap is spent on rows that can qualify;
+  // matchesSourceFilter below stays the authority (it also ignores stray space).
+  if (source === "hub") textQuery = textQuery.ilike("source_app", "hub");
+  if (source === "native") textQuery = textQuery.or("source_app.is.null,source_app.not.ilike.hub");
   textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
-  const { data: textResults } = await textQuery;
+  const { data: textRowsRaw } = await textQuery;
+  const textResults = (textRowsRaw || []).filter((r: { source_app?: string | null }) => matchesSourceFilter(r.source_app, source));
 
   const seenIds = new Set<string>();
   const merged: any[] = [];
@@ -807,25 +828,11 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
 
   // Tiered deterministic ranking — exact/prefix title matches always win.
+  // The tiers and the sort live in _shared/hub-ranking.ts so the Hub API search
+  // ranks identically: a mirrored hub file sorts one tier below its match, and
+  // inside a tier the notes the user wrote come first.
   const qn = (query || "").trim().toLowerCase();
-  const tierOf = (r: any) => {
-    const title = (r.title || "").trim().toLowerCase();
-    if (qn && title === qn) return 0;
-    if (qn && title.startsWith(qn)) return 1;
-    if (qn && title.includes(qn)) return 2;
-    if (r.exact_phrase_match) return 3;
-    if (r.similarity != null) return 4;
-    return 5;
-  };
-  const ranked = merged
-    .map((r, idx) => ({ r, idx, tier: tierOf(r) }))
-    .sort((a, b) =>
-      a.tier - b.tier ||
-      ((b.r.similarity ?? -1) - (a.r.similarity ?? -1)) ||
-      (new Date(b.r.updated_at || b.r.created_at || 0).getTime() - new Date(a.r.updated_at || a.r.created_at || 0).getTime()) ||
-      (a.idx - b.idx)
-    )
-    .map((x) => x.r);
+  const ranked = rankHybridRows(merged, query);
 
   // For title-tier rows without a snippet, synthesize one from title+body.
   for (const r of ranked) {
@@ -930,12 +937,14 @@ type SearchNotesArgs = {
   threshold: number;
   offset?: number;
   view?: "snippet" | "metadata";
+  source?: NoteSourceFilter;
 };
-const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = "snippet" }: SearchNotesArgs) => {
+const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = "snippet", source = "all" }: SearchNotesArgs) => {
   try {
-    const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold);
+    const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold, source);
     if (total === 0) {
-      return { content: [{ type: "text" as const, text: `No notes found matching "${query}". If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
+      const scope = source === "native" ? " among the notes the user wrote (source: native)" : source === "hub" ? " among the mirrored hub files (source: hub)" : "";
+      return { content: [{ type: "text" as const, text: `No notes found matching "${query}"${scope}. If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
     }
     const page = rows.slice(offset, offset + limit);
     const header = `Found ~${total} note(s) [${mode}]. Showing ${total ? offset + 1 : 0}-${offset + page.length} (has_more: ${offset + page.length < total}):`;
@@ -971,13 +980,15 @@ server.registerTool(
   {
     title: "Search Notes",
     description:
-      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. The exception is a result carrying `Source: [hub file: <path>]`: that is a mirrored file from the user's hub (the folder their AI assistants work from), machine-maintained and possibly an assistant's inference, so it ranks below the user's own notes and is NOT a first-person statement; say it came from the hub file. Use `source` to search only the user's own notes (`native`) or only the hub files (`hub`). Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.coerce.number().optional().default(10),
       threshold: z.coerce.number().optional().default(0.2),
       offset: z.coerce.number().optional().default(0),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
+      source: z.enum(["all", "native", "hub"]).optional().default("all")
+        .describe("`all` (default): everything, the user's own notes ranked above mirrored hub files. `native`: only notes that are not hub files. `hub`: only the mirrored hub files."),
     },
   },
   searchNotesHandler
@@ -1048,7 +1059,8 @@ const listRecentNotesHandler = async ({ limit: rawLimit, type, topic, person, da
     const days = rawDays ? clampNumber(rawDays, 1, 36500, 30) : undefined;
     let q = supabase
       .from("notes")
-      .select("id, title, content, metadata, tags, created_at, updated_at", { count: "exact" })
+      // source_app/source_id only so formatNoteResult can label a mirrored hub file.
+      .select("id, title, content, metadata, tags, created_at, updated_at, source_app, source_id", { count: "exact" })
       .eq("is_trashed", false)
       .eq("user_id", getCurrentUserId())
       .order("created_at", { ascending: false })

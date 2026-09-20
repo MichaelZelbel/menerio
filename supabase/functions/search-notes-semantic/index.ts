@@ -3,6 +3,7 @@ import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import {
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
+import { compareNativeFirst, rankingSimilarity } from "../_shared/hub-ranking.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -44,7 +45,11 @@ async function ilikeFallback(userId: string, query: string, limit: number, calle
     id: String(n.id),
     similarity: null,
     match_source: "note" as const,
-  }));
+  }))
+    // Nothing here has a similarity to discount, so the hub policy is the
+    // other half of it: a mirrored hub file sorts after the notes the user
+    // wrote. Array.sort is stable, so recency still orders each group.
+    .sort((a, b) => compareNativeFirst(a.source_app as string | null, b.source_app as string | null));
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -215,8 +220,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
           if (!noteMap.has(t.id)) noteMap.set(t.id, t);
         }
 
+        // Ordered by the shared hub policy (_shared/hub-ranking.ts): a mirrored
+        // hub file competes on a discounted similarity and loses a tie to a
+        // native note. `similarity` itself is returned as measured, because the
+        // app prints it.
         results = Array.from(noteMap.values())
-          .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+          .sort((a, b) =>
+            ((rankingSimilarity(b.similarity, b.source_app) || 0) - (rankingSimilarity(a.similarity, a.source_app) || 0)) ||
+            compareNativeFirst(a.source_app, b.source_app))
           .slice(0, limit);
       }
     } catch (embErr: any) {
