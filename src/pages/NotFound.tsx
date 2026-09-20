@@ -1,13 +1,52 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Home, LayoutDashboard, Search, FileQuestion } from "lucide-react";
+import { Home, LayoutDashboard, Search, FileQuestion, Loader2 } from "lucide-react";
+
+// How long "this page does not exist" is held back while the browser looks for a newer
+// build. Long enough for a service worker update check on a slow phone, short enough that a
+// real wrong address still gets its answer quickly.
+const NEWER_BUILD_WAIT_MS = 4000;
 
 const NotFound = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  // A browser that has been here before runs the app shell its service worker kept, and that
+  // shell does not know a page added since. Seen live on 2026-09-21: the first visit to the
+  // new /connect-hub answered "doesn't exist" until the worker had updated. So before saying
+  // so, ask for the newest build; when one takes over, registerType "autoUpdate" reloads the
+  // tab and the page is there.
+  const [lookingForNewerBuild, setLookingForNewerBuild] = useState(
+    typeof navigator !== "undefined" && "serviceWorker" in navigator && !!navigator.serviceWorker.controller,
+  );
+
+  useEffect(() => {
+    if (!lookingForNewerBuild) return;
+    let done = false;
+    const giveUp = window.setTimeout(() => { if (!done) setLookingForNewerBuild(false); }, NEWER_BUILD_WAIT_MS);
+    navigator.serviceWorker.getRegistration()
+      .then((registration) => registration?.update())
+      .then((registration) => {
+        // Nothing newer is installing or waiting: this address really does not exist.
+        if (!registration?.installing && !registration?.waiting) {
+          done = true;
+          setLookingForNewerBuild(false);
+        }
+      })
+      .catch(() => { done = true; setLookingForNewerBuild(false); });
+    return () => window.clearTimeout(giveUp);
+  }, [lookingForNewerBuild]);
+
+  if (lookingForNewerBuild) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4" role="status">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="mt-4 text-sm text-muted-foreground">Loading the newest version of this page…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
