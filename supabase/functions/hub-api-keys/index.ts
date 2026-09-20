@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mintHubKey } from "../_shared/hub-key-mint.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,18 +78,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Generate random key: mnr_ + 48 hex chars
-      const randomBytes = new Uint8Array(24);
-      crypto.getRandomValues(randomBytes);
-      const hexKey = Array.from(randomBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-      const fullKey = `mnr_${hexKey}`;
-      const keyPrefix = fullKey.slice(0, 12);
-
-      // Hash the key
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(fullKey));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+      // mnr_ + 48 hex chars, stored only as a hash. Shared with hub-connect so
+      // there is one way to make a key.
+      const { fullKey, keyPrefix, keyHash } = await mintHubKey();
 
       const { data: inserted, error: insertError } = await supabaseAdmin
         .from("hub_api_keys")
