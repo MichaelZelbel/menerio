@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { selectAllRows } from "../_shared/paged-select.ts";
+import { isHubMirror } from "../_shared/hub-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -367,6 +368,42 @@ Deno.serve(async (req) => {
     const branch = ghConn.branch || "main";
     const vaultPath = ghConn.vault_path || "/";
 
+    if (!bulk && (!note_id || !action)) {
+      return new Response(JSON.stringify({ error: "note_id and action required" }), { status: 400, headers: corsHeaders });
+    }
+
+    // Get the note before anything is asked of GitHub, so a note that is not
+    // exported at all costs no API call and cannot cause a repository to be made.
+    let note: Record<string, unknown> | null = null;
+    if (!bulk) {
+      const { data, error: noteErr } = await serviceClient
+        .from("notes")
+        .select("*")
+        .eq("id", note_id)
+        .eq("user_id", userId)
+        .single();
+
+      if (noteErr || !data) {
+        return new Response(JSON.stringify({ error: "Note not found" }), { status: 404, headers: corsHeaders });
+      }
+      note = data;
+
+      // A mirrored hub file already IS a Markdown file in a git folder: the
+      // hub's own. Exporting it would keep a second, lagging copy of thousands
+      // of machine-written files in the user's vault, and every hub sync would
+      // turn into a wave of vault commits. So it is never written, and never
+      // deleted either: whatever an earlier export pushed under hub/ stays
+      // where it is for the user to keep or remove, this function just stops
+      // touching it. Success, not an error: the editor calls this on every
+      // save and must not show a failed sync for a note that is fine.
+      if (isHubMirror(data.source_app as string | null)) {
+        return new Response(
+          JSON.stringify({ success: true, skipped: true, reason: "hub_mirror", action: "skipped" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     const shouldEnsureRepo = bulk || action !== "delete";
     const repoState = shouldEnsureRepo
       ? await ensureGithubRepository(ghToken, owner, repo, branch)
@@ -377,23 +414,7 @@ Deno.serve(async (req) => {
       return await handleBulkSync(serviceClient, userId, ghToken, owner, repo, branch, vaultPath, repoState.created);
     }
 
-    if (!note_id || !action) {
-      return new Response(JSON.stringify({ error: "note_id and action required" }), { status: 400, headers: corsHeaders });
-    }
-
-    // Get the note
-    const { data: note, error: noteErr } = await serviceClient
-      .from("notes")
-      .select("*")
-      .eq("id", note_id)
-      .eq("user_id", userId)
-      .single();
-
-    if (noteErr || !note) {
-      return new Response(JSON.stringify({ error: "Note not found" }), { status: 404, headers: corsHeaders });
-    }
-
-    const result = await syncSingleNote(serviceClient, userId, ghToken, owner, repo, branch, vaultPath, note, action);
+    const result = await syncSingleNote(serviceClient, userId, ghToken, owner, repo, branch, vaultPath, note!, action);
     if (repoState.created) result.repository_created = true;
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
@@ -562,6 +583,10 @@ async function handleBulkSync(
         .select("*")
         .eq("user_id", userId)
         .eq("is_trashed", false)
+        // Mirrored hub files are not exported (see the single-note path above
+        // for why). Left out in the query so a bulk sync does not download the
+        // full body of several thousand notes only to discard them.
+        .or("source_app.is.null,source_app.not.ilike.hub")
         .order("updated_at", { ascending: false })
         .order("id")
         .range(from, to),
@@ -569,6 +594,12 @@ async function handleBulkSync(
   } catch {
     return new Response(JSON.stringify({ error: "Failed to fetch notes" }), { status: 500, headers: corsHeaders });
   }
+
+  // The query filter above is the cheap half. `source_app` is written by
+  // another program, and isHubMirror forgives the stray space an ILIKE would
+  // not, so it stays the authority. Nothing is deleted from the repository for
+  // a hub file an earlier export pushed; it is simply no longer maintained.
+  notes = notes.filter((n) => !isHubMirror(n.source_app as string | null));
 
   const results: { note_id: string; title: string; success: boolean; error?: string }[] = [];
 
