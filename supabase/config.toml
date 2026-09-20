@@ -223,3 +223,12 @@ verify_jwt = false
 
 [functions.weekly-review]
 verify_jwt = false
+
+[functions.quick-capture]
+verify_jwt = false
+
+[functions.slack-capture]
+verify_jwt = false
+
+[functions.daily-digest]
+verify_jwt = false
