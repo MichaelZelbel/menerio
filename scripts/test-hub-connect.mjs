@@ -8,14 +8,17 @@
  *
  * The limits have to hold when requests arrive together, not only one at a
  * time, so the guessing tests run as parallel bursts on separate connections.
+ * The last part serves the real hub-connect/index.ts in this process, against
+ * the same database, and checks the HTTP answers the contract lists.
  *
  *   createdb hub_connect_test
  *   psql -v ON_ERROR_STOP=1 -d hub_connect_test -f scripts/bootstrap-hub-connect-test.sql
  *   node scripts/test-hub-connect.mjs
  */
 import assert from 'node:assert/strict';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
 import { build } from 'esbuild';
 import pg from 'pg';
 
@@ -99,8 +102,63 @@ const challengeOf = (verifier) => createHash('sha256').update(verifier).digest('
 const newVerifier = () => randomBytes(32).toString('base64url');
 const newKey = () => { const fullKey = `mnr_${randomBytes(24).toString('hex')}`; return { fullKey, hash: sha256(fullKey), prefix: fullKey.slice(0, 12) }; };
 
+/**
+ * The real edge function, bundled and served in this process. Only the client
+ * is synthetic: rpc() and from() run against the test database, a session token
+ * is "session:<user id>", and everything the function logs is kept so the test
+ * can prove no secret is in it.
+ */
+async function serveFunction(entry, db, authDb, logged) {
+  const bundle = await build({
+    entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'cjs',
+    plugins: [{
+      name: 'synthetic-database', setup(b) {
+        b.onResolve({ filter: /^https:/ }, (args) => ({ path: args.path, namespace: 'fake' }));
+        b.onLoad({ filter: /.*/, namespace: 'fake' }, () => ({ contents: 'export const createClient = (_u, _k, options) => globalThis.makeClient(options)', loader: 'js' }));
+      },
+    }],
+  });
+  // Supabase Auth answers these, not the service role's table grants.
+  const userById = async (id) => (await authDb.query('select id, email from auth.users where id=$1', [id])).rows[0] ?? null;
+  const makeClient = (options) => ({
+    ...supabaseLike(db),
+    async rpc(name, args) {
+      // The Hub API throttle has its own test; here it lets everything through.
+      if (name === 'hub_api_bump_usage') return { data: [{ allowed: true }], error: null };
+      const names = Object.keys(args);
+      try {
+        const { rows } = await db.query(`select public.${name}(${names.map((n, i) => `${n} => $${i + 1}`).join(', ')}) as r`, names.map((n) => args[n]));
+        return { data: rows[0].r, error: null };
+      } catch (err) {
+        return { data: null, error: { code: err.code, message: err.message } };
+      }
+    },
+    auth: {
+      async getUser() {
+        const match = /^Bearer session:(.+)$/.exec(options?.global?.headers?.Authorization ?? '');
+        const user = match ? await userById(match[1]) : null;
+        return user ? { data: { user }, error: null } : { data: { user: null }, error: { message: 'invalid session' } };
+      },
+      admin: { getUserById: async (id) => ({ data: { user: await userById(id) }, error: null }) },
+    },
+  });
+  let handler;
+  const keep = (...args) => logged.push(args.map(String).join(' '));
+  vm.runInNewContext(bundle.outputFiles[0].text, {
+    makeClient, console: { log: keep, warn: keep, error: keep },
+    Request, Response, URL, Headers, TextEncoder, crypto: webcrypto, setTimeout, clearTimeout,
+    Deno: {
+      env: { get: (key) => ({ SUPABASE_URL: 'https://synthetic.invalid', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-key' })[key] },
+      serve: (fn) => { handler = fn; },
+    },
+  });
+  return handler;
+}
+
 const run = randomUUID().slice(0, 8);
 const callerHash = (name) => `test:${run}:${name}`;
+// Requests opened through the HTTP section carry a real (hashed) caller, so they are removed by id.
+const httpRequests = [];
 let db;
 
 try {
@@ -444,7 +502,101 @@ try {
     assert.equal(protocol.tokenErrorForStatus((await collect(svc, randomUUID(), newVerifier())).status), 'expired_token', 'an unknown request reads as expired');
   }
 
-  // 12. The hand-made key went through all of it untouched, and still opens the door.
+  // 12. The same flow through the real edge function, over HTTP, to pin what the hub and the page actually see.
+  {
+    const logged = [];
+    const serve = await serveFunction('supabase/functions/hub-connect/index.ts', svc, db, logged);
+    const call = async (method, path, { body, headers = {} } = {}) => {
+      const res = await serve(new Request(`https://synthetic.invalid/hub-connect/${path}`, {
+        method, headers: { 'content-type': 'application/json', 'cf-connecting-ip': `203.0.113.${run.charCodeAt(0) % 250}`, ...headers },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }));
+      assert.equal(res.headers.get('cache-control'), 'no-store', `${path} must not be cacheable`);
+      return { status: res.status, body: await res.json() };
+    };
+    const session = (userId) => ({ authorization: `Bearer session:${userId}` });
+    const noGap = (requestId) => db.query('update hub_connect_requests set last_poll_at = null where id=$1', [requestId]);
+
+    const httpHub = randomUUID();
+    const verifier = newVerifier();
+    const startBody = {
+      hub_id: httpHub, hub_name: 'HTTP hub', device_id: deviceId, device_name: 'Test laptop',
+      code_challenge: challengeOf(verifier), code_challenge_method: 'S256', flow: 'browser', wants: { context: true, documents: false },
+    };
+    assert.equal((await call('POST', 'start', { body: { ...startBody, code_challenge_method: 'plain' } })).status, 400);
+    const started = await call('POST', 'start', { body: startBody });
+    assert.equal(started.status, 200);
+    httpRequests.push(started.body.request_id);
+    assert.match(started.body.user_code, /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
+    assert.equal(started.body.verification_uri, 'https://menerio.com/connect-hub');
+    assert.equal(started.body.verification_uri_complete, `https://menerio.com/connect-hub?request=${started.body.request_id}&code=${started.body.user_code}`);
+    assert.equal(started.body.expires_in, 600);
+    assert.equal(started.body.interval, 3);
+    const storedCaller = (await db.query('select caller_hash from hub_connect_requests where id=$1', [started.body.request_id])).rows[0].caller_hash;
+    assert.match(storedCaller, /^[0-9a-f]{64}$/, 'the caller address must be stored as a hash');
+    const id = started.body.request_id;
+
+    assert.equal((await call('GET', `request?request_id=${id}`)).status, 401);
+    const page = await call('GET', `request?request_id=${id}`, { headers: session(userA) });
+    assert.equal(page.status, 200);
+    assert.equal(page.body.account_label, `a-${run}@example.test`);
+    assert.equal(page.body.user_code, started.body.user_code);
+    assert.equal((await call('GET', `request?request_id=${id}`, { headers: session(userB) })).status, 404);
+    assert.equal((await call('POST', 'approve', { headers: session(userB), body: { request_id: id, user_code: started.body.user_code, approve: true } })).status, 404);
+
+    const pending = await call('POST', 'token', { body: { request_id: id, code_verifier: verifier, device_id: deviceId } });
+    assert.deepEqual([pending.status, pending.body.error], [428, 'authorization_pending']);
+    const tooSoon = await call('POST', 'token', { body: { request_id: id, code_verifier: verifier, device_id: deviceId } });
+    assert.deepEqual([tooSoon.status, tooSoon.body.error], [429, 'slow_down']);
+
+    const miss = await call('POST', 'approve', { headers: session(userA), body: { request_id: id, user_code: 'not a code', approve: true } });
+    assert.deepEqual([miss.status, miss.body.error, miss.body.attempts_left], [400, 'wrong_code', 4]);
+    const yes = await call('POST', 'approve', { headers: session(userA), body: { request_id: id, user_code: started.body.user_code.toLowerCase().replace('-', ' '), approve: true } });
+    assert.deepEqual([yes.status, yes.body], [200, { status: 'approved' }]);
+
+    await noGap(id);
+    const wrong = await call('POST', 'token', { body: { request_id: id, code_verifier: newVerifier(), device_id: deviceId } });
+    assert.deepEqual([wrong.status, wrong.body.error], [400, 'invalid_grant']);
+    await noGap(id);
+    const token = await call('POST', 'token', { body: { request_id: id, code_verifier: verifier, device_id: deviceId } });
+    assert.equal(token.status, 200);
+    assert.match(token.body.api_key, /^mnr_[0-9a-f]{48}$/);
+    assert.equal(token.body.hub_id, httpHub);
+    assert.equal(token.body.generation, 1);
+    assert.equal(token.body.account_label, `a-${run}@example.test`);
+    assert.deepEqual(token.body.scopes, SCOPES);
+    assert.equal(token.body.documents, false);
+    assert.equal((await db.query('select count(*)::int as n from hub_api_keys where key_hash=$1 and hub_connection_id=$2', [sha256(token.body.api_key), token.body.connection_id])).rows[0].n, 1, 'the returned key is the stored one');
+    await noGap(id);
+    const twice = await call('POST', 'token', { body: { request_id: id, code_verifier: verifier, device_id: deviceId } });
+    assert.deepEqual([twice.status, twice.body.error], [410, 'expired_token']);
+
+    const bearer = { authorization: `Bearer ${token.body.api_key}` };
+    const status = await call('GET', 'status', { headers: { ...bearer, 'x-hub-device-id': deviceId, 'x-hub-device-name': 'Test laptop', 'x-hub-client': 'claude-code', 'x-hub-client-state': 'working' } });
+    assert.equal(status.status, 200);
+    assert.equal(status.body.connected, true);
+    assert.equal(status.body.connection_id, token.body.connection_id);
+    assert.equal(status.body.hub_name, 'HTTP hub');
+    assert.equal(status.body.devices[0].clients['claude-code'].state, 'working');
+    const legacyStatus = await call('GET', 'status', { headers: { authorization: `Bearer ${legacy.fullKey}` } });
+    assert.deepEqual(legacyStatus.body, { connected: true, legacy_key: true, scopes: ['notes', 'profile'] });
+    assert.equal((await call('GET', 'status', { headers: { authorization: `Bearer mnr_${'0'.repeat(48)}` } })).status, 401);
+
+    assert.equal((await call('POST', 'disconnect', { headers: session(userB), body: { connection_id: token.body.connection_id } })).status, 404);
+    const legacyEnd = await call('POST', 'disconnect', { headers: { authorization: `Bearer ${legacy.fullKey}` } });
+    assert.deepEqual([legacyEnd.status, legacyEnd.body.error], [403, 'legacy_key']);
+    assert.deepEqual((await call('POST', 'disconnect', { headers: bearer })).body, { status: 'disconnected' });
+    assert.deepEqual((await call('POST', 'disconnect', { headers: bearer })).body, { status: 'disconnected' }, 'ending twice answers the same');
+    assert.deepEqual((await call('POST', 'disconnect', { headers: session(userA), body: { connection_id: token.body.connection_id } })).body, { status: 'disconnected' });
+    const after = await call('GET', 'status', { headers: bearer });
+    assert.deepEqual([after.status, after.body.error, after.body.message], [401, 'revoked', "This hub's connection to Menerio was ended."]);
+
+    assert.ok(!logged.join('\n').includes(token.body.api_key), 'the key must never be logged');
+    assert.ok(!logged.join('\n').includes(verifier), 'the verifier must never be logged');
+    console.log('over HTTP             : start, request, approve, token once, status, disconnect twice, revoked; nothing secret logged');
+  }
+
+  // 13. The hand-made key went through all of it untouched, and still opens the door.
   {
     assert.deepEqual(await legacySnapshot(), legacyBefore, 'a key that belongs to no connection must not change');
     const accepted = await lookupHubKey(legacy.fullKey, admin);
@@ -453,7 +605,7 @@ try {
     console.log('hand-made key         : unchanged and still accepted');
   }
 
-  console.log('hub connect: approve, collect once, limits hold in parallel, generation rule enforced, RLS tight, legacy key untouched');
+  console.log('hub connect: approve, collect once, limits hold in parallel, generation rule enforced, RLS tight, HTTP contract as written, legacy key untouched');
 } finally {
   // Deleting the two accounts takes their connections, devices, keys and claimed
   // requests with them; unclaimed requests are found by this run's caller tag.
@@ -461,6 +613,7 @@ try {
     await db.query('reset role').catch(() => {});
     await db.query("delete from auth.users where email like $1", [`%-${run}@example.test`]).catch(() => {});
     await db.query("delete from hub_connect_requests where caller_hash like $1", [`test:${run}:%`]).catch(() => {});
+    await db.query('delete from hub_connect_requests where id = any($1::uuid[])', [httpRequests]).catch(() => {});
   }
   await Promise.all(clients.map((c) => c.end().catch(() => {})));
 }
