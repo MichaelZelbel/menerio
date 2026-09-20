@@ -187,13 +187,44 @@ Deno.serve(async (req) => {
         folder_path: normalizeFolderPath(body.folder_path),
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("notes")
         .insert(noteData)
         .select("id, title, created_at, updated_at")
         .single();
 
+      // A sender's id (source_app + source_id) is unique per account, and a TRASHED
+      // note keeps holding it. So a hub file that was deleted and later came back
+      // under the same path (a git revert, a restored folder) could never be
+      // mirrored again: every create answered 400 "duplicate key", hourly, forever.
+      // The file is back, so the note comes back: same id, new text, out of the bin.
+      // A live note with that id is a real conflict and says which note holds it.
+      if (error && (error as { code?: string }).code === "23505" && noteData.source_id) {
+        const { data: holder } = await supabase
+          .from("notes")
+          .select("id, is_trashed")
+          .eq("user_id", userId)
+          .eq("source_app", noteData.source_app as string)
+          .eq("source_id", noteData.source_id as string)
+          .maybeSingle();
+        if (holder && holder.is_trashed) {
+          const { user_id: _owner, ...fields } = noteData;
+          const restored = await supabase
+            .from("notes")
+            .update({ ...fields, is_trashed: false, trashed_at: null })
+            .eq("id", holder.id)
+            .eq("user_id", userId)
+            .select("id, title, created_at, updated_at")
+            .single();
+          data = restored.data;
+          error = restored.error;
+        } else if (holder) {
+          return errorJson("CONFLICT", `A note with this source_id already exists: ${holder.id}`, 409);
+        }
+      }
+
       if (error) return dbErrorResponse(error);
+      if (!data) return errorJson("INTERNAL", "The note was not returned after saving", 500);
 
       // Trigger background processing (embedding, metadata)
       fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-note`, {
