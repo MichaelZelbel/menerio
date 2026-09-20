@@ -49,13 +49,14 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Test sync permissions, contact pagination, atomic merges and the API throttle
+      - name: Test sync permissions, contact pagination, atomic merges, the API throttle and the hub connect flow
         env:
           PGHOST: localhost
           PGUSER: postgres
           PGPASSWORD: postgres
           MERGE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/merge_review_test
           HUB_RATE_LIMIT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/hub_rate_limit_test
+          HUB_CONNECT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/hub_connect_test
           NOTE_AI_NORMALIZE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/note_ai_normalize_test
         run: |
           createdb github_sync_test
@@ -70,6 +71,9 @@ jobs:
           createdb hub_rate_limit_test
           psql -v ON_ERROR_STOP=1 -d hub_rate_limit_test -f scripts/bootstrap-hub-rate-limit-test.sql
           node scripts/test-hub-rate-limit.mjs
+          createdb hub_connect_test
+          psql -v ON_ERROR_STOP=1 -d hub_connect_test -f scripts/bootstrap-hub-connect-test.sql
+          node scripts/test-hub-connect.mjs
           createdb note_ai_normalize_test
           node scripts/test-note-ai-normalize.mjs
 
