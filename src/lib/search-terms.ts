@@ -12,6 +12,8 @@
  * and can never overturn a coverage or position difference.
  */
 
+import { compareNativeFirst, rankingScore } from "@/lib/hub-ranking";
+
 const STOPWORDS = new Set([
   "a", "about", "after", "all", "am", "an", "and", "any", "are", "as", "at", "be", "because",
   "been", "before", "being", "but", "by", "can", "could", "did", "do", "does", "doing", "done",
@@ -87,6 +89,11 @@ export interface RankableNote {
   title?: string | null;
   content?: string | null;
   updated_at?: string | null;
+  /**
+   * Where the note came from. Optional: a caller whose rows do not carry it
+   * simply gets no hub demotion, which is the old behaviour.
+   */
+  source_app?: string | null;
 }
 
 /** Number of query terms present in a note's title or content. */
@@ -261,6 +268,11 @@ export function isTitleHit<T extends RankableNote>(
  *
  * A bounded typo-tolerant pass runs only when the strict pass produced no title
  * match at all, so fuzzy hits can never dilute exact results.
+ *
+ * A mirrored hub file is ordered by a discounted score and loses a tie to a
+ * native note (see `hub-ranking.ts`). The discount is applied here and not in
+ * `scoreNote`, so "did this match its title" stays a fact about the match and
+ * not about where the note came from.
  */
 export function rankNotesByTerms<T extends RankableNote>(
   notes: T[],
@@ -286,8 +298,11 @@ export function rankNotesByTerms<T extends RankableNote>(
 
   return scored
     .filter((s) => s.score > 0 || (!phrase.trim() && terms.length === 0))
+    .map((s) => ({ ...s, score: rankingScore(s.score, s.note.source_app) }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
+      const bySource = compareNativeFirst(a.note.source_app, b.note.source_app);
+      if (bySource !== 0) return bySource;
       if (a.updated !== b.updated) return a.updated < b.updated ? 1 : -1;
       return a.index - b.index;
     })

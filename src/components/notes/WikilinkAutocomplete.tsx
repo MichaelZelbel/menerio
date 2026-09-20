@@ -21,6 +21,8 @@ interface NoteResult {
   title: string;
   metadata: Record<string, unknown> | null;
   updated_at: string;
+  /** Selected so the shared ranking can put a mirrored hub file below a native note. */
+  source_app?: string | null;
 }
 
 /** Normalize a title for comparison: trim, collapse whitespace, strip diacritics, lowercase. */
@@ -75,7 +77,7 @@ export function WikilinkAutocomplete({
     const timer = setTimeout(async () => {
       let q = supabase
         .from("notes")
-        .select("id, title, metadata, updated_at")
+        .select("id, title, metadata, updated_at, source_app")
         .eq("user_id", user.id)
         .eq("is_trashed", false)
         .order("updated_at", { ascending: false })

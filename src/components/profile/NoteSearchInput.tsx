@@ -47,7 +47,7 @@ export function NoteSearchInput({ selectedNoteId, selectedNoteTitle, onSelect }:
       const q = query.trim().toLowerCase();
       const { data } = await supabase
         .from("notes")
-        .select("id, title, updated_at")
+        .select("id, title, updated_at, source_app")
         .eq("user_id", user.id)
         .ilike("title", `%${escapeLike(q)}%`)
         .eq("is_trashed", false)
