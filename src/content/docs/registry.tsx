@@ -476,6 +476,7 @@ const githubSync: DocPage = {
 
       <h2 id="how-sync-works">How Sync Works</h2>
       <p>When enabled, Menerio exports your notes as Markdown files to your GitHub repository. You can configure the sync direction (push only, pull only, or both) and it runs automatically or on-demand.</p>
+      <p>Notes mirrored from a hub folder (shown as synced from <code>hub</code>) are not exported: they already live as Markdown files in the hub's own repository. If an earlier export pushed files under <code>hub/</code>, they stay in your vault until you remove them yourself.</p>
       <Callout type="info">This is perfect for keeping a Markdown backup or for interoperability with tools like Obsidian.</Callout>
 
       <h2 id="import-vault">Import an Existing Vault</h2>
@@ -662,6 +663,8 @@ const settingsAccount: DocPage = {
       <h2 id="api-keys">API Keys</h2>
       <p>Generate API keys in <strong>Settings → API Keys</strong> to access Menerio's Hub API. Each key has configurable scopes (notes, contacts, actions, stats) and can be revoked at any time.</p>
       <CodeBlock code={`curl -H "Authorization: Bearer mb_abc123..." \\\n  https://your-project.supabase.co/functions/v1/hub-api-notes`} language="bash" title="Using the Hub API" />
+      <p><code>GET /hub-api-notes/search?q=…</code> searches by meaning and by text at once. Add <code>source_app=hub</code> or <code>source_app=native</code> to narrow it and <code>limit</code> (up to 50) to size it. The response says <code>mode: "semantic+text"</code>, or <code>"text_only"</code> when no AI credits are left.</p>
+      <p>The same keys connect AI assistants over MCP. An assistant can call <code>list_note_folders</code> to see your folders, then <code>capture_note</code> with a title, folder and tags to file a note where it belongs; <code>[[Exact Title]]</code> in the text links it to another note. Notes mirrored from a hub folder rank below your own notes in every search and are marked as hub files in MCP results.</p>
 
       <h2 id="subscription">Subscription & Credits</h2>
       <p>View your current plan and AI credit usage in <strong>Settings → Subscription</strong>. Free accounts include a monthly AI credit allowance; upgrade to Premium for more credits and features.</p>

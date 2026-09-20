@@ -1835,6 +1835,16 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. `curl -X POST` to `/functions/v1/hub-api-notes` with `Authorization: Bearer mnr_…` and a JSON body
 - **Expected Outcome:** 201 with the created note. Note appears in the user's Notes list. Rate-limit headers are present.
 
+### TS-API-002b: Hub API — Combined Search
+
+- **Objective:** Validate `GET /hub-api-notes/search`
+- **Preconditions:** A key with the `notes` scope; at least one indexed note; a hub mirror note (`source_app = 'hub'`) on the same subject
+- **Steps:**
+  1. `GET /functions/v1/hub-api-notes/search?q=<a phrase that describes the note without using its words>`
+  2. Repeat with `&source_app=hub`, with `&source_app=native`, and with `&limit=1`
+  3. Repeat with an account that has no AI credits left
+- **Expected Outcome:** Step 1 returns the note with a `similarity`, a `snippet` of about 300 characters and `mode: "semantic+text"`; the native note is listed before the hub file. Step 2 returns only hub files, only non-hub notes, and exactly one result. Step 3 still answers 200 with `mode: "text_only"` and `similarity: null`. One `hub-api-search:embedding` usage row is recorded for the key's owner per semantic search.
+
 ### TS-API-003: Hub API — Rate Limit Enforcement
 
 - **Objective:** Validate the 1000/hr limit
@@ -1860,6 +1870,26 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   2. Generate a token; copy MCP endpoint URL
   3. Configure the MCP client (e.g. Claude Desktop) with URL + token
 - **Expected Outcome:** MCP client lists Menerio tools (read notes, search, write notes…). Tool calls succeed and respect user RLS via the per-request Supabase client.
+
+### TS-API-005b: MCP — File a Note in a Folder
+
+- **Objective:** Validate `list_note_folders`, `capture_note` filing and wikilinks
+- **Preconditions:** An MCP client connected with a key that has the `notes` scope; a folder `Health` and a note titled `Cholesterol` exist
+- **Steps:**
+  1. Call `list_note_folders`
+  2. Call `capture_note` with `content` containing `[[Cholesterol]]`, `title: "Blood test"`, `folder_path: "health"`, `tags: ["Labs"]`
+  3. Call `capture_note` with `folder_path: "hub/rules"`
+  4. Open the new note in the app
+- **Expected Outcome:** Step 1 lists `Health` with its note count and the top-level count, without the `hub` tree (it appears with `include_hub: true`). Step 2 answers with the note id, `Title: Blood test`, `Folder: Health` (the existing casing), the merged tags, the resolved wikilink and up to five related existing notes. Step 3 is refused and saves nothing. Step 4 shows the note in `Health` with `Cholesterol` under outgoing links, and `Blood test` under the backlinks of `Cholesterol`.
+
+### TS-API-005c: MCP — Hub Files Rank Below Own Notes
+
+- **Objective:** Validate hub demotion, labelling and the `source` filter
+- **Preconditions:** A native note and a hub mirror note that both match a query
+- **Steps:**
+  1. Call `search_notes` with the query
+  2. Repeat with `source: "native"` and with `source: "hub"`
+- **Expected Outcome:** Step 1 lists the native note first; the hub result carries `Source: [hub file: <path>]`. Step 2 returns only native notes, then only hub files.
 
 ### TS-API-006: App Integrations Hub (UI)
 
