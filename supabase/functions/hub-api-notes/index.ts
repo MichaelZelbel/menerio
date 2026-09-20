@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
 import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
-import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
+import { combinedNoteSearch } from "../_shared/note-search.ts";
 import {
   corsHeaders,
   json,
@@ -61,24 +62,27 @@ Deno.serve(async (req) => {
       const q = url.searchParams.get("q") || "";
       if (!q) return errorJson("BAD_REQUEST", "q parameter required", 400);
 
-      const { limit } = paginationParams(url);
+      // Search by meaning and by text, in this process. The app's semantic
+      // search function needs a user token, and a call to it with the service
+      // key used to sit here anyway: awaited, answered 401, and its result never
+      // read, so every hub search paid an extra function invocation and failed
+      // outright when that call did. No second function is involved now: the
+      // embedding is fetched through the same credit-aware helper the MCP
+      // server uses, charged to the user the key belongs to, and the query runs
+      // against match_note_chunks directly. Out of credits or a provider outage
+      // means text only (mode says which), never an error.
+      const { results, mode } = await combinedNoteSearch(supabase, {
+        userId,
+        query: q,
+        limit: url.searchParams.get("limit"),
+        sourceApp: url.searchParams.get("source_app"),
+        embed: async (text) =>
+          (await getEmbeddingWithCredits(
+            supabase, Deno.env.get("OPENROUTER_API_KEY")!, userId, "hub-api-search", text,
+          )).embedding,
+      });
 
-      // A direct text search. The semantic search function needs a user token,
-      // and a call to it with the service key used to sit here anyway: awaited,
-      // answered 401, and its result never read, so every hub search paid an
-      // extra function invocation and failed outright when that call did.
-      const query = q.toLowerCase();
-      const { data, error } = await supabase
-        .from("notes")
-        .select("id, title, content, tags, entity_type, is_favorite, is_pinned, created_at, updated_at")
-        .eq("user_id", userId)
-        .eq("is_trashed", false)
-        .or(ilikeAnyColumn(["title", "content"], query))
-        .order("updated_at", { ascending: false })
-        .limit(limit);
-
-      if (error) return errorJson("INTERNAL", error.message, 500);
-      return json({ data, meta: { total: data?.length || 0, query: q } });
+      return json({ data: results, mode, meta: { total: results.length, query: q, mode } });
     }
 
     // GET /hub-api-notes/sync-status
