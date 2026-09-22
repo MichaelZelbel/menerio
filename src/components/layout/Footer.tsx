@@ -14,6 +14,7 @@ const legalLinks = [
   { label: "Privacy Policy", to: "/privacy" },
   { label: "Terms of Service", to: "/terms" },
   { label: "Cookie Policy", to: "/cookies" },
+  { label: "Impressum", to: "/impressum" },
 ];
 
 const socialLinks = [

@@ -226,6 +226,10 @@ const CherishlyLanding = () => {
               <a href="/cookies" className="text-muted-foreground hover:text-foreground transition-colors underline">
                 Cookies Policy
               </a>
+              <span className="text-muted-foreground">•</span>
+              <a href="/impressum" className="text-muted-foreground hover:text-foreground transition-colors underline">
+                Impressum
+              </a>
             </div>
             <p className="text-sm text-muted-foreground">
               Questions or feedback? Reach us anytime at{" "}
