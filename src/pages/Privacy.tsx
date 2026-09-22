@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { CookieList } from "@/components/legal/CookieList";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SEOHead } from "@/components/SEOHead";
@@ -78,7 +79,7 @@ const Privacy = () => {
             <div>
               <h1 className="text-4xl font-bold text-foreground mb-2">Privacy Policy</h1>
               <p className="text-muted-foreground">
-                <strong>Last updated:</strong> December 6, 2025
+                <strong>Last updated:</strong> September 22, 2026
               </p>
             </div>
             <Button
@@ -167,36 +168,9 @@ const Privacy = () => {
 
               <h3 className="text-xl font-medium text-foreground mt-6 mb-3">Tracking Technologies and Cookies</h3>
               <p>
-                We use Cookies and similar tracking technologies to track the activity on Our Service and store certain information. Tracking technologies used are beacons, tags, and scripts to collect and track information and to improve and analyze Our Service. The technologies We use may include:
+                We use no advertising cookies and no third-party trackers. The complete list of cookies on the Website is below. The visitor statistics cookie, and the page-view count it belongs to, only run after You choose "Accept all" in the cookie banner; "Just the essentials" keeps them off and deletes the cookie. You can change Your choice at any time with "Cookie settings" at the bottom of every page. Details are in our <Link to="/cookies" className="text-primary hover:underline">Cookie Policy</Link>.
               </p>
-              <ul className="list-disc pl-6 space-y-2 mt-2">
-                <li><strong className="text-foreground">Cookies or Browser Cookies.</strong> A cookie is a small file placed on Your Device. You can instruct Your browser to refuse all Cookies or to indicate when a Cookie is being sent. However, if You do not accept Cookies, You may not be able to use some parts of our Service. Unless you have adjusted Your browser setting so that it will refuse Cookies, our Service may use Cookies.</li>
-                <li><strong className="text-foreground">Web Beacons.</strong> Certain sections of our Service and our emails may contain small electronic files known as web beacons (also referred to as clear gifs, pixel tags, and single-pixel gifs) that permit the Company, for example, to count users who have visited those pages or opened an email and for other related website statistics.</li>
-              </ul>
-              <p className="mt-4">
-                Cookies can be "Persistent" or "Session" Cookies. Persistent Cookies remain on Your personal computer or mobile device when You go offline, while Session Cookies are deleted as soon as You close Your web browser.
-              </p>
-              <p className="mt-2">We use both Session and Persistent Cookies for the purposes set out below:</p>
-              <ul className="list-disc pl-6 space-y-4 mt-2">
-                <li>
-                  <strong className="text-foreground">Necessary / Essential Cookies</strong><br />
-                  Type: Session Cookies<br />
-                  Administered by: Us<br />
-                  Purpose: These Cookies are essential to provide You with services available through the Website and to enable You to use some of its features. They help to authenticate users and prevent fraudulent use of user accounts. Without these Cookies, the services that You have asked for cannot be provided, and We only use these Cookies to provide You with those services.
-                </li>
-                <li>
-                  <strong className="text-foreground">Cookies Policy / Notice Acceptance Cookies</strong><br />
-                  Type: Persistent Cookies<br />
-                  Administered by: Us<br />
-                  Purpose: These Cookies identify if users have accepted the use of cookies on the Website.
-                </li>
-                <li>
-                  <strong className="text-foreground">Functionality Cookies</strong><br />
-                  Type: Persistent Cookies<br />
-                  Administered by: Us<br />
-                  Purpose: These Cookies allow us to remember choices You make when You use the Website, such as remembering your login details or language preference. The purpose of these Cookies is to provide You with a more personal experience and to avoid You having to re-enter your preferences every time You use the Website.
-                </li>
-              </ul>
+              <CookieList />
 
               <h3 className="text-xl font-medium text-foreground mt-6 mb-3">Use of Your Personal Data</h3>
               <p>The Company may use Personal Data for the following purposes:</p>

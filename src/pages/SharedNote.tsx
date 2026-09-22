@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CookieSettingsButton } from "@/components/legal/CookieSettingsButton";
 import { useParams, Link } from "react-router-dom";
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -115,6 +116,9 @@ export default function SharedNote() {
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Powered by <span className="font-semibold">Menerio</span>
           </Link>
+          <div className="mt-2">
+            <CookieSettingsButton className="text-xs text-muted-foreground hover:text-foreground transition-colors" />
+          </div>
         </footer>
       </article>
     </>

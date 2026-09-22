@@ -14,9 +14,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        body: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
-        display: ["DM Sans", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+        body: ["Plus Jakarta Sans Variable", "Plus Jakarta Sans", "system-ui", "sans-serif"],
+        display: ["DM Sans Variable", "DM Sans", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono Variable", "JetBrains Mono", "ui-monospace", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",

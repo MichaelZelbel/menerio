@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+/* Fonts are served from this site (Fontsource), never from Google: a Google Fonts request
+   sends every visitor's IP address to Google before any consent. */
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource-variable/plus-jakarta-sans';
+@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/dm-sans';
 
 @tailwind base;
 @tailwind components;
@@ -6,10 +11,10 @@
 
 @layer base {
   :root {
-    --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
-    --font-display: 'DM Sans', system-ui, sans-serif;
-    --font-hero: 'Bricolage Grotesque', 'Plus Jakarta Sans', system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-body: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-display: 'DM Sans Variable', 'DM Sans', system-ui, sans-serif;
+    --font-hero: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* Primary — Deep Sapphire Blue */
     --primary: 220 70% 45%;

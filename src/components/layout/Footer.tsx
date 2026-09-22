@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Github, Twitter, Linkedin, Mail } from "lucide-react";
 import { BRAND } from "@/lib/brand";
 import { brandLogo } from "@/lib/brand-assets";
+import { CookieSettingsButton } from "@/components/legal/CookieSettingsButton";
 
 const productLinks = [
   ...(BRAND.showDocs ? [{ label: "Docs", to: "/docs" }] : []),
@@ -81,6 +82,9 @@ export function Footer() {
                   </Link>
                 </li>
               ))}
+              <li>
+                <CookieSettingsButton className="text-left text-sm text-[hsl(var(--landing-muted))] transition-colors hover:text-[hsl(var(--landing-sky-highlight))]" />
+              </li>
             </ul>
           </div>
         </div>

@@ -1,9 +1,28 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import { brandForId } from "./src/brands";
 import { brandIndexHtml, brandStatics } from "./vite.brand";
+import { GATE_SCRIPT } from "./src/lib/consent";
+
+// The consent gate (src/lib/consent.ts) must run before every other script,
+// including the analytics script the host injects, so it goes inline straight
+// after <meta charset> (which has to stay within the first 1024 bytes).
+function consentGate(): Plugin {
+  return {
+    name: "consent-gate",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const tag = `<script>${GATE_SCRIPT}</script>`;
+        const charset = /<meta\s+charset=[^>]*>/i;
+        if (!charset.test(html)) throw new Error("consent-gate: no <meta charset> in index.html");
+        return html.replace(charset, (m) => `${m}\n    ${tag}`);
+      },
+    },
+  };
+}
 
 // White-label brand for this build (docs/BRANDING.md). Defaults to menerio;
 // the Cherishly deployment sets VITE_BRAND=cherishly in its build env.
@@ -20,6 +39,7 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    consentGate(),
     brandIndexHtml(brand),
     brandStatics(brand, __dirname),
     VitePWA({

@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from "react";
+import { openConsentSettings } from "@/lib/consent";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -336,6 +337,12 @@ export default function Settings() {
                 <Label>Email</Label>
                 <Input value={user?.email || ""} disabled className="bg-muted" />
                 <p className="text-xs text-muted-foreground">Contact support to change your email.</p>
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <Label>Cookies</Label>
+                <p className="text-xs text-muted-foreground">Change or withdraw your cookie choice for this browser.</p>
+                <Button variant="outline" size="sm" onClick={openConsentSettings}>Cookie settings</Button>
               </div>
               <Separator />
               <form onSubmit={handlePasswordChange} className="space-y-4">
