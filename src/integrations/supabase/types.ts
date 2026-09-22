@@ -1701,6 +1701,8 @@ export type Database = {
         Row: {
           created_at: string | null
           expires_at: string | null
+          generation: number | null
+          hub_connection_id: string | null
           id: string
           is_active: boolean | null
           key_hash: string
@@ -1713,6 +1715,8 @@ export type Database = {
         Insert: {
           created_at?: string | null
           expires_at?: string | null
+          generation?: number | null
+          hub_connection_id?: string | null
           id?: string
           is_active?: boolean | null
           key_hash: string
@@ -1725,6 +1729,8 @@ export type Database = {
         Update: {
           created_at?: string | null
           expires_at?: string | null
+          generation?: number | null
+          hub_connection_id?: string | null
           id?: string
           is_active?: boolean | null
           key_hash?: string
@@ -1734,7 +1740,15 @@ export type Database = {
           scopes?: string[]
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "hub_api_keys_connection_owner_fk"
+            columns: ["hub_connection_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "hub_connections"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
       hub_api_usage: {
         Row: {
@@ -1764,6 +1778,154 @@ export type Database = {
             columns: ["key_id"]
             isOneToOne: false
             referencedRelation: "hub_api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hub_connect_requests: {
+        Row: {
+          caller_hash: string
+          code_challenge: string
+          connection_id: string | null
+          created_at: string
+          device_id: string
+          device_name: string
+          expires_at: string
+          flow: string
+          generation: number | null
+          hub_id: string
+          hub_name: string
+          id: string
+          last_poll_at: string | null
+          status: string
+          user_code: string
+          user_id: string | null
+          wants: Json
+          wrong_codes: number
+          wrong_verifiers: number
+        }
+        Insert: {
+          caller_hash: string
+          code_challenge: string
+          connection_id?: string | null
+          created_at?: string
+          device_id: string
+          device_name: string
+          expires_at: string
+          flow: string
+          generation?: number | null
+          hub_id: string
+          hub_name: string
+          id?: string
+          last_poll_at?: string | null
+          status?: string
+          user_code: string
+          user_id?: string | null
+          wants?: Json
+          wrong_codes?: number
+          wrong_verifiers?: number
+        }
+        Update: {
+          caller_hash?: string
+          code_challenge?: string
+          connection_id?: string | null
+          created_at?: string
+          device_id?: string
+          device_name?: string
+          expires_at?: string
+          flow?: string
+          generation?: number | null
+          hub_id?: string
+          hub_name?: string
+          id?: string
+          last_poll_at?: string | null
+          status?: string
+          user_code?: string
+          user_id?: string | null
+          wants?: Json
+          wrong_codes?: number
+          wrong_verifiers?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hub_connect_requests_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "hub_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hub_connections: {
+        Row: {
+          approved_at: string
+          created_at: string
+          documents: boolean
+          generation: number
+          hub_id: string
+          hub_name: string
+          id: string
+          revoked_at: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          approved_at?: string
+          created_at?: string
+          documents?: boolean
+          generation?: number
+          hub_id: string
+          hub_name: string
+          id?: string
+          revoked_at?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          approved_at?: string
+          created_at?: string
+          documents?: boolean
+          generation?: number
+          hub_id?: string
+          hub_name?: string
+          id?: string
+          revoked_at?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      hub_devices: {
+        Row: {
+          clients: Json
+          connection_id: string
+          device_id: string
+          first_seen_at: string
+          last_contact_at: string
+          name: string
+        }
+        Insert: {
+          clients?: Json
+          connection_id: string
+          device_id: string
+          first_seen_at?: string
+          last_contact_at?: string
+          name: string
+        }
+        Update: {
+          clients?: Json
+          connection_id?: string
+          device_id?: string
+          first_seen_at?: string
+          last_contact_at?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hub_devices_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "hub_connections"
             referencedColumns: ["id"]
           },
         ]
@@ -4858,6 +5020,94 @@ export type Database = {
           allowed: boolean
           request_count: number
         }[]
+      }
+      hub_connect_collect: {
+        Args: {
+          p_computed_challenge: string
+          p_device_id: string
+          p_key_hash: string
+          p_key_prefix: string
+          p_max_wrong_verifiers: number
+          p_min_poll_gap_ms: number
+          p_request_id: string
+          p_scopes: string[]
+        }
+        Returns: Json
+      }
+      hub_connect_decide: {
+        Args: {
+          p_approve: boolean
+          p_documents: boolean
+          p_max_wrong_codes: number
+          p_request_id: string
+          p_user_code: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      hub_connect_disconnect: {
+        Args: { p_connection_id: string; p_key_id: string; p_user_id: string }
+        Returns: string
+      }
+      hub_connect_open_request: {
+        Args: { p_request_id: string; p_user_id: string }
+        Returns: {
+          caller_hash: string
+          code_challenge: string
+          connection_id: string | null
+          created_at: string
+          device_id: string
+          device_name: string
+          expires_at: string
+          flow: string
+          generation: number | null
+          hub_id: string
+          hub_name: string
+          id: string
+          last_poll_at: string | null
+          status: string
+          user_code: string
+          user_id: string | null
+          wants: Json
+          wrong_codes: number
+          wrong_verifiers: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "hub_connect_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      hub_connect_start: {
+        Args: {
+          p_caller_hash: string
+          p_code_challenge: string
+          p_device_id: string
+          p_device_name: string
+          p_flow: string
+          p_hub_id: string
+          p_hub_name: string
+          p_max_starts_per_hour: number
+          p_ttl_seconds: number
+          p_user_code: string
+          p_wants: Json
+        }
+        Returns: Json
+      }
+      hub_connect_touch: {
+        Args: {
+          p_client: string
+          p_client_state: string
+          p_device_id: string
+          p_device_name: string
+          p_key_id: string
+        }
+        Returns: Json
+      }
+      hub_connect_view: {
+        Args: { p_request_id: string; p_user_id: string }
+        Returns: Json
       }
       increment_collection_template_usage: {
         Args: { p_slug: string }
