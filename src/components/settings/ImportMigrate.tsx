@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Brain, FileText, Upload, Copy, Check, Sparkles } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
-const AI_MEMORY_PROMPT = `I'm setting up a personal knowledge system called Menerio. Please check your memory and conversation history for everything you know about me — my role, projects, preferences, key people, decisions, and recurring topics. Organize it into categories: People, Projects, Preferences, Decisions, Professional context, Personal context. Present each item as a clear standalone statement. I'll save these to my system.`;
+const AI_MEMORY_PROMPT = `I'm setting up a personal knowledge system called ${BRAND.name}. Please check your memory and conversation history for everything you know about me — my role, projects, preferences, key people, decisions, and recurring topics. Organize it into categories: People, Projects, Preferences, Decisions, Professional context, Personal context. Present each item as a clear standalone statement. I'll save these to my system.`;
 
 interface ImportResult {
   total: number;
@@ -257,7 +258,7 @@ export function ImportMigrate() {
           Import & Migrate
         </CardTitle>
         <CardDescription>
-          Bring your existing knowledge into Menerio. Each item gets AI-powered embedding and metadata extraction.
+          Bring your existing knowledge into {BRAND.name}. Each item gets AI-powered embedding and metadata extraction.
         </CardDescription>
       </CardHeader>
       <CardContent>

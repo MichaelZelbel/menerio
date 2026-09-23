@@ -22,7 +22,7 @@ const quickStart: DocPage = {
       <Callout type="tip" title="One Brain. Every AI.">Menerio follows the Open Brain philosophy: your knowledge stays yours, portable, and connected across every tool you use.</Callout>
 
       <h2 id="sign-up">Sign Up</h2>
-      <p>Head to <strong>menerio.lovable.app/auth</strong> and create a free account with your email — or sign in instantly with Google or GitHub. No credit card required.</p>
+      <p>Head to <strong>menerio.com/auth</strong> and create a free account with your email — or sign in instantly with Google or GitHub. No credit card required.</p>
 
       <h2 id="capture-first-thought">Capture Your First Thought</h2>
       <p>Once signed in, there are two ways to jot something down:</p>
@@ -175,7 +175,7 @@ const aiProcessing: DocPage = {
       <p>Open the <strong>Chat</strong> panel in the note sidebar to ask questions about your note's content. The AI uses your note plus relevant context from your vault to answer. Great for brainstorming, rewriting, or exploring ideas.</p>
 
       <h2 id="ai-credits">AI Credits</h2>
-      <p>AI features consume credits from your monthly allowance. Free accounts receive a generous starter allocation; Premium accounts get significantly more. You can check your remaining credits in <strong>Settings → AI Credits</strong>.</p>
+      <p>AI features consume credits from your monthly allowance. Free accounts receive a generous starter allocation; Premium accounts get significantly more. You can check your remaining credits in <strong>Settings → Credits</strong>.</p>
       <Callout type="tip">Credits reset monthly. Note processing, chat, media analysis, and connection discovery all count towards your usage.</Callout>
     </>
   ),
@@ -451,7 +451,7 @@ const messagingIntegrations: DocPage = {
       <p>Send messages to a Slack channel and have them appear as notes in Menerio. Configure your Slack workspace connection in <strong>Settings → Slack</strong>.</p>
 
       <h2 id="discord">Discord</h2>
-      <p>Set up a Discord bot to capture messages from a specific channel. Configure it in <strong>Settings → Discord</strong> with your bot token and guild ID.</p>
+      <p>Set up a Discord bot to capture messages from a specific channel. Configure it in <strong>Settings → Discord</strong> with your bot token, application ID, public key and server (guild) ID.</p>
       <Callout type="tip">All captured messages go through AI processing — so they get tagged, connected, and searchable just like any other note.</Callout>
     </>
   ),
@@ -472,7 +472,7 @@ const githubSync: DocPage = {
   content: () => (
     <>
       <h2 id="setup">Setup</h2>
-      <p>Go to <strong>Settings → GitHub Sync</strong> and enter your GitHub personal access token, repository owner, and repo name. Choose a branch and vault path.</p>
+      <p>Go to <strong>Settings → GitHub</strong> and enter your GitHub personal access token, repository owner, and repo name. Choose a branch and vault path.</p>
 
       <h2 id="how-sync-works">How Sync Works</h2>
       <p>When enabled, Menerio exports your notes as Markdown files to your GitHub repository. You can configure the sync direction (push only, pull only, or both) and it runs automatically or on-demand.</p>
@@ -541,18 +541,18 @@ const profilePage: DocPage = {
       <p>Your profile is organised into categories (e.g., "Work", "Health", "Interests") each containing key-value entries. You can add custom categories and entries, and optionally link any entry to a note for deeper context.</p>
 
       <h2 id="scopes">Visibility Scopes</h2>
-      <p>Each category has a visibility scope:</p>
+      <p>Each category has a visibility scope that decides which AI agents may read it:</p>
       <ul>
-        <li><strong>Private</strong> — only visible to you</li>
-        <li><strong>AI</strong> — shared with the AI for better personalisation</li>
-        <li><strong>Connected Apps</strong> — shared with apps you've connected</li>
+        <li><strong>All agents</strong> — always included when an agent reads your profile</li>
+        <li><strong>Professional only</strong>, <strong>Personal only</strong>, <strong>Health only</strong> — included when an agent reads your whole profile, left out when it asks for a different part only</li>
+        <li><strong>Private</strong> — never shared, only visible to you</li>
       </ul>
 
       <h2 id="completeness">Profile Completeness</h2>
       <p>A progress indicator shows how complete your profile is. A richer profile means better AI suggestions, more relevant connections, and smarter processing.</p>
 
       <h2 id="agent-instructions">Agent Instructions</h2>
-      <p>In the <strong>Agent Instructions</strong> tab, write custom instructions for the AI. For example: "Always summarise meeting notes with bullet points" or "Focus on action items related to my startup". The AI follows these when processing your notes.</p>
+      <p>In the <strong>Agent Instructions</strong> tab, write custom instructions for the AI. For example: "Always address me informally" or "Focus on action items related to my startup". They reach the note, conversation and collection chats, and every AI assistant you connect over MCP, which receives them with your profile. Automatic note processing does not use them.</p>
       <Callout type="tip">Agent Instructions are a powerful way to make Menerio truly yours — experiment with different instructions to shape how the AI works for you.</Callout>
     </>
   ),
@@ -624,7 +624,7 @@ const weeklyReview: DocPage = {
 
       <h2 id="making-the-most">Making the Most of It</h2>
       <p>Use the weekly review as a reflection tool. Ask yourself: What surprised me? What patterns am I noticing? Are there action items I keep postponing? This practice turns Menerio from a note-taking app into a genuine thinking partner.</p>
-      <Callout type="tip">Pair the weekly review with your Agent Instructions — tell the AI what to focus on in future reviews.</Callout>
+      <Callout type="tip">Capture what you learn from each review as a note, so the next one, and every assistant you connect, can find it.</Callout>
     </>
   ),
 };
@@ -644,7 +644,7 @@ const settingsAccount: DocPage = {
     { id: "data-export", title: "Data Export" },
     { id: "delete-account", title: "Delete Account" },
   ],
-  searchText: "settings account preferences notifications API keys subscription premium credits export delete",
+  searchText: "settings account preferences notifications API keys MCP connect AI assistant Claude ChatGPT Cursor subscription premium credits export delete",
   content: () => (
     <>
       <h2 id="general">General Settings</h2>
@@ -661,10 +661,10 @@ const settingsAccount: DocPage = {
       </ul>
 
       <h2 id="api-keys">API Keys</h2>
-      <p>Generate API keys in <strong>Settings → API Keys</strong> to access Menerio's Mission Control API. Each key has configurable scopes (notes, contacts, actions, stats) and can be revoked at any time.</p>
+      <p>Generate API keys in <strong>Settings → API Keys</strong> to access Menerio's Mission Control API. Each key has configurable scopes (profile, notes, contacts, actions, graph, media, stats, world, lexicon, collections) and can be revoked at any time.</p>
       <CodeBlock code={`curl -H "Authorization: Bearer mnr_abc123..." \\\n  https://your-project.supabase.co/functions/v1/mc-api-notes`} language="bash" title="Using Mission Control API" />
       <p><code>GET /mc-api-notes/search?q=…</code> searches by meaning and by text at once. Add <code>source_app=godspeed</code> or <code>source_app=native</code> to narrow it and <code>limit</code> (up to 50) to size it. The response says <code>mode: "semantic+text"</code>, or <code>"text_only"</code> when no AI credits are left.</p>
-      <p>The same keys connect AI assistants over MCP. An assistant can call <code>list_note_folders</code> to see your folders, then <code>capture_note</code> with a title, folder and tags to file a note where it belongs; <code>[[Exact Title]]</code> in the text links it to another note. Notes mirrored from a mission control folder rank below your own notes in every search and are marked as godspeed files in MCP results.</p>
+      <p>The same keys connect AI assistants over MCP: copy the server address from <strong>Settings → MCP</strong> exactly as shown (Streamable HTTP, nothing appended) and send the key as <code>Authorization: Bearer mnr_…</code>; clients that cannot set headers can add <code>?key=mnr_…</code> to the address instead. The same tab has a setup prompt and the tool list. An assistant can call <code>list_note_folders</code> to see your folders, then <code>capture_note</code> with a title, folder and tags to file a note where it belongs; <code>[[Exact Title]]</code> in the text links it to another note. Notes mirrored from a mission control folder rank below your own notes in every search and are marked as godspeed files in MCP results.</p>
 
       <h2 id="subscription">Subscription & Credits</h2>
       <p>View your current plan in <strong>Settings → Plan</strong> and your AI credit usage in <strong>Settings → Credits</strong>. Free accounts include a monthly AI credit allowance; upgrade to Premium for more credits and features.</p>
@@ -712,7 +712,7 @@ const faq: DocPage = {
       <h3>What browsers are supported?</h3>
       <p>Chrome, Firefox, Safari, and Edge (latest versions). The app works best on Chromium-based browsers.</p>
       <h3>Can I export my data?</h3>
-      <p>Yes. Export all notes as JSON or Markdown anytime from Settings → Export. Your data is always yours to take with you.</p>
+      <p>Yes. Export your notes as Markdown files to a GitHub repository from Settings → GitHub, and download your profile from Profile → Export &amp; Share. Your data is always yours to take with you.</p>
       <h3>Can I import from Obsidian?</h3>
       <p>Yes. Use the GitHub Vault Sync feature to import a Markdown vault from GitHub, preserving wikilinks and frontmatter.</p>
       <Callout type="info">Have a question not answered here? Reach out via the community or open an issue on GitHub.</Callout>

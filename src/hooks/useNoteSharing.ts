@@ -126,5 +126,7 @@ export function useCopyShareLink() {
       return url;
     },
     onSuccess: () => showToast.copied(),
+    // Without this a refused clipboard write (Safari, denied permission) did nothing at all.
+    onError: () => showToast.error("Could not copy the link. Try again from the share menu."),
   });
 }

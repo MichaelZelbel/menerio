@@ -9,6 +9,7 @@ import { SEOHead } from "@/components/SEOHead";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
+import { BRAND } from "@/lib/brand";
 
 interface SharedNoteData {
   title: string;
@@ -29,6 +30,10 @@ export default function SharedNote() {
   const [note, setNote] = useState<SharedNoteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A network failure or server error is not "this note does not exist";
+  // telling a visitor sharing was disabled when the server merely hiccuped
+  // sent them away from a link that works.
+  const [notFound, setNotFound] = useState(true);
 
   useEffect(() => {
     if (!token) return;
@@ -42,12 +47,16 @@ export default function SharedNote() {
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
+          setNotFound(res.status === 404 || res.status === 410);
           throw new Error(body.error || "Note not found");
         }
         return res.json();
       })
       .then((data) => setNote(data))
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        if (err instanceof TypeError) setNotFound(false); // fetch() itself failed
+        setError(err.message);
+      })
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -64,29 +73,41 @@ export default function SharedNote() {
   if (error || !note) {
     return (
       <>
-        <SEOHead title="Note not found — Menerio" description="This shared note does not exist or sharing has been disabled." />
+        {notFound ? (
+          <SEOHead title="Note not found — Menerio" description="This shared note does not exist or sharing has been disabled." noIndex />
+        ) : (
+          <SEOHead title="Note could not be loaded — Menerio" description="This shared note could not be loaded." noIndex />
+        )}
         <div className="max-w-3xl mx-auto px-4 py-24 text-center">
-          <h1 className="text-2xl font-bold mb-2">Note not found</h1>
+          <h1 className="text-2xl font-bold mb-2">{notFound ? "Note not found" : "This note could not be loaded"}</h1>
           <p className="text-muted-foreground mb-6">
-            This note doesn't exist or sharing has been disabled by the owner.
+            {notFound
+              ? "This note doesn't exist or sharing has been disabled by the owner."
+              : "Something went wrong while loading it. Check your connection and try again."}
           </p>
+          {!notFound && (
+            <button type="button" onClick={() => window.location.reload()} className="text-primary hover:underline mr-4">
+              Try again
+            </button>
+          )}
           <Link to="/" className="text-primary hover:underline">
-            Go to Menerio →
+            Go to {BRAND.name} →
           </Link>
         </div>
       </>
     );
   }
 
+  const displayTitle = note.title || "Untitled";
   const isHtml = looksLikeHtml(note.content);
   const safeHtml = isHtml ? DOMPurify.sanitize(note.content, { USE_PROFILES: { html: true } }) : "";
 
   return (
     <>
-      <SEOHead title={`${note.title} — Menerio`} description={`Shared note: ${note.title}`} />
+      <SEOHead title={`${displayTitle} — Menerio`} description={`Shared note: ${displayTitle}`} />
       <article className="max-w-3xl mx-auto px-4 py-12">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">{note.title || "Untitled"}</h1>
+          <h1 className="text-3xl font-bold mb-2">{displayTitle}</h1>
           <p className="text-sm text-muted-foreground">
             Last updated {format(new Date(note.updated_at), "PPP")}
           </p>
@@ -114,7 +135,7 @@ export default function SharedNote() {
 
         <footer className="mt-16 pt-6 border-t border-border text-center">
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Powered by <span className="font-semibold">Menerio</span>
+            Powered by <span className="font-semibold">{BRAND.name}</span>
           </Link>
           <div className="mt-2">
             <CookieSettingsButton className="text-xs text-muted-foreground hover:text-foreground transition-colors" />

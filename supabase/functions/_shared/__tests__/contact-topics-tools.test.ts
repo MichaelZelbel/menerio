@@ -88,6 +88,10 @@ describe("registered topic MCP transport", () => {
     expect((await resolveContextPerson(fakeDb(), owner, undefined, "Alex")).error).toBe("AMBIGUOUS_PERSON");
     expect((await resolveContextPerson(fakeDb(), owner, person)).contact.id).toBe(person);
   });
+  it("prefers the one exact name over longer names that contain it", async () => {
+    contacts.push({ ...contacts[0], id: topicId, name: "Synthetic Alex Becker" });
+    expect((await resolveContextPerson(fakeDb(), owner, undefined, "synthetic alex")).contact.id).toBe(person);
+  });
   it("resolves alias-only people and returns duplicate alias candidates", async () => {
     contacts[0].aliases = ["Craft friend"];
     expect((await resolveContextPerson(fakeDb(), owner, undefined, "craft FRIEND")).contact.id).toBe(person);

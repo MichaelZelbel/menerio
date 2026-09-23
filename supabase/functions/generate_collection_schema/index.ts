@@ -20,6 +20,11 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // The key itself is read by _shared/llm-router.ts now, not here.
 const MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-4-20250514";
 
+// The output shape at the end is spelled out because validateAndNormalize
+// checks exact keys (collection.icon, field.label) and a fixed type list, and
+// the prompt used to name neither while promising a "response schema" that is
+// never sent. A reply with "emoji" or type "rating" failed validation twice
+// and answered 500 after two paid calls.
 const SYSTEM_PROMPT = `You are a schema designer for Menerio, a personal knowledge management system. The user describes something they want to track. Your job is to produce a JSON object with three keys: "collection", "field_schema", and "agent_instructions".
 
 Rules for field_schema:
@@ -62,9 +67,25 @@ Rules for link_person inference:
 
 - If a field clearly represents a person's name and the description suggests these are people the user knows or is tracking individually (not just abstract roles), use type "link_person" instead of "text". This way the entry connects to Menerio's People system.
 
+Language:
+
+- Write the collection name, description, field labels, select options and agent_instructions in the language the user's description is written in.
+
 Output format:
 
-- Return ONLY a valid JSON object matching the response schema. No markdown fences. No commentary. No explanation.
+- Return ONLY a valid JSON object in exactly this shape. No markdown fences. No commentary. No explanation.
+
+{
+  "collection": { "name": "string", "icon": "one emoji", "description": "one sentence", "visibility": "personal" | "private" },
+  "field_schema": [
+    { "label": "Title", "type": "text", "primary": true, "indexable": false },
+    { "label": "Status", "type": "select", "primary": false, "indexable": true, "options": ["Planned", "Done"] }
+  ],
+  "agent_instructions": "string"
+}
+
+- "type" must be exactly one of: text, longtext, number, currency, date, datetime, boolean, select, multiselect, url, email, phone, link_note, link_person, link_collection_item. Any other type is rejected.
+- "options" appears only on select and multiselect fields (at most 12). A link_collection_item field also carries "target_collection_slug".
 
 End of system prompt.`;
 

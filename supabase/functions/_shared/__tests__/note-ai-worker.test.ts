@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { drainNoteAiJobs } from "../note-ai-worker";
 
 describe("note AI worker admission", () => {
-  it.each([[401, "permanent"], [402, "no_credit"], [503, "transient"], [500, "uncertain"], [200, "uncertain"]] as const)("releases HTTP %s claims as %s without declaring success", async (status, kind) => {
+  it.each([[401, "permanent"], [422, "permanent"], [402, "no_credit"], [503, "transient"], [500, "uncertain"], [200, "uncertain"]] as const)("releases HTTP %s claims as %s without declaring success", async (status, kind) => {
     let next = 0;
     const fail = vi.fn();
     const report = await drainNoteAiJobs({

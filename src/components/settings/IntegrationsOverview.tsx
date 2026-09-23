@@ -19,6 +19,7 @@ import {
   Circle,
   HardDrive,
 } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 interface IntegrationsOverviewProps {
   onOpenTab: (tab: string) => void;
@@ -49,7 +50,7 @@ const INTEGRATIONS: IntegrationDef[] = [
   { key: "connections", tab: "connections", name: "Connected Apps", description: "External apps with x-api-key access", icon: Plug },
   { key: "telegram", tab: "telegram", name: "Telegram", description: "Capture notes via Telegram bot", icon: Send },
   { key: "discord", tab: "discord", name: "Discord", description: "Capture notes via /capture slash command", icon: Gamepad2 },
-  { key: "integrations", tab: "integrations", name: "Slack", description: "Send Slack messages straight to Menerio", icon: MessageSquare },
+  { key: "integrations", tab: "integrations", name: "Slack", description: `Send Slack messages straight to ${BRAND.name}`, icon: MessageSquare },
   { key: "singlefile", tab: "singlefile", name: "Web Clipper", description: "Save web pages as Markdown notes", icon: Globe },
   { key: "github", tab: "github", name: "GitHub Sync", description: "Two-way sync with an Obsidian vault", icon: Github },
   { key: "gdrive", tab: "gdrive", name: "Google Drive Scans", description: "Auto-import scans from a Drive folder", icon: HardDrive },

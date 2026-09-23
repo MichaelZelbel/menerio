@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { parseModelJson, runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 
 /** Model text goes into an email: never as markup. */
 function escapeHtml(s: string): string {
@@ -65,6 +65,8 @@ Return a JSON object with key "bullets": an array of strings, each a single bull
         systemPrompt: DAILY_DIGEST_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },
+      // The bullets are mailed to the user; no language was named.
+      systemSuffix: sourceLanguageRule(),
     });
     // The user prompt used to ask for a bare array while json_object mode and
     // the system prompt ask for {"bullets": [...]}; a bare JSON.parse then

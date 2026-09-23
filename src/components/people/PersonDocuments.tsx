@@ -40,10 +40,11 @@ export function PersonDocuments({ personId, personName }: { personId: string; pe
   const [editContent, setEditContent] = useState("");
   const [editDocType, setEditDocType] = useState("other");
 
+  // Named columns: `*` also carried every document's embedding vector.
   const loadDocuments = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data, error } = await supabase.from("person_documents" as any).select("*").eq("user_id", user.id).eq("person_id", personId).order("updated_at", { ascending: false });
+    const { data, error } = await supabase.from("person_documents" as any).select("id, user_id, person_id, title, content, doc_type, memory_type, embedding_updated_at, created_at, updated_at").eq("user_id", user.id).eq("person_id", personId).order("updated_at", { ascending: false });
     if (error) toast({ variant: "destructive", title: "Failed to load documents", description: error.message });
     setDocuments((data || []) as unknown as PersonDocument[]);
     setLoading(false);

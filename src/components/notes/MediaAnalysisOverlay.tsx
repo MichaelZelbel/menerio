@@ -196,11 +196,13 @@ function MediaBadge({ element, status, matches, isExpanded, onToggle, noteId, st
     const update = () => {
       const parent = element.offsetParent as HTMLElement;
       if (!parent) return;
-      setPos({
-        top: element.offsetTop,
-        left: element.offsetLeft,
-        width: element.offsetWidth,
-      });
+      const next = { top: element.offsetTop, left: element.offsetLeft, width: element.offsetWidth };
+      // Keep the same object when nothing moved. A new object every second
+      // re-rendered every badge in the note once a second, for as long as
+      // the note stayed open.
+      setPos((prev) =>
+        prev && prev.top === next.top && prev.left === next.left && prev.width === next.width ? prev : next,
+      );
     };
     update();
     const interval = setInterval(update, 1000);

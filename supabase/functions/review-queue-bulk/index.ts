@@ -171,6 +171,11 @@ async function runJob(
         .eq("user_id", userId)
         .eq("status", "applied")
         .in("change_type", ["created", "updated"])
+        // Newest first: a rollback only succeeds while the page still holds
+        // what that revision wrote, so the later revisions of a page must be
+        // undone before the earlier ones.
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, from + PAGE - 1);
       if (error) throw error;
       if (!data || data.length === 0) break;
@@ -722,6 +727,14 @@ async function runRollback(
   await flush(true);
 }
 
+// supabase-js returns errors instead of throwing them. Every revert below used
+// to ignore them, so a failed delete was still counted as reverted and the
+// review item filed as removed (or blocked) while the AI's row stayed put.
+function must<T>(result: { data: T; error: { message: string } | null }): T {
+  if (result.error) throw new Error(result.error.message);
+  return result.data;
+}
+
 async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
   const p = (r.payload || {}) as any;
 
@@ -747,10 +760,10 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
       const alias = String(p.alias || "").trim();
       if (contactId && alias) {
         // contact_id comes from the payload, which its owner can write.
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        const c = must(await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle());
         if (!c) return;
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId);
+        must(await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId));
       }
     }
     return;
@@ -758,20 +771,21 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
 
   switch (r.suggestion_type) {
     case "add_contact":
-      await db.from("contacts").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+      must(await db.from("contacts").delete().eq("id", r.target_entity_id).eq("user_id", userId));
       return;
     case "add_profile_entry":
-      await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+      must(await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId));
       return;
     case "add_relationship":
-      await db.from("contact_relationships").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+      must(await db.from("contact_relationships").delete().eq("id", r.target_entity_id).eq("user_id", userId));
       return;
     case "add_moment": {
       // target_entity_id is user-writable: only touch a moment this user owns.
-      const { data: m } = await db.from("moments").select("id").eq("id", r.target_entity_id).eq("user_id", userId).maybeSingle();
+      const m = must(await db.from("moments").select("id").eq("id", r.target_entity_id).eq("user_id", userId).maybeSingle());
       if (!m) return;
-      await db.from("moment_participants").delete().eq("moment_id", m.id);
-      await db.from("moments").delete().eq("id", m.id).eq("user_id", userId);
+      // Participants cascade from the moment; deleting them first left a
+      // moment with nobody in it whenever the moment delete then failed.
+      must(await db.from("moments").delete().eq("id", m.id).eq("user_id", userId));
       return;
     }
     case "add_alias": {
@@ -779,21 +793,21 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
       const alias = String(p.alias || "").trim();
       if (contactId && alias) {
         // contact_id comes from the payload, which its owner can write.
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        const c = must(await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle());
         if (!c) return;
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId);
+        must(await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId));
       }
       return;
     }
     case "group_member_suggestion":
-      await db.from("contact_group_memberships").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+      must(await db.from("contact_group_memberships").delete().eq("id", r.target_entity_id).eq("user_id", userId));
       return;
     case "unknown_profile_field":
       // If a target row was written, delete the value. The field definition
       // stays so any manual edits are not lost.
       if (r.target_entity_id) {
-        await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+        must(await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId));
       }
       return;
     default:
@@ -802,17 +816,10 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
 }
 
 async function wikiRollbackAsService(db: SupabaseClient, userId: string, revisionId: string) {
-  // Mirror wiki_rollback_revision semantics without relying on auth.uid().
-  const { data: rev, error } = await db.from("wiki_revisions").select("*").eq("id", revisionId).eq("user_id", userId).maybeSingle();
-  if (error || !rev) return;
-  if (rev.change_type === "created") {
-    if (rev.wiki_page_id) {
-      await db.from("wiki_pages").delete().eq("id", rev.wiki_page_id).eq("user_id", userId);
-    }
-  } else if (rev.change_type === "updated") {
-    if (rev.wiki_page_id) {
-      await db.from("wiki_pages").update({ content: rev.previous_content ?? "" }).eq("id", rev.wiki_page_id).eq("user_id", userId);
-    }
-  }
-  await db.from("wiki_revisions").update({ status: "rolled_back", rolled_back_at: new Date().toISOString() }).eq("id", revisionId);
+  // Same function the single rollback button calls, so both refuse to undo a
+  // revision whose page has changed since (it would erase the later changes),
+  // lock the page, and write the rollback record. The direct writes that stood
+  // here overwrote the page unconditionally and ignored every error.
+  const { error } = await db.rpc("wiki_rollback_revision_for", { p_user_id: userId, p_revision_id: revisionId });
+  if (error) throw new Error(error.message);
 }

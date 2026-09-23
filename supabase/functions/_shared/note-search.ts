@@ -135,6 +135,12 @@ export interface CombinedSearchOptions {
    * error for the caller.
    */
   embed: (query: string) => Promise<number[]>;
+  /**
+   * Rows the caller may return. Rows marked ai_visibility = 'hidden' are
+   * already left out in the query; this is for what a filter cannot express
+   * (a note about a person marked sensitive).
+   */
+  visible?: (row: { ai_visibility?: string | null; metadata?: Record<string, unknown> | null }) => boolean;
 }
 
 export interface CombinedSearchResult {
@@ -158,7 +164,7 @@ export interface CombinedSearchResult {
 export type CombinedSearchMode = "semantic+text" | "text_only";
 
 const NOTE_FIELDS =
-  "id, title, content, tags, entity_type, is_favorite, is_pinned, folder_path, source_app, source_id, created_at, updated_at";
+  "id, title, content, tags, entity_type, is_favorite, is_pinned, folder_path, source_app, source_id, created_at, updated_at, ai_visibility, metadata";
 
 export function clampSearchLimit(raw: unknown): number {
   const n = typeof raw === "number" ? raw : parseInt(String(raw ?? ""), 10);
@@ -188,6 +194,8 @@ interface SearchRow {
   source_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+  ai_visibility?: string | null;
+  metadata?: Record<string, unknown> | null;
   similarity: number | null;
   chunk: string | null;
   exact_phrase_match?: boolean;
@@ -234,10 +242,13 @@ export async function combinedNoteSearch(
         .select(NOTE_FIELDS)
         .eq("user_id", opts.userId)
         .eq("is_trashed", false)
+        // Hidden from AI means hidden from this key too (mc-visibility.ts).
+        .neq("ai_visibility", "hidden")
         .in("id", Array.from(best.keys()));
       if (rowsErr) throw new Error(rowsErr.message);
       for (const r of (rows || []) as SearchRow[]) {
         if (!sourceAppMatches(r.source_app, filter)) continue;
+        if (opts.visible && !opts.visible(r)) continue;
         const hit = best.get(r.id)!;
         byNote.set(r.id, { ...r, similarity: hit.similarity, chunk: hit.chunk });
       }
@@ -255,6 +266,7 @@ export async function combinedNoteSearch(
     .select(NOTE_FIELDS)
     .eq("user_id", opts.userId)
     .eq("is_trashed", false)
+    .neq("ai_visibility", "hidden")
     .or(ilikeAnyColumn(["title", "content"], query.toLowerCase()));
   textQuery = applySourceFilter(textQuery, filter);
   const { data: textRows, error: textErr } = await textQuery
@@ -266,6 +278,7 @@ export async function combinedNoteSearch(
 
   for (const r of (textRows || []) as SearchRow[]) {
     if (!sourceAppMatches(r.source_app, filter)) continue;
+    if (opts.visible && !opts.visible(r)) continue;
     const ex = byNote.get(r.id);
     if (ex) ex.exact_phrase_match = true;
     else byNote.set(r.id, { ...r, similarity: null, chunk: null, exact_phrase_match: true });

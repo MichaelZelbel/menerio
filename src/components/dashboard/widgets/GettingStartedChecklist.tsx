@@ -3,13 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Circle, X } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 interface GettingStartedChecklistProps {
   hasProfile: boolean;
   hasNotes: boolean;
+  /** At least one note carries AI metadata. */
+  hasAiNote?: boolean;
 }
 
-export function GettingStartedChecklist({ hasProfile, hasNotes }: GettingStartedChecklistProps) {
+const FEATURES_SEEN_KEY = "menerio-checklist-features-seen";
+
+export function GettingStartedChecklist({ hasProfile, hasNotes, hasAiNote = false }: GettingStartedChecklistProps) {
   const navigate = useNavigate();
   const [showChecklist, setShowChecklist] = useState(() => {
     return localStorage.getItem("menerio-checklist-dismissed") !== "true";
@@ -20,11 +25,25 @@ export function GettingStartedChecklist({ hasProfile, hasNotes }: GettingStarted
     setShowChecklist(false);
   };
 
+  const [featuresSeen, setFeaturesSeen] = useState(() => localStorage.getItem(FEATURES_SEEN_KEY) === "true");
+
+  // Two items could never be ticked ("Process a note with AI" was hard-coded
+  // false, "Explore features" had no signal), so the list sat at 2/4 forever.
   const checklistItems = [
     { label: "Complete your profile", done: hasProfile, action: () => navigate("/dashboard/settings") },
-    { label: "Create your first note", done: hasNotes, action: () => navigate("/dashboard/notes") },
-    { label: "Process a note with AI", done: false, action: () => navigate("/dashboard/notes") },
-    { label: "Explore features", done: false, action: () => navigate("/features") },
+    { label: "Create your first note", done: hasNotes, action: () => navigate("/dashboard/notes?action=create") },
+    { label: "Process a note with AI", done: hasAiNote, action: () => navigate("/dashboard/notes") },
+    // The features page is part of a brand's marketing site only when its
+    // header links to it; Cherishly's does not, and landed on the other brand's page.
+    ...(BRAND.marketingNav.some((link) => link.to === "/features") ? [{
+      label: "Explore features",
+      done: featuresSeen,
+      action: () => {
+        localStorage.setItem(FEATURES_SEEN_KEY, "true");
+        setFeaturesSeen(true);
+        navigate("/features");
+      },
+    }] : []),
   ];
   const completedCount = checklistItems.filter((i) => i.done).length;
 

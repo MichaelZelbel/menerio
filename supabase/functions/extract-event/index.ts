@@ -4,7 +4,7 @@ import {
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { EXTRACT_EVENT_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -112,6 +112,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
         systemPrompt: EXTRACT_EVENT_PROMPT,
       },
       templateVars: { currentDate: today },
+      // The headline and description are shown on the timeline; the prompt
+      // named no language, and a row that omits {{currentDate}} would lose the
+      // date, so both invariants ride in the suffix.
+      systemSuffix: `Today is ${today}.\n\n${sourceLanguageRule()}`,
       callOptions: {
         tools: [EXTRACT_EVENT_TOOL],
         tool_choice: { type: "function", function: { name: "extract_event" } },

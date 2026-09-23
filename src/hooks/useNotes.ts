@@ -503,7 +503,14 @@ export function useNoteProcessingState(noteId: string) {
   return useQuery({
     queryKey: ["note-ai-state", user?.id, noteId],
     enabled: !!user && !!noteId,
-    refetchInterval: 15_000,
+    // Poll fast only while the job can still change on its own. A finished
+    // job (or none) only changes after a save or a manual run, and both
+    // invalidate this query; the slow poll covers edits from another window.
+    // It used to poll every 15 s for as long as any note stayed open.
+    refetchInterval: (query) => {
+      const state = (query.state.data as { state?: string } | null | undefined)?.state;
+      return state === "pending" || state === "running" || state === "parked" ? 15_000 : 120_000;
+    },
     queryFn: async () => {
       const { data, error } = await supabase
         .from("note_ai_jobs" as never)

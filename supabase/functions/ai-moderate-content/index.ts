@@ -240,28 +240,14 @@ async function classifyContent(admin: any, content: string, userId: string): Pro
 }
 
 async function incrementStrikes(admin: any, userId: string) {
-  const { data: existing } = await admin
-    .from("user_suspensions")
-    .select("id, strike_count")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (existing) {
-    const row = existing as { id: string; strike_count: number };
-    const newCount = row.strike_count + 1;
-    const updates: Record<string, unknown> = { strike_count: newCount };
-    if (newCount >= STRIKE_LIMIT) {
-      updates.suspended = true;
-      updates.suspended_at = new Date().toISOString();
-      updates.suspension_reason = "Automatic suspension: repeated content violations";
-    }
-    await admin.from("user_suspensions").update(updates).eq("id", row.id);
-  } else {
-    await admin.from("user_suspensions").insert({
-      user_id: userId,
-      strike_count: 1,
-    });
-  }
+  // One atomic call: reading the count and writing count + 1 back let
+  // concurrent violations share one strike and slip past the limit.
+  const { error } = await admin.rpc("record_content_strike", {
+    p_user_id: userId,
+    p_limit: STRIKE_LIMIT,
+    p_reason: "Automatic suspension: repeated content violations",
+  });
+  if (error) console.error("[ai-moderate-content] strike not recorded:", error.message);
 }
 
 /** The title is the user's own text; unescaped it was HTML in the email. */

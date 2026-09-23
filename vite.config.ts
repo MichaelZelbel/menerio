@@ -24,6 +24,38 @@ function consentGate(): Plugin {
   };
 }
 
+// Icon chunks that only ProfileIcon's by-name lookup can reach. They are kept
+// out of the service-worker precache: there are ~1,500 of them and each one
+// imports the main chunk, so every deploy would re-download all of them on
+// every installed client. An icon chunk some other chunk imports statically
+// stays in the precache, or that route would break offline.
+const lazyOnlyIconFiles = new Set<string>();
+const LUCIDE_ICON_MODULE = /[\\/]lucide-react[\\/]dist[\\/]esm[\\/]icons[\\/]/;
+function lazyOnlyIcons(): Plugin {
+  return {
+    name: "lazy-only-icons",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      lazyOnlyIconFiles.clear();
+      const staticallyImported = new Set<string>();
+      for (const out of Object.values(bundle)) {
+        if (out.type === "chunk") out.imports.forEach((f) => staticallyImported.add(f));
+      }
+      for (const out of Object.values(bundle)) {
+        if (
+          out.type === "chunk" &&
+          !out.isEntry &&
+          out.facadeModuleId &&
+          LUCIDE_ICON_MODULE.test(out.facadeModuleId) &&
+          !staticallyImported.has(out.fileName)
+        ) {
+          lazyOnlyIconFiles.add(out.fileName);
+        }
+      }
+    },
+  };
+}
+
 // White-label brand for this build (docs/BRANDING.md). Defaults to menerio;
 // the Cherishly deployment sets VITE_BRAND=cherishly in its build env.
 const brand = brandForId(process.env.VITE_BRAND);
@@ -40,6 +72,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     consentGate(),
+    lazyOnlyIcons(),
     brandIndexHtml(brand),
     brandStatics(brand, __dirname),
     VitePWA({
@@ -76,6 +109,12 @@ export default defineConfig(({ mode }) => ({
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "/index.html",
         cleanupOutdatedCaches: true,
+        manifestTransforms: [
+          async (entries) => ({
+            manifest: entries.filter((e) => !lazyOnlyIconFiles.has(e.url)),
+            warnings: [],
+          }),
+        ],
       },
     }),
   ],
@@ -121,7 +160,12 @@ export default defineConfig(({ mode }) => ({
           // makes a second copy impossible rather than merely unlikely.
           query: ["@tanstack/react-query", "@powersync/tanstack-react-query"],
           powersync: ["@powersync/web", "@powersync/react"],
-          icons: ["lucide-react"],
+          // lucide-react is deliberately NOT a manual chunk. ProfileIcon reaches
+          // every icon through lucide's dynamicIconImports, so naming the
+          // package here merged all ~1,500 icons into one 850 kB chunk that
+          // index.html modulepreloaded on every page. Unnamed, Rollup keeps
+          // the icons the app imports next to their users and gives each
+          // name-only icon its own small lazy chunk (see lazyOnlyIcons).
           motion: ["framer-motion"],
           dates: ["date-fns"],
         },

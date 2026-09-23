@@ -13,7 +13,7 @@ import { Loader2, Eye, EyeOff } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BRAND } from "@/lib/brand";
 import { brandLogo } from "@/lib/brand-assets";
-import { rememberReturnTo } from "@/lib/return-to";
+import { rememberReturnTo, safeReturnPath } from "@/lib/return-to";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -53,7 +53,8 @@ export default function Auth() {
   const { signIn, signUp, signInWithOAuth, resetPassword, session } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get("redirect") || "/dashboard";
+  // Only a path inside this app: ?redirect=//evil.example must not leave it.
+  const redirectTo = safeReturnPath(searchParams.get("redirect")) ?? "/dashboard";
   const defaultTab = searchParams.get("tab") === "signup" ? "signup" : "signin";
   const [activeTab, setActiveTab] = useState(defaultTab);
 

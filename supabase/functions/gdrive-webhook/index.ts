@@ -9,6 +9,7 @@
  * random per-user channel token, which only Google knows.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/secret-equals.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     // Unknown or mismatched channel — acknowledge so Google stops retrying.
-    if (!conn || conn.channel_token !== token) return new Response("ok", { status: 200 });
+    if (!conn || !(await secretEquals(token, conn.channel_token))) return new Response("ok", { status: 200 });
 
     await admin
       .from("gdrive_connections")

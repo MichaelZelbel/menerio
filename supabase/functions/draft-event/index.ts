@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { openRouterWithCredits, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
-import { resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { resolveSystemPrompt, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { DRAFT_EVENT_PROMPT } from "../_shared/llm-defaults.ts";
 import { sanitizePromptText } from "../_shared/prompt-safety.ts";
 
@@ -105,7 +105,10 @@ Deno.serve(async (req) => {
         peopleContext,
       },
     );
-    const systemMessage = { role: "system", content: systemPromptResolved };
+    // Appended in code so an llm_call_configs row cannot drop it. The prompt
+    // keeps the description in the user's words but said nothing about the
+    // title, which it may "freely write", so a German moment got an English one.
+    const systemMessage = { role: "system", content: `${systemPromptResolved}\n\n${sourceLanguageRule()}` };
 
     const schema = {
       type: "object",

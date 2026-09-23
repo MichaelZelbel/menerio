@@ -199,7 +199,7 @@ export function EntityDetail({ entity, onDeleted }: EntityDetailProps) {
             <ul className="space-y-1.5">
               {notes.map((n) => (
                 <li key={n.id} className="text-sm">
-                  <Link to={`/dashboard/notes?note=${n.id}`} className="hover:underline">
+                  <Link to={`/dashboard/notes/${n.id}`} className="hover:underline">
                     {n.title || "Untitled"}
                   </Link>
                 </li>

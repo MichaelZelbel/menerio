@@ -55,7 +55,7 @@ function pinTitleHits(
 const MAX_RESULTS = 8;
 
 
-type SearchStatus = "idle" | "pending" | "running" | "done";
+type SearchStatus = "idle" | "pending" | "running" | "done" | "failed";
 
 export function DashboardSearch() {
   const [query, setQuery] = useState("");
@@ -129,11 +129,14 @@ export function DashboardSearch() {
       setVisible([]);
       setStatus("running");
 
+      // Either pass may fail on its own; only when both do is the empty list
+      // a failure rather than "No results found".
+      let failures = 0;
       try {
         const ilike = await ilikeSearch.mutateAsync(query);
         if (requestIdRef.current !== reqId) return;
         commit((prev) => pinTitleHits(mergeStable(prev, ilike, MAX_RESULTS), query));
-      } catch { /* ignore */ }
+      } catch { failures += 1; }
 
       try {
         const res = await semanticSearch.mutateAsync({ query, limit: MAX_RESULTS, threshold: 0.25 });
@@ -141,9 +144,9 @@ export function DashboardSearch() {
         // Append-only: rows already rendered keep their exact position so a row
         // can never jump out from under the user's cursor mid-click.
         commit((prev) => mergeStable(prev, res.results, MAX_RESULTS));
-      } catch { /* ignore */ }
+      } catch { failures += 1; }
 
-      if (requestIdRef.current === reqId) setStatus("done");
+      if (requestIdRef.current === reqId) setStatus(failures === 2 ? "failed" : "done");
     }, 150);
 
     return () => clearTimeout(timer);
@@ -197,6 +200,11 @@ export function DashboardSearch() {
         >
           {results.length === 0 && status === "done" && (
             <p className="text-sm text-muted-foreground text-center py-6">No results found</p>
+          )}
+          {results.length === 0 && status === "failed" && (
+            <p role="alert" className="text-sm text-destructive text-center py-6 px-3">
+              Search could not reach the server. Check your connection and try again.
+            </p>
           )}
           {results.length === 0 && isSearching && (
             <div className="py-2">

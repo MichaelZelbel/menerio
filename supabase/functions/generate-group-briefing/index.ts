@@ -23,7 +23,9 @@ serve(async (req) => {
 
     const briefing = await callMarkdown(admin, userId, "group-ai.briefing", [
       { role: "system", content: "" },
-      { role: "user", content: taggedPrompt({ group, period_days: days, memberships: memberships || [], interactions: interactions || [], actions: actions || [] }) },
+      // `today`: "Stale Members" and "next week" are judged against last_movement_at
+      // and interaction dates, and without it the model had no date to measure from.
+      { role: "user", content: taggedPrompt({ today: new Date().toISOString().slice(0, 10), group, period_days: days, memberships: memberships || [], interactions: interactions || [], actions: actions || [] }) },
     ]);
 
     const generatedAt = new Date().toISOString();

@@ -154,6 +154,10 @@ serve(async (req) => {
         },
         callOptions: { response_format: { type: "json_object" } },
         templateVars: { contactName },
+        // Free text is the one path where the model's value is kept (a given
+        // label+value is restored below). Nothing told it to keep the user's
+        // words, so "wohnt in München" could come back as "Munich".
+        systemSuffix: "VALUE — copy the value from the user's fact in their own words and language. Do not translate, paraphrase, or add details the fact does not state. The label may use a canonical label from the list above.",
       });
       parsed = parseModelJson<Record<string, unknown>>(result.content);
       if (parsed === null) throw new Error("Model returned no JSON");

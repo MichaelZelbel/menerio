@@ -16,6 +16,12 @@ export type { Claim } from "@/lib/claims";
 
 const db = supabase as any;
 
+// Every column except `embedding`. `*` shipped each claim's vector (1,536
+// floats as text, about 19 kB) to a list that shows attribute and value, and
+// the list is persisted to IndexedDB.
+const CLAIM_COLUMNS =
+  "id, user_id, subject_type, subject_id, attribute, value, value_json, valid_from, valid_to, confidence, cardinality, evidence_quote, review_by, source_type, source_id, origin, created_at, updated_at";
+
 /**
  * World reads the same claims through the `world_claims` view under its own
  * key; without this a fact added or ended on a person page kept its old state
@@ -36,7 +42,7 @@ export function useClaims(subjectType: ClaimSubjectType, subjectId: string | nul
     queryFn: async () => {
       let q = db
         .from("claims")
-        .select("*")
+        .select(CLAIM_COLUMNS)
         .eq("user_id", user!.id)
         .eq("subject_type", subjectType);
       q = subjectType === "self" ? q.is("subject_id", null) : q.eq("subject_id", subjectId);
@@ -75,7 +81,7 @@ export function useAddClaim() {
 
       let q = db
         .from("claims")
-        .select("*")
+        .select(CLAIM_COLUMNS)
         .eq("user_id", user!.id)
         .eq("subject_type", input.subject_type)
         .eq("attribute", attribute);
@@ -107,7 +113,7 @@ export function useAddClaim() {
           source_type: input.source_type || "manual",
           source_id: input.source_id || null,
         })
-        .select("*")
+        .select(CLAIM_COLUMNS)
         .single();
       if (error) throw error;
 

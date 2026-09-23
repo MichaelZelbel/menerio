@@ -86,6 +86,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { brandLogo } from "@/lib/brand-assets";
 import { escapeLike, pgOrValue } from "@/lib/postgrest";
 
 
@@ -123,11 +124,13 @@ export default function Notes() {
   const [searchMode, setSearchMode] = useState(false);
   const [showLocalGraph, setShowLocalGraph] = useState(false);
 
-  // Sync selectedId when URL param changes (e.g. from graph node click)
+  // The URL is the source of the open note. selectNote() always writes it, so
+  // mirroring it back both ways is safe. Only following it when it named a
+  // note meant that the browser's Back button (or the sidebar's "Notes" link)
+  // changed the URL to /dashboard/notes while the old note stayed open, and
+  // on a phone the list never came back.
   useEffect(() => {
-    if (urlNoteId && urlNoteId !== selectedId) {
-      setSelectedId(urlNoteId);
-    }
+    setSelectedId(urlNoteId ?? null);
   }, [urlNoteId]);
   const [searchQuery, setSearchQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
@@ -574,13 +577,16 @@ export default function Notes() {
     trash: trashNotes.length,
   };
 
+  // `type` lets the Smart button search in the mode it just switched to: its
+  // click handler still sees this render's searchType ("exact"), so without
+  // it switching back to Smart ran only the keyword search.
   const handleSearch = useCallback(
-    (q: string) => {
+    (q: string, type: SearchMode = searchType) => {
       setSearchQuery(q);
       setSemanticResults(null);
       if (!q.trim()) return;
       ilikeSearch.mutate(q);
-      if (searchType === "semantic") {
+      if (type === "semantic") {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
           semanticSearch.mutate(
@@ -596,6 +602,18 @@ export default function Notes() {
   useEffect(() => {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, []);
+
+  // ?q=... opens the search with that text (the topic chips on an analysed
+  // image link here). The param is consumed so Back does not re-run it.
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (!q) return;
+    setSearchMode(true);
+    handleSearch(q);
+    const next = new URLSearchParams(searchParams);
+    next.delete("q");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, handleSearch, setSearchParams]);
 
   const searchResults: SemanticSearchResult[] | null = useMemo(() => {
     if (!searchMode || !searchQuery.trim()) return null;
@@ -793,7 +811,7 @@ export default function Notes() {
 
   return (
     <>
-    <div className="flex h-[calc(100dvh-56px)] overflow-hidden">
+    <div className="flex h-[calc(100dvh-104px)] overflow-hidden">
       <SEOHead title="Notes — Menerio" noIndex />
 
 
@@ -896,7 +914,7 @@ export default function Notes() {
                   value={newFolderPath}
                   onChange={(e) => setNewFolderPath(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") createFolder(); }}
-                  placeholder={activeFolderPath ? `${activeFolderPath}/New folder` : "Projects/Menerio"}
+                  placeholder={activeFolderPath ? `${activeFolderPath}/New folder` : "Projects/Garden"}
                   className="h-8 text-xs"
                 />
                 <Button size="sm" className="h-8" onClick={createFolder}>Add</Button>
@@ -1092,7 +1110,7 @@ export default function Notes() {
                     onClick={() => {
                       setSearchType("semantic");
                       setSemanticResults(null);
-                      if (searchQuery.trim()) handleSearch(searchQuery);
+                      if (searchQuery.trim()) handleSearch(searchQuery, "semantic");
                     }}
                   >
                     <Sparkles className="h-3 w-3" />
@@ -1280,10 +1298,10 @@ export default function Notes() {
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <div className="mb-4">
-              <img src="/favicon.png" alt="Menerio" className="h-16 w-16 object-contain" />
+              <img src={brandLogo} alt="" className="h-16 w-16 object-contain" />
             </div>
             <h3 className="text-lg font-semibold font-display mb-2">
-              Your Open Knowledge System
+              No note open
             </h3>
             <p className="text-sm text-muted-foreground max-w-sm mb-6">
               Select a note to view it, or create a new one to start capturing your thoughts.

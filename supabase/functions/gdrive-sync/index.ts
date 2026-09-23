@@ -10,6 +10,7 @@
  *   - the scheduled backstop / webhook → service role key, syncs due connections
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/secret-equals.ts";
 import { checkBalance } from "../_shared/llm-credits.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
 
@@ -365,8 +366,8 @@ Deno.serve(async (req) => {
 
     let targetUserId: string | null = null;
     const cronSecret = Deno.env.get("GDRIVE_CRON_SECRET");
-    const isCron = !!cronSecret && req.headers.get("x-cron-key") === cronSecret;
-    const isService = isCron || (!!token && token === SERVICE_ROLE_KEY);
+    const isCron = await secretEquals(req.headers.get("x-cron-key"), cronSecret);
+    const isService = isCron || (await secretEquals(token, SERVICE_ROLE_KEY));
 
     if (!isService) {
       if (!token) return json({ error: "Unauthorized" }, 401);

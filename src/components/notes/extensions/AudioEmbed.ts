@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
+import { safeEmbedSrc } from "@/lib/safe-url";
 
 /**
  * Audio embed node for TipTap.
@@ -28,7 +29,7 @@ export const AudioEmbed = Node.create({
       [
         "audio",
         mergeAttributes({
-          src: HTMLAttributes.src,
+          src: safeEmbedSrc(HTMLAttributes.src),
           controls: "true",
           preload: "metadata",
         }),

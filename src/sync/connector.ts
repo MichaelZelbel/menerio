@@ -74,7 +74,9 @@ function toPostgresRecord(
 }
 
 // SQLSTATE uses five alphanumeric characters, not five digits.
-// 22: invalid data; 23: integrity constraints; 42501: denied by policy.
+// 22: invalid data; 23: integrity constraints; 54: a value over a hard limit
+// (a note too large for the full-text index raises 54000 on every attempt);
+// 42501: denied by policy. HTTP 413 is a body the gateway will never accept.
 // Other 42 and PostgREST schema-cache errors require a deployment repair.
 // Auth and temporary failures remain in PowerSync for automatic retries.
 export function classifySyncError(error: unknown): FailureKind {
@@ -82,9 +84,16 @@ export function classifySyncError(error: unknown): FailureKind {
   const { code, status } = (error ?? {}) as { code?: string; status?: number };
   if (status === 401 || code === "PGRST301" || code === "PGRST302" || code === "28000" || code === "28P01") return "auth";
   if (code === "42501" || status === 403) return "permission";
-  if (/^(22|23)[A-Z0-9]{3}$/.test(code ?? "")) return "data";
+  if (/^(22|23|54)[A-Z0-9]{3}$/.test(code ?? "") || status === 413) return "data";
+  if (code === "PGRST116") return "data";
   if (/^42[A-Z0-9]{3}$/.test(code ?? "") || /^PGRST20[0-5]$/.test(code ?? "")) return "schema";
   return "transient";
+}
+
+// supabase-js puts the HTTP status on the response, not on the error, so the
+// 401/403/413 checks in classifySyncError never saw one.
+function withStatus(error: object, status: number | undefined) {
+  return Object.assign(error, { status });
 }
 
 export class SupabaseConnector implements PowerSyncBackendConnector {
@@ -123,19 +132,31 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
         await captureNoteWithLexicon(record, authorization);
         return;
       }
-      const { error } = await table.upsert(record).setHeader("Authorization", authorization);
-      if (error) throw error;
+      // A PUT only ever creates a row. Local creates are the only intended
+      // PUTs; the replica repair and the open-note self-heal (local-replica.ts)
+      // also emit one, carrying a server snapshot that can be seconds or, with
+      // a stalled queue, days old. An upsert wrote that snapshot over the whole
+      // row, undoing a restore from Trash, a newer edit from another device or
+      // the AI's metadata. The capture path above already inserts-or-ignores.
+      const { error, status } = await table.upsert(record, { ignoreDuplicates: true }).setHeader("Authorization", authorization);
+      if (error) throw withStatus(error, status);
     } else if (op.op === UpdateType.PATCH) {
       if (op.opData && Object.keys(op.opData).length > 0) {
         const record = toPostgresRecord(op.table, op.opData);
         if (Object.keys(record).length > 0) {
-          const { error } = await table.update(record).eq("id", op.id).setHeader("Authorization", authorization);
-          if (error) throw error;
+          const { data, error, status } = await table.update(record).eq("id", op.id).select("id").setHeader("Authorization", authorization);
+          if (error) throw withStatus(error, status);
+          // PostgREST answers an UPDATE that matched nothing with success. The
+          // row was deleted elsewhere while this edit waited, and acknowledging
+          // it discarded the edit for good; keep it in recovery instead.
+          if (Array.isArray(data) && data.length === 0) {
+            throw Object.assign(new Error(`The ${op.table} row this change edits no longer exists on the server.`), { code: "PGRST116" });
+          }
         }
       }
     } else if (op.op === UpdateType.DELETE) {
-      const { error } = await table.delete().eq("id", op.id).setHeader("Authorization", authorization);
-      if (error) throw error;
+      const { error, status } = await table.delete().eq("id", op.id).setHeader("Authorization", authorization);
+      if (error) throw withStatus(error, status);
     }
   }
 

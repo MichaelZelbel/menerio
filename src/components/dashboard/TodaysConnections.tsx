@@ -23,11 +23,14 @@ export function TodaysConnections() {
   const fetch = useCallback(async () => {
     if (!user) return;
 
-    // Only fetch once per day
-    const lastFetch = localStorage.getItem("menerio-daily-connections-date");
+    // Only fetch once per day. The cache is per account: a shared key showed
+    // the previous account's note titles to whoever signed in next that day.
+    const dateKey = `menerio-daily-connections-date:${user.id}`;
+    const dataKey = `menerio-daily-connections:${user.id}`;
+    const lastFetch = localStorage.getItem(dateKey);
     const today = new Date().toDateString();
     if (lastFetch === today) {
-      const cached = localStorage.getItem("menerio-daily-connections");
+      const cached = localStorage.getItem(dataKey);
       if (cached) {
         try { setData(JSON.parse(cached)); } catch { /* ignore malformed cache */ }
         return;
@@ -47,12 +50,17 @@ export function TodaysConnections() {
       // Silently skip on insufficient-credits or any error — widget is optional
       if (res.error) {
         // Cache today's date so we don't retry on every dashboard mount
-        localStorage.setItem("menerio-daily-connections-date", today);
-        localStorage.removeItem("menerio-daily-connections");
-      } else if (res.data && res.data.connections?.length > 0) {
-        setData(res.data);
-        localStorage.setItem("menerio-daily-connections", JSON.stringify(res.data));
-        localStorage.setItem("menerio-daily-connections-date", today);
+        localStorage.setItem(dateKey, today);
+        localStorage.removeItem(dataKey);
+      } else if (res.data) {
+        // An empty answer is cached for the day too. It used to be left
+        // uncached, so an account with no match (or whose newest note had no
+        // embedding yet, which the function then embeds and pays for without
+        // saving) called find-connections again on every Dashboard visit.
+        const hasConnections = res.data.connections?.length > 0;
+        if (hasConnections) setData(res.data);
+        localStorage.setItem(dataKey, JSON.stringify(hasConnections ? res.data : null));
+        localStorage.setItem(dateKey, today);
       }
     } catch { /* network errors are non-fatal */ }
     setLoading(false);
@@ -98,7 +106,7 @@ export function TodaysConnections() {
         {data.connections.slice(0, 3).map((conn) => (
           <button
             key={conn.id}
-            onClick={() => navigate(`/dashboard/notes?selected=${conn.id}`)}
+            onClick={() => navigate(`/dashboard/notes/${conn.id}`)}
             className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent transition-colors"
           >
             <span className="text-xs truncate flex-1 text-foreground">{conn.title}</span>

@@ -4,7 +4,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
-import { parseModelJson, runChat, runOcr } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, runOcr, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { countPdfPages } from "../_shared/pdf-page-count.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -119,6 +119,9 @@ async function summarizePageText(
         systemPrompt: PAGE_SUMMARY_DEFAULT_PROMPT,
       },
       callOptions: { response_format: { type: "json_object" } },
+      // The description and topics are shown with the attachment and feed the
+      // note's context; a German letter should not be described in English.
+      systemSuffix: sourceLanguageRule(),
     });
     const parsed = parseModelJson<Record<string, unknown>>(result.content) ?? {};
     return {
@@ -547,6 +550,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
         });
       }
       user = authed;
+      // The storage path is confined to the caller's prefix below, but the
+      // note was not: a caller could file analysis rows under another
+      // account's note id, and readers that select by note id alone would
+      // hand that text to the note's owner's AI as the note's own media.
+      if (typeof note_id === "string" && note_id) {
+        const { data: owned, error: ownErr } = await supabase
+          .from("notes").select("id").eq("id", note_id).eq("user_id", authed.id).maybeSingle();
+        if (ownErr) throw ownErr;
+        if (!owned) {
+          return new Response(JSON.stringify({ error: "Note not found" }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
     }
 
     if (!note_id || !storage_path || !media_type) {
@@ -567,7 +585,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // caller could pass another user's storage_path to read that user's file and
     // clobber their analysis rows. Confining the path to the caller's own prefix
     // closes that cross-user access.
-    if (typeof storage_path !== "string" || !storage_path.startsWith(`${user.id}/`)) {
+    // A ".." segment would leave the prefix the startsWith check just confirmed.
+    if (
+      typeof storage_path !== "string" ||
+      !storage_path.startsWith(`${user.id}/`) ||
+      storage_path.split("/").some((segment) => segment === ".." || segment === ".")
+    ) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

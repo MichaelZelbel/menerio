@@ -191,7 +191,7 @@ export default function People() {
   const deleteTarget = deleteTargetId ? people.find((p) => p.id === deleteTargetId) ?? null : null;
 
   return (
-    <div className="flex h-[calc(100dvh-56px)] overflow-hidden">
+    <div className="flex h-[calc(100dvh-104px)] overflow-hidden">
       <SEOHead title="People — Menerio" noIndex />
 
       {/* Left panel — tree + search */}

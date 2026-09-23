@@ -66,11 +66,14 @@ export function WebClipPreview({ webClip, defaultOpen = false }: Props) {
           `script-src 'none'; ` +
           `frame-src 'none'; ` +
           `object-src 'none';">`;
-        if (/<head[^>]*>/i.test(text)) {
-          text = text.replace(/<head([^>]*)>/i, `<head$1>${csp}`);
-        } else {
-          text = `<!doctype html><html><head>${csp}</head><body>${text}</body></html>`;
-        }
+        // The policy goes FIRST, before anything in the snapshot. Inserting it
+        // after the first "<head" match let a script placed ahead of <head>, or
+        // a "<!--<head>-->" comment (which swallowed the meta), run with no
+        // policy. That matters beyond the sandboxed iframe: "Open full page"
+        // below opens a blob: URL, and a blob: URL runs in this app's origin.
+        // A meta right after the doctype lands in the implied <head>; the
+        // snapshot's own <html> and <head> tags are then merged or ignored.
+        text = `<!doctype html><meta charset="utf-8">${csp}${text.replace(/^\uFEFF?\s*<!doctype[^>]*>/i, "")}`;
 
         if (!cancelled) {
           setHtml(text);

@@ -24,7 +24,7 @@ interface OrphanNotesDetectorProps {
 export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data, isLoading } = useOrphanNotes();
+  const { data, isLoading } = useOrphanNotes({ withContent: !compact });
   const [computing, setComputing] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 

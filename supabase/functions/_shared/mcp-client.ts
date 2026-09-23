@@ -19,6 +19,8 @@
  * side (menerio-mcp/deno.json → 1.24.3), loaded via `npm:` like the server.
  */
 
+import { isSafeOutboundUrl } from "./ssrf-guard.ts";
+
 // Specifiers held as variables so `deno check` doesn't eagerly resolve them
 // (the root package.json makes local npm: resolution fail); Supabase's runtime
 // resolves `npm:` specifiers natively, as menerio-mcp already relies on.
@@ -87,6 +89,26 @@ function sanitize(s: string, max: number): string {
     .slice(0, max);
 }
 
+/**
+ * The server URL is whatever the user typed into Settings, and this runs
+ * inside the edge runtime: without a check it reached loopback, private
+ * ranges and the cloud metadata address, and the SDK followed redirects
+ * there too. Each request's URL is checked and redirects are refused, since a
+ * Streamable HTTP endpoint has no reason to redirect. http stays allowed for
+ * people running a server on their own public host.
+ */
+export function isAllowedMcpServerUrl(raw: string): boolean {
+  return isSafeOutboundUrl(raw, { requireHttps: false });
+}
+
+const guardedFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (!isAllowedMcpServerUrl(url)) {
+    return Promise.reject(new Error("MCP server URL refused: not a public http(s) address"));
+  }
+  return fetch(input, { ...init, redirect: "error" });
+};
+
 function headersFor(auth: Record<string, unknown> | null): Record<string, string> {
   const headers: Record<string, string> = {};
   if (!auth) return headers;
@@ -151,12 +173,16 @@ export async function loadUserMcpTools(
     rows.map(async (row) => {
       let client: Any = null;
       try {
+        if (!isAllowedMcpServerUrl(row.url)) {
+          throw new Error("URL refused: not a public http(s) address");
+        }
         client = new Client(
           { name: "menerio-chat", version: "1.0.0" },
           { capabilities: {} }
         );
         const transport = new StreamableHTTPClientTransport(new URL(row.url), {
-          requestInit: { headers: headersFor(row.auth) },
+          requestInit: { headers: headersFor(row.auth), redirect: "error" },
+          fetch: guardedFetch,
         });
         await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connect ${row.name}`);
         const listed: any = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listTools ${row.name}`);

@@ -25,8 +25,14 @@ function getLazyIcon(name: string): any {
   if (cached) return cached;
   const importer = (dynamicIconImports as Record<string, () => Promise<unknown>>)[name];
   if (!importer) return null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Component = lazy(importer as any);
+  // By-name icon chunks are not in the service-worker precache (see
+  // lazyOnlyIcons in vite.config.ts), so offline the import can fail. A
+  // rejected lazy() would throw to the error boundary and take the whole
+  // profile down; draw the fallback circle instead.
+  const Component = lazy(() =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (importer() as Promise<any>).catch(() => ({ default: Circle })),
+  );
   iconCache.set(name, Component);
   return Component;
 }

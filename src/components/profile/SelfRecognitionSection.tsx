@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { X, Plus, UserCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { BRAND } from "@/lib/brand";
 
 interface SelfAlias {
   id: string;
@@ -95,7 +96,7 @@ export function SelfRecognitionSection() {
           <div>
             <h3 className="text-sm font-medium">When I write about myself</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              If you mention your own name in notes ("Michael's VRChat profile"), Menerio can recognize that as you and route facts to your profile instead of creating a stranger.
+              If you mention your own name in notes ("Alex's running plan"), {BRAND.name} can recognize that as you and route facts to your profile instead of creating a stranger.
             </p>
           </div>
         </div>

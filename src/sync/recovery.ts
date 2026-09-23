@@ -85,13 +85,23 @@ export function dependentGroups(operations: CrudEntry[]): CrudEntry[][] {
   const groups: CrudEntry[][] = [];
   for (const operation of operations) {
     const related = groups.filter(group => group.some(other =>
-      other.id === operation.id || references(other.opData, operation.id)
-      || references(operation.opData, other.id)));
+      other.id === operation.id || referencesRow(other.opData, operation.id)
+      || referencesRow(operation.opData, other.id)));
     const members = new Set([...related.flat(), operation]);
     for (const group of related) groups.splice(groups.indexOf(group), 1);
     groups.push(operations.filter(op => members.has(op)));
   }
   return groups;
+}
+
+// Free text is not a reference. A body that links to /dashboard/notes/<id> or
+// quotes an id tied every later edit of that note to a rejected one: they went
+// straight to recovery without being tried, and the editor reverted on sync.
+const FREE_TEXT_COLUMNS = new Set(["title", "content"]);
+
+function referencesRow(opData: Record<string, unknown> | undefined, id: string): boolean {
+  if (!opData) return false;
+  return Object.entries(opData).some(([key, value]) => !FREE_TEXT_COLUMNS.has(key) && references(value, id));
 }
 
 function references(value: unknown, id: string): boolean {

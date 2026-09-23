@@ -43,7 +43,9 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     category: "Notes",
     blurb: "Capture, search, and manage thoughts.",
     tools: [
+      { name: "search_brain", desc: "Preferred search. Your dated facts, notes and Lexicon pages in one call, each result labelled by kind." },
       { name: "search_notes", desc: "Semantic search across all notes by meaning. Your own notes rank above mirrored godspeed files; filter with source: native or godspeed." },
+      { name: "get_note", desc: "Read one note's full content by ID or exact title, before editing it." },
       { name: "list_recent_notes", desc: "Recent notes, filterable by type, topic, person, or date." },
       { name: "list_note_folders", desc: "Your note folders with note counts, so a new note goes in the folder that fits." },
       { name: "capture_note", desc: "Save a new note with an optional title, folder and tags. [[Exact Title]] links it to another note; the reply names the most related notes." },
@@ -58,10 +60,19 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     blurb: "Contacts and their interaction history.",
     tools: [
       { name: "list_people", desc: "List all contacts." },
-      { name: "search_contacts", desc: "Search contacts by name, company, or tag." },
-      { name: "get_contact_context", desc: "Full context for one person: profile, notes, interactions, moments." },
+      { name: "search_contacts", desc: "Search contacts by name, alias, or company, or filter by relationship type." },
+      { name: "get_contact_context", desc: "Full context for one person: details, profile, recent interactions, related notes." },
+      { name: "get_contact_profile", desc: "One person's profile facts and dated claims." },
       { name: "get_person_notes", desc: "All notes mentioning a specific person." },
       { name: "log_interaction", desc: "Record an interaction with a contact." },
+      { name: "list_contact_topics", desc: "Topics to bring up with a person, highest priority first." },
+      { name: "get_contact_topic_history", desc: "The history of one topic, newest first." },
+      { name: "create_contact_topic", desc: "Add a topic to bring up with a person." },
+      { name: "update_contact_topic", desc: "Edit a topic's title, priority, or repetition." },
+      { name: "discuss_contact_topic", desc: "Record that a topic was discussed." },
+      { name: "archive_contact_topic", desc: "Stop bringing up a topic." },
+      { name: "reopen_contact_topic", desc: "Restore a completed or archived topic." },
+      { name: "undo_contact_topic_event", desc: "Reverse the latest change to a topic." },
     ],
   },
   {
@@ -70,7 +81,18 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     tools: [
       { name: "create_moment_with_ai", desc: "Preferred. Create a Moment from a natural-language description; AI fills in structured fields." },
       { name: "list_moments", desc: "List recent Moments, optionally filtered." },
-      { name: "search_moments", desc: "Search Moments by content or participants." },
+      { name: "search_moments", desc: "Search Moments by keyword in their title or description." },
+    ],
+  },
+  {
+    category: "World",
+    blurb: "Places, organizations, projects, objects and pets, and dated facts.",
+    tools: [
+      { name: "create_entity", desc: "Add a place, organization, project, object, or pet." },
+      { name: "search_entities", desc: "Search entities by name, alias, description, or type." },
+      { name: "get_entity_context", desc: "One entity with its current facts, moments, and notes." },
+      { name: "add_claim", desc: "Record a dated fact about you, a person, or an entity; an older fact it replaces gets an end date." },
+      { name: "get_claims", desc: "Read dated facts: current, full history, or changed since a date." },
     ],
   },
   {
@@ -245,7 +267,7 @@ export function MCPConnectionManager() {
 **Step 3 — Save behavior rules.** Ask my permission, then append the following to your **global / user-level** instructions file (e.g. \`~/.claude/CLAUDE.md\`, \`GEMINI.md\`, \`AGENTS.md\`, or your tool's user-scope rules) so they apply in every future session:
 
 - At the start of a session that needs personal context, call \`get_user_profile\` once to personalize, and honor any \`agent_instructions\` it returns.
-- When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_notes\` (and \`lexicon_search\`) before answering — don't answer from memory alone.
+- When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_brain\` (my dated facts, notes and Lexicon pages in one call) before answering — don't answer from memory alone.
 - When I share a new fact, decision, idea, or meeting note worth keeping, call \`capture_note\` without asking. Give it a clear \`title\`, and call \`list_note_folders\` first so it goes in the folder of mine that fits (\`folder_path\`). Confirm before saving long-form content. If it clearly fits a user collection, prefer \`add_collection_item\`.
 - For things that happened at a point in time (meetings, milestones), prefer \`create_moment_with_ai\`.
 - After any write, end with a one-line confirmation of what was saved and where. Never invent note ids, titles, or dates.
@@ -423,8 +445,8 @@ export function MCPConnectionManager() {
             <Sparkles className="h-5 w-5" /> Agent Setup Prompt
           </CardTitle>
           <CardDescription>
-            Paste this into your AI agent's system prompt or instructions. It tells the agent what Menerio is, which
-            tools are available, and how to use them well.
+            Send this to your AI agent once, as a message. It asks for your key, installs the server, and saves
+            the rules for using it into the agent's own instructions file.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

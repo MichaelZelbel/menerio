@@ -25,6 +25,7 @@ vi.mock("@/hooks/useProfileSummary", () => ({
 }));
 vi.mock("@/hooks/useReviewQueue", () => ({
   useReviewQueue: () => ({ pendingCount: 0 }),
+  useReviewQueueCount: () => 0,
 }));
 vi.mock("@/components/settings/CreditsDisplay", () => ({
   CreditsDisplay: () => null,

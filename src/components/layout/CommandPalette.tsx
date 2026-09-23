@@ -27,7 +27,51 @@ import {
   ClipboardList,
   User,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useNotes, useCreateNote } from "@/hooks/useNotes";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { OFFLINE_CORE } from "@/lib/flags";
+
+type PaletteNote = { id: string; title: string | null };
+
+// The palette lists the first 50 notes in the notes list's order and nothing
+// else. It is mounted in DashboardLayout, so on the server path it used to run
+// useNotes("all") on every signed-in page: every note in the vault, full
+// bodies, paged 1,000 at a time, refetched on each mount once 60 s stale, and
+// all of it just to show 50 titles in a dialog that is usually closed. Now it
+// fetches those 50 titles, and only while the dialog is open.
+function usePaletteNotesRemote(open: boolean): PaletteNote[] | undefined {
+  const { user } = useAuth();
+  const { data } = useQuery<PaletteNote[]>({
+    queryKey: ["command-palette-notes", user?.id],
+    enabled: open && !!user,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notes")
+        .select("id, title")
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false)
+        .order("is_pinned", { ascending: false })
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
+        .limit(50);
+      if (error) throw error;
+      return (data ?? []) as PaletteNote[];
+    },
+  });
+  return data;
+}
+
+// Local-first sessions read the list from the device's SQLite replica, which
+// costs no network, so they keep sharing the notes list.
+function usePaletteNotesLocal(_open: boolean): PaletteNote[] | undefined {
+  return useNotes("all").data;
+}
+
+// OFFLINE_CORE is fixed for the page's lifetime, so this never changes hooks.
+const usePaletteNotes = OFFLINE_CORE ? usePaletteNotesLocal : usePaletteNotesRemote;
 
 const NAV_ITEMS: { title: string; url: string; icon: typeof FileText }[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -49,7 +93,7 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
-  const { data: notes } = useNotes("all");
+  const notes = usePaletteNotes(open);
   const createNote = useCreateNote();
 
   useEffect(() => {

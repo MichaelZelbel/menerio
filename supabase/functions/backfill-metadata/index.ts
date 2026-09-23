@@ -94,8 +94,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let processed = 0;
     const errors: string[] = [];
 
+    // Notes that already have a vector keep it. This used to embed every
+    // selected note's whole text again (paid, and uncapped in length) and
+    // overwrite notes.embedding, which process-note sets from the note's
+    // first chunk, just because the metadata was missing. The check reads ids
+    // only, so no vector crosses the wire for it.
+    const alreadyEmbedded = new Set<string>();
+    {
+      const { data: withVector, error: vecErr } = await supabase
+        .from("notes")
+        .select("id")
+        .in("id", notes.map((n) => n.id))
+        .not("embedding", "is", null);
+      if (vecErr) throw vecErr;
+      for (const row of withVector || []) alreadyEmbedded.add(row.id as string);
+    }
+
+    // Stop starting batches well before the 150 s wall clock. Twenty batches
+    // of model calls plus a second's pause each could run past it, and the
+    // caller then saw a failure although most notes had been saved. What is
+    // left is picked up by the next run, because it still has no metadata.
+    const startedAt = Date.now();
+    const TIME_BUDGET_MS = 110_000;
+    let stoppedEarly = false;
+
     // Process in batches
     for (let i = 0; i < notes.length; i += BATCH_SIZE) {
+      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+        stoppedEarly = true;
+        break;
+      }
       const batch = notes.slice(i, i + BATCH_SIZE);
 
       const results = await Promise.allSettled(
@@ -104,7 +132,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           if (!fullText || fullText.length < 5) return null;
 
           const [embedding, metadata] = await Promise.all([
-            getEmbedding(user.id, fullText).catch(() => null),
+            alreadyEmbedded.has(note.id) ? Promise.resolve(null) : getEmbedding(user.id, fullText).catch(() => null),
             extractMetadata(user.id, fullText),
           ]);
 
@@ -137,7 +165,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       total,
       processed,
       errors: errors.length > 0 ? errors.slice(0, 5) : undefined,
-      message: `Processed ${processed} of ${total} notes`,
+      message: stoppedEarly
+        ? `Processed ${processed} of ${total} notes. Run it again for the rest.`
+        : `Processed ${processed} of ${total} notes`,
     });
   } catch (err) {
     console.error("backfill-metadata error:", err);

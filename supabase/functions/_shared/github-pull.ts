@@ -415,7 +415,18 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
           sync_direction: "import",
           synced_at: inserted.updated_at || new Date().toISOString(),
         };
-        await serviceClient.from("github_sync_log").upsert(importedEntry, { onConflict: "user_id,note_id" });
+        // The log is what marks this path as known. Without it the next sync
+        // imports the same file again as another new note, and every sync after
+        // that too; take the note back out and let the next run retry cleanly.
+        // (serviceClient throws on any database error.)
+        try {
+          await serviceClient.from("github_sync_log").upsert(importedEntry, { onConflict: "user_id,note_id" });
+        } catch (logErr) {
+          console.error("[github-pull] sync log write failed, undoing import of", path, String(logErr));
+          await client.from("notes").delete().eq("id", inserted.id).eq("user_id", userId);
+          results.errors++;
+          continue;
+        }
         syncByNoteId.set(inserted.id, importedEntry);
 
         results.new_imports++;
@@ -474,20 +485,36 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
     }
 
     // 5. Push pending local changes (notes updated since last sync)
-    const allNotes = await selectAllRows<any>((from, to) => serviceClient.from("notes").select("id, title, content, metadata, tags, folder_path, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed, source_app").eq("user_id", userId).eq("is_trashed", false).order("id").range(from, to));
+    // Only the three columns the "does it need a push?" test reads; the body
+    // and the rest are loaded per note that actually needs pushing. This used
+    // to load every note's full content on every run (including scheduled
+    // runs and import-only connections, which push nothing) to push the few
+    // that changed: about 1,700 bodies a run on a large account.
+    const pushesNotes = ["export", "bidirectional"].includes(ghConn.sync_direction);
+    const noteStubs = pushesNotes
+      ? await selectAllRows<{ id: string; updated_at: string; source_app: string | null }>((from, to) => serviceClient.from("notes").select("id, updated_at, source_app").eq("user_id", userId).eq("is_trashed", false).order("id").range(from, to))
+      : [];
 
     let pushed = 0;
-    for (const note of (["export", "bidirectional"].includes(ghConn.sync_direction) ? allNotes : []) || []) {
+    for (const stub of noteStubs) {
       // Menerio does not keep godspeed mirror notes as Markdown files: Mission Control's own git
       // repository is where those files live. Same rule as github-sync-export.
-      if (isGodspeedMirror(note.source_app)) continue;
-      const syncEntry = syncByNoteId.get(note.id);
+      if (isGodspeedMirror(stub.source_app)) continue;
+      const syncEntry = syncByNoteId.get(stub.id);
       if (syncEntry?.sync_status === "conflict") continue; // Don't push conflicted notes
 
-      const needsPush = !syncEntry || (syncEntry.synced_at && new Date(note.updated_at) > new Date(syncEntry.synced_at));
+      const needsPush = !syncEntry || (syncEntry.synced_at && new Date(stub.updated_at) > new Date(syncEntry.synced_at));
       if (!needsPush) continue;
 
       try {
+        const { data: note, error: noteErr } = await serviceClient
+          .from("notes")
+          .select("id, title, content, metadata, tags, folder_path, created_at, updated_at, is_favorite, is_pinned, entity_type, is_trashed, source_app")
+          .eq("id", stub.id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (noteErr) throw noteErr;
+        if (!note || note.is_trashed) continue; // deleted or trashed since the list was read
         const fileName = (note.title || "Untitled").replace(/[<>:"/\\|?*]/g, "").replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled";
         const base = vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
         const folder = String(note.folder_path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/");
@@ -543,7 +570,7 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
         pushed++;
       } catch (err) {
         results.errors++;
-        results.details.push({ noteId: note.id, action: "push_error", error: String(err) });
+        results.details.push({ noteId: stub.id, action: "push_error", error: String(err) });
       }
     }
 

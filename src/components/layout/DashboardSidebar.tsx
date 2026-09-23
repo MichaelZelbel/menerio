@@ -34,7 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { PremiumBadge } from "@/components/subscription/PremiumBadge";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { useProfileSummary } from "@/hooks/useProfileSummary";
-import { useReviewQueue } from "@/hooks/useReviewQueue";
+import { useReviewQueueCount } from "@/hooks/useReviewQueue";
 import {
   Sidebar,
   SidebarContent,
@@ -58,7 +58,7 @@ export function DashboardSidebar() {
   const navigate = useNavigate();
   const isPremium = role === "premium" || role === "premium_gift" || role === "admin";
   const { completeness } = useProfileSummary();
-  const { pendingCount } = useReviewQueue();
+  const pendingCount = useReviewQueueCount();
 
   const profileDotColor =
     completeness < 30 ? "bg-destructive" : completeness < 70 ? "bg-yellow-500" : "bg-green-500";

@@ -67,21 +67,6 @@ export function useReviewQueue() {
     staleTime: 30_000,
   });
 
-  const { data: pendingCount = 0 } = useQuery({
-    queryKey: ["review-queue-count", user?.id],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("review_queue" as any)
-        .select("id", { count: "exact", head: true })
-        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
-        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
-      if (error) throw error;
-      return count || 0;
-    },
-    enabled: !!user,
-    refetchInterval: 60_000,
-  });
-
   const { data: wikiRevisions = [], isLoading: isLoadingWikiRevisions } = useQuery({
     queryKey: ["wiki-revision-review-queue", user?.id],
     queryFn: async () => {
@@ -93,6 +78,60 @@ export function useReviewQueue() {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as WikiRevisionReviewItem[];
+    },
+    enabled: !!user,
+    // No polling on the heavy list (both full page texts per row); the
+    // count badge in useReviewQueueCount refreshes instead.
+    staleTime: 30_000,
+  });
+
+  const updateStatus = useMutation({
+    mutationFn: async ({ id, status, extra }: { id: string; status: "kept" | "removed" | "blocked" | "pending_review" | "auto_applied_unreviewed"; extra?: Record<string, unknown> }) => {
+      const { error } = await supabase
+        .from("review_queue" as any)
+        .update({ status, reviewed_at: new Date().toISOString(), ...extra } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["review-queue-count"] });
+    },
+  });
+
+  const pendingCount = useReviewQueueCount();
+
+  return {
+    items,
+    wikiRevisions,
+    isLoading: isLoading || isLoadingWikiRevisions,
+    pendingCount,
+    updateStatus,
+  };
+}
+
+/**
+ * The badge number only: two head:true counts, polled once a minute.
+ *
+ * The sidebar is mounted on every signed-in page. It used to call
+ * useReviewQueue() for this number, which also fetched up to 500 queue rows
+ * with their payloads on every mount and, every 60 s, every unreviewed
+ * Lexicon revision with both full page texts (previous_content and
+ * new_content), with no limit. Those only matter on the Review Queue page.
+ */
+export function useReviewQueueCount(): number {
+  const { user } = useAuth();
+
+  const { data: pendingCount = 0 } = useQuery({
+    queryKey: ["review-queue-count", user?.id],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("review_queue" as any)
+        .select("id", { count: "exact", head: true })
+        .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
+        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
+      if (error) throw error;
+      return count || 0;
     },
     enabled: !!user,
     refetchInterval: 60_000,
@@ -113,25 +152,5 @@ export function useReviewQueue() {
     refetchInterval: 60_000,
   });
 
-  const updateStatus = useMutation({
-    mutationFn: async ({ id, status, extra }: { id: string; status: "kept" | "removed" | "blocked" | "pending_review" | "auto_applied_unreviewed"; extra?: Record<string, unknown> }) => {
-      const { error } = await supabase
-        .from("review_queue" as any)
-        .update({ status, reviewed_at: new Date().toISOString(), ...extra } as any)
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["review-queue"] });
-      queryClient.invalidateQueries({ queryKey: ["review-queue-count"] });
-    },
-  });
-
-  return {
-    items,
-    wikiRevisions,
-    isLoading: isLoading || isLoadingWikiRevisions,
-    pendingCount: pendingCount + wikiRevisionCount,
-    updateStatus,
-  };
+  return pendingCount + wikiRevisionCount;
 }

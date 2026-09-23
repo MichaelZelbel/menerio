@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, Plus, Search, Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound, Users } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -77,6 +77,16 @@ function NewGroupDialog() {
   const navigate = useNavigate();
   const createGroup = useCreateGroup();
   const [open, setOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // ?new=1 (the command palette's "New group") opens this dialog; it used to
+  // land on the list with nothing open.
+  useEffect(() => {
+    if (!searchParams.get("new")) return;
+    setOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [step, setStep] = useState<1 | 2>(1);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const selectedTemplate = selectedTemplateId ? getTemplateById(selectedTemplateId) : null;

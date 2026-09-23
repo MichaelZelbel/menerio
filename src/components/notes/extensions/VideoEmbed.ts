@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
+import { safeEmbedSrc } from "@/lib/safe-url";
 
 /**
  * Video embed node for TipTap.
@@ -25,7 +26,9 @@ export const VideoEmbed = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    const src = HTMLAttributes.src || "";
+    // http(s) only: "javascript:alert(1)//youtube" passed the host test below
+    // and went into an iframe src unchanged.
+    const src = safeEmbedSrc(HTMLAttributes.src);
     const isIframe = /youtube|youtu\.be|vimeo|dailymotion/.test(src);
 
     if (isIframe) {
@@ -37,7 +40,7 @@ export const VideoEmbed = Node.create({
           "iframe",
           mergeAttributes(
             {
-              src: embedUrl,
+              src: safeEmbedSrc(embedUrl),
               frameborder: "0",
               allowfullscreen: "true",
               allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture",

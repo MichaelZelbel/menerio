@@ -116,6 +116,14 @@ export async function resolveConfig(
       source: "fallback-default",
     };
   }
+  // A row with no prompt means "use the code's prompt", not "send none". The
+  // migration that created this table seeded every row with system_prompt NULL
+  // and enabled, and only opening the admin screen backfilled them, so on a
+  // fresh database every runChat call site ran with no instructions at all
+  // (resolveSystemPrompt already fell back; this path did not).
+  if (!row.system_prompt || !row.system_prompt.trim()) {
+    return { effective: { ...row, system_prompt: defaults.systemPrompt ?? null }, source: "db" };
+  }
   return { effective: row, source: "db" };
 }
 

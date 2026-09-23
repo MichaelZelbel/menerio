@@ -109,6 +109,7 @@ import { cn } from "@/lib/utils";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { formatDistanceToNow, format } from "date-fns";
 import { showToast } from "@/lib/toast";
+import { openExternalUrl } from "@/lib/safe-url";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
@@ -126,6 +127,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BRAND } from "@/lib/brand";
 
 
 
@@ -474,6 +476,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const activeNoteIdRef = useRef(note.id);
   const flushSavesRef = useRef<() => void>(() => {});
 
+  // A note that was just created is empty. Put the caret in its title: the
+  // "New Note" menu item that created it unmounts, and focus fell back to the
+  // page, so a keyboard user had to find the title with the mouse.
+  useEffect(() => {
+    if (!note.title && !note.content && !note.is_trashed && !note.is_external) {
+      titleInputRef.current?.focus();
+    }
+    // Only when this editor opens (it is keyed by note id).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
@@ -568,17 +581,22 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     setWikilinkOpen(true);
   }, []);
 
+  // `editor` is declared below (useEditor needs these callbacks), so read it
+  // through editorRef at call time instead of closing over a render's value.
   const handleWikilinkSelect = useCallback((title: string, noteId: string) => {
-    if (!editor) return;
-    insertWikilinkSafely(editor, { noteId, noteTitle: title });
+    const current = editorRef.current;
+    if (!current) return;
+    insertWikilinkSafely(current, { noteId, noteTitle: title });
     setWikilinkOpen(false);
   }, []);
 
   const handleWikilinkCreate = useCallback(async (title: string) => {
-    if (!editor) return;
+    if (!editorRef.current) return;
     try {
       const newNote = await createNote.mutateAsync({ title });
-      insertWikilinkSafely(editor, { noteId: newNote.id, noteTitle: title });
+      const current = editorRef.current;
+      if (!current || current.isDestroyed) return;
+      insertWikilinkSafely(current, { noteId: newNote.id, noteTitle: title });
       setWikilinkOpen(false);
     } catch {
       showToast.error("Failed to create note");
@@ -803,11 +821,15 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       if (incomingMatchesPendingTitle || noteChanged) pendingSaveTitleRef.current = null;
     }
     setShowTagInput(false);
-    setShowInfo(false);
-    setSourceMode(false);
-
+    // Info panel and Markdown source mode are only reset for a different note.
+    // This effect also runs after every autosave (the saved row patches the
+    // cache, so note.content/updated_at change); resetting sourceMode there threw
+    // the user out of source mode a second after they started typing, and the
+    // rich editor still held the pre-edit text, so the next keystroke saved over
+    // their Markdown edits.
     if (noteChanged) {
-
+      setShowInfo(false);
+      setSourceMode(false);
 
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
@@ -1331,7 +1353,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }, 800);
       setSourceMode(false);
     }
-  }, [editor, sourceMode, sourceText, note, saveContentNow, triggerGitHubSync]);
+  }, [editor, sourceMode, sourceText, note, saveContentNow, triggerGitHubSync, resolveWikilinks, setEditorContentWithAttachments]);
 
   return (
     <div className="flex h-full">
@@ -1519,13 +1541,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 <DropdownMenuItem onClick={makeACopy} disabled={duplicateNote.isPending}>
                   <Copy className="mr-2 h-4 w-4" /> Make a copy
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`); showToast.success("Copied to clipboard"); }}>
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${title}\n\n${plainText}`).then(() => showToast.success("Copied to clipboard"), () => showToast.error("Could not copy to the clipboard")); }}>
                   <Copy className="mr-2 h-4 w-4" /> Copy to clipboard
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={downloadMarkdown}>
                   <Download className="mr-2 h-4 w-4" /> Download Markdown
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`); showToast.copied(); }}>
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`).then(() => showToast.copied(), () => showToast.error("Could not copy the link")); }}>
                   <Link2 className="mr-2 h-4 w-4" /> Copy note link
                 </DropdownMenuItem>
                 {sharedNote?.is_active ? (
@@ -1563,7 +1585,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
               Synced from <span className="font-medium">{note.source_app || "external app"}</span> — duplicate to edit
             </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Changes here would be overwritten on the next sync. Create a local copy to make edits in Menerio.
+              Changes here would be overwritten on the next sync. Create a local copy to make edits in {BRAND.name}.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1572,7 +1594,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs gap-1.5"
-                onClick={() => window.open(note.source_url!, "_blank")}
+                onClick={() => openExternalUrl(note.source_url)}
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 Open in {note.source_app || "App"}
@@ -1808,7 +1830,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           <AlertDialogHeader>
             <AlertDialogTitle>Title already exists in this folder</AlertDialogTitle>
             <AlertDialogDescription>
-              Choose how Menerio should handle this duplicate title. GitHub filenames will always remain collision-safe.
+              Choose how {BRAND.name} should handle this duplicate title. GitHub filenames will always remain collision-safe.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:justify-between gap-2">

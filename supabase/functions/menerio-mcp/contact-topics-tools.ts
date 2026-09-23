@@ -7,7 +7,11 @@ export const CONTACT_TOPIC_SCOPES = Object.fromEntries([
   "list_contact_topics", "get_contact_topic_history", "create_contact_topic", "update_contact_topic", "discuss_contact_topic", "archive_contact_topic", "reopen_contact_topic", "undo_contact_topic_event",
 ].map(name => [name, "contacts"]));
 const id = z.string().uuid();
-const mutation = { topic_id: id, expected_version: z.number().int().positive(), request_id: id };
+// request_id is an idempotency key the caller makes up. The schema said only
+// "uuid", so a model had no way to tell it apart from the ids it looks up.
+const requestId = id.describe("A new random UUID you generate for this change. Reuse the same one only to retry the same call after a timeout.");
+const contactId = id.describe("The person's contact_id, from search_contacts or get_contact_context.");
+const mutation = { topic_id: id.describe("The topic's id, from list_contact_topics or get_contact_context."), expected_version: z.number().int().positive().describe("The topic's current version, as last read; a stale version is refused."), request_id: requestId };
 const page = { cursor: z.string().max(4096).optional(), limit: z.number().int().min(1).max(100).default(20) };
 const historyCursor = z.object({ topic: id, created: z.string().datetime({ offset: true }), id }).strict();
 const success = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
@@ -27,7 +31,7 @@ export function registerContactTopicTools(server: McpServer, db: SupabaseClient,
       try { return success(await run(z.object(shape).strict().parse(args))); } catch (error) { return failure(error); }
     });
   }
-  register({ contact_id: id, status: z.enum(["active", "completed", "archived"]).default("active"), query: z.string().max(300).optional(), ...page }, "list_contact_topics", "List a resolved person's topics, ordered High, Normal, Low then oldest first. Follow next_cursor for more.", args => listTopics(db, userId(), args));
+  register({ contact_id: contactId, status: z.enum(["active", "completed", "archived"]).default("active"), query: z.string().max(300).optional(), ...page }, "list_contact_topics", "List a resolved person's topics, ordered High, Normal, Low then oldest first. Follow next_cursor for more.", args => listTopics(db, userId(), args));
   register({ topic_id: id, ...page }, "get_contact_topic_history", "Read immutable topic events, newest first. Discussion snapshots retain their original wording; reversal events identify undone operations.", async args => {
     const owner = userId(), topic = await requireTopic(db, owner, args.topic_id);
     let q = db.from("contact_topic_events").select("*").eq("user_id", owner).eq("topic_id", args.topic_id);
@@ -43,7 +47,7 @@ export function registerContactTopicTools(server: McpServer, db: SupabaseClient,
     return { events, next_cursor: data && data.length > args.limit && last ? btoa(JSON.stringify({ topic: args.topic_id, created: last.created_at, id: last.id })) : null, person_url: personTopicUrl(topic.contact_id) };
   });
   const command = (action: string) => async ({ request_id, ...args }: Record<string, unknown>) => applyTopicCommand(db, userId(), String(request_id), { action, ...args });
-  register({ contact_id: id, title: z.string().trim().min(1).max(300), mode: topicMode.default("one_off"), priority: topicPriority.default("normal"), request_id: id }, "create_contact_topic", "Create a native topic for an exact person ID. Keep the same request_id and payload on a timeout retry.", command("create"));
+  register({ contact_id: contactId, title: z.string().trim().min(1).max(300), mode: topicMode.default("one_off"), priority: topicPriority.default("normal"), request_id: requestId }, "create_contact_topic", "Create a native topic for an exact person ID. Keep the same request_id and payload on a timeout retry.", command("create"));
   register({ ...mutation, patch: topicPatch }, "update_contact_topic", "Edit title, priority, or repetition at the current version. Stale versions are refused.", command("update"));
   register({ ...mutation, discussed_at: z.string().datetime({ offset: true }).optional(), close_after: z.boolean().default(false) }, "discuss_contact_topic", "Record a discussion. One-off completes; recurring remains active unless close_after is true. Optional discussed_at must be in the past.", command("discuss"));
   register(mutation, "archive_contact_topic", "Stop bringing up a topic without claiming it was discussed.", command("archive"));

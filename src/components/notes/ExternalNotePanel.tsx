@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Note, RelatedItem } from "@/hooks/useNotes";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
+import { openExternalUrl } from "@/lib/safe-url";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,7 +104,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            onClick={() => window.open(note.source_url!, "_blank")}
+            onClick={() => openExternalUrl(note.source_url)}
           >
             <ExternalLink className="h-3.5 w-3.5" />
             Open in {note.source_app}
@@ -209,7 +210,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
                     className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs hover:bg-accent/50 transition-colors text-left"
                     onClick={() => {
                       if (item.source_url) {
-                        window.open(item.source_url, "_blank");
+                        openExternalUrl(item.source_url);
                       }
                     }}
                   >

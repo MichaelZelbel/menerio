@@ -95,7 +95,12 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
     setError(null);
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      // Returning with loading still true left the spinner up for good.
+      setLoading(false);
+      setError("Your session has ended. Sign in again to find connections.");
+      return;
+    }
 
     try {
       const res = await supabase.functions.invoke("find-connections", {

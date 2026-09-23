@@ -7,7 +7,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSessio
   functions: { invoke: mock.invoke }, rpc: (...args: unknown[]) => ({ setHeader: (name: string, value: string) => { mock.rpcHeader(name, value); return mock.rpc(...args); } }),
   from: () => ({
     upsert: (...args: unknown[]) => ({ setHeader: () => mock.upsert(...args) }),
-    update: (...args: unknown[]) => ({ eq: (...filters: unknown[]) => ({ setHeader: () => mock.update(...args).eq(...filters) }) }),
+    update: (...args: unknown[]) => ({ eq: (...filters: unknown[]) => ({ select: () => ({ setHeader: () => mock.update(...args).eq(...filters) }) }) }),
     delete: () => ({ eq: () => ({ setHeader: async () => ({ error: null }) }) }),
   }),
 } }));

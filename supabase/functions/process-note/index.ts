@@ -2665,8 +2665,14 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
         if (recalled?.target === "self") {
           decision = { kind: "self", contactCandidates: [], reason: "recalled_self" };
         } else if (recalled?.target === "contact" && recalled.contact_id) {
-          const c = candidates.find((x) => x.id === recalled.contact_id) || { id: recalled.contact_id, name: person };
-          decision = { kind: "contact", contactCandidates: [c], reason: "recalled_contact" };
+          // Only a contact that still exists and is not merged away. The table
+          // has no foreign key, so a remembered contact outlives its deletion:
+          // on 2026-09-23 the owner's "michael" pointed at a deleted contact
+          // with 790 recorded decisions, and every ambiguous mention of him was
+          // linked to that dead id. Otherwise the mention stays ambiguous.
+          const live = (allContacts || []).find((x: any) => x.id === recalled.contact_id) as { id: string; name: string } | undefined;
+          const c = candidates.find((x) => x.id === recalled.contact_id) || (live ? { id: live.id, name: live.name } : null);
+          if (c) decision = { kind: "contact", contactCandidates: [c], reason: "recalled_contact" };
         }
         // A recalled decision is not new evidence; counting it again made one
         // early guess reinforce itself on every later note.
@@ -2953,9 +2959,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("Function error:", err);
+    // A classified job failure has already been recorded on the job by
+    // processInBackground (no_credit parks it, transient schedules a retry).
+    // Answering 500 for all of them made the drain worker file a second,
+    // "uncertain" failure and close its slot for the tick; on 2026-09-23 an
+    // exhausted allowance produced 385 such 500s in seven hours. Say what
+    // happened, in the statuses drainNoteAiJobs already maps.
+    const status = err instanceof NoteAIJobError
+      ? ({ no_credit: 402, transient: 503, stale: 409, permanent: 422, uncertain: 500 } as const)[err.kind] ?? 500
+      : 500;
+    if (status === 500) console.error("Function error:", err);
+    else console.warn(`[process-note] job ended: ${(err as NoteAIJobError).kind}: ${(err as Error).message}`);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

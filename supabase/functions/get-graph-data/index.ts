@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildAliasMap, resolvePeopleDetailed, type Contact } from "../_shared/graph-matching.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -400,7 +401,8 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", user.id)
       .eq("is_trashed", false)
       .order("created_at", { ascending: false })
-      .limit(limit);
+      // Bounded: the body's limit was passed through as is.
+      .limit(Math.min(Math.max(Number(limit) || 200, 1), 2000));
     if (!include_hidden) notesQuery = notesQuery.eq("ai_visibility", "visible");
 
     if (note_type) {
@@ -427,25 +429,33 @@ Deno.serve(async (req: Request) => {
     const noteIds = filteredNotes.map((n) => n.id);
     if (noteIds.length === 0) return json({ nodes: [], edges: [] });
 
-    let allConnections: any[] = [];
+    // Edges out of each batch of 50 notes, all batches at once, each paged
+    // past PostgREST's 1,000-row cap, and kept only when the other end is in
+    // the set too. This used to run the batches one after another (ten round
+    // trips for the Dashboard's 500-note call) and put all 500 target ids in
+    // every request's URL (about 19 kB of query string), with an error or a
+    // capped page read as "no more edges".
+    const inSet = new Set(noteIds);
     const batchSize = 50;
-    for (let i = 0; i < noteIds.length; i += batchSize) {
-      const batch = noteIds.slice(i, i + batchSize);
-      let connQuery = supabase
-        .from("note_connections")
-        .select("id, source_note_id, target_note_id, connection_type, strength, metadata")
-        .eq("user_id", user.id)
-        .gte("strength", min_strength)
-        .in("source_note_id", batch)
-        .in("target_note_id", noteIds);
-
-      if (connection_types && Array.isArray(connection_types) && connection_types.length > 0) {
-        connQuery = connQuery.in("connection_type", connection_types);
-      }
-
-      const { data } = await connQuery;
-      if (data) allConnections = allConnections.concat(data);
-    }
+    const batches: string[][] = [];
+    for (let i = 0; i < noteIds.length; i += batchSize) batches.push(noteIds.slice(i, i + batchSize));
+    const perBatch = await Promise.all(
+      batches.map((batch) =>
+        selectAllRows<any>((from, to) => {
+          let connQuery = supabase
+            .from("note_connections")
+            .select("id, source_note_id, target_note_id, connection_type, strength, metadata")
+            .eq("user_id", user.id)
+            .gte("strength", min_strength)
+            .in("source_note_id", batch);
+          if (connection_types && Array.isArray(connection_types) && connection_types.length > 0) {
+            connQuery = connQuery.in("connection_type", connection_types);
+          }
+          return connQuery.order("id").range(from, to);
+        }),
+      ),
+    );
+    const allConnections: any[] = perBatch.flat().filter((c) => inSet.has(c.target_note_id));
 
     const result = pivotSharedPersonEdges(filteredNotes, allConnections, contacts, aliasMap);
     return json(result);

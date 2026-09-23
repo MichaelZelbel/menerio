@@ -10,6 +10,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BRAND } from "@/lib/brand";
 
 type SuggestionMode = "auto" | "ask" | "off";
 type SuggestionSensitivity = "conservative" | "balanced" | "exploratory";
@@ -39,7 +40,7 @@ const modeOptions: Array<{ value: SuggestionMode; label: string; description: st
   {
     value: "auto",
     label: "Add automatically",
-    description: "Menerio adds high-confidence suggestions right away. You can review and remove them later.",
+    description: `${BRAND.name} adds high-confidence suggestions right away. You can review and remove them later.`,
   },
   {
     value: "ask",
@@ -49,7 +50,7 @@ const modeOptions: Array<{ value: SuggestionMode; label: string; description: st
   {
     value: "off",
     label: "Off",
-    description: "Menerio does not create AI suggestions from your notes.",
+    description: `${BRAND.name} does not create AI suggestions from your notes.`,
   },
 ];
 
@@ -57,7 +58,7 @@ const sensitivityOptions: Array<{ value: SuggestionSensitivity; label: string; d
   {
     value: "conservative",
     label: "Conservative",
-    description: "Only add things Menerio is very sure about.",
+    description: `Only add things ${BRAND.name} is very sure about.`,
   },
   {
     value: "balanced",
@@ -133,7 +134,7 @@ export function AISuggestionPreferences() {
           <Brain className="h-5 w-5 text-primary" />
           AI Suggestions
         </CardTitle>
-        <CardDescription>Choose how Menerio turns note insights into updates to your knowledge base.</CardDescription>
+        <CardDescription>Choose how {BRAND.name} turns note insights into updates to your knowledge base.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3">

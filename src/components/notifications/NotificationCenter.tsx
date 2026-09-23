@@ -68,8 +68,12 @@ export function NotificationCenter() {
 
   useEffect(() => {
     fetchNotifications();
-    // Poll every 60s
-    const interval = setInterval(fetchNotifications, 60_000);
+    // Poll every 60 s while the tab is visible; a hidden tab (often several
+    // stay open all day) has nobody to show the badge to.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      fetchNotifications();
+    }, 60_000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 

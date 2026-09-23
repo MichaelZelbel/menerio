@@ -57,8 +57,11 @@ async function writeRunState(db: any, userId: string, contactId: string | null, 
   }
 }
 
+// Only a job this run still holds. A profile write during the run re-queues the
+// job (enqueue_profile_normalization_job sets it back to "queued"); marking it
+// completed by id erased that, so the new change was never normalized.
 async function markJob(db: any, id: string, values: Record<string, unknown>) {
-  await db.from("profile_normalization_jobs").update(values).eq("id", id);
+  await db.from("profile_normalization_jobs").update(values).eq("id", id).eq("status", "running");
 }
 
 async function claimQueuedJobs(db: any, userId: string, limit: number) {
@@ -298,7 +301,10 @@ serve(async (req) => {
           });
           console.log(`[admin-normalize] subject=${subj ?? "owner"} done`, agg);
           for (const jobId of jobBySubject.get(subj ?? "owner") || []) {
-            await markJob(db, jobId, { status: "completed", processed_at: new Date().toISOString(), last_error: null });
+            // attempts counts failures in a row. Nothing reset it, and a
+            // re-queue keeps it, so after five runs of any kind a subject
+            // (the owner's own profile included) was never claimed again.
+            await markJob(db, jobId, { status: "completed", attempts: 0, processed_at: new Date().toISOString(), last_error: null });
           }
         } catch (e) {
           const msg = String(e);

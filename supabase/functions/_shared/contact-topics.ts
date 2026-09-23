@@ -42,7 +42,15 @@ export async function resolveContextPerson(db: SupabaseClient, owner: string, co
     const result = await db.from("contacts").select("*").eq("user_id", owner).is("merged_into", null).eq("ai_visibility", "visible").eq("id", contactId).limit(1);
     checkTopicError(result.error); data = result.data ?? [];
   } else data = await searchContextPeople(db, owner, name!, 21);
-  if (!data?.length) return { error: "NOT_FOUND", message: "No contact found." };
+  if (!data?.length) return { error: "NOT_FOUND", message: "No contact found. Check the spelling with search_contacts, or pass contact_id." };
+  // "Tom" beside "Tom Becker" was refused as ambiguous on every call, even
+  // though one of them is called exactly that. A single exact name or alias
+  // (case-insensitive) wins; the write tools already resolve this way.
+  if (data.length > 1 && !contactId) {
+    const needle = name!.trim().toLocaleLowerCase();
+    const exact = data.filter(c => [c.name, ...(c.is_sensitive ? [] : c.aliases ?? [])].some(v => String(v ?? "").trim().toLocaleLowerCase() === needle));
+    if (exact.length === 1) return { contact: exact[0] };
+  }
   if (data.length > 1) return { error: "AMBIGUOUS_PERSON", message: "Choose a contact_id before continuing.", candidates: data.slice(0, 20).map(c => ({ id: c.id, name: c.name })), more_candidates: data.length > 20 };
   return { contact: data[0] };
 }

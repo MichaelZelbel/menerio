@@ -135,7 +135,13 @@ export function ApiKeysManager() {
 
   const handleCopy = async () => {
     if (!generatedKey) return;
-    await navigator.clipboard.writeText(generatedKey);
+    try {
+      await navigator.clipboard.writeText(generatedKey);
+    } catch {
+      // The key is shown only once; say so instead of failing silently.
+      toast({ variant: "destructive", title: "Could not copy", description: "Select the key above and copy it by hand." });
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -160,8 +166,8 @@ export function ApiKeysManager() {
           <Key className="h-5 w-5" /> API Keys
         </CardTitle>
         <CardDescription>
-          One key for everything. It connects your tools (your mission control folder, Claude, ChatGPT,
-          OpenCode or any other MCP client) to your memory at{" "}
+          One key for everything. It connects your AI tools (Claude, ChatGPT, OpenCode or any other
+          MCP client, or your own mission control) to your memory at{" "}
           <code className="font-mono">{MCP_URL}</code>, and works for the REST API too.
           The boxes on a key decide which of your data it may touch.
         </CardDescription>
@@ -184,7 +190,7 @@ export function ApiKeysManager() {
               <DialogTitle>Generate API Key</DialogTitle>
               <DialogDescription>
                 Name the key after the machine or tool it is for. All boxes start ticked:
-                full access, the right shape for your own assistant or godspeed. Untick boxes to
+                full access, the right shape for your own assistant or mission control. Untick boxes to
                 narrow a key you hand to someone else's app.
               </DialogDescription>
             </DialogHeader>
@@ -219,7 +225,7 @@ export function ApiKeysManager() {
                     id="keyName"
                     value={newKeyName}
                     onChange={(e) => setNewKeyName(e.target.value)}
-                    placeholder='e.g., "Profile App", "Querino"'
+                    placeholder='e.g., "Claude Desktop", "Work laptop"'
                   />
                 </div>
                 <div className="space-y-2">

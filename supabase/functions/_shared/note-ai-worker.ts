@@ -58,7 +58,7 @@ export async function drainNoteAiJobs(options: DrainOptions) {
         report.finished++;
       } else {
         const kind = result.status === 402 ? "no_credit"
-          : result.status === 401 || result.status === 403 || result.status === 400 ? "permanent"
+          : result.status === 401 || result.status === 403 || result.status === 400 || result.status === 422 ? "permanent"
           : result.status === 503 ? "transient" : "uncertain";
         await options.fail(job, kind);
         report.failed++;

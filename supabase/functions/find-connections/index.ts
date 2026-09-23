@@ -6,7 +6,7 @@ import {
   balanceUnavailableResponse,
   type CreditInfo,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { FIND_CONNECTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -190,6 +190,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
             model: "deepseek/deepseek-v4-flash",
             systemPrompt: FIND_CONNECTIONS_PROMPT,
           },
+          // The insight is shown to the user and named no language.
+          systemSuffix: sourceLanguageRule(),
         });
         insight = chatResult.content || null;
         lastCredits = chatResult.credits ?? lastCredits;

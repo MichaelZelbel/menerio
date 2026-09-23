@@ -65,7 +65,9 @@ Deno.serve(async (req: Request) => {
     // Fetch the note
     const { data: note, error: noteErr } = await supabase
       .from("notes")
-      .select("id, user_id, title, content, metadata, embedding, tags, ai_visibility")
+      // No content or tags: neither is read here, and content is the note's
+      // whole body, loaded after every processed note.
+      .select("id, user_id, title, metadata, embedding, ai_visibility")
       .eq("id", note_id)
       .eq("user_id", userId)
       .single();
@@ -209,12 +211,29 @@ Deno.serve(async (req: Request) => {
     }
 
     // Upsert all connections (excluding manual_link which are managed separately)
+    // In batches. One request per edge meant hundreds of sequential round
+    // trips for a note that shares a common topic or person with hundreds of
+    // others (shared edges are uncapped), after every processed note. Rows in
+    // one batch never collide: each target appears once per connection type.
+    // A refused batch (say a target note deleted meanwhile) falls back to one
+    // row at a time, so one bad row costs only itself, as before.
     let upserted = 0;
-    for (const conn of connections) {
-      const { error } = await supabase
+    const UPSERT_BATCH = 500;
+    for (let i = 0; i < connections.length; i += UPSERT_BATCH) {
+      const batch = connections.slice(i, i + UPSERT_BATCH);
+      const { error: batchError } = await supabase
         .from("note_connections")
-        .upsert(conn, { onConflict: "source_note_id,target_note_id,connection_type" });
-      if (!error) upserted++;
+        .upsert(batch, { onConflict: "source_note_id,target_note_id,connection_type" });
+      if (!batchError) {
+        upserted += batch.length;
+        continue;
+      }
+      for (const conn of batch) {
+        const { error } = await supabase
+          .from("note_connections")
+          .upsert(conn, { onConflict: "source_note_id,target_note_id,connection_type" });
+        if (!error) upserted++;
+      }
     }
 
     // Clean up stale shared_person and shared_topic connections

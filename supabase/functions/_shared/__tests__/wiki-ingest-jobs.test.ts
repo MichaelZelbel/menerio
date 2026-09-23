@@ -243,7 +243,7 @@ describe('Lexicon checkpoints hold replies, not the Lexicon', () => {
       const filters: Record<string, unknown> = {};
       let deleting = false;
       const q: Record<string, unknown> = {
-        select: () => q, order: () => q, insert: () => q,
+        select: () => q, order: () => q, insert: () => q, in: () => q,
         eq: (key: string, value: unknown) => { filters[key] = value; return q; },
         delete: () => { deleting = true; return q; },
         then: (done: (value: unknown) => unknown) => {

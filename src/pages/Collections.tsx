@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import type { Database } from "@/integrations/supabase/types";
 import { AICollectionDialog } from "@/components/collections/AICollectionDialog";
+import { BRAND } from "@/lib/brand";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionWithCount = Collection & { itemCount: number };
@@ -232,7 +233,7 @@ function NewCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </RadioGroup>
           </div>
 
-          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">URL: menerio.com/collections/{slugPreview}</p>
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">URL: {BRAND.domain}/collections/{slugPreview}</p>
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>

@@ -7,6 +7,7 @@
  * a user picks a folder.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/secret-equals.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -126,8 +127,8 @@ Deno.serve(async (req) => {
 
   const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
   const cronSecret = Deno.env.get("GDRIVE_CRON_SECRET");
-  const isCron = !!cronSecret && req.headers.get("x-cron-key") === cronSecret;
-  if (!isCron && token !== SERVICE_ROLE_KEY) {
+  const isCron = await secretEquals(req.headers.get("x-cron-key"), cronSecret);
+  if (!isCron && !(await secretEquals(token, SERVICE_ROLE_KEY))) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

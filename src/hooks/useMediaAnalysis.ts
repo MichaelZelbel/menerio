@@ -20,6 +20,9 @@ export interface MediaAnalysisEntry {
   updated_at: string | null;
 }
 
+const MEDIA_ANALYSIS_COLUMNS =
+  "id, note_id, storage_path, media_type, page_number, original_filename, extracted_text, description, topics, raw_analysis, analysis_status, error_message, created_at, updated_at";
+
 export function useMediaAnalysis(noteId: string | undefined) {
   const { user } = useAuth();
 
@@ -29,11 +32,15 @@ export function useMediaAnalysis(noteId: string | undefined) {
       if (!noteId) return [];
       const { data, error } = await supabase
         .from("media_analysis")
-        .select("*")
+        // Named columns, not `*`: `*` carried each row's embedding (1,536
+        // floats as text, about 19 kB) into a query that re-runs every 3 s
+        // while any page is still being analysed and is persisted to
+        // IndexedDB. A 50-page PDF was about 1 MB per poll.
+        .select(MEDIA_ANALYSIS_COLUMNS)
         .eq("note_id", noteId)
         .order("created_at", { ascending: true });
       if (error) throw error;
-      return (data || []) as MediaAnalysisEntry[];
+      return (data || []) as unknown as MediaAnalysisEntry[];
     },
     enabled: !!noteId && !!user,
     refetchInterval: (query) => {

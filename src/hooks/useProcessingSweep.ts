@@ -6,6 +6,17 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const SWEEP_INTERVAL_MS = 5 * 60_000;
 
+// When this page last swept, per account. DashboardLayout is mounted by three
+// separate route trees (/dashboard, /collections, /lexicon), so moving between
+// them remounts this hook; so did every hourly token refresh, because the
+// effect depended on the session object. Each remount fired a sweep 5 s later.
+const lastSweepAt = new Map<string, number>();
+
+/** Test hook: forget when each account last swept. */
+export function resetProcessingSweepClock() {
+  lastSweepAt.clear();
+}
+
 /**
  * Server-side safety net for AI note processing.
  *
@@ -16,14 +27,22 @@ const SWEEP_INTERVAL_MS = 5 * 60_000;
 export function useProcessingSweep() {
   const { user, session } = useAuth();
   const queryClient = useQueryClient();
+  const userId = user?.id;
+  const signedIn = !!session;
 
   useEffect(() => {
-    if (!user || !session) return;
+    if (!userId || !signedIn) return;
     let cancelled = false;
 
     const run = async () => {
+      // A hidden tab has nobody waiting on the result; the next visible tick
+      // (or the next mount) repairs anything missed.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const last = lastSweepAt.get(userId) ?? 0;
+      if (Date.now() - last < SWEEP_INTERVAL_MS / 2) return;
+      lastSweepAt.set(userId, Date.now());
       try {
-        await retryLexiconEnrollments(user.id);
+        await retryLexiconEnrollments(userId);
         if (cancelled) return;
         const { data, error } = await supabase.functions.invoke("sweep-note-processing", {
           body: { limit: 10 },
@@ -45,5 +64,5 @@ export function useProcessingSweep() {
       clearTimeout(startTimer);
       clearInterval(interval);
     };
-  }, [user, session, queryClient]);
+  }, [userId, signedIn, queryClient]);
 }

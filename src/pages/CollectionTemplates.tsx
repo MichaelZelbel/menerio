@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { BRAND } from "@/lib/brand";
 
 type Template = Database["public"]["Tables"]["collection_templates"]["Row"];
 type FieldType =
@@ -177,7 +178,7 @@ function ConfirmCreateDialog({ template, open, onOpenChange }: { template: Templ
         <div className="space-y-2">
           <Label htmlFor="template-collection-name">Collection name</Label>
           <Input id="template-collection-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="My Books" />
-          <p className="text-xs text-muted-foreground">URL: menerio.com/collections/{slugify(name)}</p>
+          <p className="text-xs text-muted-foreground">URL: {BRAND.domain}/collections/{slugify(name)}</p>
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={isCreating} onClick={() => onOpenChange(false)}>Cancel</Button>

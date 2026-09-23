@@ -3,6 +3,7 @@ import { authenticateGodspeedKey, requireScope } from "../_shared/mc-auth.ts";
 import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
 import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
 import { combinedNoteSearch } from "../_shared/note-search.ts";
+import { loadMcVisibility, noteIsVisible, notHidden } from "../_shared/mc-visibility.ts";
 import {
   corsHeaders,
   json,
@@ -61,6 +62,7 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && action === "search") {
       const q = url.searchParams.get("q") || "";
       if (!q) return errorJson("BAD_REQUEST", "q parameter required", 400);
+      const visibility = await loadMcVisibility(supabase, userId);
 
       // Search by meaning and by text, in this process. The app's semantic
       // search function needs a user token, and a call to it with the service
@@ -76,6 +78,7 @@ Deno.serve(async (req) => {
         query: q,
         limit: url.searchParams.get("limit"),
         sourceApp: url.searchParams.get("source_app"),
+        visible: (row) => noteIsVisible(row, visibility),
         embed: async (text) =>
           (await getEmbeddingWithCredits(
             supabase, Deno.env.get("OPENROUTER_API_KEY")!, userId, "mc-api-search", text,
@@ -118,13 +121,18 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && action && action !== "search" && action !== "sync-status") {
       const { data, error } = await supabase
         .from("notes")
-        .select("id, title, content, tags, entity_type, metadata, structured_fields, related, is_favorite, is_pinned, is_external, source_app, source_id, source_url, folder_path, sync_status, created_at, updated_at")
+        .select("id, title, content, tags, entity_type, metadata, structured_fields, related, is_favorite, is_pinned, is_external, source_app, source_id, source_url, folder_path, sync_status, created_at, updated_at, ai_visibility")
         .eq("id", action)
         .eq("user_id", userId)
         .eq("is_trashed", false)
         .single();
 
       if (error || !data) return errorJson("NOT_FOUND", "Note not found", 404);
+      // A note hidden from AI, or about a person marked sensitive, is not
+      // this key's to read; same answer as a note that does not exist.
+      if (!noteIsVisible(data, await loadMcVisibility(supabase, userId))) {
+        return errorJson("NOT_FOUND", "Note not found", 404);
+      }
       return json({ data }, 200, {
         "X-Menerio-Modified": data.updated_at || "",
       });
@@ -138,11 +146,12 @@ Deno.serve(async (req) => {
       const entityType = url.searchParams.get("type");
       const tag = url.searchParams.get("tag");
 
-      let query = supabase
+      const visibility = await loadMcVisibility(supabase, userId);
+      let query = notHidden(supabase
         .from("notes")
-        .select("id, title, content, tags, entity_type, is_favorite, is_pinned, source_app, folder_path, created_at, updated_at", { count: "exact" })
+        .select("id, title, content, tags, entity_type, is_favorite, is_pinned, source_app, folder_path, created_at, updated_at, matched_people:metadata->matched_people", { count: "exact" })
         .eq("user_id", userId)
-        .eq("is_trashed", false);
+        .eq("is_trashed", false));
 
       if (entityType) query = query.eq("entity_type", entityType);
       if (tag) query = query.contains("tags", [tag]);
@@ -153,7 +162,13 @@ Deno.serve(async (req) => {
 
       const { data, error, count } = await query;
       if (error) return errorJson("INTERNAL", error.message, 500);
-      return json({ data, meta: { total: count || 0, offset, limit } });
+      // Notes about a sensitive person leave this page; the filter cannot be
+      // expressed on the jsonb list in the query, so total can be the higher
+      // of the two by exactly those notes.
+      const rows = ((data || []) as Record<string, unknown>[])
+        .filter((r) => noteIsVisible({ metadata: { matched_people: r.matched_people } }, visibility))
+        .map(({ matched_people: _mp, ...rest }) => rest);
+      return json({ data: rows, meta: { total: count || 0, offset, limit } });
     }
 
     // POST /mc-api-notes — Create

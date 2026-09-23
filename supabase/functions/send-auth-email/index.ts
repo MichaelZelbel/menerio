@@ -14,6 +14,7 @@
 //
 // Rollback: Dashboard → Authentication → Auth Hooks → disable "Send Email".
 import { Webhook } from "https://esm.sh/standardwebhooks@1.0.0";
+import { secretEquals } from "../_shared/secret-equals.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const HOOK_SECRET = (Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "").replace("v1,whsec_", "");
@@ -260,7 +261,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (url.searchParams.get("debug") === "domains") {
       const debugKey = Deno.env.get("EMAIL_DEBUG_KEY") ?? "";
       const auth = req.headers.get("Authorization") ?? "";
-      if (!debugKey || auth !== `Bearer ${debugKey}`) {
+      if (!(await secretEquals(auth.replace(/^Bearer\s+/i, ""), debugKey))) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
       }
       const probe = async (key: string | undefined) => {

@@ -48,6 +48,25 @@ export function LinkToNoteDialog({
     if (!user) return;
     setLinking(true);
     try {
+      // The connection first: it is an idempotent upsert, so a retry after a
+      // failed content write cannot append the wikilink a second time.
+      // `note_connections` is unique on (source_note_id, target_note_id,
+      // connection_type) only; naming user_id as well made Postgres refuse
+      // every link ("no unique or exclusion constraint matching the ON
+      // CONFLICT specification") after the wikilink had already been added.
+      const { error: connectionError } = await supabase.from("note_connections" as any).upsert(
+        {
+          user_id: user.id,
+          source_note_id: sourceNoteId,
+          target_note_id: targetNoteId,
+          connection_type: "manual_link",
+          strength: 1.0,
+          metadata: {},
+        },
+        { onConflict: "source_note_id,target_note_id,connection_type" }
+      );
+      if (connectionError) throw connectionError;
+
       // Append a wikilink to the source note's content
       const { data: sourceNote, error: readError } = await supabase
         .from("notes")
@@ -66,20 +85,6 @@ export function LinkToNoteDialog({
         .update({ content: updatedContent })
         .eq("id", sourceNoteId);
       if (updateError) throw updateError;
-
-      // Create the connection
-      const { error: connectionError } = await supabase.from("note_connections" as any).upsert(
-        {
-          user_id: user.id,
-          source_note_id: sourceNoteId,
-          target_note_id: targetNoteId,
-          connection_type: "manual_link",
-          strength: 1.0,
-          metadata: {},
-        },
-        { onConflict: "user_id,source_note_id,target_note_id,connection_type" }
-      );
-      if (connectionError) throw connectionError;
 
       queryClient.invalidateQueries({ queryKey: ["backlinks"] });
       queryClient.invalidateQueries({ queryKey: ["note-connections"] });

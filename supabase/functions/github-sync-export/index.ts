@@ -81,6 +81,13 @@ function normalizePathPart(path: unknown): string {
   return String(path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
 }
 
+// The columns the export reads (frontmatter, path, body, mirror check).
+// `*` also carried `embedding`, 1,536 floats as text (about 19 kB a note):
+// on every editor save of a GitHub-connected account, and for every note of a
+// bulk export (about 32 MB extra for 1,700 notes), none of it ever used.
+const EXPORT_NOTE_COLUMNS =
+  "id, user_id, title, content, metadata, tags, entity_type, folder_path, is_favorite, is_pinned, is_trashed, source_app, created_at, updated_at";
+
 function buildNotePath(vaultPath: string, note: Record<string, unknown>, fileName?: string): string {
   const base = normalizePathPart(vaultPath);
   const folder = normalizePathPart(note.folder_path);
@@ -394,7 +401,7 @@ Deno.serve(async (req) => {
     if (!bulk) {
       const { data, error: noteErr } = await serviceClient
         .from("notes")
-        .select("*")
+        .select(EXPORT_NOTE_COLUMNS)
         .eq("id", note_id)
         .eq("user_id", userId)
         .single();
@@ -602,7 +609,7 @@ async function handleBulkSync(
     notes = await selectAllRows<BulkNote>((from, to) =>
       supabase
         .from("notes")
-        .select("*")
+        .select(EXPORT_NOTE_COLUMNS)
         .eq("user_id", userId)
         .eq("is_trashed", false)
         // Mirrored godspeed files are not exported (see the single-note path above

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { flushNoteSave, applyNoteEdit, applyNoteEditVerified, hashNoteContent } from "@/lib/note-ai-edit";
 import { toast } from "sonner";
 
@@ -41,8 +41,9 @@ import {
   Expand,
   Shrink,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import { chatMarkdownComponents, chatMarkdownPlugins } from "@/lib/chat-markdown";
+// Lazy: this component is in DashboardLayout, so a static import put the
+// Markdown stack into the main chunk. See ChatMarkdown.tsx.
+const ChatMarkdown = lazy(() => import("./ChatMarkdown"));
 
 type ChatMessage = PersistedChatMessage;
 type SizeMode = "docked" | "expanded" | "fullscreen";
@@ -555,7 +556,9 @@ export function GlobalAIChatFAB() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={chatMarkdownPlugins} components={chatMarkdownComponents}>{msg.content}</ReactMarkdown>
+                        <Suspense fallback={<p className="whitespace-pre-wrap">{msg.content}</p>}>
+                          <ChatMarkdown>{msg.content}</ChatMarkdown>
+                        </Suspense>
                       </div>
                     ) : (
                       <p className="whitespace-pre-wrap">{msg.content}</p>

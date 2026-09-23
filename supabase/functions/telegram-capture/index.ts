@@ -41,6 +41,9 @@ async function sendTelegramMessage(
       text,
       parse_mode: "HTML",
     }),
+    // A stalled Telegram API held the webhook open after the note was saved;
+    // Telegram then saw a failure and delivered the same update again.
+    signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
     console.error(`telegram sendMessage failed [${res.status}]: ${await res.text().catch(() => "")}`);
@@ -218,13 +221,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       text.slice(0, 50).replace(/\n/g, " ") +
       (text.length > 50 ? "…" : "");
 
+    // Telegram redelivers an update until it gets a 2xx, so one message could
+    // become several notes (each analysed and charged). Its update_id is
+    // unique per bot; a redelivery finds the note it already made.
+    const updateId = typeof update.update_id === "number" ? update.update_id : null;
+    if (updateId !== null) {
+      const { data: seen, error: seenErr } = await supabase
+        .from("notes")
+        .select("id")
+        .eq("user_id", conn.user_id)
+        .contains("metadata", { source: "telegram", telegram_update_id: updateId })
+        .limit(1);
+      if (!seenErr && seen && seen.length > 0) return json({ ok: true });
+    }
+
     const { data: note, error: noteErr } = await supabase
       .from("notes")
       .insert({
         user_id: conn.user_id,
         title,
         content: text,
-        metadata: { is_quick_capture: true, source: "telegram" },
+        metadata: { is_quick_capture: true, source: "telegram", ...(updateId !== null ? { telegram_update_id: updateId } : {}) },
       })
       .select("id")
       .single();

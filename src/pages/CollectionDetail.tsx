@@ -103,6 +103,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { linkifyText } from "@/lib/linkify";
+import { safeExternalUrl } from "@/lib/safe-url";
 import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
@@ -611,10 +612,14 @@ function FieldValue({
       </div>
     );
   }
-  if (field.type === "url")
+  if (field.type === "url") {
+    // Collection items are also written by the AI and the MCP tools; a
+    // javascript: value rendered as an href runs in this origin on click.
+    const href = safeExternalUrl(String(value));
+    if (!href) return <span className="truncate">{truncate(value)}</span>;
     return (
       <a
-        href={String(value)}
+        href={href}
         target="_blank"
         rel="noreferrer"
         className="inline-flex max-w-60 items-center gap-1 truncate text-primary hover:underline"
@@ -623,6 +628,7 @@ function FieldValue({
         <ExternalLink className="h-3 w-3" />
       </a>
     );
+  }
   if (field.type === "email")
     return (
       <a
@@ -1345,9 +1351,9 @@ function FieldInput({
               type="button"
               variant="outline"
               onClick={() => {
-                const parsed = z.string().url().safeParse(value);
-                if (parsed.success)
-                  window.open(parsed.data, "_blank", "noopener,noreferrer");
+                // z.string().url() accepts javascript: URLs.
+                const safe = safeExternalUrl(value);
+                if (safe) window.open(safe, "_blank", "noopener,noreferrer");
                 else toast.error("Enter a valid URL first");
               }}
             >

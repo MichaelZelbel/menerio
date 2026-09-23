@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateGodspeedKey, requireScope } from "../_shared/mc-auth.ts";
 import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
+import { actionIsVisible, loadMcVisibility, notHidden, sensitiveContactExclusion } from "../_shared/mc-visibility.ts";
 import {
   json,
   errorJson,
@@ -85,10 +86,14 @@ Deno.serve(async (req) => {
       }
       if (contactId && !isUuid(contactId)) return errorJson("BAD_REQUEST", "contact_id must be a UUID", 400);
 
-      let query = supabase
+      // Hidden from AI, or about a person marked sensitive: not this key's.
+      const visibility = await loadMcVisibility(supabase, userId);
+      let query = notHidden(supabase
         .from("action_items")
         .select("id, content, status, priority, due_date, tags, contact_id, source_note_id, completed_at, created_at, updated_at", { count: "exact" })
-        .eq("user_id", userId);
+        .eq("user_id", userId));
+      const exclusion = sensitiveContactExclusion(visibility);
+      if (exclusion) query = query.or(exclusion);
 
       if (status) query = query.eq("status", status);
       if (priority) query = query.eq("priority", priority);
@@ -111,6 +116,9 @@ Deno.serve(async (req) => {
         .single();
 
       if (error || !data) return errorJson("NOT_FOUND", "Action item not found", 404);
+      if (!actionIsVisible(data, await loadMcVisibility(supabase, userId))) {
+        return errorJson("NOT_FOUND", "Action item not found", 404);
+      }
       return json({ data });
     }
 

@@ -26,6 +26,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Loader2, CheckCircle2, ExternalLink, Copy, Send, Unplug } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 function generatePairingCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -277,7 +278,7 @@ export function TelegramIntegration() {
                   Send <code className="bg-muted px-1.5 py-0.5 rounded text-xs">/newbot</code> and follow the prompts to name your bot
                 </li>
                 <li>Copy the <strong>bot token</strong> BotFather gives you and paste it below</li>
-                <li>Click <strong>Connect</strong> — Menerio will automatically register the webhook</li>
+                <li>Click <strong>Connect</strong> — {BRAND.name} will automatically register the webhook</li>
                 <li>
                   Open your new bot in Telegram and send the <strong>pairing code</strong> shown below
                 </li>
@@ -309,7 +310,7 @@ export function TelegramIntegration() {
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
             <p className="text-sm font-medium text-foreground">Pairing Code</p>
             <p className="text-xs text-muted-foreground">
-              Send this code as a message to your Telegram bot to link it to your Menerio account:
+              Send this code as a message to your Telegram bot to link it to your {BRAND.name} account:
             </p>
             <div className="flex items-center gap-2">
               <code className="text-2xl font-mono font-bold tracking-[0.3em] text-foreground bg-muted px-4 py-2 rounded-lg select-all">

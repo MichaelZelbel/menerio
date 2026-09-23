@@ -16,7 +16,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: auth.userId }, access_token: auth.token } } }) },
     from: () => ({
       upsert: (...a: unknown[]) => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return upsert(...a); } }),
-      update: (...a: unknown[]) => ({ eq: () => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return update(...a); } }) }),
+      update: (...a: unknown[]) => ({ eq: () => ({ select: () => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return update(...a); } }) }) }),
       delete: () => ({ eq: (...a: unknown[]) => ({ setHeader: (_: string, value: string) => { auth.beforeSend?.(); auth.headers.push(value); return del(...a); } }) }),
     }),
   },
@@ -235,6 +235,44 @@ describe("durable recovery", () => {
     await new SupabaseConnector().uploadData(database as never);
     expect(upsert.mock.calls.map(call => call[0].id)).toEqual(["first", "second", "second"]);
     expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("does not hold back a note whose body merely mentions a rejected note", async () => {
+    const bad = "11111111-2222-3333-4444-555555555555";
+    upsert.mockResolvedValueOnce({ error: { code: "22P02" } });
+    await new SupabaseConnector().uploadData(fakeDb([put(bad)], vi.fn()) as never);
+    await new SupabaseConnector().uploadData(fakeDb([{ ...put("linker"), op: "PATCH", opData: { content: `see /dashboard/notes/${bad}` } }], vi.fn()) as never);
+    expect(update).toHaveBeenCalledOnce();
+    expect(await readRecovery("user-1")).toHaveLength(1);
+  });
+
+  it("only inserts on PUT, so a stale snapshot never overwrites the server row", async () => {
+    await new SupabaseConnector().uploadData(fakeDb([put("snapshot", { title: "old" })], vi.fn()) as never);
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ id: "snapshot" }), { ignoreDuplicates: true });
+  });
+
+  it("keeps an edit to a row deleted elsewhere instead of acknowledging it", async () => {
+    update.mockResolvedValueOnce({ data: [], error: null, status: 200 });
+    const complete = vi.fn();
+    await new SupabaseConnector().uploadData(fakeDb([{ ...put("gone"), op: "PATCH", opData: { content: "an hour of work" } }], complete) as never);
+    expect(complete).toHaveBeenCalledOnce();
+    const batches = await readRecovery("user-1");
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toMatchObject({ status: "recovery", kind: "data", code: "PGRST116" });
+    expect(batches[0].operations[0].opData).toEqual({ content: "an hour of work" });
+  });
+
+  it.each([[{ code: "54000" }, "data"], [{ message: "Request Entity Too Large", status: 413 }, "data"], [{ message: "Forbidden", status: 403 }, "permission"]])("classifies %o as %s", (error, kind) => {
+    expect(classifySyncError(error)).toBe(kind);
+  });
+
+  it("moves a value over a hard server limit to recovery instead of retrying it forever", async () => {
+    upsert.mockResolvedValueOnce({ error: { code: "54000", message: "string is too long for tsvector" }, status: 400 });
+    const complete = vi.fn();
+    await new SupabaseConnector().uploadData(fakeDb([put("huge"), put("next")], complete) as never);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledTimes(2);
+    expect((await readRecovery("user-1"))[0]).toMatchObject({ kind: "data", code: "54000" });
   });
 
   it("refuses to use another account's connector", async () => {

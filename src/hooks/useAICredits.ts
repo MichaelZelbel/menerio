@@ -17,6 +17,15 @@ export interface AICredits {
   tokensPerCredit: number;
 }
 
+/** A row whose period has not ended. A row without a readable end counts as current. */
+function allowanceIsCurrent(row: unknown): boolean {
+  if (!row) return false;
+  const end = (row as { period_end?: string | null }).period_end;
+  if (!end) return true;
+  const t = new Date(end).getTime();
+  return Number.isNaN(t) || t > Date.now();
+}
+
 export function useAICredits() {
   const { session, user } = useAuth();
   const [credits, setCredits] = useState<AICredits | null>(null);
@@ -45,24 +54,33 @@ export function useAICredits() {
       setIsLoading(true);
       setError(null);
 
-      // Ensure allowance period exists. If the Edge Function is temporarily unavailable,
-      // keep the UI usable and fall back to reading any existing allowance below.
-      const { error: ensureErr } = await supabase.functions.invoke("ensure-token-allowance", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      const readAllowance = () =>
+        supabase
+          .from("v_ai_allowance_current" as any)
+          .select("*")
+          .eq("user_id", user.id)
+          .order("period_start", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (ensureErr) {
-        console.warn("Unable to ensure AI allowance period:", ensureErr);
+      // Read first; call ensure-token-allowance only when this month's row is
+      // missing or over. It used to run before every read, and every mounted
+      // copy of this hook (banner, sidebar, Dashboard, editor gate) reads on
+      // mount, on each token refresh and after every AI call, so one AI action
+      // cost three to four edge-function calls whose answer was "it exists".
+      // The function is idempotent, so skipping it when the row is current
+      // changes nothing. If it is unavailable, fall back to what exists.
+      let { data, error: fetchErr } = await readAllowance();
+      if (!fetchErr && !allowanceIsCurrent(data)) {
+        const { error: ensureErr } = await supabase.functions.invoke("ensure-token-allowance", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (ensureErr) {
+          console.warn("Unable to ensure AI allowance period:", ensureErr);
+        } else {
+          ({ data, error: fetchErr } = await readAllowance());
+        }
       }
-
-      // Fetch current allowance from view
-      const { data, error: fetchErr } = await supabase
-        .from("v_ai_allowance_current" as any)
-        .select("*")
-        .eq("user_id", user.id)
-        .order("period_start", { ascending: false })
-        .limit(1)
-        .maybeSingle();
 
       if (fetchErr) throw new Error(fetchErr.message);
       if (!current()) return;

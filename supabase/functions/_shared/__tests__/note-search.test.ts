@@ -40,6 +40,7 @@ function fakeDb() {
       const q: Row = {
         select: () => q,
         eq: (k: string, v: unknown) => { rows = rows.filter((r) => r[k] === v); return q; },
+        neq: (k: string, v: unknown) => { rows = rows.filter((r) => r[k] !== v); return q; },
         in: (k: string, vs: unknown[]) => { rows = rows.filter((r) => vs.includes(r[k])); return q; },
         ilike: (k: string, v: string) => { rows = rows.filter((r) => String(r[k] ?? "").toLowerCase() === v.toLowerCase()); return q; },
         or: (expr: string) => {
@@ -182,6 +183,23 @@ describe("combinedNoteSearch", () => {
     db.rpc = async () => ({ data: chunks, error: null });
     const { results } = await combinedNoteSearch(db, { userId: USER, query: "budget", embed });
     expect(results.map((r) => r.id)).toEqual(["mine"]);
+  });
+
+  it("leaves out notes hidden from AI in both arms, and what the caller's visible() refuses", async () => {
+    notes = [
+      note("hidden", { content: "budget", ai_visibility: "hidden" }),
+      note("about-sensitive", { content: "budget", ai_visibility: "visible", metadata: { matched_people: ["s"] } }),
+      note("mine", { content: "budget", ai_visibility: "visible" }),
+    ];
+    chunks = [chunk("hidden", 0.99), chunk("about-sensitive", 0.98), chunk("mine", 0.3)];
+    const visible = (r: { metadata?: Record<string, unknown> | null }) =>
+      !((r.metadata?.matched_people as string[] | undefined) ?? []).includes("s");
+    const both = await combinedNoteSearch(fakeDb(), { userId: USER, query: "budget", embed, visible });
+    expect(both.results.map((r) => r.id)).toEqual(["mine"]);
+    const textOnly = await combinedNoteSearch(fakeDb(), {
+      userId: USER, query: "budget", visible, embed: async () => { throw new Error("no credits"); },
+    });
+    expect(textOnly.results.map((r) => r.id)).toEqual(["mine"]);
   });
 
   it("honours the limit, defaulting to 10 and never passing 50", async () => {

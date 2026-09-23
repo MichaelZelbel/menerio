@@ -48,6 +48,7 @@ import { AISuggestionPreferences } from "@/components/settings/AISuggestionPrefe
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 import { AiVisibilitySettings } from "@/components/settings/AiVisibilitySettings";
+import { BRAND } from "@/lib/brand";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -80,6 +81,12 @@ const ROLE_LABELS: Record<string, { label: string; description: string }> = {
   admin: { label: "Admin", description: "Full administrative access." },
 };
 
+const SETTINGS_TABS = [
+  "account", "avatar", "godspeed", "import", "notifications", "ai-suggestions", "ai-visibility",
+  "connections", "mcp", "integrations", "telegram", "discord", "singlefile", "github", "gdrive",
+  "apikeys", "credits", "subscription", "danger",
+];
+
 export default function Settings() {
   const { user, profile, role, updatePassword, refreshProfile, signOut } = useAuth();
   const { toast } = useToast();
@@ -90,7 +97,10 @@ export default function Settings() {
   // Settings (the Web Clipper's "API keys" link, the sidebar's "Connect AI",
   // the credits banner) change the search params without remounting the page,
   // and a copy in state never heard about them.
-  const activeTab = searchParams.get("tab") || "account";
+  // An unknown ?tab= (an old bookmark, a mistyped link) rendered an empty
+  // page with no tab selected; fall back to Account instead.
+  const requestedTab = searchParams.get("tab");
+  const activeTab = requestedTab && SETTINGS_TABS.includes(requestedTab) ? requestedTab : "account";
 
   const handleTabChange = (value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -239,6 +249,7 @@ export default function Settings() {
         return;
       }
 
+      setDeleteDialogOpen(false);
       await signOut();
       navigate("/");
       toast({ title: "Account deleted", description: "Your account has been permanently deleted." });
@@ -246,7 +257,6 @@ export default function Settings() {
       toast({ variant: "destructive", title: "Error", description: "Something went wrong." });
     } finally {
       setDeleteLoading(false);
-      setDeleteDialogOpen(false);
     }
   };
 
@@ -343,7 +353,10 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label>Email</Label>
                 <Input value={user?.email || ""} disabled className="bg-muted" />
-                <p className="text-xs text-muted-foreground">Contact support to change your email.</p>
+                <p className="text-xs text-muted-foreground">
+                  To change your email, write to{" "}
+                  <a href={`mailto:${BRAND.supportEmail}`} className="text-primary hover:underline">{BRAND.supportEmail}</a>.
+                </p>
               </div>
               <Separator />
               <div className="space-y-2">
@@ -447,7 +460,7 @@ export default function Settings() {
                 <p className="text-sm font-medium mb-1">AI Credits</p>
                 <p className="text-xs text-muted-foreground">
                   View your detailed AI credit usage in the{" "}
-                  <button onClick={() => {}} className="text-primary hover:underline">Credits tab</button>.
+                  <button type="button" onClick={() => handleTabChange("credits")} className="text-primary hover:underline">Credits tab</button>.
                 </p>
               </div>
             </CardContent>
@@ -556,7 +569,13 @@ export default function Settings() {
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction
-                        onClick={handleDeleteAccount}
+                        onClick={(e) => {
+                          // AlertDialogAction closes the dialog on click, which
+                          // hid the spinner and, on a wrong password, threw the
+                          // typed confirmation away. Close only on success.
+                          e.preventDefault();
+                          void handleDeleteAccount();
+                        }}
                         disabled={deleteLoading || deleteConfirmText !== "DELETE" || !deletePassword}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >

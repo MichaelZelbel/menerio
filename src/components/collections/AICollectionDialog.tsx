@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { Json } from "@/integrations/supabase/types";
+import { BRAND } from "@/lib/brand";
 
 type FieldType =
   | "text"
@@ -353,7 +354,7 @@ export function AICollectionDialog({ open, onOpenChange, onCreated }: { open: bo
       <DialogContent className="max-h-[90vh] max-w-[720px] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{titleId}</DialogTitle>
-          {stage === "input" && <p className="text-sm text-muted-foreground">Describe what you want to track in one sentence. Menerio will design the schema for you.</p>}
+          {stage === "input" && <p className="text-sm text-muted-foreground">Describe what you want to track in one sentence. {BRAND.name} will design the schema for you.</p>}
         </DialogHeader>
 
         {stage === "input" && (

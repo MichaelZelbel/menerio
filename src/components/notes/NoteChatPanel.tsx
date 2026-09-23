@@ -221,7 +221,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, note.id, onNoteChanged, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, note.id, note.content, onNoteChanged, refreshSummaryIfNeeded]);
 
   /** Restore the note to the version from before an AI edit. */
   const undoNoteEdit = useCallback(

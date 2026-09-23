@@ -25,6 +25,7 @@ import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { ImportVaultDialog } from "./ImportVaultDialog";
 import { SyncConflictsPanel } from "./SyncConflictsPanel";
+import { BRAND } from "@/lib/brand";
 
 export function GitHubSyncSettings() {
   const { user } = useAuth();
@@ -165,7 +166,7 @@ export function GitHubSyncSettings() {
         showToast.success("Connection successful!");
       } else if (status === "missing") {
         setTestResult("missing");
-        showToast.success("Repository does not exist yet. Menerio will create it on first export or sync.");
+        showToast.success(`Repository does not exist yet. ${BRAND.name} will create it on first export or sync.`);
       } else {
         setTestResult("error");
         showToast.error(`Failed: ${(data as any)?.code ?? ""} ${(data as any)?.message ?? ""}`.trim());
@@ -316,8 +317,8 @@ export function GitHubSyncSettings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="export">Export only (Menerio → GitHub)</SelectItem>
-                <SelectItem value="import">Import only (GitHub → Menerio)</SelectItem>
+                <SelectItem value="export">Export only ({BRAND.name} → GitHub)</SelectItem>
+                <SelectItem value="import">Import only (GitHub → {BRAND.name})</SelectItem>
                 <SelectItem value="bidirectional">Bidirectional</SelectItem>
               </SelectContent>
             </Select>
@@ -325,7 +326,7 @@ export function GitHubSyncSettings() {
               <div className="flex items-start gap-2 p-2 rounded-md bg-warning/10 border border-warning/30">
                 <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
                 <p className="text-xs text-muted-foreground">
-                  Bidirectional sync may create conflicts if the same note is edited in both Menerio and Obsidian between syncs. Conflicts will be flagged for manual resolution.
+                  Bidirectional sync may create conflicts if the same note is edited in both {BRAND.name} and Obsidian between syncs. Conflicts will be flagged for manual resolution.
                 </p>
               </div>
             )}

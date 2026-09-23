@@ -22,11 +22,17 @@ export interface OrphanNote {
  * Connections are paginated through fully (not capped at 500 like the graph),
  * so the count matches reality.
  */
-export function useOrphanNotes() {
+export function useOrphanNotes({ withContent = true }: { withContent?: boolean } = {}) {
   const { user } = useAuth();
+  // The Dashboard card shows a count and three titles, but this used to load
+  // every visible note's full body to get them (about 1,700 on a large
+  // account). Only the full list, which shows a preview line, needs content.
+  const columns = withContent
+    ? "id, title, content, metadata, updated_at, ai_visibility, is_trashed"
+    : "id, title, metadata, updated_at, ai_visibility, is_trashed";
 
   return useQuery({
-    queryKey: ["orphan-notes", user?.id],
+    queryKey: ["orphan-notes", user?.id, withContent ? "full" : "titles"],
     enabled: !!user,
     queryFn: async () => {
       // 1. Fetch all AI-visible, non-trashed notes for the user.
@@ -34,7 +40,7 @@ export function useOrphanNotes() {
       const notes = await fetchAllPages<OrphanNote>((from, to) =>
         (supabase as any)
           .from("notes")
-          .select("id, title, content, metadata, updated_at, ai_visibility, is_trashed")
+          .select(columns)
           .eq("user_id", user!.id)
           .eq("is_trashed", false)
           .eq("ai_visibility", "visible")

@@ -144,6 +144,22 @@ export function useAddMembership() {
         .select()
         .single();
 
+      if (error?.code === "23505") {
+        // UNIQUE (group_id, contact_id) also covers archived rows, so a person
+        // removed from the group could never be added back: the insert failed
+        // and the "Already a member" toast pointed at a row the list hides.
+        // Bring the archived membership back instead.
+        const { data: restored, error: restoreError } = await supabase
+          .from("contact_group_memberships")
+          .update({ archived_at: null, status: status ?? firstStage, priority })
+          .eq("group_id", groupId)
+          .eq("contact_id", personId)
+          .not("archived_at", "is", null)
+          .select()
+          .maybeSingle();
+        if (restoreError) throw restoreError;
+        if (restored) return restored as MembershipRow;
+      }
       if (error) throw error;
       return data as MembershipRow;
     },

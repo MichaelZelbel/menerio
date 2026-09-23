@@ -670,24 +670,24 @@ async function explodeBags(
 
       const { error: delErr } = await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
       if (delErr) { stats.skipped++; continue; }
-      let written = 0;
-      for (const w of resolved) {
-        const categoryId = w.categoryId;
-        const { error: insErr } = await db.from("profile_entries").insert({
-          user_id: userId,
-          contact_id: subj,
-          category_id: categoryId,
-          label: w.label,
-          value: w.value,
-          origin: row.origin,
-          evidence_quote: row.evidence_quote,
-          linked_note_id: row.linked_note_id,
-          sort_order: row.sort_order ?? 0,
-        } as any);
-        // A blocked insert means the fact already exists elsewhere in a
-        // cleaner form — the dedup guard is the authority, not this job.
-        if (!insErr) { stats.exploded++; written++; }
-      }
+      // One statement for every piece, so they land together or not at all.
+      // One insert per piece lost the pieces after a failed one: the source
+      // row was already gone and was only put back when none had landed.
+      // A row the dedup guard drops is not an error and is simply not
+      // returned: that fact already exists elsewhere in a cleaner form.
+      const { data: landed, error: insErr } = await db.from("profile_entries").insert(resolved.map((w) => ({
+        user_id: userId,
+        contact_id: subj,
+        category_id: w.categoryId,
+        label: w.label,
+        value: w.value,
+        origin: row.origin,
+        evidence_quote: row.evidence_quote,
+        linked_note_id: row.linked_note_id,
+        sort_order: row.sort_order ?? 0,
+      })) as any).select("id");
+      const written = insErr ? 0 : (landed?.length ?? 0);
+      stats.exploded += written;
       // Nothing landed (a constraint, a network error): put the source row back
       // as it was rather than lose it. If the guard refuses this too, the fact
       // really is held elsewhere.
@@ -1062,14 +1062,14 @@ serve(async (req) => {
       if (!reviewId) return json({ error: "review_id required" }, 400);
       const { data: row, error } = await db
         .from("review_queue")
-        .select("id, user_id, suggestion_type, payload, target_entity_id, status")
+        .select("id, user_id, suggestion_type, payload, target_entity_id, status, applied_at")
         .eq("id", reviewId)
         .maybeSingle();
       if (error || !row) return json({ error: "not found" }, 404);
       if (row.user_id !== userId) return json({ error: "forbidden" }, 403);
       if (row.suggestion_type !== "normalize_profile_entry") return json({ error: "wrong suggestion_type" }, 400);
 
-      await rollbackNormalization(db, { ...(row.payload as NormalizationPayload), user_id: userId }, row.target_entity_id);
+      await rollbackNormalization(db, { ...(row.payload as NormalizationPayload), user_id: userId }, row.target_entity_id, row.applied_at);
       await db
         .from("review_queue")
         .update({ status: "removed" })

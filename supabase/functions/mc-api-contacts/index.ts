@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateGodspeedKey, requireScope } from "../_shared/mc-auth.ts";
 import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
 import { ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
+import { loadMcVisibility, notHidden, redactContact } from "../_shared/mc-visibility.ts";
 import {
   json,
   errorJson,
@@ -139,6 +140,14 @@ Deno.serve(async (req) => {
         .single();
 
       if (error || !data) return errorJson("NOT_FOUND", "Contact not found", 404);
+      // Hidden from AI means hidden from this key; a sensitive person is
+      // reduced to id, name and relationship, with no interaction history.
+      if (data.ai_visibility === "hidden") return errorJson("NOT_FOUND", "Contact not found", 404);
+      const visibility = await loadMcVisibility(supabase, userId);
+      const shown = redactContact(data, visibility);
+      if (shown !== data) {
+        return json({ data: { ...shown, interactions: [] } }, 200, { "X-Menerio-Modified": data.updated_at || "" });
+      }
 
       // Fetch interactions
       const { data: interactions } = await supabase
@@ -161,10 +170,11 @@ Deno.serve(async (req) => {
       const tag = url.searchParams.get("tag");
       const search = url.searchParams.get("q");
 
-      let query = supabase
+      const visibility = await loadMcVisibility(supabase, userId);
+      let query = notHidden(supabase
         .from("contacts")
         .select("id, name, email, phone, company, role, relationship, tags, last_contact_date, contact_frequency_days, created_at, updated_at", { count: "exact" })
-        .eq("user_id", userId);
+        .eq("user_id", userId));
 
       if (relationship) query = query.eq("relationship", relationship);
       if (tag) query = query.contains("tags", [tag]);
@@ -174,7 +184,8 @@ Deno.serve(async (req) => {
 
       const { data, error, count } = await query;
       if (error) return errorJson("INTERNAL", error.message, 500);
-      return json({ data, meta: { total: count || 0, offset, limit } });
+      const rows = ((data || []) as Record<string, unknown>[]).map((r) => redactContact(r, visibility));
+      return json({ data: rows, meta: { total: count || 0, offset, limit } });
     }
 
     // POST /mc-api-contacts — Create

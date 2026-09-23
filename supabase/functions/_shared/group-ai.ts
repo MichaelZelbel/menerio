@@ -1,6 +1,30 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, deductTokens } from "./llm-credits.ts";
-import { parseModelJson, runChat } from "./llm-router.ts";
+import { parseModelJson, runChat, sourceLanguageRule } from "./llm-router.ts";
+import { getCallSiteDefault } from "./llm-defaults.ts";
+
+/**
+ * The code's prompt for a group call site, as the fallback. These callers pass
+ * an empty system message and used to pass no `systemPrompt` default, so a
+ * missing or disabled `llm_call_configs` row, or a failed config read (which
+ * `loadConfig` turns into "no row"), sent the model tagged data and no
+ * instructions: the briefing came back in whatever shape the model chose and
+ * the next step fell back to "Follow up".
+ */
+function groupDefaults(callSite: string) {
+  return {
+    provider: "openrouter" as const,
+    model: MODEL,
+    systemPrompt: getCallSiteDefault(callSite)?.system_prompt ?? undefined,
+  };
+}
+
+/**
+ * Every group answer is read by the user, and this model leans Chinese when no
+ * language is named (see `outputLanguageRule`). Nothing told it which language
+ * to write the briefing, the next step or the reasons in.
+ */
+const GROUP_LANGUAGE_RULE = sourceLanguageRule();
 
 // The prompt-safety helpers live in their own module because this one imports
 // the Supabase client from esm.sh, which the Node test runner cannot resolve —
@@ -89,8 +113,9 @@ export async function callJson(
     userId,
     callSite,
     messages,
-    defaults: { provider: "openrouter", model: MODEL },
+    defaults: groupDefaults(callSite),
     callOptions: { response_format: { type: "json_object" } },
+    systemSuffix: GROUP_LANGUAGE_RULE,
   });
   // Fenced JSON is a documented live failure; a bare JSON.parse answered 500
   // after the call had been billed.
@@ -110,7 +135,8 @@ export async function callMarkdown(
     userId,
     callSite,
     messages,
-    defaults: { provider: "openrouter", model: MODEL },
+    defaults: groupDefaults(callSite),
+    systemSuffix: GROUP_LANGUAGE_RULE,
   });
   return String(result.content || "").trim();
 }

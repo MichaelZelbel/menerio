@@ -116,6 +116,11 @@ function scoreSourceNote(group: ImportableGroup, note: ImportableNote) {
     if (title.includes(token)) score += 2;
     if (content.includes(token)) score += 1;
   }
+  // A table only ranks a note that is about this group. The table bonus alone
+  // used to reach the threshold of 3, so any recent note with a Markdown table
+  // (a shopping list, a price comparison) was "the" member list of every
+  // group, and importing it created a contact per row.
+  if (score === 0) return 0;
   if ((note.content || "").includes("|")) score += 3;
   return score;
 }

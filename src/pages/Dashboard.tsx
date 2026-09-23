@@ -24,12 +24,13 @@ interface LayoutProps {
   notes: ReturnType<typeof useNotes>["data"] & {};
   hasNotes: boolean;
   hasProfile: boolean;
+  hasAiNote: boolean;
   onCreateNote: () => void;
   firstCapturesSlot?: ReactNode;
 }
 
 /** The default arrangement: notes front and center. */
-const NotesFirstLayout = ({ notes, hasNotes, hasProfile, onCreateNote, firstCapturesSlot }: LayoutProps) => (
+const NotesFirstLayout = ({ notes, hasNotes, hasProfile, hasAiNote, onCreateNote, firstCapturesSlot }: LayoutProps) => (
   <div className="grid gap-6 lg:grid-cols-3">
     <div className="lg:col-span-2 space-y-6">
       {!hasNotes && (
@@ -52,13 +53,13 @@ const NotesFirstLayout = ({ notes, hasNotes, hasProfile, onCreateNote, firstCapt
       <DiscoveryFeed />
       <OrphanNotesDetector compact />
       <BridgeNotesHighlighter compact />
-      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} />
+      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} hasAiNote={hasAiNote} />
     </div>
   </div>
 );
 
 /** Cherishly's arrangement: the people you cherish come first. */
-const PeopleFirstLayout = ({ notes, hasNotes, hasProfile, firstCapturesSlot }: LayoutProps) => (
+const PeopleFirstLayout = ({ notes, hasNotes, hasProfile, hasAiNote, firstCapturesSlot }: LayoutProps) => (
   <div className="grid gap-6 lg:grid-cols-3">
     <div className="lg:col-span-2 space-y-6">
       <TodaysConnections />
@@ -72,7 +73,7 @@ const PeopleFirstLayout = ({ notes, hasNotes, hasProfile, firstCapturesSlot }: L
       {hasNotes && <RecentNotesCard notes={notes} />}
       <ActivityFeed limit={5} />
       <ProfileWidget />
-      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} />
+      <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} hasAiNote={hasAiNote} />
     </div>
   </div>
 );
@@ -97,7 +98,7 @@ const Dashboard = () => {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-display font-bold">
-            Welcome back, {displayName} 👋
+            {hasNotes ? "Welcome back" : "Welcome"}, {displayName} 👋
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {BRAND.dashboardSubline}
@@ -120,6 +121,7 @@ const Dashboard = () => {
           notes={notes}
           hasNotes={hasNotes}
           hasProfile={hasProfile}
+          hasAiNote={aiProcessedCount > 0}
           onCreateNote={() => navigate("/dashboard/notes?action=create")}
           firstCapturesSlot={firstCaptures.show ? <FirstCapturesWizard onComplete={firstCaptures.dismiss} /> : undefined}
         />
@@ -128,6 +130,7 @@ const Dashboard = () => {
           notes={notes}
           hasNotes={hasNotes}
           hasProfile={hasProfile}
+          hasAiNote={aiProcessedCount > 0}
           onCreateNote={() => navigate("/dashboard/notes?action=create")}
           firstCapturesSlot={firstCaptures.show ? <FirstCapturesWizard onComplete={firstCaptures.dismiss} /> : undefined}
         />

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Home, LayoutDashboard, Search, FileQuestion, Loader2 } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 // How long "this page does not exist" is held back while the browser looks for a newer
 // build. Long enough for a service worker update check on a slow phone, short enough that a
@@ -64,7 +65,10 @@ const NotFound = () => {
           It may have been moved or deleted.
         </p>
 
-        {/* Search */}
+        {/* Search. It searches the documentation, which a brand without docs
+            (Cherishly) does not show, and which a signed-in visitor could
+            mistake for a search of their notes, so the box says what it is. */}
+        {BRAND.showDocs && (
         <form
           className="mt-8 flex gap-2"
           onSubmit={(e) => {
@@ -77,12 +81,13 @@ const NotFound = () => {
             <Input aria-label="Search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search for something…"
+              placeholder="Search the documentation…"
               className="pl-9"
             />
           </div>
           <Button type="submit" variant="outline">Search</Button>
         </form>
+        )}
 
         {/* Actions */}
         <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">

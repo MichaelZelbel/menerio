@@ -161,31 +161,14 @@ Deno.serve(async (req) => {
         tier: "stopword",
       });
 
-      // Increment strikes
-      const { data: existing } = await admin
-        .from("user_suspensions")
-        .select("strike_count")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (existing) {
-        const newCount = (existing.strike_count ?? 0) + 1;
-        const shouldSuspend = newCount >= MAX_STRIKES;
-        await admin
-          .from("user_suspensions")
-          .update({
-            strike_count: newCount,
-            ...(shouldSuspend
-              ? { suspended: true, suspended_at: new Date().toISOString(), suspension_reason: `Auto-suspended after ${newCount} content violations` }
-              : {}),
-          })
-          .eq("user_id", user.id);
-      } else {
-        await admin.from("user_suspensions").insert({
-          user_id: user.id,
-          strike_count: 1,
-        });
-      }
+      // Increment strikes. One atomic call: a read-then-write here let
+      // concurrent violations share one strike and slip past the limit.
+      const { error: strikeErr } = await admin.rpc("record_content_strike", {
+        p_user_id: user.id,
+        p_limit: MAX_STRIKES,
+        p_reason: `Auto-suspended after ${MAX_STRIKES} content violations`,
+      });
+      if (strikeErr) console.error("[moderate-content] strike not recorded:", strikeErr.message);
 
       return ok({
         approved: false,

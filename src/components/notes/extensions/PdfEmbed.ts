@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
+import { safeEmbedSrc } from "@/lib/safe-url";
 
 /**
  * PDF embed node for TipTap.
@@ -39,7 +40,9 @@ export const PdfEmbed = Node.create({
         "iframe",
         mergeAttributes(
           {
-            src: HTMLAttributes.src || "about:blank",
+            // A javascript: src in an iframe runs in this origin; note content is
+            // written by API keys, bots and the AI, not only by the user.
+            src: safeEmbedSrc(HTMLAttributes.src),
             frameborder: "0",
             "data-type": "pdf",
           },

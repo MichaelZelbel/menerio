@@ -27,7 +27,9 @@ serve(async (req) => {
 
     const result = await callJson(admin, userId, "group-ai.next_step", [
       { role: "system", content: "" },
-      { role: "user", content: taggedPrompt({ group: membership.contact_groups, person: membership.contacts, interactions: interactions || [], notes: (notes || []).map(noteText) }) },
+      // `today`: the due date is an offset from today and the interactions carry
+      // dates; without it "last spoke a year ago" and "yesterday" read the same.
+      { role: "user", content: taggedPrompt({ today: new Date().toISOString().slice(0, 10), group: membership.contact_groups, person: membership.contacts, interactions: interactions || [], notes: (notes || []).map(noteText) }) },
     ]);
 
     // runChat inside callJson already billed the real usage; no second fixed deduction.

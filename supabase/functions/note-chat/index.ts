@@ -414,6 +414,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .from("media_analysis")
         .select("storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
         .eq("note_id", note_id)
+        // Another account can file a row under this note id (the table's RLS
+        // checks user_id only); its text would reach this chat as note context.
+        .eq("user_id", user.id)
         .eq("analysis_status", "complete")
         .order("original_filename", { ascending: true })
         .order("page_number", { ascending: true, nullsFirst: true });

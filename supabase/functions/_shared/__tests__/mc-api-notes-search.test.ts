@@ -22,6 +22,10 @@ async function harness(options: Options = {}) {
   const notes: Row[] = [
     { id: "native-1", user_id: "user-a", title: "Dentist", content: "Root canal booked for March.", tags: [], entity_type: null, is_favorite: false, is_pinned: false, is_trashed: false, folder_path: "Health", source_app: "web", source_id: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-02-01T00:00:00Z" },
     { id: "mc-1", user_id: "user-a", title: "observations/teeth.md", content: "He has a root canal coming up.", tags: [], entity_type: null, is_favorite: false, is_pinned: false, is_trashed: false, folder_path: "godspeed/observations", source_app: "godspeed", source_id: "observations/teeth.md", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-03-01T00:00:00Z" },
+    // Hidden from AI, and a note about a person marked sensitive: the owner's
+    // app shows both, a Mission Control key sees neither.
+    { id: "hidden-1", user_id: "user-a", title: "Root canal (private)", content: "root canal notes", tags: [], is_trashed: false, folder_path: "", source_app: "web", source_id: null, ai_visibility: "hidden", metadata: {}, updated_at: "2026-03-03T00:00:00Z" },
+    { id: "sens-1", user_id: "user-a", title: "Root canal with S", content: "root canal together", tags: [], is_trashed: false, folder_path: "", source_app: "web", source_id: null, ai_visibility: "visible", metadata: { matched_people: ["contact-s"] }, updated_at: "2026-03-04T00:00:00Z" },
     { id: "foreign", user_id: "user-b", title: "Root canal", content: "root canal", tags: [], is_trashed: false, folder_path: "", source_app: "web", source_id: null, updated_at: "2026-03-02T00:00:00Z" },
   ];
   const rpcs: { name: string; args: Row }[] = [];
@@ -34,6 +38,8 @@ async function harness(options: Options = {}) {
         return { data: [
           { note_id: "mc-1", similarity: 0.82, content: "He has a root canal coming up." },
           { note_id: "native-1", similarity: 0.55, content: "Root canal booked for March." },
+          { note_id: "hidden-1", similarity: 0.9, content: "root canal notes" },
+          { note_id: "sens-1", similarity: 0.9, content: "root canal together" },
         ], error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
@@ -43,11 +49,23 @@ async function harness(options: Options = {}) {
         table === "godspeed_api_keys" ? [{ id: "key-1", user_id: "user-a", scopes: ["notes"], is_active: true, expires_at: null }]
         : table === "v_ai_allowance_current" ? [{ user_id: "user-a", remaining_tokens: options.tokens ?? 1_000_000, remaining_credits: 10, period_start: "2026-09-01" }]
         : table === "notes" ? [...notes]
+        : table === "contacts" ? [{ id: "contact-s", user_id: "user-a", is_sensitive: true, merged_into: null }]
         : [];
       let single = false;
       const q: Row = {
-        select: () => q, update: () => q, order: () => q,
+        // PostgREST's "alias:column->key" projection, the one form the list uses.
+        select: (cols?: string) => {
+          if (cols?.includes("matched_people:metadata->matched_people")) {
+            rows = rows.map((r) => ({ ...r, matched_people: (r.metadata as Row | undefined)?.matched_people ?? null }));
+          }
+          return q;
+        },
+        update: () => q, order: () => q,
         eq: (k: string, v: unknown) => { if (k !== "key_hash") rows = rows.filter((r) => r[k] === v); return q; },
+        neq: (k: string, v: unknown) => { rows = rows.filter((r) => r[k] !== v); return q; },
+        is: (k: string, v: unknown) => { rows = rows.filter((r) => (r[k] ?? null) === v); return q; },
+        range: (from: number, to: number) => { rows = rows.slice(from, to + 1); return q; },
+        single: () => { single = true; return q; },
         in: (k: string, vs: unknown[]) => { rows = rows.filter((r) => vs.includes(r[k])); return q; },
         ilike: (k: string, v: string) => { rows = rows.filter((r) => String(r[k] ?? "").toLowerCase() === v.toLowerCase()); return q; },
         or: (expr: string) => {
@@ -95,6 +113,9 @@ async function harness(options: Options = {}) {
   return {
     rpcs, fetches,
     // The edge runtime hands the function a path that starts at its own name.
+    get: (path: string) => handler!(new Request(`https://synthetic.invalid/hub-api-notes${path}`, {
+      method: "GET", headers: { Authorization: "Bearer mnr_synthetic" },
+    })),
     search: (qs: string) => handler!(new Request(`https://synthetic.invalid/hub-api-notes/search?${qs}`, {
       method: "GET", headers: { Authorization: "Bearer mnr_synthetic" },
     })),
@@ -166,6 +187,32 @@ describe("GET /mc-api-notes/search", () => {
     const h = await harness();
     const body = await (await h.search("q=root%20canal")).json();
     expect(body.data.map((r: Row) => r.id)).not.toContain("foreign");
+  });
+
+  it("leaves out notes hidden from AI and notes about a sensitive person", async () => {
+    const h = await harness();
+    for (const qs of ["q=root%20canal", "q=root%20canal&source_app=native"]) {
+      const ids = (await (await h.search(qs)).json()).data.map((r: Row) => r.id);
+      expect(ids).not.toContain("hidden-1");
+      expect(ids).not.toContain("sens-1");
+    }
+    const textOnly = await harness({ tokens: 0 });
+    const ids = (await (await textOnly.search("q=root%20canal")).json()).data.map((r: Row) => r.id);
+    expect(ids).not.toContain("hidden-1");
+    expect(ids).not.toContain("sens-1");
+  });
+
+  it("answers 404 for a hidden or sensitive note by id, and leaves both out of the list", async () => {
+    const h = await harness();
+    expect((await h.get("/hidden-1")).status).toBe(404);
+    expect((await h.get("/sens-1")).status).toBe(404);
+    expect((await h.get("/native-1")).status).toBe(200);
+    const list = await (await h.get("")).json();
+    const ids = list.data.map((r: Row) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(["native-1", "mc-1"]));
+    expect(ids).not.toContain("hidden-1");
+    expect(ids).not.toContain("sens-1");
+    expect(list.data.every((r: Row) => !("matched_people" in r))).toBe(true);
   });
 
   it("still requires q", async () => {

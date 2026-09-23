@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { showToast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
 import { useAddClaim } from "@/hooks/useClaims";
@@ -43,6 +43,7 @@ import {
   AlertTriangle,
   Globe,
 } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 const typeConfig: Record<string, { icon: typeof UserPlus; label: string; color: string }> = {
   add_contact: { icon: UserPlus, label: "Add to People", color: "text-green-500" },
@@ -333,7 +334,9 @@ export default function ReviewQueue() {
           confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
           person_id: firstContact?.contact_id || null,
           source: "note_auto",
-          status: "happened",
+          // moments_status_check allows past_fact, future_plan, ongoing and
+          // unknown; "happened" failed every single accept. Same as bulk keep.
+          status: "past_fact",
         } as any)
         .select("id")
         .single();
@@ -999,13 +1002,24 @@ export default function ReviewQueue() {
 
 
   const hasReviewItems = items.length + wikiRevisions.length > 0;
+  // ?contact_id=<id> comes from a person's "N pending profile suggestions"
+  // badge. It used to be ignored, so the person landed in the whole queue.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contactFilter = searchParams.get("contact_id");
+  const clearContactFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("contact_id");
+    setSearchParams(next, { replace: true });
+  };
   const combinedReviewItems = useMemo(
     () =>
       [
-        ...wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision })),
-        ...items.map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
+        ...(contactFilter ? [] : wikiRevisions.map((revision) => ({ kind: "wiki" as const, created_at: revision.created_at, revision }))),
+        ...items
+          .filter((item) => !contactFilter || (item.payload as { contact_id?: string } | null)?.contact_id === contactFilter)
+          .map((item) => ({ kind: "review" as const, created_at: item.created_at, item })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [items, wikiRevisions],
+    [items, wikiRevisions, contactFilter],
   );
 
   // Paginate to keep the DOM small even with thousands of pending items.
@@ -1038,7 +1052,7 @@ export default function ReviewQueue() {
       <div>
         <h1 className="text-2xl font-bold font-display">Review AI Changes</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Menerio automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
+          {BRAND.name} automatically added these insights from your notes. Keep what looks right, remove what does not, or block things you never want added again.
         </p>
         {hasReviewItems && (
           <p className="text-xs text-muted-foreground mt-2">
@@ -1048,7 +1062,18 @@ export default function ReviewQueue() {
         )}
       </div>
 
-      {hasReviewItems && (
+      {contactFilter && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <span>Showing only the suggestions about one person.</span>
+          <Button size="sm" variant="link" className="h-auto p-0" onClick={clearContactFilter}>
+            Show all
+          </Button>
+        </div>
+      )}
+
+      {/* The bulk buttons act on every pending change on the server, so they
+          are hidden while the list shows one person's suggestions only. */}
+      {hasReviewItems && !contactFilter && (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={handleNeverAgainAll} disabled={bulkDisabled}>
             <X className="h-4 w-4 mr-1" />
