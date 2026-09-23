@@ -10,7 +10,7 @@ Browser and all eight MCP topic tools share database commands. Owner policies, s
 
 Merging people transfers topic IDs and history atomically with the merge marker. A self-merge with topics requires reassignment; an interrupted self-merge remains visible and resumable. Deletion explicitly cascades the deleted person's topics and history. The existing multi-request profile merge is not converted into a whole-profile transaction.
 
-The shared hub `talk-about` skill handles capture, discussion completion, prioritization, call preparation, ambiguity, retries, German requests, and dated discussion versus explicit reminders. It creates no substitute notes or reminders.
+The shared mission control `talk-about` skill handles capture, discussion completion, prioritization, call preparation, ambiguity, retries, German requests, and dated discussion versus explicit reminders. It creates no substitute notes or reminders.
 
 ## Verification
 
@@ -49,4 +49,4 @@ Published code: `223b5bdd585ca2e4f48512c207d3f39370c31153`, present in Lovable b
 
 Both migrations are recorded in production: `20260907140000` and `20260907141000`. MCP version 73 and merge-contacts version 200 are active, with their existing authentication settings preserved. Topic Realtime publication membership and restricted function grants were checked live. The pre-release database backup completed on 7 September at 04:24 UTC.
 
-The shared hub skill is pushed to hub origin. Menerio code is pushed to `main` and `codex/person-conversation-topics`. No production deployment remains pending for this feature. Open [People](https://menerio.com/dashboard/people), choose a person, and use the checklist below their name. This is live account data, not a separate test database.
+The shared mission control skill is pushed to godspeed origin. Menerio code is pushed to `main` and `codex/person-conversation-topics`. No production deployment remains pending for this feature. Open [People](https://menerio.com/dashboard/people), choose a person, and use the checklist below their name. This is live account data, not a separate test database.

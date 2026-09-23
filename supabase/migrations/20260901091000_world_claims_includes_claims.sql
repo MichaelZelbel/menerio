@@ -2,9 +2,9 @@
 -- confidence and a source link, and appears in NO view. `FROM public.claims`
 -- occurs in no migration before this one.
 --
--- world_claims, the endpoint the hub mirrors, is a union of profile_entries
+-- world_claims, the endpoint Mission Control mirrors, is a union of profile_entries
 -- (with valid_from and valid_to hardcoded NULL, because that table has no date
--- columns at all) and contact_relationships. That is why 198 of the hub's 200
+-- columns at all) and contact_relationships. That is why 198 of Mission Control's 200
 -- mirrored claims were named "undated": not because nobody filled the dates in,
 -- but because the view could not carry one.
 --

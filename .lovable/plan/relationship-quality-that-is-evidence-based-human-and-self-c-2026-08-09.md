@@ -9,7 +9,7 @@ The current account data confirms the distinction:
 - There are **90 stored relationship rows** and **no duplicate `pair_key` values**. Exact structural deduplication is working, yet the result is still poor because semantically equivalent or nonsensical claims receive different labels.
 - The extraction pipeline auto-applies relationships at its default confidence of `0.72`, while the balanced threshold is `0.70`. A single model answer therefore normally becomes permanent data without a second judgment.
 - **89 of 90** stored rows can be traced to a Review Queue record with a source note ID, but `contact_relationships` stores no evidence quote, relevance judgment, or person-verification result. “Came from this note” is not the same as “this note states this relationship.”
-- The account contains contacts named `Menerio`, `Hub`, `Infy`, `HR`, `Captain`, and `Coach`; their metadata is empty, so downstream relationship extraction has no reliable entity identity to consult.
+- The account contains contacts named `Menerio`, `Godspeed`, `Infy`, `HR`, `Captain`, and `Coach`; their metadata is empty, so downstream relationship extraction has no reliable entity identity to consult.
 - The existing repair only removes blocked labels, self-edges, and exact duplicate pair keys. It never rereads the source note to decide whether the claim is true, meaningful, or about a real person. That is why the repair reported success without repairing the actual problem.
 
 ## The quality rule

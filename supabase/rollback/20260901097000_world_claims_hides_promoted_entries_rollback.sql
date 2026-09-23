@@ -13,10 +13,10 @@
 --     re-widens the view to three arms and undoes that rollback.
 --
 -- WHAT THIS COSTS. The single filtering line goes away, so a fact that was
--- promoted from a profile entry into a claim reaches the hub mirror TWICE
+-- promoted from a profile entry into a claim reaches Mission Control mirror TWICE
 -- again: once undated from profile_entries, once dated from claims. Both
 -- describe the same fact and the dated one is strictly better. The duplicate
--- is visible rather than dangerous — but `check-claim-conflicts.js` in the hub
+-- is visible rather than dangerous — but `check-claim-conflicts.js` in Mission Control
 -- may then report those pairs, so expect the conflict count to rise by roughly
 -- the number of promoted facts.
 --

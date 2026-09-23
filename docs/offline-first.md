@@ -55,7 +55,7 @@ through `console.warn`, which `vite.config.ts` strips from production
 indicator. So a client that happened to start during those ten minutes stayed
 frozen after the service recovered, showed a completely normal note list, and
 said nothing. That is how a device ended up on 577 notes against 638 on the
-server, and it surfaced only when hub folders written straight into Postgres
+server, and it surfaced only when Mission Control folders written straight into Postgres
 never appeared in the UI.
 
 **What now happens instead** (`src/sync/reachability.ts`, `src/sync/sync-health.ts`):
@@ -89,8 +89,8 @@ each time; the instance was still deprovisioned on 2026-07-18 and again on
 count. Long-lived desktop sessions and sync-config deploys are what kept it alive
 between those dates.
 
-**What runs now:** a job on Michael's hub VPS (`vps/hub/powersync-keepalive.sh` in
-the hub repo) checks every six hours through the PowerSync CLI and redeploys the
+**What runs now:** a job on Michael's Mission Control VPS (`vps/godspeed/powersync-keepalive.sh` in
+Mission Control repo) checks every six hours through the PowerSync CLI and redeploys the
 unchanged sync config only when the instance is deprovisioned or the last deploy is
 five days old. A deploy restarts a deprovisioned instance without anyone touching the
 dashboard. Measured cost: PowerSync Cloud treats an unchanged deploy as a new sync

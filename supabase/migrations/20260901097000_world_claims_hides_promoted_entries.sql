@@ -2,7 +2,7 @@
 --
 -- profile_entries is now a display layer over claims (20260901093000), but
 -- world_claims still emitted both arms unconditionally, so a promoted fact
--- reached the hub mirror as two files: the undated profile row and the dated
+-- reached Mission Control mirror as two files: the undated profile row and the dated
 -- claim. Two files, one fact, and the dated one is strictly better.
 --
 -- The rule: a profile entry that names the claim it displays is suppressed

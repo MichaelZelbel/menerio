@@ -55,16 +55,16 @@ beforeEach(() => {
     {
       notes: [
         note("n-chol", "Cholesterol", { folder_path: "Health" }),
-        note("n-hub", "observations/health.md", { source_app: "hub", source_id: "observations/health.md", folder_path: "hub/observations" }),
+        note("n-godspeed", "observations/health.md", { source_app: "godspeed", source_id: "observations/health.md", folder_path: "godspeed/observations" }),
         note("n-binned", "Old labs", { is_trashed: true, folder_path: "Health" }),
         note("n-top", "Loose thought"),
       ],
-      note_folders: [{ id: "f1", user_id: USER, path: "Health", name: "Health", parent_path: "" }, { id: "f2", user_id: USER, path: "hub", name: "hub", parent_path: "" }],
+      note_folders: [{ id: "f1", user_id: USER, path: "Health", name: "Health", parent_path: "" }, { id: "f2", user_id: USER, path: "godspeed", name: "godspeed", parent_path: "" }],
       note_connections: [],
     },
     {
       match_note_chunks: () => ({ data: [
-        { note_id: "n-hub", similarity: 0.80 }, { note_id: "n-chol", similarity: 0.72 }, { note_id: "n-binned", similarity: 0.9 },
+        { note_id: "n-godspeed", similarity: 0.80 }, { note_id: "n-chol", similarity: 0.72 }, { note_id: "n-binned", similarity: 0.9 },
       ], error: null }),
     },
   );
@@ -101,11 +101,11 @@ describe("capture_note", () => {
     expect(textOf(r)).toContain("Folder: Money/Invoices (new folder created: Money, Money/Invoices)");
   });
 
-  it.each(["hub", "hub/rules", "/Hub/observations/", "HUB\\x"])("refuses folder_path %s before spending or saving anything", async (folder_path) => {
+  it.each(["godspeed", "godspeed/rules", "/Godspeed/observations/", "GODSPEED\\x"])("refuses folder_path %s before spending or saving anything", async (folder_path) => {
     const before = db.tables.notes.length;
     const r = await call("capture_note", { content: "x", folder_path });
     expect(r.isError).toBe(true);
-    expect(textOf(r)).toContain("mirror of the user's hub files");
+    expect(textOf(r)).toContain("mirror of the user's mission control files");
     expect(textOf(r)).toContain("Nothing was saved");
     expect(db.tables.notes).toHaveLength(before);
     expect(metadataCalls).toBe(0);
@@ -118,12 +118,12 @@ describe("capture_note", () => {
     expect(textOf(r)).toContain("Folder: Hubris");
   });
 
-  it("lists related existing notes: native first, hub file marked, trashed and itself left out", async () => {
+  it("lists related existing notes: native first, godspeed file marked, trashed and itself left out", async () => {
     const t = textOf(await call("capture_note", { content: "LDL 130", title: "Blood test" }));
     const related = t.split("\n").filter((l) => l.startsWith("- "));
     expect(related).toEqual([
       "- Cholesterol (n-chol), 72% similar",
-      "- observations/health.md [hub file] (n-hub), 80% similar",
+      "- observations/health.md [godspeed file] (n-godspeed), 80% similar",
     ]);
     const saved = db.tables.notes.find((n) => n.title === "Blood test")!;
     expect(db.rpcCalls[0].args).toMatchObject({ p_user_id: USER, query_embedding: VECTOR });
@@ -167,24 +167,24 @@ describe("capture_note", () => {
     const tools = (await client.listTools()).tools;
     await client.close(); await server.close();
     const capture = tools.find((t) => t.name === "capture_note")!;
-    for (const word of ["`title`", "`folder_path`", "`tags`", "list_note_folders", "[[Exact Title]]", "hub"]) expect(capture.description).toContain(word);
+    for (const word of ["`title`", "`folder_path`", "`tags`", "list_note_folders", "[[Exact Title]]", "godspeed"]) expect(capture.description).toContain(word);
     expect(Object.keys((capture.inputSchema as { properties: Row }).properties).sort()).toEqual(["content", "folder_path", "tags", "title"]);
     expect((capture.inputSchema as { required?: string[] }).required).toEqual(["content"]);
   });
 });
 
 describe("list_note_folders", () => {
-  it("lists folders with counts and the top-level count, hub mirror hidden, trash not counted", async () => {
+  it("lists folders with counts and the top-level count, godspeed mirror hidden, trash not counted", async () => {
     const out = JSON.parse(textOf(await call("list_note_folders", {})));
     expect(out.folders).toEqual([{ path: "Health", notes: 1, notes_including_subfolders: 1 }]);
     expect(out.top_level_notes).toBe(1);
-    expect(out.hub_mirror_included).toBe(false);
+    expect(out.godspeed_mirror_included).toBe(false);
   });
 
-  it("shows the mirror tree when include_hub is true", async () => {
-    const out = JSON.parse(textOf(await call("list_note_folders", { include_hub: true })));
-    expect(out.folders.map((f: Row) => f.path)).toEqual(["Health", "hub", "hub/observations"]);
-    expect(out.folders.find((f: Row) => f.path === "hub/observations").notes).toBe(1);
+  it("shows the mirror tree when include_godspeed is true", async () => {
+    const out = JSON.parse(textOf(await call("list_note_folders", { include_godspeed: true })));
+    expect(out.folders.map((f: Row) => f.path)).toEqual(["godspeed", "godspeed/observations", "Health"]);
+    expect(out.folders.find((f: Row) => f.path === "godspeed/observations").notes).toBe(1);
   });
 
   it("counts only the caller's notes and leaves AI-hidden ones out", async () => {

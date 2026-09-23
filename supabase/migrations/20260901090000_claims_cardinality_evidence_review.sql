@@ -2,7 +2,7 @@
 --
 -- cardinality    says whether an attribute holds one live value or several.
 --                Without it, contradiction detection flags every multi-value
---                attribute and becomes noise nobody reads. Measured on the hub
+--                attribute and becomes noise nobody reads. Measured on Mission Control
 --                mirror 2026-08-30: of 8 subject+attribute collisions, at least
 --                two were legitimate multi-value attributes.
 --

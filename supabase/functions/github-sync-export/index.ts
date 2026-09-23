@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { selectAllRows } from "../_shared/paged-select.ts";
-import { isHubMirror } from "../_shared/hub-source.ts";
+import { isGodspeedMirror } from "../_shared/mc-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -388,17 +388,17 @@ Deno.serve(async (req) => {
       }
       note = data;
 
-      // A mirrored hub file already IS a Markdown file in a git folder: the
-      // hub's own. Exporting it would keep a second, lagging copy of thousands
-      // of machine-written files in the user's vault, and every hub sync would
+      // A mirrored mission control file already IS a Markdown file in a git folder: the
+      // godspeed's own. Exporting it would keep a second, lagging copy of thousands
+      // of machine-written files in the user's vault, and every mission control sync would
       // turn into a wave of vault commits. So it is never written, and never
-      // deleted either: whatever an earlier export pushed under hub/ stays
+      // deleted either: whatever an earlier export pushed under godspeed/ stays
       // where it is for the user to keep or remove, this function just stops
       // touching it. Success, not an error: the editor calls this on every
       // save and must not show a failed sync for a note that is fine.
-      if (isHubMirror(data.source_app as string | null)) {
+      if (isGodspeedMirror(data.source_app as string | null)) {
         return new Response(
-          JSON.stringify({ success: true, skipped: true, reason: "hub_mirror", action: "skipped" }),
+          JSON.stringify({ success: true, skipped: true, reason: "godspeed_mirror", action: "skipped" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
@@ -583,10 +583,10 @@ async function handleBulkSync(
         .select("*")
         .eq("user_id", userId)
         .eq("is_trashed", false)
-        // Mirrored hub files are not exported (see the single-note path above
+        // Mirrored godspeed files are not exported (see the single-note path above
         // for why). Left out in the query so a bulk sync does not download the
         // full body of several thousand notes only to discard them.
-        .or("source_app.is.null,source_app.not.ilike.hub")
+        .or("source_app.is.null,source_app.not.ilike.godspeed")
         .order("updated_at", { ascending: false })
         .order("id")
         .range(from, to),
@@ -596,10 +596,10 @@ async function handleBulkSync(
   }
 
   // The query filter above is the cheap half. `source_app` is written by
-  // another program, and isHubMirror forgives the stray space an ILIKE would
+  // another program, and isGodspeedMirror forgives the stray space an ILIKE would
   // not, so it stays the authority. Nothing is deleted from the repository for
-  // a hub file an earlier export pushed; it is simply no longer maintained.
-  notes = notes.filter((n) => !isHubMirror(n.source_app as string | null));
+  // a mission control file an earlier export pushed; it is simply no longer maintained.
+  notes = notes.filter((n) => !isGodspeedMirror(n.source_app as string | null));
 
   const results: { note_id: string; title: string; success: boolean; error?: string }[] = [];
 

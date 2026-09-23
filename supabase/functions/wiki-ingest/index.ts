@@ -5,7 +5,7 @@ import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 import { softStructure } from "../_shared/wiki-structure.ts";
 import { createNoteAIJobs, classifyNoteAIError, NoteAIJobError } from "../_shared/note-ai-jobs.ts";
 import { runWikiStage, dispatchWikiRequest } from "../_shared/wiki-ingest-jobs.ts";
-import { shouldExtractFacts } from "../_shared/hub-source.ts";
+import { shouldExtractFacts } from "../_shared/mc-source.ts";
 import { sanitizePromptText, taggedPrompt } from "../_shared/prompt-safety.ts";
 
 const corsHeaders = {

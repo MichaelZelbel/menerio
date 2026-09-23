@@ -13,8 +13,8 @@
  * Pure on purpose: no Deno APIs in this file, so the Node test runner can
  * import it directly.
  */
-import { isHubMirror } from "./hub-source.ts";
-import { compareNativeFirst, isHubFolderPath, rankingSimilarity } from "./hub-ranking.ts";
+import { isGodspeedMirror } from "./mc-source.ts";
+import { compareNativeFirst, isGodspeedFolderPath, rankingSimilarity } from "./mc-ranking.ts";
 import { normalizeFolderPath } from "./note-create-tools.ts";
 import type { DbClient } from "./db-client.ts";
 
@@ -67,7 +67,7 @@ export interface RelatedNote {
  * The user's existing notes closest to an embedding that was just computed.
  *
  * Costs no tokens: the vector is the new note's own, handed in by the caller.
- * Native notes are preferred by the shared hub policy (a mirrored file competes
+ * Native notes are preferred by the shared mission control policy (a mirrored file competes
  * on a discounted similarity and loses ties), because "related to what you
  * already wrote" is the useful answer and the mirror would otherwise fill the
  * list by volume. Trashed and AI-hidden notes are never listed.
@@ -112,7 +112,7 @@ export async function findRelatedNotes(
     .slice(0, max)
     .map((r) => ({
       id: r.id,
-      title: `${r.title || "Untitled"}${isHubMirror(r.source_app) ? " [hub file]" : ""}`,
+      title: `${r.title || "Untitled"}${isGodspeedMirror(r.source_app) ? " [godspeed file]" : ""}`,
       similarity: r.similarity,
     }));
 }
@@ -171,7 +171,7 @@ export interface FolderListing {
   folders: { path: string; notes: number; notes_including_subfolders: number }[];
   top_level_notes: number;
   folder_count: number;
-  hub_mirror_included: boolean;
+  godspeed_mirror_included: boolean;
 }
 
 /**
@@ -182,20 +182,20 @@ export interface FolderListing {
  * themselves (a note can sit in a path nobody ever made a row for). A note in
  * "A/B/C" makes "A" and "A/B" exist too.
  *
- * The hub mirror's tree is left out unless asked for. It is hundreds of
+ * Mission Control mirror's tree is left out unless asked for. It is hundreds of
  * machine-made folders, nothing may be filed there, and an assistant choosing
  * where a new note belongs would otherwise have to read past all of them.
  */
 export function buildFolderListing(
   folderPaths: (string | null | undefined)[],
   noteFolderPaths: (string | null | undefined)[],
-  includeHub = false,
+  includeGodspeed = false,
 ): FolderListing {
   const direct = new Map<string, number>();
   const known = new Set<string>();
   let topLevel = 0;
 
-  const admit = (p: string) => includeHub || !isHubFolderPath(p);
+  const admit = (p: string) => includeGodspeed || !isGodspeedFolderPath(p);
   const addWithAncestors = (p: string) => {
     const segs = p.split("/");
     for (let i = 1; i <= segs.length; i++) known.add(segs.slice(0, i).join("/"));
@@ -220,5 +220,5 @@ export function buildFolderListing(
     return { path, notes: direct.get(path) ?? 0, notes_including_subfolders: deep };
   });
 
-  return { folders, top_level_notes: topLevel, folder_count: folders.length, hub_mirror_included: includeHub };
+  return { folders, top_level_notes: topLevel, folder_count: folders.length, godspeed_mirror_included: includeGodspeed };
 }

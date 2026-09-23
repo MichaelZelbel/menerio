@@ -57,8 +57,8 @@ hour after such a run: short connections are not what their inactivity counter
 sees. Their rule is "no deploys or client connections for over 7 days", and a
 deploy is what demonstrably counts and what restarts a deprovisioned instance.
 
-The keepalive therefore moved to Michael's hub VPS as a scheduled deploy of the
-unchanged sync config (`vps/hub/powersync-keepalive.sh` in the hub repo, root
+The keepalive therefore moved to Michael's Mission Control VPS as a scheduled deploy of the
+unchanged sync config (`vps/godspeed/powersync-keepalive.sh` in Mission Control repo, root
 cron every 6 h, deploys only when the instance is deprovisioned or five days have
 passed since the last deploy). An unchanged deploy still creates a new sync rules
 version and makes every client re-download its notes, so it deploys as rarely as

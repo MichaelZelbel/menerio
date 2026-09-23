@@ -79,9 +79,9 @@ describe("syncWikilinkConnections", () => {
     expect(links()).toEqual([]);
   });
 
-  it("resolves a duplicated title to the user's own oldest note, not a hub file", async () => {
+  it("resolves a duplicated title to the user's own oldest note, not a mission control file", async () => {
     db.tables.notes.push(
-      note("hub-berlin", "Berlin", { source_app: "hub", created_at: "2025-01-01T00:00:00Z" }),
+      note("mc-berlin", "Berlin", { source_app: "godspeed", created_at: "2025-01-01T00:00:00Z" }),
       note("berlin-2", "Berlin", { created_at: "2026-06-01T00:00:00Z" }),
     );
     const res = await syncWikilinkConnections(db, USER, "src", "[[Berlin]]");

@@ -84,25 +84,25 @@ verify_jwt = false
 [functions.get-shared-note]
 verify_jwt = false
 
-[functions.hub-api-keys]
+[functions.mc-api-keys]
 verify_jwt = false
 
-[functions.hub-api-notes]
+[functions.mc-api-notes]
 verify_jwt = false
 
-[functions.hub-api-contacts]
+[functions.mc-api-contacts]
 verify_jwt = false
 
-[functions.hub-api-actions]
+[functions.mc-api-actions]
 verify_jwt = false
 
-[functions.hub-api-stats]
+[functions.mc-api-stats]
 verify_jwt = false
 
-[functions.hub-api-world]
+[functions.mc-api-world]
 verify_jwt = false
 
-[functions.hub-connect]
+[functions.mc-connect]
 verify_jwt = false
 
 [functions.receive-note]

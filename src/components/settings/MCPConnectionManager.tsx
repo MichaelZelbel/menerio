@@ -42,7 +42,7 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     category: "Notes",
     blurb: "Capture, search, and manage thoughts.",
     tools: [
-      { name: "search_notes", desc: "Semantic search across all notes by meaning. Your own notes rank above mirrored hub files; filter with source: native or hub." },
+      { name: "search_notes", desc: "Semantic search across all notes by meaning. Your own notes rank above mirrored godspeed files; filter with source: native or godspeed." },
       { name: "list_recent_notes", desc: "Recent notes, filterable by type, topic, person, or date." },
       { name: "list_note_folders", desc: "Your note folders with note counts, so a new note goes in the folder that fits." },
       { name: "capture_note", desc: "Save a new note with an optional title, folder and tags. [[Exact Title]] links it to another note; the reply names the most related notes." },

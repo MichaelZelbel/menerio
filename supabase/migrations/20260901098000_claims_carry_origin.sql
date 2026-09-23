@@ -1,7 +1,7 @@
 -- A promoted fact must not lose the fact that a human typed it.
 --
 -- WHY (found 2026-08-31, before anything was promoted). profile_entries has
--- an `origin` column and world_claims passes it through, and the hub reads it:
+-- an `origin` column and world_claims passes it through, and Mission Control reads it:
 -- world-records.ts has HUMAN_ORIGINS = {'user_manual'} and stamps every
 -- mirrored fact `written_by: human` or `written_by: machine` from it. That one
 -- word is the whole protection behind world/menerio-bridge.md — "a background
@@ -12,7 +12,7 @@
 -- because until now every claim really had been written by a machine. The
 -- moment a promotion moves a user_manual entry into a claim, migration 097000
 -- hides the entry arm and the claim arm answers in its place — as
--- `written_by: machine`. Michael's hand-typed value would arrive in the hub
+-- `written_by: machine`. Michael's hand-typed value would arrive in Mission Control
 -- stripped of the only marker that stops the next job overwriting it.
 --
 -- So claims carry an origin of their own, and the promotion copies the
@@ -26,7 +26,7 @@ ALTER TABLE public.claims
   ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'menerio';
 
 COMMENT ON COLUMN public.claims.origin IS
-  'Who wrote this fact: user_manual = the user typed it, and the hub then
+  'Who wrote this fact: user_manual = the user typed it, and Mission Control then
    mirrors it as written_by: human and refuses to let a job change its words.
    Anything else is machine-written. Carried across unchanged when a profile
    entry is promoted into a claim.';

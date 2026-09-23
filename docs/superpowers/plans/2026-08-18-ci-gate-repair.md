@@ -446,24 +446,24 @@ A check nobody has seen fail is a check nobody should trust. Break a file delibe
 # (a) a syntax error, exactly the shape of the 2026-08-17 bug
 python3 -c "
 import io
-p='supabase/functions/hub-api-notes/index.ts'; s=io.open(p,encoding='utf-8').read()
+p='supabase/functions/mc-api-notes/index.ts'; s=io.open(p,encoding='utf-8').read()
 s=s.replace('import { ilikeAnyColumn } from \"../_shared/postgrest-filters.ts\";\nimport {',
             'import {\nimport { ilikeAnyColumn } from \"../_shared/postgrest-filters.ts\";',1)
 io.open(p,'w',encoding='utf-8',newline='').write(s)"
 node scripts/check-edge-functions.mjs; echo "exit: $?"
-git checkout -- supabase/functions/hub-api-notes/index.ts
+git checkout -- supabase/functions/mc-api-notes/index.ts
 
 # (b) an import path that does not exist
 python3 -c "
 import io
-p='supabase/functions/hub-api-notes/index.ts'; s=io.open(p,encoding='utf-8').read()
+p='supabase/functions/mc-api-notes/index.ts'; s=io.open(p,encoding='utf-8').read()
 io.open(p,'w',encoding='utf-8',newline='').write(s.replace('postgrest-filters.ts','postgrest-filterz.ts',1))"
 node scripts/check-edge-functions.mjs; echo "exit: $?"
-git checkout -- supabase/functions/hub-api-notes/index.ts
+git checkout -- supabase/functions/mc-api-notes/index.ts
 ```
 
-Expected (a): `hub-api-notes/index.ts:5  syntax: Expected "as" but found "{"`, exit 1.
-Expected (b): `hub-api-notes/index.ts  unresolved import: "../_shared/postgrest-filterz.ts"`, exit 1.
+Expected (a): `mc-api-notes/index.ts:5  syntax: Expected "as" but found "{"`, exit 1.
+Expected (b): `mc-api-notes/index.ts  unresolved import: "../_shared/postgrest-filterz.ts"`, exit 1.
 
 Then confirm you restored it: `git status --short` shows nothing, and the check passes again.
 
@@ -557,9 +557,9 @@ Break one thing per gate, confirm the exit code, restore it. Verify `git status 
 ```bash
 # lint: a never-reassigned `let` is a prefer-const ERROR, so it must fail the gate
 printf '\nexport function __lintProbe() { let probe = 1; return probe; }\n' \
-  >> supabase/functions/_shared/hub-source.ts
+  >> supabase/functions/_shared/mc-source.ts
 npm run lint >/dev/null 2>&1; echo "lint should be 1: $?"
-git checkout -- supabase/functions/_shared/hub-source.ts
+git checkout -- supabase/functions/_shared/mc-source.ts
 npm run lint >/dev/null 2>&1; echo "lint back to 0: $?"
 
 # functions: covered by Task 3 Step 4 — re-run that if you want belt and braces

@@ -9,7 +9,7 @@ with the original page snapshot preserved as an attachment.
    saves the current page as a single self-contained HTML file.
 2. SingleFile is configured to upload that file to Menerio's REST endpoint.
 3. Menerio's `singlefile-capture` Edge Function:
-   - authenticates the request with a Hub API key (Bearer `mnr_…`),
+   - authenticates the request with a Mission Control API key (Bearer `mnr_…`),
    - validates the upload (HTML, ≤ 20 MB),
    - extracts the title, description and readable text,
    - stores the original HTML snapshot in the `note-attachments` bucket,
@@ -78,7 +78,7 @@ Content-Type: multipart/form-data
 
 ## Security model
 
-- Authentication uses the existing **Hub API key** system (`mnr_` prefix,
+- Authentication uses the existing **Godspeed API key** system (`mnr_` prefix,
   SHA-256 hashed at rest, scoped, rate-limited to 1000 req/h per key).
 - Uploaded HTML is **never executed** in the Menerio app; it is stored as a
   binary attachment in the private `note-attachments` bucket and only fetched

@@ -3,7 +3,7 @@
 -- It opened a real authenticated sync stream for four seconds every run and
 -- reported ok, and PowerSync still deprovisioned the Free-plan instance on
 -- 2026-09-07 01:06 UTC, one hour after such a run. Short connections are not
--- activity to their counter; deploys are. The keepalive now runs on the hub VPS
+-- activity to their counter; deploys are. The keepalive now runs on Mission Control VPS
 -- as a scheduled deploy of the unchanged sync config (docs/CRON_JOBS.md, runbook
 -- "PowerSync keepalive"). The function stays deployed; only the timer is off.
 --

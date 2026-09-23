@@ -68,7 +68,7 @@ describe("offline capture enrollment", () => {
     expect(mock.upsert).not.toHaveBeenCalled();
     expect(mock.invoke).not.toHaveBeenCalled();
   });
-  it.each([{ source_app: "hub" }, { source_app: "import" }, { is_external: 1 }, { ai_visibility: "hidden" }, { is_trashed: 1 }])("does not enroll excluded capture %j", async (fields) => {
+  it.each([{ source_app: "godspeed" }, { source_app: "import" }, { is_external: 1 }, { ai_visibility: "hidden" }, { is_trashed: 1 }])("does not enroll excluded capture %j", async (fields) => {
     const { database, complete } = db([put("excluded-note", fields)]);
     await new SupabaseConnector().uploadData(database as never);
     expect(mock.upsert).toHaveBeenCalledTimes(1);

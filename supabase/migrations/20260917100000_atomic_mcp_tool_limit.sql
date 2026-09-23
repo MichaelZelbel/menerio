@@ -5,8 +5,8 @@
 -- wrote a log row AFTER the tool had run. Every call in a parallel burst
 -- therefore read the same count, all of them passed, and none of them was
 -- visible to the others until they had finished. The same read-then-write
--- shape that commit 6cc47c64 removed from the Hub API rate limit
--- (20260909120000_atomic_hub_api_rate_limit.sql), and it is fixed the same way:
+-- shape that commit 6cc47c64 removed from Mission Control API rate limit
+-- (20260909120000_atomic_godspeed_api_rate_limit.sql), and it is fixed the same way:
 -- one INSERT ... ON CONFLICT DO UPDATE increments relative to the stored value,
 -- Postgres serialises conflicting writers on the primary key, and each caller
 -- is told its own count.

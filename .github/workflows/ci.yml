@@ -49,14 +49,14 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Test sync permissions, contact pagination, atomic merges, the API throttle and the hub connect flow
+      - name: Test sync permissions, contact pagination, atomic merges, the API throttle and Mission Control connect flow
         env:
           PGHOST: localhost
           PGUSER: postgres
           PGPASSWORD: postgres
           MERGE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/merge_review_test
-          HUB_RATE_LIMIT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/hub_rate_limit_test
-          HUB_CONNECT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/hub_connect_test
+          GODSPEED_RATE_LIMIT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/godspeed_rate_limit_test
+          GODSPEED_CONNECT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/godspeed_connect_test
           NOTE_AI_NORMALIZE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost/note_ai_normalize_test
         run: |
           createdb github_sync_test
@@ -68,12 +68,12 @@ jobs:
           createdb merge_review_test
           psql -v ON_ERROR_STOP=1 -d merge_review_test -f scripts/bootstrap-merge-review-test.sql -f supabase/migrations/20260907140000_contact_topics.sql -f supabase/migrations/20260907141000_contact_topic_conflict_http.sql -f supabase/migrations/20260908120002_atomic_contact_merge.sql
           node scripts/test-merge-review.mjs
-          createdb hub_rate_limit_test
-          psql -v ON_ERROR_STOP=1 -d hub_rate_limit_test -f scripts/bootstrap-hub-rate-limit-test.sql
-          node scripts/test-hub-rate-limit.mjs
-          createdb hub_connect_test
-          psql -v ON_ERROR_STOP=1 -d hub_connect_test -f scripts/bootstrap-hub-connect-test.sql
-          node scripts/test-hub-connect.mjs
+          createdb godspeed_rate_limit_test
+          psql -v ON_ERROR_STOP=1 -d godspeed_rate_limit_test -f scripts/bootstrap-godspeed-rate-limit-test.sql
+          node scripts/test-godspeed-rate-limit.mjs
+          createdb godspeed_connect_test
+          psql -v ON_ERROR_STOP=1 -d godspeed_connect_test -f scripts/bootstrap-godspeed-connect-test.sql
+          node scripts/test-godspeed-connect.mjs
           createdb note_ai_normalize_test
           node scripts/test-note-ai-normalize.mjs
 

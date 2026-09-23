@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { normalizeFolderPath, resolveFolderPath } from "../_shared/note-create-tools.ts";
-import { HUB_FOLDER_ROOT, isHubFolderPath } from "../_shared/hub-ranking.ts";
+import { GODSPEED_FOLDER_ROOT, isGodspeedFolderPath } from "../_shared/mc-ranking.ts";
 import { buildFolderListing, captureTitle, findRelatedNotes, formatCaptureReceipt, mergeTags, type IndexingState, type RelatedNote } from "../_shared/note-filing.ts";
 import { syncWikilinkConnections } from "../_shared/wikilinks.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
@@ -34,8 +34,8 @@ const text = (t: string, isError = false) => ({
   ...(isError ? { isError: true } : {}),
 });
 
-export const HUB_FOLDER_REFUSAL =
-  `The "${HUB_FOLDER_ROOT}" folder tree is a mirror of the user's hub files and is rewritten by the sync, so notes cannot be filed in or under it. ` +
+export const GODSPEED_FOLDER_REFUSAL =
+  `The "${GODSPEED_FOLDER_ROOT}" folder tree is a mirror of the user's mission control files and is rewritten by the sync, so notes cannot be filed in or under it. ` +
   `Nothing was saved. Call list_note_folders and pick one of the user's own folders, or omit folder_path for the top level.`;
 
 export type CaptureNoteArgs = {
@@ -56,10 +56,10 @@ export function registerNoteFilingTools(
       const owner = userId();
 
       // Refuse the mirror's tree BEFORE anything is spent or written. Same
-      // normalisation as update_note and the Hub API, so "/Hub/rules/" cannot
+      // normalisation as update_note and Mission Control API, so "/Godspeed/rules/" cannot
       // slip past as a different spelling of the same place.
       const requestedFolder = normalizeFolderPath(folder_path);
-      if (isHubFolderPath(requestedFolder)) return text(HUB_FOLDER_REFUSAL, true);
+      if (isGodspeedFolderPath(requestedFolder)) return text(GODSPEED_FOLDER_REFUSAL, true);
 
       const metadata = await deps.extractMetadata(content);
       const finalTitle = captureTitle(content, title);
@@ -122,7 +122,7 @@ export function registerNoteFilingTools(
       }
 
       // Fire-and-forget: trigger full process-note pipeline (metadata, profile facts,
-      // moments, relationships, connections). Mirrors receive-note / hub-api-notes.
+      // moments, relationships, connections). Mirrors receive-note / mc-api-notes.
       try { deps.triggerProcessNote(inserted.id); }
       catch (e) { console.warn("process-note trigger failed (capture):", (e as Error).message); }
 
@@ -149,14 +149,14 @@ export function registerNoteFilingTools(
       description:
         "Save a new note to the user's brain, filed properly. Generates an embedding and extracts metadata automatically. " +
         "Pass `title` for a clear, specific title (otherwise the first line of the content is used). " +
-        "Pass `folder_path` to file it: call `list_note_folders` first and reuse one of the user's existing folders verbatim when one fits (e.g. 'Health' or 'Projects/Menerio'); a path that does not exist yet is created; omit it for the top level. The `hub` folder tree is a read-only mirror and is refused. " +
+        "Pass `folder_path` to file it: call `list_note_folders` first and reuse one of the user's existing folders verbatim when one fits (e.g. 'Health' or 'Projects/Menerio'); a path that does not exist yet is created; omit it for the top level. The `godspeed` folder tree is a read-only mirror and is refused. " +
         "Pass `tags` to add the user's own tags; they are merged with the AI-extracted topics. " +
         "To link this note to another on purpose, write `[[Exact Title]]` of an existing note in the content: it becomes a real link in the graph and backlinks. " +
         "The response states the note id, final title, folder, and up to 5 most related existing notes (title + id) you can mention or wikilink. Menerio also links related notes on its own in the background, so you do not need to link everything by hand.",
       inputSchema: {
         content: z.string().describe("The note content to capture (Markdown). `[[Exact Title]]` links to an existing note."),
         title: z.string().optional().describe("Title for the note. Defaults to the first line of the content."),
-        folder_path: z.string().optional().describe("Folder to file the note in, e.g. 'Health' or 'Projects/Menerio'. See list_note_folders. Omit for the top level. Anything under 'hub' is refused."),
+        folder_path: z.string().optional().describe("Folder to file the note in, e.g. 'Health' or 'Projects/Menerio'. See list_note_folders. Omit for the top level. Anything under 'godspeed' is refused."),
         tags: z.array(z.string()).optional().describe("Tags to add; merged with the AI-extracted topics."),
       },
     },
@@ -180,15 +180,15 @@ export function registerNoteFilingTools(
       description:
         "List the user's note folders with how many notes each holds, sorted by path, plus the count of notes at the top level. " +
         "Call this BEFORE `capture_note` or before moving a note with `update_note`, and pick the folder that fits, reusing its path verbatim, capitalisation included. " +
-        "The `hub` tree (a machine-maintained mirror of the user's hub files, where nothing can be filed) is hidden unless `include_hub` is true.",
+        "The `godspeed` tree (a machine-maintained mirror of the user's mission control files, where nothing can be filed) is hidden unless `include_godspeed` is true.",
       inputSchema: {
-        include_hub: z.boolean().optional().default(false).describe("Also list the read-only `hub` mirror tree. Default false."),
+        include_godspeed: z.boolean().optional().default(false).describe("Also list the read-only `godspeed` mirror tree. Default false."),
       },
     },
-    async ({ include_hub }: { include_hub?: boolean }) => {
+    async ({ include_godspeed }: { include_godspeed?: boolean }) => {
       try {
         const owner = userId();
-        const includeHub = include_hub === true;
+        const includeGodspeed = include_godspeed === true;
 
         // Paged: the mirror alone is thousands of notes, and an unpaged select
         // stops at PostgREST's 1000-row cap without saying so, which would make
@@ -200,8 +200,8 @@ export function registerNoteFilingTools(
             .eq("user_id", owner)
             .eq("is_trashed", false)
             .eq("ai_visibility", "visible");
-          if (!includeHub) {
-            q = q.not("folder_path", "ilike", HUB_FOLDER_ROOT).not("folder_path", "ilike", `${HUB_FOLDER_ROOT}/%`);
+          if (!includeGodspeed) {
+            q = q.not("folder_path", "ilike", GODSPEED_FOLDER_ROOT).not("folder_path", "ilike", `${GODSPEED_FOLDER_ROOT}/%`);
           }
           return q.order("id").range(from, to);
         });
@@ -211,12 +211,12 @@ export function registerNoteFilingTools(
         const listing = buildFolderListing(
           folderRows.map((r) => r.path),
           noteRows.map((r) => r.folder_path),
-          includeHub,
+          includeGodspeed,
         );
         return text(JSON.stringify({
           ...listing,
           note: listing.folder_count
-            ? "Reuse one of these paths verbatim as folder_path when it fits. A new path is created on capture. Nothing can be filed under 'hub'."
+            ? "Reuse one of these paths verbatim as folder_path when it fits. A new path is created on capture. Nothing can be filed under 'godspeed'."
             : "The user has no folders yet. A folder_path passed to capture_note is created.",
         }, null, 2));
       } catch (err: unknown) {

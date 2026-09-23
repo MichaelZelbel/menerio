@@ -2,7 +2,7 @@
 //
 // The extractor used to dump every proper noun it saw near a professional
 // paragraph into `Skill`, which produced nonsense like
-//   Skill: German, English, Phil Benton, Menerio, hub routines, OpenClaw, blockchain
+//   Skill: German, English, Phil Benton, Menerio, godspeed routines, OpenClaw, blockchain
 // A person's name, a product name, a language and a bare topic are all NOT
 // skills. This module routes each list member to where it belongs, or drops
 // it, without calling an LLM.

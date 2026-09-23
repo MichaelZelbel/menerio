@@ -76,7 +76,7 @@ export function humanizeAttribute(attribute: string): string {
  * wrongly-many one hides a real contradiction and nobody ever finds out.
  *
  * Keys are the output of normalizeAttribute, so they are hyphenated.
- * Measured on the hub mirror 2026-08-30: of 8 subject+attribute collisions,
+ * Measured on Mission Control mirror 2026-08-30: of 8 subject+attribute collisions,
  * at least two were legitimate multi-value attributes rather than
  * contradictions, which is why this list exists before any conflict check.
  */

@@ -12,7 +12,7 @@
 -- WHAT THIS COSTS, AND CHECK IT BEFORE YOU RUN IT. The claim arm goes back to
 -- asserting origin = 'menerio' for every claim. Any claim whose origin is
 -- 'user_manual' — one the promotion moved out of a hand-typed profile entry —
--- then reaches the hub mirror as `written_by: machine`, which is the marker
+-- then reaches Mission Control mirror as `written_by: machine`, which is the marker
 -- that stops a background job rewriting a value Michael typed.
 --
 --   SELECT count(*) FROM public.claims WHERE origin = 'user_manual';

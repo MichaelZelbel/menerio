@@ -73,7 +73,7 @@ export function ApiKeysManager() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await supabase.functions.invoke("hub-api-keys", {
+      const res = await supabase.functions.invoke("mc-api-keys", {
         method: "GET",
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
@@ -99,7 +99,7 @@ export function ApiKeysManager() {
     setGenerating(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await supabase.functions.invoke("hub-api-keys/generate", {
+      const res = await supabase.functions.invoke("mc-api-keys/generate", {
         method: "POST",
         headers: { Authorization: `Bearer ${session?.access_token}` },
         body: { name: newKeyName.trim(), scopes: newKeyScopes },
@@ -121,7 +121,7 @@ export function ApiKeysManager() {
   const handleRevoke = async (id: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await supabase.functions.invoke(`hub-api-keys/${id}`, {
+      const res = await supabase.functions.invoke(`mc-api-keys/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
@@ -160,7 +160,7 @@ export function ApiKeysManager() {
           <Key className="h-5 w-5" /> API Keys
         </CardTitle>
         <CardDescription>
-          One key for everything. It connects your tools (your hub folder, Claude, ChatGPT,
+          One key for everything. It connects your tools (your mission control folder, Claude, ChatGPT,
           OpenCode or any other MCP client) to your memory at{" "}
           <code className="font-mono">{MCP_URL}</code>, and works for the REST API too.
           The boxes on a key decide which of your data it may touch.
@@ -184,7 +184,7 @@ export function ApiKeysManager() {
               <DialogTitle>Generate API Key</DialogTitle>
               <DialogDescription>
                 Name the key after the machine or tool it is for. All boxes start ticked:
-                full access, the right shape for your own assistant or hub. Untick boxes to
+                full access, the right shape for your own assistant or godspeed. Untick boxes to
                 narrow a key you hand to someone else's app.
               </DialogDescription>
             </DialogHeader>

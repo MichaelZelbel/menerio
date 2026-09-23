@@ -1697,12 +1697,12 @@ export type Database = {
           },
         ]
       }
-      hub_api_keys: {
+      godspeed_api_keys: {
         Row: {
           created_at: string | null
           expires_at: string | null
           generation: number | null
-          hub_connection_id: string | null
+          godspeed_connection_id: string | null
           id: string
           is_active: boolean | null
           key_hash: string
@@ -1716,7 +1716,7 @@ export type Database = {
           created_at?: string | null
           expires_at?: string | null
           generation?: number | null
-          hub_connection_id?: string | null
+          godspeed_connection_id?: string | null
           id?: string
           is_active?: boolean | null
           key_hash: string
@@ -1730,7 +1730,7 @@ export type Database = {
           created_at?: string | null
           expires_at?: string | null
           generation?: number | null
-          hub_connection_id?: string | null
+          godspeed_connection_id?: string | null
           id?: string
           is_active?: boolean | null
           key_hash?: string
@@ -1742,15 +1742,15 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "hub_api_keys_connection_owner_fk"
-            columns: ["hub_connection_id", "user_id"]
+            foreignKeyName: "godspeed_api_keys_connection_owner_fk"
+            columns: ["godspeed_connection_id", "user_id"]
             isOneToOne: false
-            referencedRelation: "hub_connections"
+            referencedRelation: "godspeed_connections"
             referencedColumns: ["id", "user_id"]
           },
         ]
       }
-      hub_api_usage: {
+      godspeed_api_usage: {
         Row: {
           created_at: string | null
           id: string
@@ -1774,15 +1774,15 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "hub_api_usage_key_id_fkey"
+            foreignKeyName: "godspeed_api_usage_key_id_fkey"
             columns: ["key_id"]
             isOneToOne: false
-            referencedRelation: "hub_api_keys"
+            referencedRelation: "godspeed_api_keys"
             referencedColumns: ["id"]
           },
         ]
       }
-      hub_connect_requests: {
+      godspeed_connect_requests: {
         Row: {
           caller_hash: string
           code_challenge: string
@@ -1793,8 +1793,8 @@ export type Database = {
           expires_at: string
           flow: string
           generation: number | null
-          hub_id: string
-          hub_name: string
+          godspeed_id: string
+          godspeed_name: string
           id: string
           last_poll_at: string | null
           status: string
@@ -1814,8 +1814,8 @@ export type Database = {
           expires_at: string
           flow: string
           generation?: number | null
-          hub_id: string
-          hub_name: string
+          godspeed_id: string
+          godspeed_name: string
           id?: string
           last_poll_at?: string | null
           status?: string
@@ -1835,8 +1835,8 @@ export type Database = {
           expires_at?: string
           flow?: string
           generation?: number | null
-          hub_id?: string
-          hub_name?: string
+          godspeed_id?: string
+          godspeed_name?: string
           id?: string
           last_poll_at?: string | null
           status?: string
@@ -1848,22 +1848,22 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "hub_connect_requests_connection_id_fkey"
+            foreignKeyName: "godspeed_connect_requests_connection_id_fkey"
             columns: ["connection_id"]
             isOneToOne: false
-            referencedRelation: "hub_connections"
+            referencedRelation: "godspeed_connections"
             referencedColumns: ["id"]
           },
         ]
       }
-      hub_connections: {
+      godspeed_connections: {
         Row: {
           approved_at: string
           created_at: string
           documents: boolean
           generation: number
-          hub_id: string
-          hub_name: string
+          godspeed_id: string
+          godspeed_name: string
           id: string
           revoked_at: string | null
           status: string
@@ -1874,8 +1874,8 @@ export type Database = {
           created_at?: string
           documents?: boolean
           generation?: number
-          hub_id: string
-          hub_name: string
+          godspeed_id: string
+          godspeed_name: string
           id?: string
           revoked_at?: string | null
           status?: string
@@ -1886,8 +1886,8 @@ export type Database = {
           created_at?: string
           documents?: boolean
           generation?: number
-          hub_id?: string
-          hub_name?: string
+          godspeed_id?: string
+          godspeed_name?: string
           id?: string
           revoked_at?: string | null
           status?: string
@@ -1895,7 +1895,7 @@ export type Database = {
         }
         Relationships: []
       }
-      hub_devices: {
+      godspeed_devices: {
         Row: {
           clients: Json
           connection_id: string
@@ -1922,10 +1922,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "hub_devices_connection_id_fkey"
+            foreignKeyName: "godspeed_devices_connection_id_fkey"
             columns: ["connection_id"]
             isOneToOne: false
-            referencedRelation: "hub_connections"
+            referencedRelation: "godspeed_connections"
             referencedColumns: ["id"]
           },
         ]
@@ -5014,14 +5014,14 @@ export type Database = {
         }
         Returns: boolean
       }
-      hub_api_bump_usage: {
+      godspeed_api_bump_usage: {
         Args: { p_key_id: string; p_limit: number; p_window_start: string }
         Returns: {
           allowed: boolean
           request_count: number
         }[]
       }
-      hub_connect_collect: {
+      godspeed_connect_collect: {
         Args: {
           p_computed_challenge: string
           p_device_id: string
@@ -5034,7 +5034,7 @@ export type Database = {
         }
         Returns: Json
       }
-      hub_connect_decide: {
+      godspeed_connect_decide: {
         Args: {
           p_approve: boolean
           p_documents: boolean
@@ -5045,11 +5045,11 @@ export type Database = {
         }
         Returns: Json
       }
-      hub_connect_disconnect: {
+      godspeed_connect_disconnect: {
         Args: { p_connection_id: string; p_key_id: string; p_user_id: string }
         Returns: string
       }
-      hub_connect_open_request: {
+      godspeed_connect_open_request: {
         Args: { p_request_id: string; p_user_id: string }
         Returns: {
           caller_hash: string
@@ -5061,8 +5061,8 @@ export type Database = {
           expires_at: string
           flow: string
           generation: number | null
-          hub_id: string
-          hub_name: string
+          godspeed_id: string
+          godspeed_name: string
           id: string
           last_poll_at: string | null
           status: string
@@ -5074,20 +5074,20 @@ export type Database = {
         }
         SetofOptions: {
           from: "*"
-          to: "hub_connect_requests"
+          to: "godspeed_connect_requests"
           isOneToOne: true
           isSetofReturn: false
         }
       }
-      hub_connect_start: {
+      godspeed_connect_start: {
         Args: {
           p_caller_hash: string
           p_code_challenge: string
           p_device_id: string
           p_device_name: string
           p_flow: string
-          p_hub_id: string
-          p_hub_name: string
+          p_godspeed_id: string
+          p_godspeed_name: string
           p_max_starts_per_hour: number
           p_ttl_seconds: number
           p_user_code: string
@@ -5095,7 +5095,7 @@ export type Database = {
         }
         Returns: Json
       }
-      hub_connect_touch: {
+      godspeed_connect_touch: {
         Args: {
           p_client: string
           p_client_state: string
@@ -5105,7 +5105,7 @@ export type Database = {
         }
         Returns: Json
       }
-      hub_connect_view: {
+      godspeed_connect_view: {
         Args: { p_request_id: string; p_user_id: string }
         Returns: Json
       }

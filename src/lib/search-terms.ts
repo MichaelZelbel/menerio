@@ -12,7 +12,7 @@
  * and can never overturn a coverage or position difference.
  */
 
-import { compareNativeFirst, rankingScore } from "@/lib/hub-ranking";
+import { compareNativeFirst, rankingScore } from "@/lib/mc-ranking";
 
 const STOPWORDS = new Set([
   "a", "about", "after", "all", "am", "an", "and", "any", "are", "as", "at", "be", "because",
@@ -91,7 +91,7 @@ export interface RankableNote {
   updated_at?: string | null;
   /**
    * Where the note came from. Optional: a caller whose rows do not carry it
-   * simply gets no hub demotion, which is the old behaviour.
+   * simply gets no mission control demotion, which is the old behaviour.
    */
   source_app?: string | null;
 }
@@ -269,8 +269,8 @@ export function isTitleHit<T extends RankableNote>(
  * A bounded typo-tolerant pass runs only when the strict pass produced no title
  * match at all, so fuzzy hits can never dilute exact results.
  *
- * A mirrored hub file is ordered by a discounted score and loses a tie to a
- * native note (see `hub-ranking.ts`). The discount is applied here and not in
+ * A mirrored mission control file is ordered by a discounted score and loses a tie to a
+ * native note (see `mc-ranking.ts`). The discount is applied here and not in
  * `scoreNote`, so "did this match its title" stays a fact about the match and
  * not about where the note came from.
  */

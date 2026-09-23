@@ -1,7 +1,7 @@
 # Menerio
 
 ## What it is
-Menerio is a central event hub for personal data.
+Menerio is a central event store for personal data.
 
 > **Project status: Alpha**
 > Menerio is usable but still evolving. APIs, data structures, and UI may change without notice. Some features are partially implemented or experimental. We recommend it for early adopters and contributors who are comfortable with rough edges.
@@ -33,8 +33,8 @@ Each piece of data belongs to exactly one app. Other apps receive synchronized c
 ### Event-Based Architecture
 All changes are emitted as events (e.g. `event.created`, `event.updated`). Menerio stores and distributes these events to subscribed apps.
 
-### Hub-and-Spoke Model
-Apps do not communicate directly with each other. All communication flows through Menerio as the central hub.
+### Star Model (one center, many spokes)
+Apps do not communicate directly with each other. All communication flows through Menerio as the center.
 
 ### Synchronization with Ownership
 Changes made in one app propagate back to the owning app through Menerio, ensuring consistency without conflicts.

@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   const location = useLocation();
-  // Path AND query string: /connect-hub?request=... is useless without its
+  // Path AND query string: /connect-godspeed?request=... is useless without its
   // query, and that is exactly the page an anonymous visitor arrives on.
   const here = `${location.pathname}${location.search}`;
 

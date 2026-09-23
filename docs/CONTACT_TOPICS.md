@@ -24,10 +24,10 @@ The release followed this order:
 2. Verify grants, ownership policies, command functions, composite keys, merge trigger, and `supabase_realtime` publication membership. Run a synthetic release check under two test owners.
 3. Deploy `menerio-mcp` and `merge-contacts` together: `npx supabase@latest functions deploy menerio-mcp merge-contacts --project-ref tjeapelvjlmbxafsmjef --use-api`. Verify `verify_jwt=false` for the MCP endpoint remains applied; its own key authentication and data scopes remain mandatory. Preserve the existing merge function authentication configuration.
 4. Merge the reviewed feature branch into `main`, let Lovable sync the build, and publish that tested frontend through the existing Menerio Lovable project. A successful local build or GitHub push is not evidence of public publication.
-5. Refresh shared hub skill discovery after the MCP tool list contains all eight topic tools. The skill already handles unavailable tools without claiming a save or creating substitute notes.
+5. Refresh shared mission control skill discovery after the MCP tool list contains all eight topic tools. The skill already handles unavailable tools without claiming a save or creating substitute notes.
 6. With synthetic test people, verify browser create to MCP list, MCP create to an already-open mobile profile, discussion/history in both directions, recurring close-after, and isolation. Archive the test topics through the feature.
 
-Rollback restores the previous frontend and MCP/merge function builds and disables topic use in the hub. Keep the additive tables, receipts, and history; never drop them as rollback. Restore service before attempting a corrective migration.
+Rollback restores the previous frontend and MCP/merge function builds and disables topic use in Mission Control. Keep the additive tables, receipts, and history; never drop them as rollback. Restore service before attempting a corrective migration.
 
 Provider references checked during preparation: [Supabase function CLI](https://supabase.com/docs/reference/cli/supabase-functions-deploy), [database migrations](https://supabase.com/docs/guides/deployment/database-migrations), [Lovable GitHub sync](https://docs.lovable.dev/integrations/github), and [Lovable publishing](https://docs.lovable.dev/features/publish).
 

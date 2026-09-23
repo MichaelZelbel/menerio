@@ -11,12 +11,12 @@ import { getEmbeddingWithCredits, openRouterWithCredits } from "../_shared/llm-c
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
 import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
-import { lookupHubKey } from "../_shared/hub-auth.ts";
+import { lookupGodspeedKey } from "../_shared/mc-auth.ts";
 import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
-import { hubFileLabel, isHubFolderPath, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/hub-ranking.ts";
+import { godspeedFileLabel, isGodspeedFolderPath, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/mc-ranking.ts";
 import { syncWikilinkConnections } from "../_shared/wikilinks.ts";
-import { HUB_FOLDER_REFUSAL, registerNoteFilingTools } from "./note-filing-tools.ts";
+import { GODSPEED_FOLDER_REFUSAL, registerNoteFilingTools } from "./note-filing-tools.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
   applyVisibility,
@@ -37,8 +37,8 @@ const MCP_TOKEN_PREFIX = "mnr_mcp_";
 const MCP_TOKEN_PATTERN = /^mnr_mcp_[A-Za-z0-9_-]{43}$/;
 // Retired connector scope: it used to gate this endpoint. Now every active API
 // key authenticates here and the data scopes decide which tools answer, so the
-// only job left for "hub" is to be ignored when an old key still carries it.
-const RETIRED_HUB_SCOPE = "hub";
+// only job left for "godspeed" is to be ignored when an old key still carries it.
+const RETIRED_GODSPEED_SCOPE = "godspeed";
 const INVALID_TOKEN_FORMAT_MESSAGE =
   "Invalid key format. This MCP server accepts any Menerio API key (prefix `mnr_`) from Menerio → Settings → API Keys.";
 const MALFORMED_MCP_TOKEN_MESSAGE =
@@ -95,7 +95,7 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
     // data scopes it carries decide which tools answer, checked per tool call.
     // Older mnr_mcp_ tokens keep working through the branch below.
     if (token.startsWith("mnr_")) {
-      const { result, errorMessage } = await lookupHubKey(token, supabase);
+      const { result, errorMessage } = await lookupGodspeedKey(token, supabase);
       if (!result) {
         console.warn("MCP API key rejected", {
           reason: errorMessage,
@@ -103,7 +103,7 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
         });
         return { userId: null, scopes: null, error: { status: 401, message: errorMessage ?? "Invalid or revoked key." } };
       }
-      const dataScopes = result.scopes.filter((s) => s !== RETIRED_HUB_SCOPE);
+      const dataScopes = result.scopes.filter((s) => s !== RETIRED_GODSPEED_SCOPE);
       return { userId: result.userId, scopes: dataScopes, error: null };
     }
     return { userId: null, scopes: null, error: { status: 401, message: INVALID_TOKEN_FORMAT_MESSAGE } };
@@ -268,12 +268,12 @@ function formatNoteResult(
   parts.push(`--- Result ${i + 1}${scoreStr} ---`);
   parts.push(`Title: ${t.title || "Untitled"}`);
   parts.push(`ID: ${t.id || ""}`);
-  // A mirrored hub file says so, in both views. The search descriptions tell a
+  // A mirrored mission control file says so, in both views. The search descriptions tell a
   // model to treat a note as the user's own first-person statement; a file an
   // assistant generated about the user is not that, and only this line lets
   // the reader tell the two apart.
-  const hubLabel = hubFileLabel(t.source_app, t.source_id);
-  if (hubLabel) parts.push(`Source: ${hubLabel} (mirrored from the user's hub, machine-maintained, not a note the user wrote)`);
+  const godspeedLabel = godspeedFileLabel(t.source_app, t.source_id);
+  if (godspeedLabel) parts.push(`Source: ${godspeedLabel} (mirrored from the user's mission control, machine-maintained, not a note the user wrote)`);
   const dateStr = t.updated_at || t.created_at;
   parts.push(`Updated: ${dateStr ? new Date(dateStr).toISOString().slice(0, 10) : "unknown"}`);
   parts.push(`Type: ${(m.type as string) || "unknown"}`);
@@ -366,8 +366,8 @@ async function enforceMcpToolLimit(toolName: string) {
   // is only written after the tool has run. Every call in a parallel burst read
   // the same count and passed, so the limit only ever stopped a caller that
   // waited politely for each answer. mcp_tool_bump_usage increments relative to
-  // the stored value in one INSERT ... ON CONFLICT, the same fix the Hub API
-  // limit got in 6cc47c64 (_shared/hub-rate-limit.ts).
+  // the stored value in one INSERT ... ON CONFLICT, the same fix Mission Control API
+  // limit got in 6cc47c64 (_shared/mc-rate-limit.ts).
   const windowStart = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString();
   const { data, error } = await supabase.rpc("mcp_tool_bump_usage", {
     p_user_id: getCurrentUserId(),
@@ -731,8 +731,8 @@ function buildBoostPhrases(query: string): string[] {
 }
 
 // Helper: hybrid notes search (chunk-level semantic + ILIKE), reusable by search_notes and search_brain.
-// `source` narrows to the notes the user wrote ("native") or to the mirrored hub
-// files ("hub"). Whatever it is, ordering follows _shared/hub-ranking.ts.
+// `source` narrows to the notes the user wrote ("native") or to the mirrored mission control
+// files ("godspeed"). Whatever it is, ordering follows _shared/mc-ranking.ts.
 async function hybridSearchNotes(query: string, limit: number, threshold: number, source: NoteSourceFilter = "all"): Promise<{ rows: any[]; total: number; mode: string }> {
   let semanticResults: any[] = [];
   let semanticOk = false;
@@ -798,8 +798,8 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
     .limit(CANDIDATE_CAP);
   // Narrow in the query so the row cap is spent on rows that can qualify;
   // matchesSourceFilter below stays the authority (it also ignores stray space).
-  if (source === "hub") textQuery = textQuery.ilike("source_app", "hub");
-  if (source === "native") textQuery = textQuery.or("source_app.is.null,source_app.not.ilike.hub");
+  if (source === "godspeed") textQuery = textQuery.ilike("source_app", "godspeed");
+  if (source === "native") textQuery = textQuery.or("source_app.is.null,source_app.not.ilike.godspeed");
   textQuery = await applyVisibility(textQuery, "notes", supabase, getCurrentUserId());
   const { data: textRowsRaw } = await textQuery;
   const textResults = (textRowsRaw || []).filter((r: { source_app?: string | null }) => matchesSourceFilter(r.source_app, source));
@@ -831,8 +831,8 @@ async function hybridSearchNotes(query: string, limit: number, threshold: number
   }
 
   // Tiered deterministic ranking — exact/prefix title matches always win.
-  // The tiers and the sort live in _shared/hub-ranking.ts so the Hub API search
-  // ranks identically: a mirrored hub file sorts one tier below its match, and
+  // The tiers and the sort live in _shared/mc-ranking.ts so Mission Control API search
+  // ranks identically: a mirrored mission control file sorts one tier below its match, and
   // inside a tier the notes the user wrote come first.
   const qn = (query || "").trim().toLowerCase();
   const ranked = rankHybridRows(merged, query);
@@ -946,7 +946,7 @@ const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = 
   try {
     const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold, source);
     if (total === 0) {
-      const scope = source === "native" ? " among the notes the user wrote (source: native)" : source === "hub" ? " among the mirrored hub files (source: hub)" : "";
+      const scope = source === "native" ? " among the notes the user wrote (source: native)" : source === "godspeed" ? " among the mirrored mission control files (source: godspeed)" : "";
       return { content: [{ type: "text" as const, text: `No notes found matching "${query}"${scope}. If the user is asking about a synthesized topic, also try lexicon_search or search_brain.` }] };
     }
     const page = rows.slice(offset, offset + limit);
@@ -983,15 +983,15 @@ server.registerTool(
   {
     title: "Search Notes",
     description:
-      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. The exception is a result carrying `Source: [hub file: <path>]`: that is a mirrored file from the user's hub (the folder their AI assistants work from), machine-maintained and possibly an assistant's inference, so it ranks below the user's own notes and is NOT a first-person statement; say it came from the hub file. Use `source` to search only the user's own notes (`native`) or only the hub files (`hub`). Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
+      "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. The exception is a result carrying `Source: [godspeed file: <path>]`: that is a mirrored file from the user's mission control (the folder their AI assistants work from), machine-maintained and possibly an assistant's inference, so it ranks below the user's own notes and is NOT a first-person statement; say it came from Mission Control file. Use `source` to search only the user's own notes (`native`) or only Mission Control files (`godspeed`). Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
       limit: z.coerce.number().optional().default(10),
       threshold: z.coerce.number().optional().default(0.2),
       offset: z.coerce.number().optional().default(0),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
-      source: z.enum(["all", "native", "hub"]).optional().default("all")
-        .describe("`all` (default): everything, the user's own notes ranked above mirrored hub files. `native`: only notes that are not hub files. `hub`: only the mirrored hub files."),
+      source: z.enum(["all", "native", "godspeed"]).optional().default("all")
+        .describe("`all` (default): everything, the user's own notes ranked above mirrored godspeed files. `native`: only notes that are not godspeed files. `godspeed`: only the mirrored mission control files."),
     },
   },
   searchNotesHandler
@@ -1062,7 +1062,7 @@ const listRecentNotesHandler = async ({ limit: rawLimit, type, topic, person, da
     const days = rawDays ? clampNumber(rawDays, 1, 36500, 30) : undefined;
     let q = supabase
       .from("notes")
-      // source_app/source_id only so formatNoteResult can label a mirrored hub file.
+      // source_app/source_id only so formatNoteResult can label a mirrored mission control file.
       .select("id, title, content, metadata, tags, created_at, updated_at, source_app, source_id", { count: "exact" })
       .eq("is_trashed", false)
       .eq("user_id", getCurrentUserId())
@@ -1143,7 +1143,7 @@ registerNoteFilingTools(server, supabase, getCurrentUserId, {
   embedChunks: (noteId, title, content) =>
     embedAndStoreNoteChunks(supabase, OPENROUTER_API_KEY, getCurrentUserId(), noteId, title, content, "mcp-capture"),
   // Fire-and-forget: trigger full process-note pipeline (metadata, profile facts,
-  // moments, relationships, connections). Mirrors receive-note / hub-api-notes.
+  // moments, relationships, connections). Mirrors receive-note / mc-api-notes.
   triggerProcessNote: (noteId) => {
     fetch(`${SUPABASE_URL}/functions/v1/process-note`, {
       method: "POST",
@@ -1162,7 +1162,7 @@ server.registerTool(
   {
     title: "Update Note",
     description:
-      "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. To move a note, pass `folder_path` (see `list_note_folders`; anything under `hub` is refused, that tree is a read-only mirror). `[[Exact Title]]` of an existing note in `content` becomes a real link in the graph and backlinks; the response lists which wikilinks resolved. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
+      "Edit an existing note's title, content (Markdown), tags, folder, favorite, or pinned state. Only fields you pass are changed. To move a note, pass `folder_path` (see `list_note_folders`; anything under `godspeed` is refused, that tree is a read-only mirror). `[[Exact Title]]` of an existing note in `content` becomes a real link in the graph and backlinks; the response lists which wikilinks resolved. External (synced) notes cannot be edited directly — duplicate them first via the app UI.",
     inputSchema: {
       note_id: z.string().describe("The note's UUID. Get it from the `ID:` field in search_notes, list_recent_notes, get_person_notes, or get_connected_notes results."),
       title: z.string().optional(),
@@ -1196,13 +1196,13 @@ server.registerTool(
       if (title !== undefined) updates.title = title;
       if (content !== undefined) updates.content = content;
       if (tags !== undefined) updates.tags = tags;
-      // Same normalisation as note creation and the Hub API: a leading slash
+      // Same normalisation as note creation and Mission Control API: a leading slash
       // stored verbatim puts the note in a nameless folder above the real one.
       if (folder_path !== undefined) {
         const normalized = normalizeFolderPath(folder_path);
         // The mirror's tree is rewritten by the sync; a note moved into it
         // would sit among files it does not belong to. Same refusal as capture.
-        if (isHubFolderPath(normalized)) return jsonTool({ error: HUB_FOLDER_REFUSAL.replace("Nothing was saved.", "Nothing was changed.") });
+        if (isGodspeedFolderPath(normalized)) return jsonTool({ error: GODSPEED_FOLDER_REFUSAL.replace("Nothing was saved.", "Nothing was changed.") });
         updates.folder_path = normalized;
       }
       if (is_favorite !== undefined) updates.is_favorite = is_favorite;

@@ -41,7 +41,7 @@ const WikiLintPlaceholder = lazy(() => import("./pages/WikiLintPlaceholder"));
 const WikiPage = lazy(() => import("./pages/WikiPage"));
 const Settings = lazy(() => import("./pages/Settings"));
 const GDriveCallback = lazy(() => import("./pages/GDriveCallback"));
-const ConnectHub = lazy(() => import("./pages/ConnectHub"));
+const ConnectGodspeed = lazy(() => import("./pages/ConnectGodspeed"));
 
 
 const Privacy = lazy(() => import("./pages/Privacy"));
@@ -119,13 +119,13 @@ const App = () => (
 
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
-                  {/* Where a hub sends its owner to confirm a connection. Signed-in only;
+                  {/* Where a mission control sends its owner to confirm a connection. Signed-in only;
                       ProtectedRoute keeps the ?request=...&code=... through sign-in. */}
                   <Route
-                    path="/connect-hub"
+                    path="/connect-godspeed"
                     element={
                       <ProtectedRoute>
-                        <ConnectHub />
+                        <ConnectGodspeed />
                       </ProtectedRoute>
                     }
                   />

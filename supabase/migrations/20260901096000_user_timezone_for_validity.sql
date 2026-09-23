@@ -10,7 +10,7 @@
 -- 22:00 and midnight local disappears for up to two hours; further east it is
 -- worse. Nothing errors, nothing warns: search simply returns fewer facts and
 -- the caller concludes the data was never saved. That is the same silent-
--- absence failure the hub has been bitten by before.
+-- absence failure Mission Control has been bitten by before.
 --
 -- The fix is to ask the question in the user's own day rather than in UTC.
 -- Default 'UTC' keeps every existing user exactly where they are.

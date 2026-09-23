@@ -25,7 +25,7 @@
 -- 3. About fifty-five public tables with a user_id column had no foreign key
 --    to auth.users, so deleting the auth user deleted the profile and the
 --    notes and left contacts, moments, claims, interactions, API keys and MCP
---    tokens in place; a hub key of a deleted account stayed is_active and kept
+--    tokens in place; a mission control key of a deleted account stayed is_active and kept
 --    reading its orphaned contacts. Every public table with a uuid user_id
 --    column now cascades from auth.users. The list is derived from the
 --    catalogue rather than written out, so a table added later is covered by

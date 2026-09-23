@@ -28,7 +28,7 @@ menerio/
 │   └── utils/               # Pure utility functions
 ├── supabase/
 │   ├── functions/           # Supabase Edge Functions (Deno)
-│   │   ├── _shared/         # Shared helpers (auth, rate limiting, credits, Hub, group imports)
+│   │   ├── _shared/         # Shared helpers (auth, rate limiting, credits, Mission Control, group imports)
 │   │   └── <function-name>/ # One directory per edge function
 │   ├── migrations/          # Database migrations (auto-generated, read-only)
 │   └── config.toml          # Edge function configuration

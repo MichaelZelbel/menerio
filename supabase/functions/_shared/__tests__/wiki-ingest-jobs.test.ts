@@ -29,7 +29,7 @@ it.each([false, true])('uses captured input and handles an uncertain final check
   const runChat = vi.fn(async () => ({ content: JSON.stringify({ actions: [], source_links: [], log_summary: 'fixture' }) }));
   const finish = vi.fn(async () => true);
   const jobs = { assertCurrent: vi.fn(), finish };
-  const { processIngest } = endpointFunctions({ runChat, runWikiStage, NoteAIJobError, WIKI_INGEST_PROMPT: 'fixture', shouldExtractFacts: (source: string) => source !== 'hub' });
+  const { processIngest } = endpointFunctions({ runChat, runWikiStage, NoteAIJobError, WIKI_INGEST_PROMPT: 'fixture', shouldExtractFacts: (source: string) => source !== 'godspeed' });
   const job = { id: 'j', user_id: 'u', note_id: 'n', lease_id: 'l', fingerprint: 'fixture-fp', snapshot: { id: 'n', title: 'Synthetic fixture', content: 'A sufficiently long synthetic note for testing.', metadata: {}, ai_visibility: 'visible' } };
   if (uncertain) {
     const error = await processIngest({ rpc, from }, jobs, job, Date.now()).catch((e: unknown) => e);
@@ -66,9 +66,9 @@ it('group insight outputs are checkpointed and tenant scoped, never directly wri
   expect(db.rpc).toHaveBeenCalledWith('checkpoint_note_ai_stage', expect.objectContaining({ _stage: 'wiki-group:g' }));
 });
 
-it.each([{ source_app: 'hub' }, { ai_visibility: 'hidden' }, { is_trashed: true }])('refuses ineligible snapshots before provider access: %j', async (restriction) => {
+it.each([{ source_app: 'godspeed' }, { ai_visibility: 'hidden' }, { is_trashed: true }])('refuses ineligible snapshots before provider access: %j', async (restriction) => {
   const runChat = vi.fn();
-  const { processIngest } = endpointFunctions({ runChat, shouldExtractFacts: (source: string) => source !== 'hub' });
+  const { processIngest } = endpointFunctions({ runChat, shouldExtractFacts: (source: string) => source !== 'godspeed' });
   await expect(processIngest({}, { assertCurrent: vi.fn() }, { user_id: 'u', note_id: 'n', snapshot: { title: 'Fixture', content: 'Synthetic long text', ...restriction } }, Date.now())).rejects.toThrow('ineligible');
   expect(runChat).not.toHaveBeenCalled();
 });

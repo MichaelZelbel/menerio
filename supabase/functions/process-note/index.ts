@@ -15,7 +15,7 @@ import {
   profileExtractionContract,
 } from "../_shared/llm-defaults.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
-import { shouldExtractFacts } from "../_shared/hub-source.ts";
+import { shouldExtractFacts } from "../_shared/mc-source.ts";
 import { findOrCreateContact } from "../_shared/find-or-create-contact.ts";
 import {
   canonicalLabel,
@@ -2482,9 +2482,9 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
       count: 0, truncated: false, failures: 0,
     };
 
-    // Notes mirrored out of the hub are indexed for search and nothing else:
-    // the hub reads them by meaning, never by the title, tags or summary this
-    // pass would write, and every hub commit that touched one re-bought it.
+    // Notes mirrored out of Mission Control are indexed for search and nothing else:
+    // Mission Control reads them by meaning, never by the title, tags or summary this
+    // pass would write, and every mission control commit that touched one re-bought it.
     const indexOnly = !shouldExtractFacts(note.source_app);
     if (indexOnly) {
       const chunkResult = await embedAndStoreNoteChunks(
@@ -2772,7 +2772,7 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
     // fact store in migration 093000 and became a display layer over `claims`,
     // and nothing carried a row across. So a fact extracted from a note reached
     // the display layer and stopped there: undated, with no cardinality and no
-    // review date, invisible to search_claims and to the hub mirror's dated arm.
+    // review date, invisible to search_claims and to Mission Control mirror's dated arm.
     // That is rot type 3a in SPEC.md — the value exists in a note and was never
     // promoted — and this call is what closes it for every new fact.
     //

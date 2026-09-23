@@ -8,7 +8,7 @@
  *   - The original HTML snapshot stored in the `note-attachments` bucket
  *   - source_app="singlefile" so the existing source-badge UI shows it
  *
- * Auth: existing Hub API key system (Bearer mnr_...). Requires `notes` scope.
+ * Auth: existing Mission Control API key system (Bearer mnr_...). Requires `notes` scope.
  *
  * Endpoint: POST /functions/v1/singlefile-capture
  * Form fields:
@@ -19,8 +19,8 @@
  *   - folder     (optional) folder path (e.g. "Web Clips")
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authenticateHubKey, requireScope } from "../_shared/hub-auth.ts";
-import { checkRateLimit } from "../_shared/hub-rate-limit.ts";
+import { authenticateGodspeedKey, requireScope } from "../_shared/mc-auth.ts";
+import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
 import { isSafeOutboundUrl } from "../_shared/ssrf-guard.ts";
 import {
   decodeEntities,
@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
   }
 
   // ── Auth ──
-  const { result: auth, error: authErr } = await authenticateHubKey(req);
+  const { result: auth, error: authErr } = await authenticateGodspeedKey(req);
   if (authErr) return authErr;
   const scopeErr = requireScope(auth!.scopes, "notes");
   if (scopeErr) return scopeErr;

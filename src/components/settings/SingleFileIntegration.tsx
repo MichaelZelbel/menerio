@@ -75,7 +75,7 @@ export function SingleFileIntegration() {
           <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground flex gap-2">
             <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>
-              SingleFile uploads use a Hub <strong>API key</strong> with the{" "}
+              SingleFile uploads use a Mission Control <strong>API key</strong> with the{" "}
               <code className="bg-muted px-1 rounded">notes</code> scope. Generate
               one in the <Link to="/dashboard/settings?tab=apikeys" className="text-primary hover:underline">API Keys</Link> tab,
               then paste it into SingleFile as a Bearer token below.

@@ -75,7 +75,7 @@ describe("dateOnly", () => {
 });
 
 describe("toWorldEntity", () => {
-  it("carries the fields a hub file needs", () => {
+  it("carries the fields a mission control file needs", () => {
     const entity = toWorldEntity({
       id: "e1",
       name: "Ownward Studio",

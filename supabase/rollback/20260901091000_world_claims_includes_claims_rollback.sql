@@ -8,7 +8,7 @@
 -- drops while it exists.
 --
 -- Rolling this back does NOT lose any claim. It only makes the claims table
--- invisible to the hub mirror again, which is the state before 2026-09-01.
+-- invisible to Mission Control mirror again, which is the state before 2026-09-01.
 -- The next `world_pull.py --apply` will then delete the mirrored copies of
 -- every claim-sourced file, so run the pull in dry-run first and read the
 -- removal notice before applying it.

@@ -5,7 +5,7 @@
  * the web app, from `useAICredits` at sign-in. An account whose owner never
  * opened the app that month had no row, `checkBalance` read "zero rows" as "no
  * credits", and every server-side caller quietly fell back: notes captured by an
- * assistant over MCP were stored without an embedding, the hub mirror was stored
+ * assistant over MCP were stored without an embedding, Mission Control mirror was stored
  * without one, and search answered by words only. That is exactly the account of
  * someone who lets an assistant keep the notebook, which is what the MCP server
  * is for. Found with a free test account that had been idle since July: 27

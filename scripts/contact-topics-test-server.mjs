@@ -16,16 +16,16 @@ const owner = '74000000-0000-4000-8000-000000000001', other = '74000000-0000-400
 const person = '74000000-0000-4000-8000-000000000011', second = '74000000-0000-4000-8000-000000000012', foreign = '74000000-0000-4000-8000-000000000013';
 await pool.query(`alter table public.contacts add column if not exists aliases text[] default '{}';
 alter table public.contacts add column if not exists company text; alter table public.contacts add column if not exists relationship text;
-create table if not exists public.hub_api_keys(id uuid primary key,user_id uuid,scopes text[],is_active boolean,expires_at timestamptz,key_hash text,last_used_at timestamptz);`);
-await pool.query('alter role service_role bypassrls; grant select on public.contacts,public.hub_api_keys to service_role; grant update on public.hub_api_keys to service_role');
+create table if not exists public.godspeed_api_keys(id uuid primary key,user_id uuid,scopes text[],is_active boolean,expires_at timestamptz,key_hash text,last_used_at timestamptz);`);
+await pool.query('alter role service_role bypassrls; grant select on public.contacts,public.godspeed_api_keys to service_role; grant update on public.godspeed_api_keys to service_role');
 await pool.query('insert into public.contacts(id,user_id,name,aliases) values($1,$4,$6,$7),($2,$4,$8,$9),($3,$5,$10,$9) on conflict(id) do nothing',[person,second,foreign,owner,other,'Synthetic Alex',['Craft friend'],'Synthetic Robin',[],'Synthetic Other']);
 for (const [i,key,user,scopes] of [[1,'mnr_topics_owner',owner,['contacts']],[2,'mnr_topics_other',other,['contacts']],[3,'mnr_topics_no_contacts',owner,['notes']]]) {
- await pool.query('insert into public.hub_api_keys(id,user_id,scopes,is_active,key_hash) values($1,$2,$3,true,$4) on conflict(id) do update set scopes=excluded.scopes', [`74000000-0000-4000-8000-00000000010${i}`,user,scopes,createHash('sha256').update(key).digest('hex')]);
+ await pool.query('insert into public.godspeed_api_keys(id,user_id,scopes,is_active,key_hash) values($1,$2,$3,true,$4) on conflict(id) do update set scopes=excluded.scopes', [`74000000-0000-4000-8000-00000000010${i}`,user,scopes,createHash('sha256').update(key).digest('hex')]);
 }
 let edgeFetch;
 globalThis.Deno = { env: { get: key => ({ SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service', OPENROUTER_API_KEY: 'unused-synthetic' })[key] }, serve: fn => { edgeFetch = fn; } };
 await import('../.superpowers/contact-topics/mcp.mjs');
-const tables = new Set(['contacts','contact_topics','contact_topic_events','hub_api_keys']);
+const tables = new Set(['contacts','contact_topics','contact_topic_events','godspeed_api_keys']);
 const identifier = value => { if (!/^[a-z_]+$/.test(value)) throw new Error('Invalid test query identifier'); return `"${value}"`; };
 function splitParts(text) { const out=[]; let depth=0,start=0; for(let i=0;i<text.length;i++){if(text[i]==='(')depth++;if(text[i]===')')depth--;if(text[i]===','&&depth===0){out.push(text.slice(start,i));start=i+1;}}out.push(text.slice(start));return out; }
 function condition(text, values) {
@@ -53,7 +53,7 @@ async function rest(req,url,body) {
    await client.query('commit');return {data:result.rows[0].result};
   }
   if(!tables.has(path)){await client.query('commit');return {data:[],count:0};}
-  if(req.method==='PATCH'&&path==='hub_api_keys'){await client.query('commit');return {data:null};}
+  if(req.method==='PATCH'&&path==='godspeed_api_keys'){await client.query('commit');return {data:null};}
   if(req.method!=='GET'&&req.method!=='HEAD')throw new Error('Only feature RPC writes allowed');
   const values=[], filters=[];
   for(const [key,value] of url.searchParams){if(['select','order','limit','offset'].includes(key))continue;filters.push(key==='or'?condition('or'+value,values):condition(`${key}.${value}`,values));}

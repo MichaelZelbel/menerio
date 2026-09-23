@@ -1,18 +1,18 @@
 /**
  * Combined note search for callers that hold an API key, not a user session.
  *
- * `hub-api-notes` GET /search used to be a bare ILIKE: a question phrased any
+ * `mc-api-notes` GET /search used to be a bare ILIKE: a question phrased any
  * other way than the note was written found nothing, which is the one thing a
  * search by meaning exists to fix. The app's semantic search lives in another
  * edge function that wants a user token, and the call to it that once sat in
- * the hub API answered 401 on every request. So the search runs here, in
+ * Mission Control API answered 401 on every request. So the search runs here, in
  * process, on the two arms every other search surface already uses:
  *
  *   vector arm   the query embedding against `match_note_chunks`
  *   text arm     ILIKE over title and content, which also finds a note whose
  *                chunks have not been embedded yet
  *
- * merged per note and ordered by the shared policy in `hub-ranking.ts`.
+ * merged per note and ordered by the shared policy in `mc-ranking.ts`.
  *
  * It never fails for want of an embedding. No credits, a provider outage, an
  * RPC error: each one drops the vector arm and the answer says `text_only`, so
@@ -22,8 +22,8 @@
  * is injected, so the Node test runner can import this directly.
  */
 import { ilikeAnyColumn } from "./postgrest-filters.ts";
-import { isHubMirror } from "./hub-source.ts";
-import { rankHybridRows } from "./hub-ranking.ts";
+import { isGodspeedMirror } from "./mc-source.ts";
+import { rankHybridRows } from "./mc-ranking.ts";
 import type { DbClient } from "./db-client.ts";
 
 export const SEARCH_DEFAULT_LIMIT = 10;
@@ -47,7 +47,7 @@ export type SourceAppFilter =
   | { kind: "exact"; value: string };
 
 /**
- * `source_app=hub` means the mirror, `source_app=native` means everything that
+ * `source_app=godspeed` means the mirror, `source_app=native` means everything that
  * is not the mirror, any other value is matched as written. Case and
  * surrounding space are ignored, the way `shouldExtractFacts` ignores them.
  */
@@ -60,7 +60,7 @@ export function parseSourceAppFilter(raw: string | null | undefined): SourceAppF
 
 export function sourceAppMatches(sourceApp: string | null | undefined, filter: SourceAppFilter): boolean {
   if (filter.kind === "all") return true;
-  if (filter.kind === "native") return !isHubMirror(sourceApp);
+  if (filter.kind === "native") return !isGodspeedMirror(sourceApp);
   return (sourceApp ?? "").trim().toLowerCase() === filter.value;
 }
 
@@ -169,7 +169,7 @@ export function clampSearchLimit(raw: unknown): number {
 function applySourceFilter(query: DbClient, filter: SourceAppFilter) {
   // A coarse filter so the row limit is spent on rows that can qualify.
   // sourceAppMatches() below is the authority; this only narrows the fetch.
-  if (filter.kind === "native") return query.or("source_app.is.null,source_app.not.ilike.hub");
+  if (filter.kind === "native") return query.or("source_app.is.null,source_app.not.ilike.godspeed");
   if (filter.kind === "exact") return query.ilike("source_app", filter.value);
   return query;
 }

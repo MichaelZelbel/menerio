@@ -16,7 +16,7 @@
  *  - only the user's own, untrashed, AI-visible notes can be targets, so a link
  *    can never confirm that a hidden note exists;
  *  - a duplicated title resolves to the oldest note, every time, and to a note
- *    the user wrote before a mirrored hub file of the same name;
+ *    the user wrote before a mirrored mission control file of the same name;
  *  - a note never links to itself.
  *
  * It ADDS links. It removes only rows this file created earlier (marked in
@@ -27,7 +27,7 @@
  * import it directly.
  */
 import { escapeLike } from "./postgrest-filters.ts";
-import { isHubMirror } from "./hub-source.ts";
+import { isGodspeedMirror } from "./mc-source.ts";
 import type { DbClient } from "./db-client.ts";
 
 const WIKILINK_REGEX = /\[\[([^[\]\n]+?)\]\]/g;
@@ -68,10 +68,10 @@ export interface WikilinkSyncResult {
 
 interface TitleRow { id: string; title: string | null; source_app?: string | null; created_at?: string | null }
 
-/** Oldest first, a native note before a hub file: the same note wins on every run. */
+/** Oldest first, a native note before a mission control file: the same note wins on every run. */
 function pickTarget(rows: TitleRow[]): TitleRow | undefined {
   return [...rows].sort((a, b) =>
-    (Number(isHubMirror(a.source_app)) - Number(isHubMirror(b.source_app))) ||
+    (Number(isGodspeedMirror(a.source_app)) - Number(isGodspeedMirror(b.source_app))) ||
     String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) ||
     String(a.id).localeCompare(String(b.id))
   )[0];

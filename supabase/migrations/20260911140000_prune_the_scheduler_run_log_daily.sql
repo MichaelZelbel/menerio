@@ -7,7 +7,7 @@
 --
 -- Querino showed where that ends: the same two tables were 1.3 GB there, 99
 -- percent of the project's disk reads, and Supabase mailed a Disk IO warning
--- on 2026-09-11 (Querino migration 20260911130000, hub decision D-203). Menerio
+-- on 2026-09-11 (Querino migration 20260911130000, godspeed decision D-203). Menerio
 -- was caught early. Applied live the same day: rows older than seven days
 -- deleted (25,669), VACUUM FULL on both tables (306 MB -> 266 MB), and the
 -- daily prune below. cron.schedule() replaces a job of the same name in place,

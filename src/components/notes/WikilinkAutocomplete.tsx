@@ -21,7 +21,7 @@ interface NoteResult {
   title: string;
   metadata: Record<string, unknown> | null;
   updated_at: string;
-  /** Selected so the shared ranking can put a mirrored hub file below a native note. */
+  /** Selected so the shared ranking can put a mirrored mission control file below a native note. */
   source_app?: string | null;
 }
 

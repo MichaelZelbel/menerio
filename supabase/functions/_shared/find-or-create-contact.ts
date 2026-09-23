@@ -4,7 +4,7 @@
 // the bulk keep, the auto-apply in process-note, the single keep in the review
 // queue and the event dialog. Two notes captured on 2026-09-04 each proposed
 // the same twelve authors, one bulk keep created one row per suggestion, and
-// twelve people existed twice in the owner's hub. Older pairs (April, July,
+// twelve people existed twice in the owner's mission control. Older pairs (April, July,
 // August) had come the same way. The fix is not a unique index, because two
 // different people can share a name; it is that creating a person first looks
 // for the person, the way the MCP server's resolveOrCreateContactsByName

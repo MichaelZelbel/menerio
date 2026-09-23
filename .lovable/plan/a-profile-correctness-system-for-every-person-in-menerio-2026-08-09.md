@@ -19,7 +19,7 @@ A single adjudicator module decides whether any profile fact or relationship may
 - **Closed vocabulary** — a role must resolve to a known family, social, or professional term. Unknown labels are refused, not stored and cleaned later.
 - **Evidence** — machine claims need a verbatim span from a real note or moment, with a minimum length and a check that the span actually contains both the subject and the claim.
 - **Sanity** — no self-edges, no placeholder values, no label-as-value, no cross-language duplicates of an existing fact.
-Every writer (`process-note`, moment extraction, lexicon enrichment, review-queue apply, imports, MCP, Hub API, the UI hook) routes through it. A mirror test fails the build if any writer bypasses it or if the frontend and edge copies of the gate drift apart.
+Every writer (`process-note`, moment extraction, lexicon enrichment, review-queue apply, imports, MCP, Mission Control API, the UI hook) routes through it. A mirror test fails the build if any writer bypasses it or if the frontend and edge copies of the gate drift apart.
 
 ### 3. Correct rendering as a system property
 - Kin roles normalise to a neutral bond key on both sides before collapse, so one bond is always one row on any profile.

@@ -44,7 +44,7 @@ function fakeDb() {
         ilike: (k: string, v: string) => { rows = rows.filter((r) => String(r[k] ?? "").toLowerCase() === v.toLowerCase()); return q; },
         or: (expr: string) => {
           if (expr.startsWith("source_app.is.null")) {
-            rows = rows.filter((r) => r.source_app == null || String(r.source_app).toLowerCase() !== "hub");
+            rows = rows.filter((r) => r.source_app == null || String(r.source_app).toLowerCase() !== "godspeed");
           } else {
             isText = true;
             const m = /ilike\."%(.*?)%"/.exec(expr);
@@ -95,34 +95,34 @@ describe("combinedNoteSearch", () => {
   });
 
   it("returns every field the contract names, and the ones older callers read", async () => {
-    notes = [note("n1", { title: "Budget", content: "budget", folder_path: "Money", source_app: "hub", source_id: "money/budget.md", tags: ["x"] })];
+    notes = [note("n1", { title: "Budget", content: "budget", folder_path: "Money", source_app: "godspeed", source_id: "money/budget.md", tags: ["x"] })];
     const { results } = await combinedNoteSearch(fakeDb(), { userId: USER, query: "budget", embed });
     expect(Object.keys(results[0]).sort()).toEqual([
       "content", "created_at", "entity_type", "folder_path", "id", "is_favorite", "is_pinned",
       "similarity", "snippet", "source_app", "source_id", "tags", "title", "updated_at",
     ]);
-    expect(results[0]).toMatchObject({ folder_path: "Money", source_app: "hub", source_id: "money/budget.md", similarity: null });
+    expect(results[0]).toMatchObject({ folder_path: "Money", source_app: "godspeed", source_id: "money/budget.md", similarity: null });
   });
 
-  it("ranks a native note above a hub file that is more similar", async () => {
-    notes = [note("hubfile", { source_app: "hub" }), note("mine", { source_app: "web" })];
-    chunks = [chunk("hubfile", 0.9), chunk("mine", 0.5)];
+  it("ranks a native note above a mission control file that is more similar", async () => {
+    notes = [note("godspeedfile", { source_app: "godspeed" }), note("mine", { source_app: "web" })];
+    chunks = [chunk("godspeedfile", 0.9), chunk("mine", 0.5)];
     const { results } = await combinedNoteSearch(fakeDb(), { userId: USER, query: "unrelated words", embed });
-    expect(results.map((r) => r.id)).toEqual(["mine", "hubfile"]);
+    expect(results.map((r) => r.id)).toEqual(["mine", "godspeedfile"]);
     // The figure reported is the measurement, not the discounted sort key.
     expect(results[1].similarity).toBe(0.9);
   });
 
-  it("filters to the mirror with source_app=hub, whatever the case", async () => {
-    notes = [note("hubfile", { source_app: "hub", content: "budget" }), note("mine", { content: "budget" })];
-    chunks = [chunk("hubfile", 0.5), chunk("mine", 0.9)];
-    const { results } = await combinedNoteSearch(fakeDb(), { userId: USER, query: "budget", sourceApp: " HUB ", embed });
-    expect(results.map((r) => r.id)).toEqual(["hubfile"]);
+  it("filters to the mirror with source_app=godspeed, whatever the case", async () => {
+    notes = [note("godspeedfile", { source_app: "godspeed", content: "budget" }), note("mine", { content: "budget" })];
+    chunks = [chunk("godspeedfile", 0.5), chunk("mine", 0.9)];
+    const { results } = await combinedNoteSearch(fakeDb(), { userId: USER, query: "budget", sourceApp: " GODSPEED ", embed });
+    expect(results.map((r) => r.id)).toEqual(["godspeedfile"]);
   });
 
   it("filters the mirror out with source_app=native, in both arms", async () => {
-    notes = [note("hubfile", { source_app: "hub", content: "budget" }), note("mine", { content: "budget" }), note("old", { source_app: null })];
-    chunks = [chunk("hubfile", 0.9), chunk("old", 0.4)];
+    notes = [note("godspeedfile", { source_app: "godspeed", content: "budget" }), note("mine", { content: "budget" }), note("old", { source_app: null })];
+    chunks = [chunk("godspeedfile", 0.9), chunk("old", 0.4)];
     const { results } = await combinedNoteSearch(fakeDb(), { userId: USER, query: "budget", sourceApp: "native", embed });
     expect(results.map((r) => r.id).sort()).toEqual(["mine", "old"]);
   });
@@ -213,7 +213,7 @@ describe("parseSourceAppFilter / sourceAppMatches", () => {
   it("matches any other sender by name", () => {
     const f = parseSourceAppFilter("Telegram");
     expect(sourceAppMatches("telegram", f)).toBe(true);
-    expect(sourceAppMatches("hub", f)).toBe(false);
+    expect(sourceAppMatches("godspeed", f)).toBe(false);
     expect(sourceAppMatches(null, f)).toBe(false);
   });
 });

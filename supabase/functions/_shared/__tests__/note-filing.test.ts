@@ -42,13 +42,13 @@ describe("findRelatedNotes", () => {
     expect(db.rpcCalls[0].args).toMatchObject({ p_user_id: USER, query_embedding: [0.1] });
   });
 
-  it("prefers a native note to a slightly closer hub file, and marks the hub file", async () => {
-    const db = dbWith([note("mine"), note("mirror", { source_app: "hub", title: "rules/x.md" })], [
+  it("prefers a native note to a slightly closer godspeed file, and marks Mission Control file", async () => {
+    const db = dbWith([note("mine"), note("mirror", { source_app: "godspeed", title: "rules/x.md" })], [
       { note_id: "mirror", similarity: 0.80 }, { note_id: "mine", similarity: 0.70 },
     ]);
     const related = await findRelatedNotes(db, USER, [0.1], "new");
     expect(related.map((r) => r.id)).toEqual(["mine", "mirror"]);
-    expect(related[1].title).toBe("rules/x.md [hub file]");
+    expect(related[1].title).toBe("rules/x.md [godspeed file]");
     expect(related[1].similarity).toBe(0.80);
   });
 
@@ -125,17 +125,17 @@ describe("buildFolderListing", () => {
     expect(buildFolderListing([], ["A/B/C"]).folders.map((f) => f.path)).toEqual(["A", "A/B", "A/B/C"]);
   });
 
-  it("hides the hub mirror tree unless asked, without touching a look-alike", () => {
-    const folders = ["hub", "hub/rules", "Hubris"];
-    const notes = ["hub/rules", "Hub/observations", "Hubris", ""];
+  it("hides Mission Control mirror tree unless asked, without touching a look-alike", () => {
+    const folders = ["godspeed", "godspeed/rules", "Hubris"];
+    const notes = ["godspeed/rules", "Godspeed/observations", "Hubris", ""];
     const hidden = buildFolderListing(folders, notes);
     expect(hidden.folders.map((f) => f.path)).toEqual(["Hubris"]);
-    expect(hidden.hub_mirror_included).toBe(false);
+    expect(hidden.godspeed_mirror_included).toBe(false);
     expect(hidden.top_level_notes).toBe(1);
     const shown = buildFolderListing(folders, notes, true);
-    expect(shown.folders.map((f) => f.path)).toEqual(expect.arrayContaining(["hub", "hub/rules", "Hub/observations", "Hubris"]));
-    expect(shown.hub_mirror_included).toBe(true);
-    expect(shown.folders.find((f) => f.path === "hub")!.notes_including_subfolders).toBe(1);
+    expect(shown.folders.map((f) => f.path)).toEqual(expect.arrayContaining(["godspeed", "godspeed/rules", "Godspeed/observations", "Hubris"]));
+    expect(shown.godspeed_mirror_included).toBe(true);
+    expect(shown.folders.find((f) => f.path === "godspeed")!.notes_including_subfolders).toBe(1);
   });
 
   it("normalises slashes the way the note tree does", () => {

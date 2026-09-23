@@ -1,12 +1,12 @@
 /**
- * World rows translated into the three words the hub and the book both use:
+ * World rows translated into the three words Mission Control and the book both use:
  * entity, event, claim.
  *
  * Pure on purpose: no Deno APIs, so a Node test runner can import it. The same
- * reason `hub-source.ts` is pure.
+ * reason `mc-source.ts` is pure.
  *
- * The slug is computed here and nowhere else. The hub names its files after it,
- * so if both sides computed it separately they would drift and the hub would
+ * The slug is computed here and nowhere else. Mission Control names its files after it,
+ * so if both sides computed it separately they would drift and Mission Control would
  * write a second file for a thing it already had.
  */
 
@@ -154,7 +154,7 @@ export function toWorldClaim(row: Record<string, any>): WorldClaim {
     written_by: writtenBy(row.origin),
     evidence_quote: row.evidence_quote ?? null,
     // The three fields the 2026-09-01 widening added. This mapper is an
-    // allowlist, so a column added to world_claims reaches the hub only when
+    // allowlist, so a column added to world_claims reaches Mission Control only when
     // it is named here: the view carried cardinality for a day before anyone
     // noticed the mirror still had none.
     confidence: row.confidence ?? null,

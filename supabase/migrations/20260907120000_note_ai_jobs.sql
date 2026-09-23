@@ -26,12 +26,12 @@ language sql stable security definer set search_path=public,pg_temp as $$
   'source_app',n.source_app,'is_external',n.is_external,'ai_visibility',n.ai_visibility,
   'created_at',n.created_at,'metadata',n.metadata,'policy_version','note-ai-v1',
   'policy_epoch',coalesce((select policy_epoch from public.note_ai_jobs where user_id=n.user_id and note_id=n.id and pipeline=_pipeline),0),
-  'extract_facts',n.ai_visibility <> 'hidden' and lower(trim(coalesce(n.source_app,''))) <> 'hub',
+  'extract_facts',n.ai_visibility <> 'hidden' and lower(trim(coalesce(n.source_app,''))) <> 'godspeed',
   'media',coalesce((select jsonb_agg(jsonb_build_object('id',m.id,'extracted_text',m.extracted_text,
    'description',m.description,'topics',m.topics) order by m.id)
    from public.media_analysis m where m.note_id=n.id and m.user_id=n.user_id and m.analysis_status='complete'),'[]'::jsonb))
  from public.notes n where n.id=_note_id and n.user_id=_user_id and not coalesce(n.is_trashed,false)
- and (_pipeline='analysis' or (_pipeline='lexicon' and n.ai_visibility <> 'hidden' and lower(trim(coalesce(n.source_app,''))) <> 'hub'))
+ and (_pipeline='analysis' or (_pipeline='lexicon' and n.ai_visibility <> 'hidden' and lower(trim(coalesce(n.source_app,''))) <> 'godspeed'))
 $$;
 create function public.note_ai_fingerprint(_input jsonb) returns text
 language sql immutable set search_path=public,extensions,pg_temp as $$

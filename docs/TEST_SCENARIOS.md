@@ -1815,9 +1815,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 
 ---
 
-## Section 31: External APIs (Hub REST API & MCP)
+## Section 31: External APIs (Mission Control REST API & MCP)
 
-### TS-API-001: Create a Hub API Key
+### TS-API-001: Create a Mission Control API Key
 
 - **Objective:** Validate scoped Bearer key creation
 - **Preconditions:** Signed in
@@ -1827,25 +1827,25 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   3. Copy the `mnr_…` key once shown
 - **Expected Outcome:** A SHA-256 hashed row is stored. The plaintext key is shown only once. The label, scopes, and rate-limit info are visible.
 
-### TS-API-002: Hub API — Create a Note via REST
+### TS-API-002: Mission Control API — Create a Note via REST
 
-- **Objective:** Validate `hub-api-notes` POST
+- **Objective:** Validate `mc-api-notes` POST
 - **Preconditions:** A key with `notes:write` scope
 - **Steps:**
-  1. `curl -X POST` to `/functions/v1/hub-api-notes` with `Authorization: Bearer mnr_…` and a JSON body
+  1. `curl -X POST` to `/functions/v1/mc-api-notes` with `Authorization: Bearer mnr_…` and a JSON body
 - **Expected Outcome:** 201 with the created note. Note appears in the user's Notes list. Rate-limit headers are present.
 
-### TS-API-002b: Hub API — Combined Search
+### TS-API-002b: Mission Control API — Combined Search
 
-- **Objective:** Validate `GET /hub-api-notes/search`
-- **Preconditions:** A key with the `notes` scope; at least one indexed note; a hub mirror note (`source_app = 'hub'`) on the same subject
+- **Objective:** Validate `GET /mc-api-notes/search`
+- **Preconditions:** A key with the `notes` scope; at least one indexed note; a mission control mirror note (`source_app = 'godspeed'`) on the same subject
 - **Steps:**
-  1. `GET /functions/v1/hub-api-notes/search?q=<a phrase that describes the note without using its words>`
-  2. Repeat with `&source_app=hub`, with `&source_app=native`, and with `&limit=1`
+  1. `GET /functions/v1/mc-api-notes/search?q=<a phrase that describes the note without using its words>`
+  2. Repeat with `&source_app=godspeed`, with `&source_app=native`, and with `&limit=1`
   3. Repeat with an account that has no AI credits left
-- **Expected Outcome:** Step 1 returns the note with a `similarity`, a `snippet` of about 300 characters and `mode: "semantic+text"`; the native note is listed before the hub file. Step 2 returns only hub files, only non-hub notes, and exactly one result. Step 3 still answers 200 with `mode: "text_only"` and `similarity: null`. One `hub-api-search:embedding` usage row is recorded for the key's owner per semantic search.
+- **Expected Outcome:** Step 1 returns the note with a `similarity`, a `snippet` of about 300 characters and `mode: "semantic+text"`; the native note is listed before Mission Control file. Step 2 returns only Mission Control files, only non-godspeed notes, and exactly one result. Step 3 still answers 200 with `mode: "text_only"` and `similarity: null`. One `mc-api-search:embedding` usage row is recorded for the key's owner per semantic search.
 
-### TS-API-003: Hub API — Rate Limit Enforcement
+### TS-API-003: Mission Control API — Rate Limit Enforcement
 
 - **Objective:** Validate the 1000/hr limit
 - **Preconditions:** A valid API key
@@ -1853,12 +1853,12 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Send a burst of requests exceeding the threshold
 - **Expected Outcome:** Once exceeded, responses return 429 with `Retry-After`.
 
-### TS-API-004: Hub API — Sync Status Endpoint
+### TS-API-004: Mission Control API — Sync Status Endpoint
 
 - **Objective:** Validate `/sync-status` for spoke apps
 - **Preconditions:** A valid key
 - **Steps:**
-  1. `GET /functions/v1/hub-api-stats/sync-status`
+  1. `GET /functions/v1/mc-api-stats/sync-status`
 - **Expected Outcome:** Response includes counts (notes, contacts, last activity) for the calling user.
 
 ### TS-API-005: MCP — Generate Token and Connect Client
@@ -1878,20 +1878,20 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Call `list_note_folders`
   2. Call `capture_note` with `content` containing `[[Cholesterol]]`, `title: "Blood test"`, `folder_path: "health"`, `tags: ["Labs"]`
-  3. Call `capture_note` with `folder_path: "hub/rules"`
+  3. Call `capture_note` with `folder_path: "godspeed/rules"`
   4. Open the new note in the app
-- **Expected Outcome:** Step 1 lists `Health` with its note count and the top-level count, without the `hub` tree (it appears with `include_hub: true`). Step 2 answers with the note id, `Title: Blood test`, `Folder: Health` (the existing casing), the merged tags, the resolved wikilink and up to five related existing notes. Step 3 is refused and saves nothing. Step 4 shows the note in `Health` with `Cholesterol` under outgoing links, and `Blood test` under the backlinks of `Cholesterol`.
+- **Expected Outcome:** Step 1 lists `Health` with its note count and the top-level count, without the `godspeed` tree (it appears with `include_godspeed: true`). Step 2 answers with the note id, `Title: Blood test`, `Folder: Health` (the existing casing), the merged tags, the resolved wikilink and up to five related existing notes. Step 3 is refused and saves nothing. Step 4 shows the note in `Health` with `Cholesterol` under outgoing links, and `Blood test` under the backlinks of `Cholesterol`.
 
-### TS-API-005c: MCP — Hub Files Rank Below Own Notes
+### TS-API-005c: MCP — Mission Control Files Rank Below Own Notes
 
-- **Objective:** Validate hub demotion, labelling and the `source` filter
-- **Preconditions:** A native note and a hub mirror note that both match a query
+- **Objective:** Validate Mission Control demotion, labelling and the `source` filter
+- **Preconditions:** A native note and a mission control mirror note that both match a query
 - **Steps:**
   1. Call `search_notes` with the query
-  2. Repeat with `source: "native"` and with `source: "hub"`
-- **Expected Outcome:** Step 1 lists the native note first; the hub result carries `Source: [hub file: <path>]`. Step 2 returns only native notes, then only hub files.
+  2. Repeat with `source: "native"` and with `source: "godspeed"`
+- **Expected Outcome:** Step 1 lists the native note first; Mission Control result carries `Source: [godspeed file: <path>]`. Step 2 returns only native notes, then only Mission Control files.
 
-### TS-API-006: App Integrations Hub (UI)
+### TS-API-006: App Integrations Mission Control (UI)
 
 - **Objective:** Validate the integrations catalog
 - **Preconditions:** Signed in
@@ -1960,6 +1960,6 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 | Timeline Event | TS-TIMELINE-002 | Manual test event | Free |
 | Collection | TS-COLLECTIONS-001 | Books collection from template | Free |
 | Telegram Pairing | TS-CAPTURE-001 | Bot paired to test account | Free |
-| Hub API Key | TS-API-001 | `mnr_…` key with `notes:read/write` | Free |
+| Mission Control API Key | TS-API-001 | `mnr_…` key with `notes:read/write` | Free |
 | Agent Instruction | TS-PROFILE-008 | "Always address me informally" | Free |
 | Weekly Review | TS-REVIEW-001 | Generated review for current week | Premium |

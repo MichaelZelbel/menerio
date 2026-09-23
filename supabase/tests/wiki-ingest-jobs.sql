@@ -43,8 +43,8 @@ begin
  update public.notes set content='Synthetic edited during synthesis' where id=n;
  if public.wiki_apply_note_ai_result(u,j.id,j.lease_id) then raise exception 'superseded generation applied'; end if;
  -- Source eligibility is checked again at apply time.
- update public.notes set source_app='hub' where id=n;
- if public.wiki_apply_note_ai_result(u,j.id,j.lease_id) then raise exception 'hub source applied'; end if;
+ update public.notes set source_app='godspeed' where id=n;
+ if public.wiki_apply_note_ai_result(u,j.id,j.lease_id) then raise exception 'godspeed source applied'; end if;
 end $$;
 
 

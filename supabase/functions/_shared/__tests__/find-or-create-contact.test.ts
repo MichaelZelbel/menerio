@@ -25,7 +25,7 @@ describe("sameName", () => {
 describe("pickExistingContact", () => {
   // On 2026-09-04 two notes each proposed "Cal Newport" and a bulk keep
   // created one contact per suggestion. Twelve people ended up twice in the
-  // owner's hub. The keep must find the person the first keep made.
+  // owner's mission control. The keep must find the person the first keep made.
   it("returns the live contact that carries the name", () => {
     const hit = c({ id: "keep-me" });
     expect(pickExistingContact("cal newport", [hit])?.id).toBe("keep-me");

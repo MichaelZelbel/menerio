@@ -84,11 +84,11 @@ begin
  perform public.enqueue_note_ai_job(j.user_id,j.note_id,'lexicon','automatic');
  update public.notes set title='Lexicon subscribed new title' where id=j.note_id;
  if not exists(select 1 from public.note_ai_jobs where note_id=j.note_id and pipeline='lexicon' and desired_generation=2) then raise exception 'Lexicon subscription lost edit'; end if;
- update public.notes set source_app=' HuB ' where id=j.note_id;
- if public.enqueue_note_ai_job(j.user_id,j.note_id,'lexicon','manual') is not null then raise exception 'hub Lexicon accepted'; end if;
+ update public.notes set source_app=' Mission Control ' where id=j.note_id;
+ if public.enqueue_note_ai_job(j.user_id,j.note_id,'lexicon','manual') is not null then raise exception 'godspeed Lexicon accepted'; end if;
  perform public.enqueue_note_ai_job(j.user_id,j.note_id,'analysis','manual');
  select * into j from public.claim_note_ai_jobs(1,300,j.user_id);
- if (j.snapshot->>'extract_facts')::boolean then raise exception 'hub extraction allowed'; end if;
+ if (j.snapshot->>'extract_facts')::boolean then raise exception 'godspeed extraction allowed'; end if;
  update public.notes set ai_visibility='hidden' where id=j.note_id;
  if public.get_note_ai_job_snapshot(j.user_id,j.id,j.lease_id) is not null then raise exception 'visibility change did not fence running snapshot'; end if;
  update public.notes set is_trashed=true where id=j.note_id;

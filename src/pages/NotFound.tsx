@@ -15,7 +15,7 @@ const NotFound = () => {
   const [query, setQuery] = useState("");
   // A browser that has been here before runs the app shell its service worker kept, and that
   // shell does not know a page added since. Seen live on 2026-09-21: the first visit to the
-  // new /connect-hub answered "doesn't exist" until the worker had updated. So before saying
+  // new /connect-godspeed answered "doesn't exist" until the worker had updated. So before saying
   // so, ask for the newest build; when one takes over, registerType "autoUpdate" reloads the
   // tab and the page is there.
   const [lookingForNewerBuild, setLookingForNewerBuild] = useState(

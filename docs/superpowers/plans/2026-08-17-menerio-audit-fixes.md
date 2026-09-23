@@ -63,7 +63,7 @@ Ranked by what it costs when it fires. "Verified" means I read the code path end
 
 **10 — search breaks on punctuation.** A PostgREST `.or()` string uses `,` to separate conditions and `()` to group them. Interpolating a raw search term means a query containing a comma is parsed as extra conditions and the request 400s. `src/lib/postgrest.ts` already solves this correctly and has tests (`src/lib/__tests__/postgrest.test.ts`) — `escapeLike`, `pgOrValue`, and `ilikeContains`, which is exactly the fragment these sites need. It is used in **three** places. Meanwhile `menerio-mcp/index.ts:1749` invented a third strategy that strips `,()'"\*%_` to spaces, which is lossy (searching for `Q1 (draft)` silently searches for `Q1 draft`). The edge functions cannot import from `src/lib`, so there is no shared helper on the Deno side at all.
 
-Affected sites taking user text: `hub-api-contacts:141`, `hub-api-notes:79`, `search-notes-semantic:35`, `menerio-mcp:664`, `:749`, `:1439`, `:2681`, `_shared/read-tools.ts:213`, `:233`, `src/pages/CollectionDetail.tsx:911`. The `.or()` calls that interpolate UUIDs or timestamps (`get-graph-data:356`, `profile-reconcile:138`, `read-tools:111`, `hub-api-world:120`, `:137`, `profile-lint:72`, `useGraphData:95`, `useReviewQueue:59`, `:77`, `WikiPage:121`, `profile-fields-registry:39`) are **not** in scope — those values cannot contain the delimiters.
+Affected sites taking user text: `mc-api-contacts:141`, `mc-api-notes:79`, `search-notes-semantic:35`, `menerio-mcp:664`, `:749`, `:1439`, `:2681`, `_shared/read-tools.ts:213`, `:233`, `src/pages/CollectionDetail.tsx:911`. The `.or()` calls that interpolate UUIDs or timestamps (`get-graph-data:356`, `profile-reconcile:138`, `read-tools:111`, `mc-api-world:120`, `:137`, `profile-lint:72`, `useGraphData:95`, `useReviewQueue:59`, `:77`, `WikiPage:121`, `profile-fields-registry:39`) are **not** in scope — those values cannot contain the delimiters.
 
 **11 — CI is red.** Commit `0c16b62f` ("Handled async normalize-profile", 2026-08-15) changed `useContactProfile.ts:179` to call `supabase.functions.invoke("normalize-profile", ...)`. The test's Supabase mock (`__tests__/useContactProfile.test.tsx:16-30`) only stubs `.from`, so `supabase.functions` is `undefined` and the test throws. `npm test` has failed on `main` for two days. The regression it guards — a quick-add into a not-yet-materialized category leaving the stale categories cache hiding the new section — is currently unguarded.
 
@@ -85,7 +85,7 @@ Recording these so nobody re-opens them: the `@supabase/supabase-js@2/cors` impo
 - `supabase/functions/_shared/__tests__/chunk-embeddings.test.ts`
 - `supabase/rollback/2026-08-17-audit-fixes-rollback.sql`
 
-**Modified:** `src/sync/connector.ts`, `src/sync/local-replica.ts`, `src/hooks/__tests__/useContactProfile.test.tsx`, `src/pages/CollectionDetail.tsx`, `supabase/functions/_shared/{collection-schema,llm-router,chunk-embeddings,read-tools}.ts`, `supabase/functions/{compute-connections,process-note,recompute-all-connections,hub-api-contacts,hub-api-notes,search-notes-semantic,menerio-mcp}/index.ts`.
+**Modified:** `src/sync/connector.ts`, `src/sync/local-replica.ts`, `src/hooks/__tests__/useContactProfile.test.tsx`, `src/pages/CollectionDetail.tsx`, `supabase/functions/_shared/{collection-schema,llm-router,chunk-embeddings,read-tools}.ts`, `supabase/functions/{compute-connections,process-note,recompute-all-connections,mc-api-contacts,mc-api-notes,search-notes-semantic,menerio-mcp}/index.ts`.
 
 ---
 
@@ -1299,7 +1299,7 @@ enumerated users from the first 1000 note rows."
 **Files:**
 - Create: `supabase/functions/_shared/postgrest-filters.ts`
 - Create: `supabase/functions/_shared/__tests__/postgrest-filters.test.ts`
-- Modify: `supabase/functions/{hub-api-contacts,hub-api-notes,search-notes-semantic,menerio-mcp}/index.ts`, `supabase/functions/_shared/read-tools.ts`, `src/pages/CollectionDetail.tsx`
+- Modify: `supabase/functions/{mc-api-contacts,mc-api-notes,search-notes-semantic,menerio-mcp}/index.ts`, `supabase/functions/_shared/read-tools.ts`, `src/pages/CollectionDetail.tsx`
 
 **Interfaces:**
 - Produces: `escapeLike`, `pgOrValue`, `ilikeContains(column: string, q: string): string` — byte-identical semantics to `src/lib/postgrest.ts`, which already has passing tests.
@@ -1404,8 +1404,8 @@ Add `import { ilikeContains } from "../_shared/postgrest-filters.ts";` (or `"./p
 
 | File:line | From | To |
 |---|---|---|
-| `hub-api-contacts:141` | `` .or(`name.ilike.%${search}%,email.ilike.%${search}%,company.ilike.%${search}%`) `` | ``.or([ilikeContains("name", search), ilikeContains("email", search), ilikeContains("company", search)].join(","))`` |
-| `hub-api-notes:79` | `` .or(`title.ilike.%${query}%,content.ilike.%${query}%`) `` | ``.or([ilikeContains("title", query), ilikeContains("content", query)].join(","))`` |
+| `mc-api-contacts:141` | `` .or(`name.ilike.%${search}%,email.ilike.%${search}%,company.ilike.%${search}%`) `` | ``.or([ilikeContains("name", search), ilikeContains("email", search), ilikeContains("company", search)].join(","))`` |
+| `mc-api-notes:79` | `` .or(`title.ilike.%${query}%,content.ilike.%${query}%`) `` | ``.or([ilikeContains("title", query), ilikeContains("content", query)].join(","))`` |
 | `search-notes-semantic:35` | `` .or(`title.ilike.%${q}%,content.ilike.%${q}%`) `` | ``.or([ilikeContains("title", q), ilikeContains("content", q)].join(","))`` |
 | `menerio-mcp:664` | `` .or(`title.ilike.*${q}*,content.ilike.*${q}*`) `` | ``.or([ilikeContains("title", q), ilikeContains("content", q)].join(","))`` |
 | `menerio-mcp:749` | `` .or(`title.ilike.*${q}*,slug.ilike.*${q}*,content.ilike.*${q}*`) `` | ``.or([ilikeContains("title", q), ilikeContains("slug", q), ilikeContains("content", q)].join(","))`` |
@@ -1440,8 +1440,8 @@ Run: `npx vitest run && npm run lint && npm run build` → all green.
 ```bash
 git add supabase/functions/_shared/postgrest-filters.ts \
         supabase/functions/_shared/__tests__/postgrest-filters.test.ts \
-        supabase/functions/hub-api-contacts/index.ts \
-        supabase/functions/hub-api-notes/index.ts \
+        supabase/functions/mc-api-contacts/index.ts \
+        supabase/functions/mc-api-notes/index.ts \
         supabase/functions/search-notes-semantic/index.ts \
         supabase/functions/menerio-mcp/index.ts \
         supabase/functions/_shared/read-tools.ts \
@@ -1590,4 +1590,4 @@ note. Make the status write a conditional update so only one caller wins."
 
 ## Out Of Scope
 
-Named so a later reader knows they were considered, not missed: the `hub_api_usage` read-then-write rate-limit race (documented and accepted in `_shared/hub-rate-limit.ts:48-53`); the `llm_usage_events.call_site` patch that uses `.order().limit()` on an UPDATE (already known-unreliable, and an audit should not be built on it); `repairLocalReplica` queueing a full-corpus re-upload that re-fires `process-note` (documented honestly at `local-replica.ts:42-57`, but worth a separate decision because it costs credits); the non-constant-time service-role key comparison at `process-note/index.ts:2732` (a network timing attack on a 40-byte secret is not practical, so this is hardening, not a defect); shared note links having no expiry column.
+Named so a later reader knows they were considered, not missed: the `godspeed_api_usage` read-then-write rate-limit race (documented and accepted in `_shared/mc-rate-limit.ts:48-53`); the `llm_usage_events.call_site` patch that uses `.order().limit()` on an UPDATE (already known-unreliable, and an audit should not be built on it); `repairLocalReplica` queueing a full-corpus re-upload that re-fires `process-note` (documented honestly at `local-replica.ts:42-57`, but worth a separate decision because it costs credits); the non-constant-time service-role key comparison at `process-note/index.ts:2732` (a network timing attack on a 40-byte secret is not practical, so this is hardening, not a defect); shared note links having no expiry column.

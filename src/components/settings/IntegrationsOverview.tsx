@@ -53,7 +53,7 @@ const INTEGRATIONS: IntegrationDef[] = [
   { key: "singlefile", tab: "singlefile", name: "Web Clipper", description: "Save web pages as Markdown notes", icon: Globe },
   { key: "github", tab: "github", name: "GitHub Sync", description: "Two-way sync with an Obsidian vault", icon: Github },
   { key: "gdrive", tab: "gdrive", name: "Google Drive Scans", description: "Auto-import scans from a Drive folder", icon: HardDrive },
-  { key: "apikeys", tab: "apikeys", name: "API Keys", description: "One key (mnr_) for Claude, ChatGPT, your hub and the REST API", icon: Key },
+  { key: "apikeys", tab: "apikeys", name: "API Keys", description: "One key (mnr_) for Claude, ChatGPT, your mission control and the REST API", icon: Key },
   { key: "mcp", tab: "mcp", name: "MCP Server", description: "The address your AI tool connects to, plus older tokens", icon: Brain },
 ];
 
@@ -117,7 +117,7 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
       let singleFileOn = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        const res = await supabase.functions.invoke("hub-api-keys", {
+        const res = await supabase.functions.invoke("mc-api-keys", {
           // Without a method, invoke sends POST, and the function answers a bare POST with
           // 404: the overview then counted zero keys for everybody. Seen in the console 2026-09-21.
           method: "GET",

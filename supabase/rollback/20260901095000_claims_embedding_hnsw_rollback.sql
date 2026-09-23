@@ -15,7 +15,7 @@
 --
 -- The failure is silent and gets worse the emptier the table. Nothing errors.
 -- Search finds nothing and every caller — the MCP, the in-app assistant, the
--- hub mirror — concludes the facts were never saved.
+-- godspeed mirror — concludes the facts were never saved.
 --
 -- So run this only to reach a known prior state (a bisect, or a pg_dump taken
 -- before the swap). If the reason is "HNSW is too slow to build" or "HNSW uses

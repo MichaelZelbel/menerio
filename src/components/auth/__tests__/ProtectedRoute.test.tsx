@@ -19,14 +19,14 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/auth" element={<Where />} />
-        <Route path="/connect-hub" element={<ProtectedRoute><Where /></ProtectedRoute>} />
+        <Route path="/connect-godspeed" element={<ProtectedRoute><Where /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><Where /></ProtectedRoute>} />
       </Routes>
     </MemoryRouter>
   );
 }
 
-const LINK = "/connect-hub?request=7d3c1d0e-64a0-4c58-8f2a-1b9e6f0c2d11&code=BCDF-GHJK";
+const LINK = "/connect-godspeed?request=7d3c1d0e-64a0-4c58-8f2a-1b9e6f0c2d11&code=BCDF-GHJK";
 
 beforeEach(() => {
   useAuthMock.mockReset();

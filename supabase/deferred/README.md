@@ -9,4 +9,4 @@ order) is what schedules it for the next deploy.
 
 | File | Waits for |
 |---|---|
-| `revoke-legacy-mcp-token.sql` | A full day of the single Menerio key working, then step 7 of `projects/menerio-one-key/plan.md` in the hub. |
+| `revoke-legacy-mcp-token.sql` | A full day of the single Menerio key working, then step 7 of `projects/menerio-one-key/plan.md` in Mission Control. |

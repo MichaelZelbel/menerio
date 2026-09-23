@@ -41,7 +41,7 @@ do $$ declare n jsonb; begin
 end $$;
 -- Server scope cannot be bypassed by calling RPC directly.
 do $$ declare fields jsonb; n jsonb; begin
- for fields in select * from jsonb_array_elements('[{"source_app":"hub"},{"source_app":"import"},{"is_external":true},{"ai_visibility":"hidden"},{"is_trashed":true}]') loop
+ for fields in select * from jsonb_array_elements('[{"source_app":"godspeed"},{"source_app":"import"},{"is_external":true},{"ai_visibility":"hidden"},{"is_trashed":true}]') loop
   n := public.capture_note_with_lexicon(fields);
   assert not exists(select 1 from public.note_ai_jobs where note_id=(n->>'id')::uuid and pipeline='lexicon'), 'excluded source enrolled';
  end loop;
