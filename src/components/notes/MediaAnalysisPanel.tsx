@@ -80,7 +80,7 @@ export function MediaAnalysisPanel({ entries, noteId, onClose, storagePath }: Me
               <RefreshCw className="h-3 w-3" />
             )}
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+          <Button aria-label="Close" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
             <X className="h-3 w-3" />
           </Button>
         </div>

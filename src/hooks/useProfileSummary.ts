@@ -19,6 +19,9 @@ export function useProfileSummary() {
         supabase.from("profile_entries").select("id, category_id").eq("user_id", userId!).is("contact_id", null),
         supabase.from("agent_instructions").select("id, is_active").eq("user_id", userId!),
       ]);
+      // A failed read used to count as an empty profile and show 0% complete.
+      const failed = catRes.error || entryRes.error || instrRes.error;
+      if (failed) throw failed;
 
       const categories = (catRes.data || []) as Pick<ProfileCategory, "id" | "slug" | "name" | "icon" | "visibility_scope">[];
       const entries = (entryRes.data || []) as Pick<ProfileEntry, "id" | "category_id">[];

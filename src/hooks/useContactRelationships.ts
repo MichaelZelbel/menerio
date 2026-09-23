@@ -72,10 +72,11 @@ export function useContactRelationships(contactId: string | null) {
 
       const contactMap = new Map<string, string>();
       if (contactIds.size > 0) {
-        const { data: contacts } = await supabase
+        const { data: contacts, error: contactsError } = await supabase
           .from("contacts")
           .select("id, name")
           .in("id", [...contactIds]);
+        if (contactsError) throw contactsError;
         for (const c of contacts || []) {
           contactMap.set(c.id, c.name);
         }
@@ -121,10 +122,13 @@ export function useContactRelationships(contactId: string | null) {
        const pairKey = relationshipPairKey(user.id, aRef, bRef, canonical);
 
       // Symmetric dedup against existing rows (skip on update of same row).
-      const { data: existing } = await supabase
+      // A failed lookup read as "no rows", so the duplicate check passed and
+      // an equivalent relationship was written a second time.
+      const { data: existing, error: existingError } = await supabase
         .from("contact_relationships")
         .select("id, source_type, source_id, target_type, target_id, label")
         .eq("user_id", user.id);
+      if (existingError) throw existingError;
       const dup = (existing || []).find((r: any) => {
         if (data.id && r.id === data.id) return false;
         const ra: EntityRef = { type: r.source_type, id: r.source_id };
@@ -169,7 +173,9 @@ export function useContactRelationships(contactId: string | null) {
           { type: rel.target_type as EntityRef["type"], id: rel.target_id },
           rel.custom_label || rel.label,
         );
-        await supabase
+        // Checked: if the rejection is not recorded, the pipelines are free to
+        // re-create the relationship the user just removed.
+        const { error: rejectionError } = await supabase
           .from("relationship_rejections")
           .upsert(
             {
@@ -180,14 +186,16 @@ export function useContactRelationships(contactId: string | null) {
             },
             { onConflict: "user_id,pair_key" },
           );
+        if (rejectionError) throw rejectionError;
       }
 
       // Also delete the inverse if it exists
       if (rel?.inverse_id) {
-        await supabase
+        const { error: inverseError } = await supabase
           .from("contact_relationships")
           .delete()
           .eq("id", rel.inverse_id);
+        if (inverseError) throw inverseError;
       }
       const { error } = await supabase
         .from("contact_relationships")

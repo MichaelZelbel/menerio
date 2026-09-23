@@ -180,19 +180,32 @@ Deno.serve(async (req) => {
     if ("error" in minted) {
       result.error = minted.error;
     } else {
-      const { status, bytes } = await touchSyncStream(powersyncUrl, minted.token);
-      result.authenticated = status >= 200 && status < 300;
-      result.streamStatus = status;
-      result.bytes = bytes;
-      result.ok = result.authenticated;
+      try {
+        const { status, bytes } = await touchSyncStream(powersyncUrl, minted.token);
+        result.authenticated = status >= 200 && status < 300;
+        result.streamStatus = status;
+        result.bytes = bytes;
+        result.ok = result.authenticated;
+      } finally {
+        // Every run minted a fresh session (with a refresh token) for the
+        // keepalive identity and never ended it: four live sessions a day,
+        // forever. End it once the stream has been touched.
+        await createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
+          .auth.admin.signOut(minted.token, "local")
+          .catch((e: unknown) => console.warn("powersync-keepalive: signOut failed", e));
+      }
     }
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
   }
 
+  // A reachable host is reported, but it is not success: the liveness probe
+  // is exactly what this job exists because it may not count as activity. It
+  // used to turn a failed authenticated keepalive into a 200, so a broken
+  // keepalive identity looked healthy in the cron log until the instance was
+  // deprovisioned again.
   if (!result.ok) {
     result.reachable = await probeHost(powersyncUrl);
-    result.ok = result.reachable === true;
   }
 
   console.log("powersync-keepalive", JSON.stringify(result));

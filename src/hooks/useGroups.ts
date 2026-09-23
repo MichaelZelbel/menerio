@@ -166,6 +166,7 @@ export function useCreateGroup() {
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
@@ -192,6 +193,7 @@ export function useUpdateGroup() {
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
@@ -218,11 +220,14 @@ export function useTrashGroup() {
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       // Trash retires the group's vault file via the sweep's retire pass.
       triggerPeopleSync();
     },
+    // Callers pass only onSuccess; a refused write said nothing at all.
+    onError: (error: Error) => showToast.error(`Could not move the group to trash: ${error.message}`),
   });
 }
 
@@ -244,10 +249,13 @@ export function useArchiveGroup() {
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
     },
+    // Callers pass only onSuccess; a refused write said nothing at all.
+    onError: (error: Error) => showToast.error(`Could not archive the group: ${error.message}`),
   });
 }
 
@@ -269,9 +277,12 @@ export function useRestoreGroup() {
     },
     onSuccess: (group) => {
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
+      qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
     },
+    // Callers pass only onSuccess; a refused write said nothing at all.
+    onError: (error: Error) => showToast.error(`Could not restore the group: ${error.message}`),
   });
 }

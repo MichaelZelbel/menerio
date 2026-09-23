@@ -73,7 +73,7 @@ export function NoteSearchInput({ selectedNoteId, selectedNoteTitle, onSelect }:
       <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm">
         <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <span className="truncate flex-1">{resolvedTitle || "Linked note"}</span>
-        <button
+        <button aria-label="Unlink note"
           type="button"
           onClick={() => {
             onSelect(null, null);
@@ -89,7 +89,7 @@ export function NoteSearchInput({ selectedNoteId, selectedNoteTitle, onSelect }:
 
   return (
     <div ref={ref} className="relative">
-      <Input
+      <Input aria-label="Search notes to link"
         placeholder="Search notes to link..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}

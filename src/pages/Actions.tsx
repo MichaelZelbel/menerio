@@ -308,7 +308,7 @@ export default function Actions() {
       {showFilters && (
         <div className="flex items-center gap-3 mb-4">
           <div className="relative flex-1">
-            <Input
+            <Input aria-label="Search actions"
               placeholder="Search actions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

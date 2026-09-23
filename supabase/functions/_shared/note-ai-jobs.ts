@@ -46,8 +46,17 @@ export function createNoteAIJobs(db: { rpc: (name: string, args: Record<string, 
       try {
         result = await produce();
       } catch (error) {
-        if (error instanceof NoteAIJobError || (error instanceof Error && ['INSUFFICIENT_CREDITS','BALANCE_UNAVAILABLE'].includes(error.message))) throw error;
+        // All three are refusals raised before the provider is contacted, so
+        // nothing was paid: REPEAT_CALL_BLOCKED filed as "uncertain" fenced the
+        // stage for good (runWikiStage already treated it as transient).
+        if (error instanceof NoteAIJobError || (error instanceof Error && ['INSUFFICIENT_CREDITS','BALANCE_UNAVAILABLE','REPEAT_CALL_BLOCKED'].includes(error.message))) throw error;
         throw new NoteAIJobError('uncertain',`Provider outcome unknown: ${stage}`);
+      }
+      // A reply cut off at the completion cap is paid but unusable, and a
+      // checkpoint is replayed on every retry. Not saving it means raising the
+      // cap and re-running the note actually helps.
+      if ((result as { truncated?: unknown } | null)?.truncated === true) {
+        throw new NoteAIJobError('permanent',`Reply cut off at the token cap: ${stage}`);
       }
       try {
         await fenced('checkpoint_note_ai_stage',lease,{_stage:stage,_result:result});

@@ -132,17 +132,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Check credit balance for the brain owner
     const balance = await checkBalance(supabase, BRAIN_OWNER_USER_ID);
     if (!balance.allowed) {
-      await replyInSlack(channel, messageTs, "⚠️ AI credits exhausted. Note saved without AI processing.");
-      // Still save the note without AI processing
+      // Still save the note without AI processing. The reply used to go out
+      // before the insert and the insert's error was never read, so a failed
+      // save was reported in the channel as saved.
       const firstLine = messageText.split("\n")[0];
       const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-      await supabase.from("notes").insert({
+      const { error: saveErr } = await supabase.from("notes").insert({
         user_id: BRAIN_OWNER_USER_ID,
         content: messageText,
         title,
         metadata: { source: "slack", slack_ts: messageTs },
         tags: [],
       });
+      if (saveErr) {
+        console.error("Supabase insert error:", saveErr);
+        await replyInSlack(channel, messageTs, "❌ Could not save this note. Please send it again.");
+        return new Response("error", { status: 500 });
+      }
+      await replyInSlack(channel, messageTs, "⚠️ AI credits exhausted. Note saved without AI processing.");
       return new Response("ok", { status: 200 });
     }
 
@@ -175,11 +182,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
         metadata = { topics: ["uncategorized"], type: "observation" };
       }
     } catch (err: any) {
-      if (err.message === "INSUFFICIENT_CREDITS") {
-        metadata = { topics: ["uncategorized"], type: "observation" };
-      } else {
-        throw err;
+      // Any failure here (no credits, a provider timeout, a 5xx) used to be
+      // rethrown for everything but credits, before the note existed: the
+      // message was answered 500, Slack's retry is short-circuited above, and
+      // the thought was simply gone with no reply in the channel. Save it with
+      // default metadata instead; the note_ai_jobs trigger re-extracts later.
+      if (err?.message !== "INSUFFICIENT_CREDITS") {
+        console.error("[ingest-thought] AI enrichment failed, saving without it:", err);
       }
+      embedding = null;
+      metadata = { topics: ["uncategorized"], type: "observation" };
     }
 
     // Extract title from first line
@@ -200,7 +212,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (error) {
       console.error("Supabase insert error:", error);
-      await replyInSlack(channel, messageTs, `Failed to capture: ${error.message}`);
+      // A database error string means nothing in a Slack thread, and Slack's
+      // retry of this event is dropped above, so the user must resend.
+      await replyInSlack(channel, messageTs, "❌ Could not save this note. Please send it again.");
       return new Response("error", { status: 500 });
     }
 

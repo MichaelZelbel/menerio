@@ -4,14 +4,16 @@
 menerio/
 ├── docs/                    # Developer documentation (you are here)
 ├── public/                  # Static assets served as-is (favicon, robots.txt, sitemap)
+├── scripts/                 # Check and test scripts run by npm and CI (edge function check, SQL and browser tests)
 ├── src/                     # Frontend application source
 │   ├── assets/              # Images and static imports (logo, favicon)
+│   ├── brands/              # White-label brand definitions (see BRANDING.md)
 │   ├── components/          # React components organised by domain
 │   │   ├── ui/              # shadcn/ui primitives (button, dialog, card, etc.)
 │   │   ├── layout/          # Page shells: Header, Footer, DashboardLayout
 │   │   ├── notes/           # Note editor, sidebar, wikilinks, embeds
 │   │   ├── people/          # Contact profiles, relationships, timeline, dedupe
-│   │   ├── groups/          # Group onboarding and migration helpers
+│   │   ├── groups/          # Group pipeline, goals, briefing and member dialogs
 │   │   ├── settings/        # Settings tabs (API keys, integrations, sync)
 │   │   ├── admin/           # Admin-only panels (moderation)
 │   │   ├── profile/         # Profile editor and completeness tracker
@@ -24,13 +26,14 @@ menerio/
 │   ├── integrations/        # Supabase client and auto-generated types
 │   ├── lib/                 # Shared utilities (API errors, uploads, content helpers)
 │   ├── pages/               # Route-level page components (Notes, People, Groups, Lexicon, Settings, etc.)
+│   ├── sync/                # Offline-first sync (PowerSync, see offline-first.md)
 │   ├── test/                # Test setup and example tests
 │   └── utils/               # Pure utility functions
 ├── supabase/
 │   ├── functions/           # Supabase Edge Functions (Deno)
 │   │   ├── _shared/         # Shared helpers (auth, rate limiting, credits, Mission Control, group imports)
 │   │   └── <function-name>/ # One directory per edge function
-│   ├── migrations/          # Database migrations (auto-generated, read-only)
+│   ├── migrations/          # Database migrations (Lovable-generated and hand-written SQL)
 │   └── config.toml          # Edge function configuration
 ├── .env.example             # Environment variable template
 ├── LICENSE                  # AGPL-3.0

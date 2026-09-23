@@ -202,7 +202,7 @@ const PersonRow = memo(function PersonRow({
                 );
               }}
               aria-label={`Select ${person.name}`}
-              className={cn("h-3.5 w-3.5", multiActive ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
+              className={cn("h-3.5 w-3.5", multiActive ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100")}
             />
           </span>
           <span className="min-w-0 flex-1 truncate">{person.name}</span>
@@ -216,7 +216,7 @@ const PersonRow = memo(function PersonRow({
             title={person.is_favorite ? "Remove from favorites" : "Add to favorites"}
             className={cn(
               "shrink-0 text-muted-foreground transition-opacity hover:text-warning",
-              person.is_favorite ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+              person.is_favorite ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
             )}
           >
             <Star className={cn("h-3.5 w-3.5", person.is_favorite && "fill-warning text-warning")} />

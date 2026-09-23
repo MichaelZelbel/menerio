@@ -107,16 +107,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Step 3: Cross-reference with existing media_analysis records
     // Paged too: a truncated set sends already-analysed media to be billed again.
-    const existing = await selectAllRows<{ storage_path: string }>((from, to) =>
+    const existing = await selectAllRows<{ storage_path: string; analysis_status: string | null; updated_at: string | null }>((from, to) =>
       supabase
         .from("media_analysis")
-        .select("storage_path")
+        .select("storage_path, analysis_status, updated_at")
         .eq("user_id", user.id)
         .order("id")
         .range(from, to)
     );
 
-    const existingPaths = new Set((existing || []).map((e: any) => e.storage_path));
+    // Only a finished analysis, or one still plausibly running, counts as done.
+    // analyze-media runs in the background; when the runtime kills a long PDF
+    // run its catch never fires and the rows stay "processing" for good, and
+    // a failed run stays "failed". Counting those as analysed meant neither was
+    // ever retried and scan mode reported them as done.
+    const STALE_PROCESSING_MS = 15 * 60_000;
+    const settled = (e: { analysis_status: string | null; updated_at: string | null }) =>
+      e.analysis_status === "complete" ||
+      (e.analysis_status === "processing" && !!e.updated_at &&
+        Date.now() - new Date(e.updated_at).getTime() < STALE_PROCESSING_MS);
+    const existingPaths = new Set((existing || []).filter(settled).map((e: any) => e.storage_path));
     const unanalyzed = allMedia.filter((m) => !existingPaths.has(m.path));
 
     const imageCount = unanalyzed.filter((m) => m.type === "image").length;

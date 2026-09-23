@@ -333,7 +333,7 @@ function SortableFieldRow({
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button aria-label="Field actions" variant="ghost" size="icon">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -419,7 +419,7 @@ function OptionEditor({
             className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-sm"
           >
             {option}
-            <button
+            <button aria-label={`Remove option ${option}`}
               type="button"
               onClick={() =>
                 onChange({

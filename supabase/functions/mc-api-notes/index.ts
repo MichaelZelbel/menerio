@@ -95,11 +95,16 @@ Deno.serve(async (req) => {
         .order("updated_at", { ascending: false })
         .limit(1);
 
-      const { count } = await supabase
+      const { count, error: countError } = await supabase
         .from("notes")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
         .eq("is_trashed", false);
+
+      // Both errors used to be ignored, and a failed read answered 200 with
+      // note_count 0 and last_modified null: to a syncing client, "your
+      // account is empty and nothing ever changed".
+      if (error || countError) return dbErrorResponse((error ?? countError)!);
 
       return json({
         data: {
@@ -294,13 +299,18 @@ Deno.serve(async (req) => {
     // DELETE /mc-api-notes/{id} — Soft delete
     if (req.method === "DELETE" && action) {
       if (!isUuid(action)) return errorJson("NOT_FOUND", "Note not found", 404);
-      const { error } = await supabase
+      // Answering success for an id that is not one of this user's notes told
+      // the caller a note was gone that never went anywhere.
+      const { data, error } = await supabase
         .from("notes")
         .update({ is_trashed: true, trashed_at: new Date().toISOString() })
         .eq("id", action)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (error) return errorJson("INTERNAL", error.message, 500);
+      if (!data) return errorJson("NOT_FOUND", "Note not found", 404);
       return json({ data: { success: true } });
     }
 

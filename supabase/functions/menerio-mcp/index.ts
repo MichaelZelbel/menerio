@@ -16,6 +16,7 @@ import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
 import { godspeedFileLabel, isGodspeedFolderPath, matchesSourceFilter, rankHybridRows, type NoteSourceFilter } from "../_shared/mc-ranking.ts";
 import { syncWikilinkConnections } from "../_shared/wikilinks.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 import { GODSPEED_FOLDER_REFUSAL, registerNoteFilingTools } from "./note-filing-tools.ts";
 import { flagConflicts, flagStale, judgeDayFor, renderClaimHit, toClaimHits, type ClaimHit } from "../_shared/claim-search.ts";
 import {
@@ -95,13 +96,16 @@ async function authenticateMcpRequest(authHeader: string | undefined) {
     // data scopes it carries decide which tools answer, checked per tool call.
     // Older mnr_mcp_ tokens keep working through the branch below.
     if (token.startsWith("mnr_")) {
-      const { result, errorMessage } = await lookupGodspeedKey(token, supabase);
+      const { result, errorMessage, errorCode } = await lookupGodspeedKey(token, supabase);
       if (!result) {
         console.warn("MCP API key rejected", {
           reason: errorMessage,
           token_prefix: token.slice(0, 12),
         });
-        return { userId: null, scopes: null, error: { status: 401, message: errorMessage ?? "Invalid or revoked key." } };
+        // A lookup that could not run is not a bad key: 503 tells the client to
+        // retry, where 401 makes it drop the connector and ask for a new key.
+        const status = errorCode === "unavailable" ? 503 : 401;
+        return { userId: null, scopes: null, error: { status, message: errorMessage ?? "Invalid or revoked key." } };
       }
       const dataScopes = result.scopes.filter((s) => s !== RETIRED_GODSPEED_SCOPE);
       return { userId: result.userId, scopes: dataScopes, error: null };
@@ -320,7 +324,14 @@ function uniqueStrings(values: unknown[] = []) {
 }
 
 function jsonTool(data: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  // `{ error: ... }` is a failed call. Without isError the MCP client reports
+  // it as a success, and a model that only checks the flag carries on as if
+  // the write happened. About thirty tools answer failures this way.
+  const failed = !!data && typeof data === "object" && !Array.isArray(data) && !!(data as { error?: unknown }).error;
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    ...(failed ? { isError: true } : {}),
+  };
 }
 
 function isUuid(value: unknown): value is string {
@@ -432,18 +443,92 @@ async function resolveGroup(idOrSlug: string) {
   return data as any;
 }
 
+type ContactRow = { id: string; name: string; [column: string]: unknown };
+
+/**
+ * One person by name, for a tool that is about to WRITE to them.
+ *
+ * This used to be `ilike %name%` with `limit(1)`: "Ann" matched Joanna,
+ * Annette and Ann in no stated order, and the interaction or membership went
+ * to whichever row came back first, with a success message naming it. Now an
+ * exact name (case-insensitive) wins; otherwise a single partial match is
+ * used; more than one is refused with the candidates and their ids, so the
+ * caller can retry with contact_id. `%` and `_` in the name are literal.
+ */
+async function resolveContactByName(name: string, columns = "*"): Promise<ContactRow> {
+  const needle = name.trim();
+  if (!needle) throw new Error("contact_name is empty. Pass the person's name or their contact_id.");
+  const base = () => supabase.from("contacts").select(columns).eq("user_id", getCurrentUserId()).is("merged_into", null);
+  const { data: exactRows, error: exactErr } = await base().ilike("name", escapeLike(needle)).limit(2);
+  if (exactErr) throw new Error(`Could not load person: ${exactErr.message}`);
+  const exact = (exactRows ?? []) as unknown as ContactRow[];
+  if (exact.length === 1) return exact[0];
+  let partial = exact;
+  if (!exact.length) {
+    const { data: partialRows, error: partialErr } = await base().ilike("name", `%${escapeLike(needle)}%`).order("name").limit(6);
+    if (partialErr) throw new Error(`Could not load person: ${partialErr.message}`);
+    partial = (partialRows ?? []) as unknown as ContactRow[];
+  }
+  if (!partial.length) throw new Error(`No person found matching "${needle}". Check the spelling with search_contacts, or create the person first.`);
+  if (partial.length === 1) return partial[0];
+  const listed = partial.slice(0, 5).map((c) => `${c.name} (contact_id ${c.id})`).join("; ");
+  throw new Error(`"${needle}" matches more than one person: ${listed}${partial.length > 5 ? "; and more" : ""}. Nothing was written. Call again with contact_id.`);
+}
+
 async function resolveContact(params: { contact_id?: string; contact_name?: string }) {
   if (params.contact_id) {
+    if (!looksLikeUuid(params.contact_id)) throw new Error(`contact_id is not a contact id: ${params.contact_id}`);
     const { data, error } = await supabase.from("contacts").select("*").eq("user_id", getCurrentUserId()).eq("id", params.contact_id).is("merged_into", null).maybeSingle();
     if (error) throw new Error(`Could not load person: ${error.message}`);
     if (data) return data as any;
+    if (!params.contact_name) throw new Error(`No person with contact_id ${params.contact_id} in this account.`);
   }
-  if (params.contact_name) {
-    const { data, error } = await supabase.from("contacts").select("*").eq("user_id", getCurrentUserId()).ilike("name", `%${params.contact_name}%`).is("merged_into", null).limit(1);
-    if (error) throw new Error(`Could not load person: ${error.message}`);
-    if (data?.[0]) return data[0] as any;
+  if (params.contact_name) return await resolveContactByName(params.contact_name);
+  throw new Error("Pass contact_id or contact_name.");
+}
+
+/**
+ * A note by id, exact title or title fragment, for the graph and media tools.
+ *
+ * They used to take `ilike %title%` with `limit(1)` over every note, trashed
+ * ones included, in no order, and a UUID was used without checking it at all.
+ * Now: an id must be this user's; otherwise an exact title (case-insensitive)
+ * beats a fragment, the newest wins among equals, trashed notes are skipped,
+ * and `%` / `_` are literal. A note hidden from AI is reported as such.
+ */
+async function resolveNoteRef(ref: string): Promise<{ id: string; title: string | null } | { error: string }> {
+  const base = () => supabase.from("notes").select("id, title, ai_visibility").eq("user_id", getCurrentUserId()).eq("is_trashed", false);
+  let row: { id: string; title: string | null; ai_visibility: string } | null = null;
+  const needle = ref.trim();
+  const isId = looksLikeUuid(needle as unknown);
+  if (isId) {
+    const { data, error } = await base().eq("id", needle).maybeSingle();
+    if (error) return { error: `Could not load the note: ${error.message}` };
+    row = data;
+  } else {
+    for (const pattern of [escapeLike(needle), `%${escapeLike(needle)}%`]) {
+      const { data, error } = await base().ilike("title", pattern).order("updated_at", { ascending: false }).limit(1);
+      if (error) return { error: `Could not load the note: ${error.message}` };
+      if (data?.[0]) { row = data[0]; break; }
+    }
   }
-  throw new Error("Person not found");
+  if (!row) return { error: `No note found matching "${ref}". Pass the note's ID from search_notes for an exact match.` };
+  if (row.ai_visibility === "hidden") return { error: "This note is hidden from AI in Menerio. Unhide it to let MCP read it." };
+  return { id: row.id, title: row.title };
+}
+
+/** Titles for note ids, leaving out trashed notes and notes hidden from AI. */
+async function visibleNoteTitles(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const { data, error } = await supabase
+    .from("notes")
+    .select("id, title")
+    .eq("user_id", getCurrentUserId())
+    .eq("is_trashed", false)
+    .eq("ai_visibility", "visible")
+    .in("id", ids);
+  if (error) throw new Error(`Could not load note titles: ${error.message}`);
+  return new Map((data || []).map((n: { id: string; title: string | null }) => [n.id, n.title || "Untitled"]));
 }
 
 function buildGroupMemberSuppressionKey(groupId: string, contactId: string) {
@@ -532,10 +617,48 @@ async function resolveOrCreateContactsByName(names: string[]) {
 }
 
 // --- MCP Server Setup ---
-const server = new McpServer({
-  name: "menerio",
-  version: "1.0.0",
-});
+//
+// Tools are recorded once, here at module load, and registered on a NEW
+// McpServer and transport for every request (see buildServer and app.all).
+//
+// One server and one transport used to serve every request of the isolate.
+// The transport routes a reply to the HTTP stream by JSON-RPC id, in one map
+// for all callers, and the SDK sends each reply on whichever transport was
+// connected last. Two requests in flight carrying the same id (every client
+// numbers from 0 or 1) overwrote each other's entry, so one caller's tool
+// result could be written to another caller's stream: a different user's
+// notes, answered to the wrong account, and the other call left hanging.
+type ToolHandler = (...args: unknown[]) => unknown;
+type ToolRegistration = { name: string; meta: unknown; handler: ToolHandler };
+const toolRegistrations: ToolRegistration[] = [];
+
+// Everything below calls server.registerTool exactly as it would on an
+// McpServer; this records the call (scope-gated, see TOOL_SCOPES) instead.
+const server = {
+  registerTool(name: string, meta: unknown, handler: ToolHandler) {
+    const scope = TOOL_SCOPES[name];
+    if (!scope) {
+      throw new Error(`Tool "${name}" has no entry in TOOL_SCOPES — every tool must name the scope that gates it.`);
+    }
+    if (toolRegistrations.some((t) => t.name === name)) throw new Error(`Tool ${name} is already registered`);
+    const gated: ToolHandler = async (...args) => {
+      const scopes = getCurrentScopes();
+      if (scopes !== "all" && !scopes.includes(scope)) {
+        return scopeRefusal(scope);
+      }
+      return await handler(...args);
+    };
+    toolRegistrations.push({ name, meta, handler: gated });
+  },
+} as unknown as McpServer;
+
+function buildServer(): McpServer {
+  const mcp = new McpServer({ name: "menerio", version: "1.0.0" });
+  for (const { name, meta, handler } of toolRegistrations) {
+    mcp.registerTool(name, meta as never, handler as never);
+  }
+  return mcp;
+}
 
 // ---------------------------------------------------------------------------
 // Per-tool scope gating. A key is a door; the scope boxes are rooms. Every
@@ -639,27 +762,8 @@ function scopeRefusal(scope: string) {
   };
 }
 
-// Wrap registerTool once so every tool, present and future, is scope-checked
-// at invocation time. Listing stays ungated; the refusal happens on call.
-{
-  const registerToolUnscoped = server.registerTool.bind(server);
-  // deno-lint-ignore no-explicit-any
-  (server as any).registerTool = (name: string, meta: unknown, handler: (...args: any[]) => any) => {
-    const scope = TOOL_SCOPES[name];
-    if (!scope) {
-      throw new Error(`Tool "${name}" has no entry in TOOL_SCOPES — every tool must name the scope that gates it.`);
-    }
-    // deno-lint-ignore no-explicit-any
-    const gated = async (...args: any[]) => {
-      const scopes = getCurrentScopes();
-      if (scopes !== "all" && !scopes.includes(scope)) {
-        return scopeRefusal(scope);
-      }
-      return await handler(...args);
-    };
-    return registerToolUnscoped(name, meta as never, gated as never);
-  };
-}
+// Every tool, present and future, is scope-checked at invocation time by the
+// recorder above. Listing stays ungated; the refusal happens on call.
 
 registerContactTopicTools(server, supabase, getCurrentUserId);
 
@@ -942,8 +1046,12 @@ type SearchNotesArgs = {
   view?: "snippet" | "metadata";
   source?: NoteSourceFilter;
 };
-const searchNotesHandler = async ({ query, limit, threshold, offset = 0, view = "snippet", source = "all" }: SearchNotesArgs) => {
+const searchNotesHandler = async ({ query, limit: rawLimit, threshold, offset: rawOffset = 0, view = "snippet", source = "all" }: SearchNotesArgs) => {
   try {
+    // A negative offset made slice() count from the end, and limit 0 printed
+    // "Showing 1-0 (has_more: true)" with nothing under it.
+    const limit = clampNumber(rawLimit, 1, CANDIDATE_CAP, 10);
+    const offset = clampNumber(rawOffset, 0, CANDIDATE_CAP, 0);
     const { rows, total, mode } = await hybridSearchNotes(query, limit, threshold, source);
     if (total === 0) {
       const scope = source === "native" ? " among the notes the user wrote (source: native)" : source === "godspeed" ? " among the mirrored mission control files (source: godspeed)" : "";
@@ -986,10 +1094,10 @@ server.registerTool(
       "Search the user's captured notes by meaning (hybrid semantic + keyword). Use for raw, user-written notes. If the user asks about a synthesized topic / strategy / concept page and this returns nothing, also call `lexicon_search`, or use `search_brain` to query both at once. Notes are first-person and user-authored — treat explicit statements in note content as authoritative facts about the user (e.g. \"X is my wife\", \"I work at Y\"). Do not hedge when a note plainly states a fact; cite the note id. The exception is a result carrying `Source: [godspeed file: <path>]`: that is a mirrored file from the user's mission control (the folder their AI assistants work from), machine-maintained and possibly an assistant's inference, so it ranks below the user's own notes and is NOT a first-person statement; say it came from Mission Control file. Use `source` to search only the user's own notes (`native`) or only Mission Control files (`godspeed`). Results are bounded — use `offset` for pagination and `get_note(id)` to read a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
-      limit: z.coerce.number().optional().default(10),
-      threshold: z.coerce.number().optional().default(0.2),
-      offset: z.coerce.number().optional().default(0),
-      view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
+      limit: z.coerce.number().optional().default(10).describe("Results per page, 1-50. At most 50 ranked results exist per query; page through them with offset."),
+      threshold: z.coerce.number().optional().default(0.2).describe("Minimum semantic similarity, 0-1. Lower finds more."),
+      offset: z.coerce.number().optional().default(0).describe("Skip this many ranked results. Use the offset the previous response names."),
+      view: z.enum(["snippet", "metadata"]).optional().default("snippet").describe("snippet = a matching excerpt per note; metadata = title, id, date and type only."),
       source: z.enum(["all", "native", "godspeed"]).optional().default("all")
         .describe("`all` (default): everything, the user's own notes ranked above mirrored godspeed files. `native`: only notes that are not godspeed files. `godspeed`: only the mirrored mission control files."),
     },
@@ -1017,7 +1125,9 @@ server.registerTool(
         .eq("user_id", getCurrentUserId());
       // "Exact title", case-insensitive: `%` and `_` in a title are literal.
       q = isUuid(note) ? q.eq("id", note) : q.ilike("title", escapeLike(note));
-      const { data, error } = await q.limit(1);
+      // Several notes can share a title; a trashed copy used to be as likely
+      // to come back as the live one. Live first, then the newest.
+      const { data, error } = await q.order("is_trashed", { ascending: true }).order("updated_at", { ascending: false }).limit(1);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
       const row = (data || [])[0];
       if (!row) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
@@ -1317,23 +1427,27 @@ server.registerTool(
   "get_stats",
   {
     title: "Brain Statistics",
-    description: "Get a summary of all captured notes: totals, types, top topics, people, and recent activity.",
+    description: "Get a summary of all captured notes visible to AI (notes the user hid from AI are left out): totals, types, top topics, people, and recent activity.",
     inputSchema: {},
   },
   async () => {
     try {
-      const { count } = await supabase
-        .from("notes")
-        .select("*", { count: "exact", head: true })
-        .eq("is_trashed", false)
-        .eq("user_id", getCurrentUserId());
-
-      const { data } = await supabase
-        .from("notes")
-        .select("metadata, created_at")
-        .eq("is_trashed", false)
-        .eq("user_id", getCurrentUserId())
-        .order("created_at", { ascending: false });
+      // Every visible note, paged. The unpaged select stopped at PostgREST's
+      // 1,000-row cap without a word, so for a larger account the types, topics
+      // and "Date range" described the newest 1,000 notes only. And notes
+      // hidden from AI were counted in, their people's names printed here.
+      const data = await selectAllRows<{ metadata: Record<string, unknown> | null; created_at: string }>((from, to) =>
+        supabase
+          .from("notes")
+          .select("metadata, created_at")
+          .eq("is_trashed", false)
+          .eq("user_id", getCurrentUserId())
+          .eq("ai_visibility", "visible")
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      const count = data.length;
 
       const types: Record<string, number> = {};
       const topics: Record<string, number> = {};
@@ -1392,7 +1506,7 @@ server.registerTool(
   "get_action_items",
   {
     title: "Get Action Items",
-    description: "Return action items from the structured tracker. Filterable by status, priority, or person.",
+    description: "Return action items from the structured tracker, newest first, at most 50. Without `status`, only open and in_progress items are returned unless include_done is true. Filterable by status, priority, or person.",
     inputSchema: {
       status: z.string().optional().describe("Filter by status: open, in_progress, done, dismissed"),
       priority: z.string().optional().describe("Filter by priority: low, normal, high, urgent"),
@@ -1434,10 +1548,12 @@ server.registerTool(
       }
       q = await applyVisibility(q, "action_items", supabase, getCurrentUserId());
 
-      const { data, error } = await q.limit(50);
+      const ITEM_CAP = 50;
+      const { data, error } = await q.limit(ITEM_CAP + 1);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
 
-      const items = data || [];
+      const more = (data || []).length > ITEM_CAP;
+      const items = (data || []).slice(0, ITEM_CAP);
 
       if (!items.length) return { content: [{ type: "text" as const, text: "No action items found." }] };
 
@@ -1446,12 +1562,18 @@ server.registerTool(
         const statusIcon = statusIcons[String(item.status)] || "⬜";
         const age = Math.floor((Date.now() - new Date(item.created_at).getTime()) / 86400000);
         let line = `${statusIcon} ${i + 1}. ${item.content}`;
-        line += `\n   Status: ${item.status} | Priority: ${item.priority} | ${age}d old`;
+        line += `\n   ID: ${item.id} | Status: ${item.status} | Priority: ${item.priority} | ${age}d old`;
         if (item.due_date) line += ` | Due: ${item.due_date}`;
+        if (item.source_note_id) line += `\n   Source note: ${item.source_note_id}`;
         return line;
       });
 
-      return { content: [{ type: "text" as const, text: `${items.length} action item(s):\n\n${lines.join("\n\n")}` }] };
+      // The list stops at 50, newest first. Saying "50 action item(s)" when
+      // there are more read as the whole list.
+      const header = more
+        ? `The ${ITEM_CAP} newest matching action items (more exist; narrow with status, priority or person):`
+        : `${items.length} action item(s):`;
+      return { content: [{ type: "text" as const, text: `${header}\n\n${lines.join("\n\n")}` }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
@@ -1914,7 +2036,7 @@ server.registerTool(
   async ({ person_name, limit }) => {
     let q = supabase.from("moments").select("id, moment_uid, title, description, happened_at, happened_end, category, status, impact_level, confidence_date, confidence_truth, source, person_id, created_at, updated_at").eq("user_id", getCurrentUserId()).is("deleted_at", null).order("happened_at", { ascending: false }).limit(clampNumber(limit, 1, 200, 50));
     if (person_name) {
-      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId()).ilike("name", `%${person_name}%`).is("merged_into", null);
+      const { data: matches } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId()).ilike("name", `%${escapeLike(person_name)}%`).is("merged_into", null);
       if (!matches?.length) return jsonTool({ message: "No people matching that name." });
       q = q.in("person_id", matches.map((p: any) => p.id));
     }
@@ -2038,57 +2160,49 @@ server.registerTool(
   "get_connected_notes",
   {
     title: "Get Connected Notes",
-    description: "Given a note title or ID, return all connected notes with connection types and strengths from the knowledge graph.",
+    description: "Given a note ID (preferred) or title, return its connected notes with their IDs, connection types and strengths from the knowledge graph, strongest first.",
     inputSchema: {
-      note: z.string().describe("Note title or ID to look up"),
-      limit: z.number().optional().default(20),
+      note: z.string().describe("Note ID (exact) or title. A title matches exactly first, then as a fragment; the most recently updated match is used."),
+      limit: z.number().optional().default(20).describe("Maximum connections, 1-100."),
     },
   },
   async ({ note, limit }) => {
     try {
-      // Find the note by title or ID
-      let noteId = note;
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(note);
-      if (!isUuid) {
-        const { data } = await supabase
-          .from("notes")
-          .select("id")
-          .eq("user_id", getCurrentUserId())
-          .ilike("title", `%${note}%`)
-          .limit(1);
-        if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
-        noteId = data[0].id;
-      }
+      const resolved = await resolveNoteRef(note);
+      if ("error" in resolved) return { content: [{ type: "text" as const, text: resolved.error }], isError: true };
+      const noteId = resolved.id;
 
-      const { data: connections } = await supabase
+      const { data: connections, error: connErr } = await supabase
         .from("note_connections")
         .select("*")
         .eq("user_id", getCurrentUserId())
         .or(`source_note_id.eq.${noteId},target_note_id.eq.${noteId}`)
         .order("strength", { ascending: false })
         .limit(clampNumber(limit, 1, 100, 20));
+      if (connErr) return { content: [{ type: "text" as const, text: `Error: ${connErr.message}` }], isError: true };
 
-      if (!connections?.length) return { content: [{ type: "text" as const, text: "No connections found for this note." }] };
+      if (!connections?.length) return { content: [{ type: "text" as const, text: `No connections found for "${resolved.title || "Untitled"}" (ID: ${noteId}).` }] };
 
-      // Get linked note details
+      // Linked notes that are trashed or hidden from AI are left out: their
+      // titles used to be printed here like any other.
       const linkedIds = [...new Set(connections.map((c: any) =>
         c.source_note_id === noteId ? c.target_note_id : c.source_note_id
-      ))];
-      const { data: linkedNotes } = await supabase
-        .from("notes")
-        .select("id, title, metadata")
-        .in("id", linkedIds);
+      ))] as string[];
+      const titles = await visibleNoteTitles(linkedIds);
 
-      const noteMap = new Map((linkedNotes || []).map((n: any) => [n.id, n]));
+      type Connection = { source_note_id: string; target_note_id: string; connection_type: string; strength: number | null };
+      const lines = (connections as Connection[])
+        .map((c) => ({ c, linkedId: c.source_note_id === noteId ? c.target_note_id : c.source_note_id }))
+        .filter(({ linkedId }) => titles.has(linkedId))
+        .map(({ c, linkedId }, i) => {
+          const dir = c.source_note_id === noteId ? "→" : "←";
+          // The ID is what update_note, get_note and get_note_media take; the
+          // update_note description sends callers here for it.
+          return `${i + 1}. ${dir} ${titles.get(linkedId)} (ID: ${linkedId}) [${c.connection_type}] strength: ${c.strength}`;
+        });
 
-      const lines = connections.map((c: any, i: number) => {
-        const linkedId = c.source_note_id === noteId ? c.target_note_id : c.source_note_id;
-        const linked = noteMap.get(linkedId);
-        const dir = c.source_note_id === noteId ? "→" : "←";
-        return `${i + 1}. ${dir} ${linked?.title || "Unknown"} [${c.connection_type}] strength: ${c.strength}`;
-      });
-
-      return { content: [{ type: "text" as const, text: `${connections.length} connection(s):\n\n${lines.join("\n")}` }] };
+      if (!lines.length) return { content: [{ type: "text" as const, text: `No connections to notes visible to AI for "${resolved.title || "Untitled"}" (ID: ${noteId}).` }] };
+      return { content: [{ type: "text" as const, text: `${lines.length} connection(s) of "${resolved.title || "Untitled"}" (ID: ${noteId}):\n\n${lines.join("\n")}` }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
@@ -2100,38 +2214,33 @@ server.registerTool(
   "find_path",
   {
     title: "Find Path Between Notes",
-    description: "Given two note titles, find the shortest path between them through the knowledge graph.",
+    description: "Given two notes (IDs or titles), find the shortest path between them through the knowledge graph.",
     inputSchema: {
-      from_note: z.string().describe("Title or ID of the starting note"),
-      to_note: z.string().describe("Title or ID of the destination note"),
+      from_note: z.string().describe("ID (preferred) or title of the starting note"),
+      to_note: z.string().describe("ID (preferred) or title of the destination note"),
     },
   },
   async ({ from_note, to_note }) => {
     try {
-      // Resolve IDs
-      async function resolveId(query: string): Promise<string | null> {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
-        if (isUuid) return query;
-        const { data } = await supabase
-          .from("notes")
-          .select("id")
+      const [from, to] = await Promise.all([resolveNoteRef(from_note), resolveNoteRef(to_note)]);
+      if ("error" in from) return { content: [{ type: "text" as const, text: `from_note: ${from.error}` }], isError: true };
+      if ("error" in to) return { content: [{ type: "text" as const, text: `to_note: ${to.error}` }], isError: true };
+      const fromId = from.id;
+      const toId = to.id;
+
+      // Every connection, paged. An unpaged select stops at 1,000 rows, and a
+      // graph larger than that answered "No path found" for notes that are
+      // connected through an edge past the cap.
+      const allConns = await selectAllRows<{ source_note_id: string; target_note_id: string; connection_type: string; strength: number }>((f, t) =>
+        supabase
+          .from("note_connections")
+          .select("source_note_id, target_note_id, connection_type, strength")
           .eq("user_id", getCurrentUserId())
-          .ilike("title", `%${query}%`)
-          .limit(1);
-        return data?.[0]?.id || null;
-      }
+          .order("id", { ascending: true })
+          .range(f, t)
+      );
 
-      const [fromId, toId] = await Promise.all([resolveId(from_note), resolveId(to_note)]);
-      if (!fromId) return { content: [{ type: "text" as const, text: `Note not found: "${from_note}"` }] };
-      if (!toId) return { content: [{ type: "text" as const, text: `Note not found: "${to_note}"` }] };
-
-      // Fetch all connections for BFS
-      const { data: allConns } = await supabase
-        .from("note_connections")
-        .select("source_note_id, target_note_id, connection_type, strength")
-        .eq("user_id", getCurrentUserId());
-
-      if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
+      if (!allConns.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
       // Build adjacency
       const adj = new Map<string, { id: string; type: string }[]>();
@@ -2174,15 +2283,12 @@ server.registerTool(
         cur = p.id;
       }
 
-      // Get note titles
-      const { data: pathNotes } = await supabase
-        .from("notes")
-        .select("id, title")
-        .in("id", path);
-      const titleMap = new Map((pathNotes || []).map((n: any) => [n.id, n.title]));
+      // A note in the middle of the path that is trashed or hidden from AI is
+      // named as such rather than by its title.
+      const titleMap = await visibleNoteTitles(path);
 
       const pathStr = path.map((id, i) => {
-        const title = titleMap.get(id) || "Unknown";
+        const title = titleMap.has(id) ? `${titleMap.get(id)} (ID: ${id})` : "(a note hidden from AI or in the trash)";
         return i < path.length - 1
           ? `${title} --[${edgeTypes[i]}]-->`
           : title;
@@ -2207,13 +2313,18 @@ server.registerTool(
   },
   async ({ min_size }) => {
     try {
-      // Fetch all connections
-      const { data: allConns } = await supabase
-        .from("note_connections")
-        .select("source_note_id, target_note_id")
-        .eq("user_id", getCurrentUserId());
+      // Every connection, paged: past 1,000 edges the unpaged select quietly
+      // clustered a slice of the graph.
+      const allConns = await selectAllRows<{ source_note_id: string; target_note_id: string }>((f, t) =>
+        supabase
+          .from("note_connections")
+          .select("source_note_id, target_note_id")
+          .eq("user_id", getCurrentUserId())
+          .order("id", { ascending: true })
+          .range(f, t)
+      );
 
-      if (!allConns?.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
+      if (!allConns.length) return { content: [{ type: "text" as const, text: "No connections in graph." }] };
 
       // Get all note IDs involved
       const allIds = new Set<string>();
@@ -2265,16 +2376,25 @@ server.registerTool(
 
       if (validClusters.length === 0) return { content: [{ type: "text" as const, text: "No clusters found." }] };
 
-      // Get titles for all notes in clusters
+      // Titles and topics, paged in batches (a large cluster set is thousands
+      // of ids, too many for one URL), and only for notes that are neither
+      // trashed nor hidden from AI.
       const allClusterIds = validClusters.flat();
-      const { data: notes } = await supabase
-        .from("notes")
-        .select("id, title, metadata")
-        .in("id", allClusterIds);
-      const noteMap = new Map((notes || []).map((n: any) => [n.id, n]));
+      const noteMap = new Map<string, { id: string; title: string | null; metadata: Record<string, unknown> | null }>();
+      for (let i = 0; i < allClusterIds.length; i += 200) {
+        const { data: notes, error: notesErr } = await supabase
+          .from("notes")
+          .select("id, title, metadata")
+          .eq("user_id", getCurrentUserId())
+          .eq("is_trashed", false)
+          .eq("ai_visibility", "visible")
+          .in("id", allClusterIds.slice(i, i + 200));
+        if (notesErr) throw new Error(notesErr.message);
+        for (const n of notes || []) noteMap.set(n.id, n);
+      }
 
       const lines = validClusters.map((ids, i) => {
-        const clusterNotes = ids.map((id) => noteMap.get(id)).filter(Boolean);
+        const clusterNotes = ids.map((id) => noteMap.get(id)).filter((n): n is NonNullable<typeof n> => !!n);
         const topics = new Map<string, number>();
         for (const n of clusterNotes) {
           const m = (n.metadata || {}) as Record<string, unknown>;
@@ -2284,7 +2404,7 @@ server.registerTool(
         }
         const topTopics = [...topics.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
         const label = topTopics.length > 0 ? topTopics.join(" & ") : `Cluster ${i + 1}`;
-        const noteList = clusterNotes.slice(0, 5).map((n: any) => `  - ${n.title}`).join("\n");
+        const noteList = clusterNotes.slice(0, 5).map((n: any) => `  - ${n.title || "Untitled"} (ID: ${n.id})`).join("\n");
         const more = ids.length > 5 ? `\n  ... and ${ids.length - 5} more` : "";
         return `${i + 1}. ${label} (${ids.length} notes)\n${noteList}${more}`;
       });
@@ -2301,9 +2421,9 @@ server.registerTool(
   "log_interaction",
   {
     title: "Log Interaction",
-    description: "Record a new interaction with a contact. Also updates the contact's last_contact_date.",
+    description: "Record a new interaction with a contact, dated today. Also updates the contact's last_contact_date.",
     inputSchema: {
-      contact_name: z.string().describe("The contact's name"),
+      contact_name: z.string().describe("The contact's name. An exact name wins; a name matching several people is refused with their names and ids, and nothing is logged."),
       type: z.string().describe("Interaction type: meeting, call, email, message, social"),
       summary: z.string().optional().describe("Brief summary of the interaction"),
       action_items: z.array(z.string()).optional().describe("Action items from this interaction"),
@@ -2313,24 +2433,9 @@ server.registerTool(
   async ({ contact_name, type, summary, action_items, group_id_or_slug }) => {
     try {
       // A merged-away duplicate is not a person any more: logging against it
-      // put the interaction where no profile shows it. `%` and `_` in the
-      // name are matched literally.
-      const { data: contacts, error: contactErr } = await supabase
-        .from("contacts")
-        .select("id, name")
-        .eq("user_id", getCurrentUserId())
-        .is("merged_into", null)
-        .ilike("name", `%${escapeLike(contact_name)}%`)
-        .limit(1);
-      if (contactErr) {
-        return { content: [{ type: "text" as const, text: `Error: ${contactErr.message}` }], isError: true };
-      }
-
-      if (!contacts?.length) {
-        return { content: [{ type: "text" as const, text: `No contact found matching "${contact_name}". Create the contact first.` }] };
-      }
-
-      const contact = contacts[0] as any;
+      // put the interaction where no profile shows it. An ambiguous name is
+      // refused with the candidates instead of logged against the first hit.
+      const contact = await resolveContactByName(contact_name, "id, name");
       // Every other MCP write to a person goes through this gate; a person
       // hidden from AI or marked sensitive must not be written to here either.
       await assertWritable(supabase, getCurrentUserId(), "contact", contact.id);
@@ -2377,10 +2482,12 @@ server.registerTool(
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
     },
   },
-  async ({ query, limit, threshold, offset = 0, view = "snippet" }) => {
+  async ({ query, limit: rawLimit, threshold, offset: rawOffset = 0, view = "snippet" }) => {
     try {
+      const limit = clampNumber(rawLimit, 1, CANDIDATE_CAP, 10);
+      const offset = clampNumber(rawOffset, 0, CANDIDATE_CAP, 0);
       const qEmb = await getEmbedding(query);
-      const { data, error } = await supabase.rpc("match_media", {
+      const { data: matches, error } = await supabase.rpc("match_media", {
         query_embedding: qEmb,
         match_threshold: threshold,
         match_count: CANDIDATE_CAP,
@@ -2391,7 +2498,25 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: `Search error: ${error.message}` }], isError: true };
       }
 
-      if (!data || data.length === 0) {
+      // match_media filters by user only. Media in a trashed note, or in a
+      // note hidden from AI (or tied to a sensitive person), was returned with
+      // its description and extracted text like any other.
+      type MediaMatch = { note_id: string; [column: string]: unknown };
+      const noteIds = [...new Set(((matches || []) as MediaMatch[]).map((m) => m.note_id).filter(Boolean))];
+      let allowed = new Set<string>();
+      if (noteIds.length) {
+        const { data: parents, error: parentErr } = await supabase
+          .from("notes")
+          .select("id, ai_visibility, metadata")
+          .eq("user_id", getCurrentUserId())
+          .eq("is_trashed", false)
+          .in("id", noteIds);
+        if (parentErr) return { content: [{ type: "text" as const, text: `Search error: ${parentErr.message}` }], isError: true };
+        allowed = new Set((await filterVisibleNotes(parents || [], supabase, getCurrentUserId())).map((n: { id: string }) => n.id));
+      }
+      const data = ((matches || []) as MediaMatch[]).filter((m) => allowed.has(m.note_id));
+
+      if (data.length === 0) {
         return { content: [{ type: "text" as const, text: `No images or PDFs found matching "${query}".` }] };
       }
 
@@ -2416,7 +2541,7 @@ server.registerTool(
           : "Image";
         parts.push(`Type: ${label}`);
         if (m.original_filename) parts.push(`File: ${m.original_filename}`);
-        if (m.note_title) parts.push(`Note: ${m.note_title}`);
+        if (m.note_title || m.note_id) parts.push(`Note: ${m.note_title || "Untitled"} (ID: ${m.note_id})`);
         if (view !== "metadata") {
           if (m.description) parts.push(`Description: ${clamp(String(m.description))}`);
           if (m.extracted_text) parts.push(`Text: ${clamp(String(m.extracted_text))}`);
@@ -2434,7 +2559,7 @@ server.registerTool(
       let text = `${header}\n\n${blocks.join("\n\n")}`;
       if (dropped > 0) {
         const nextOffset = offset + blocks.length;
-        text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note_media(note) for a note's full media.`;
+        text += `\n\n… ${dropped} more result(s) not shown (response capped). Re-run with offset=${nextOffset} for the next page, or get_note_media with a note's ID for all of its media.`;
       }
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
@@ -2449,26 +2574,18 @@ server.registerTool(
   {
     title: "Get Note Media",
     description:
-      "Given a note title or ID, return all analyzed images and PDFs in that note with their descriptions, extracted text, and topics.",
+      "Given a note ID (preferred) or title, return all analyzed images and PDFs in that note with their descriptions, extracted text, and topics.",
     inputSchema: {
-      note: z.string().describe("Note title or ID"),
+      note: z.string().describe("Note ID (exact) or title. A title matches exactly first, then as a fragment; the most recently updated match is used."),
     },
   },
   async ({ note }) => {
     try {
-      // Resolve note ID
-      let noteId = note;
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(note);
-      if (!isUuid) {
-        const { data } = await supabase
-          .from("notes")
-          .select("id")
-          .eq("user_id", getCurrentUserId())
-          .ilike("title", `%${note}%`)
-          .limit(1);
-        if (!data?.length) return { content: [{ type: "text" as const, text: `No note found matching "${note}".` }] };
-        noteId = data[0].id;
-      }
+      // A note hidden from AI used to have its media read out here anyway,
+      // description and extracted text included, when asked for by id.
+      const resolved = await resolveNoteRef(note);
+      if ("error" in resolved) return { content: [{ type: "text" as const, text: resolved.error }], isError: true };
+      const noteId = resolved.id;
 
       const { data: media, error } = await supabase
         .from("media_analysis")
@@ -2771,9 +2888,15 @@ server.registerTool(
       if (include_notes) {
         const noteIds = entries.filter((e: any) => e.linked_note_id).map((e: any) => e.linked_note_id);
         if (noteIds.length > 0) {
+          // Only this user's live notes that are visible to AI: the full body
+          // of a note hidden from AI used to be returned here as
+          // linked_note_content.
           const { data: notes } = await supabase
             .from("notes")
             .select("id, title, content")
+            .eq("user_id", getCurrentUserId())
+            .eq("is_trashed", false)
+            .eq("ai_visibility", "visible")
             .in("id", [...new Set(noteIds)]);
           for (const n of notes || []) {
             noteMap.set(n.id, { title: n.title, content: n.content });
@@ -3132,9 +3255,25 @@ server.registerTool("get_group", { title: "Get Group", description: "Get a Group
     ]);
     let notes: any[] = [];
     if (include_notes) {
-      const names = (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean).slice(0, 20);
-      const { data } = names.length ? await supabase.from("notes").select("id, title, content, created_at, metadata").eq("user_id", getCurrentUserId()).eq("is_trashed", false).contains("metadata", { people: names }).order("created_at", { ascending: false }).limit(10) : { data: [] };
-      notes = data || [];
+      // Notes mentioning ANY member. `contains({ people: names })` asked for
+      // notes mentioning EVERY member at once, so a group of two or more
+      // almost always came back with no related notes. One query per name
+      // (at most 20), merged, newest ten, and only notes visible to AI.
+      const names = [...new Set((memberships || []).map((m: { contacts?: { name?: string } | null }) => m.contacts?.name).filter(Boolean))].slice(0, 20) as string[];
+      const perName = await Promise.all(names.map(async (name) => {
+        let nq = supabase.from("notes").select("id, title, content, created_at, metadata, ai_visibility").eq("user_id", getCurrentUserId()).eq("is_trashed", false).contains("metadata", { people: [name] }).order("created_at", { ascending: false }).limit(10);
+        nq = await applyVisibility(nq, "notes", supabase, getCurrentUserId());
+        const { data, error: noteErr } = await nq;
+        if (noteErr) throw new Error(`Could not load related notes: ${noteErr.message}`);
+        return data || [];
+      }));
+      type NoteRow = { id: string; created_at: string; ai_visibility?: string; [column: string]: unknown };
+      const byId = new Map<string, NoteRow>();
+      for (const row of perName.flat() as NoteRow[]) byId.set(row.id, row);
+      notes = ((await filterVisibleNotes([...byId.values()], supabase, getCurrentUserId())) as NoteRow[])
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, 10)
+        .map(({ ai_visibility: _v, ...n }) => n);
     }
     return jsonTool({ group, members: memberships || [], recent_interactions: interactions || [], open_next_steps: actions || [], latest_briefing: briefings?.[0] || null, related_notes: notes });
   } catch (err: unknown) {
@@ -3236,7 +3375,7 @@ server.registerTool("suggest_group_next_step", { title: "Suggest Group Next Step
     if (!membership) throw new Error("Membership not found");
     const [{ data: interactions }, { data: notes }] = await Promise.all([
       supabase.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", getCurrentUserId()).eq("contact_id", (membership as any).contact_id).order("interaction_date", { ascending: false }).limit(5),
-      supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", getCurrentUserId()).contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
+      supabase.from("notes").select("title, content, created_at, metadata").eq("user_id", getCurrentUserId()).eq("is_trashed", false).eq("ai_visibility", "visible").contains("metadata", { people: [(membership as any).contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
     const { result, credits } = await openRouterWithCredits(supabase, OPENROUTER_API_KEY, getCurrentUserId(), "group_next_step", "chat/completions", { model: "deepseek/deepseek-v4-flash", temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Suggest one concrete next step for a relationship/group pipeline. Return only JSON with title, due_date_offset_days, priority, reasoning. priority must be low, normal, high, or urgent." }, { role: "user", content: JSON.stringify({ group: (membership as any).contact_groups, person: (membership as any).contacts, recent_interactions: interactions || [], recent_notes: (notes || []).map(noteText) }) }] });
     const parsed = JSON.parse(result?.choices?.[0]?.message?.content || "{}");
@@ -3273,7 +3412,7 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
       supabase.from("contact_group_memberships").select("contact_id, contacts:contact_id(name)").eq("group_id", group.id).eq("user_id", getCurrentUserId()).is("archived_at", null),
       supabase.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", getCurrentUserId()).is("merged_into", null).order("name"),
-      supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
+      supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).eq("ai_visibility", "visible").order("created_at", { ascending: false }).limit(100),
     ]);
     const structuredImport = await importGroupMembersFromNotes(supabase, getCurrentUserId(), group, notes || []);
     if (structuredImport) return jsonTool({ ok: true, mode: "structured_import", ...structuredImport });
@@ -3305,7 +3444,7 @@ server.registerTool("add_members_from_notes", { title: "Add Members From Notes",
 server.registerTool("preview_group_members_from_note", { title: "Preview Group Members From Note", description: "Deterministically preview people that can be imported into a Group from a matching Markdown table or numbered list note. Does not write data.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
   try {
     const group = await resolveGroup(group_id_or_slug);
-    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).eq("ai_visibility", "visible").order("created_at", { ascending: false }).limit(100);
     if (error) throw new Error(error.message);
     const preview = previewGroupMembersFromNotes(group, notes || []);
     return jsonTool(preview ? { ok: true, source_note: { id: preview.note.id, title: preview.note.title || "Untitled" }, parsed_rows: preview.rows.length, rows: preview.rows.slice(0, 120) } : { ok: true, source_note: null, parsed_rows: 0, rows: [] });
@@ -3317,7 +3456,7 @@ server.registerTool("preview_group_members_from_note", { title: "Preview Group M
 server.registerTool("import_group_members_from_note", { title: "Import Group Members From Note", description: "Deterministically import people into a Group from a matching Markdown table or numbered list note. Creates missing contacts, preserves rank/order, saves link/relevance/first-step metadata.", inputSchema: { group_id_or_slug: z.string() } }, async ({ group_id_or_slug }) => {
   try {
     const group = await resolveGroup(group_id_or_slug);
-    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100);
+    const { data: notes, error } = await supabase.from("notes").select("id, title, content, metadata, created_at").eq("user_id", getCurrentUserId()).eq("is_trashed", false).eq("ai_visibility", "visible").order("created_at", { ascending: false }).limit(100);
     if (error) throw new Error(error.message);
     const result = await importGroupMembersFromNotes(supabase, getCurrentUserId(), group, notes || []);
     return jsonTool(result ? { ok: true, ...result } : { ok: false, error: "No matching structured note found" });
@@ -3401,6 +3540,9 @@ server.registerTool("update_collection_item", { title: "Update Collection Item",
     const { data: existing, error: existingError } = await supabase.from("collection_items").select("id, collection_id, data, collections:collection_id(*)").eq("user_id", getCurrentUserId()).eq("id", item_id).maybeSingle();
     if (existingError) throw new Error(existingError.message);
     if (!existing) throw new Error("Collection item not found");
+    // The same gate every other MCP write goes through: an item hidden from AI
+    // could be overwritten here by id.
+    await assertWritable(supabase, getCurrentUserId(), "collection_item", item_id);
     const collection = (existing as any).collections;
     validateCollectionData(collection, data || {});
     const merged = { ...((existing as any).data || {}), ...(data || {}) };
@@ -3414,7 +3556,8 @@ server.registerTool("list_collection_items", { title: "List Collection Items", d
   return withLoggedCollectionTool("list_collection_items", { collection_slug, search, limit, date_from, date_to, status, sort }, async () => {
     const collection = await getCollectionBySlug(collection_slug);
     const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
-    let q = supabase.from("collection_items").select("id, title, data, updated_at, created_at").eq("user_id", getCurrentUserId()).eq("collection_id", collection.id).limit(cappedLimit);
+    // Items the user hid from AI are left out, as every other reader does.
+    let q = supabase.from("collection_items").select("id, title, data, updated_at, created_at").eq("user_id", getCurrentUserId()).eq("collection_id", collection.id).eq("ai_visibility", "visible").limit(cappedLimit);
     if (search) q = q.textSearch("search_vector", search, { type: "websearch", config: "simple" });
     if (date_from) q = q.gte("indexable_date_1", date_from);
     if (date_to) q = q.lte("indexable_date_1", date_to);
@@ -3431,7 +3574,7 @@ server.registerTool("list_collection_items", { title: "List Collection Items", d
 server.registerTool("search_all_collections", { title: "Search All Collections", description: "Search across all of the user's collections at once. Useful when the user references something but you don't know which collection it might be in.", inputSchema: { query: z.string(), limit: z.number().optional().default(20) } }, async ({ query, limit }) => {
   return withLoggedCollectionTool("search_all_collections", { query, limit }, async () => {
     const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
-    const { data, error } = await supabase.from("collection_items").select("id, title, data, collections:collection_id(slug, name)").eq("user_id", getCurrentUserId()).textSearch("search_vector", query, { type: "websearch", config: "simple" }).order("updated_at", { ascending: false }).limit(cappedLimit);
+    const { data, error } = await supabase.from("collection_items").select("id, title, data, collections:collection_id(slug, name)").eq("user_id", getCurrentUserId()).eq("ai_visibility", "visible").textSearch("search_vector", query, { type: "websearch", config: "simple" }).order("updated_at", { ascending: false }).limit(cappedLimit);
     if (error) throw new Error(error.message);
     return (data || []).map((item: any) => {
       const flat = Object.values(item.data || {}).map((value) => typeof value === "object" ? JSON.stringify(value) : String(value)).join(" ");
@@ -3458,9 +3601,9 @@ server.registerTool(
       "Results are bounded — use `get_note(id)` for a full note body.",
     inputSchema: {
       query: z.string().describe("What to search for"),
-      limit: z.coerce.number().optional().default(10),
-      threshold: z.coerce.number().optional().default(0.2),
-      offset: z.coerce.number().optional().default(0),
+      limit: z.coerce.number().optional().default(10).describe("Notes per page, 1-50 (also caps claims and Lexicon pages)."),
+      threshold: z.coerce.number().optional().default(0.2).describe("Minimum semantic similarity, 0-1. Lower finds more."),
+      offset: z.coerce.number().optional().default(0).describe("Pages through NOTES only. Claims and Lexicon pages come on the first page (offset 0) and are not repeated."),
       view: z.enum(["snippet", "metadata"]).optional().default("snippet"),
       as_of: z.string().optional()
         .describe("YYYY-MM-DD. Omit for what is true today. Set it to ask what was believed on that date instead."),
@@ -3468,16 +3611,23 @@ server.registerTool(
         .describe("Which kinds to search. All three by default."),
     },
   },
-  async ({ query, limit, threshold, offset = 0, view = "snippet", as_of, include }) => {
+  async ({ query, limit: rawLimit, threshold, offset: rawOffset = 0, view = "snippet", as_of, include }) => {
     try {
+      const limit = clampNumber(rawLimit, 1, CANDIDATE_CAP, 10);
+      const offset = clampNumber(rawOffset, 0, CANDIDATE_CAP, 0);
+      // Claims and Lexicon pages are not paged: they are all on the first page.
+      // They used to be repeated on every page, first, so when they alone
+      // filled the response budget a caller following "re-run with a higher
+      // offset" got the same claims back forever and never reached a note.
+      const firstPage = offset === 0;
       const kinds = new Set(include && include.length ? include : ["claim", "note", "lexicon"]);
       // null = "whatever day it is where the user is", resolved in the RPC.
       const asOf = (as_of && /^\d{4}-\d{2}-\d{2}$/.test(as_of)) ? as_of : null;
 
       const [{ rows: noteRows, total: noteTotal, mode }, lexRows, claimHits] = await Promise.all([
         kinds.has("note") ? hybridSearchNotes(query, limit, threshold) : Promise.resolve({ rows: [], total: 0, mode: "skipped" }),
-        kinds.has("lexicon") ? searchLexiconPages(query, limit) : Promise.resolve([]),
-        kinds.has("claim") ? searchClaims(query, limit, threshold, asOf) : Promise.resolve([] as ClaimHit[]),
+        kinds.has("lexicon") && firstPage ? searchLexiconPages(query, limit) : Promise.resolve([]),
+        kinds.has("claim") && firstPage ? searchClaims(query, limit, threshold, asOf) : Promise.resolve([] as ClaimHit[]),
       ]);
 
       if (!noteRows.length && !lexRows.length && !claimHits.length) {
@@ -3486,11 +3636,14 @@ server.registerTool(
 
       const notePage = noteRows.slice(offset, offset + limit);
       const asOfNote = asOf ? ` as believed on ${asOf}` : "";
-      const header = `Found ${claimHits.length} claim(s)${asOfNote}, ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`;
+      const header = firstPage
+        ? `Found ${claimHits.length} claim(s)${asOfNote}, ~${noteTotal} note(s) [${mode}] and ${lexRows.length} Lexicon page(s). Showing notes ${noteTotal ? offset + 1 : 0}-${offset + notePage.length} (has_more: ${offset + notePage.length < noteTotal}):`
+        : `Notes ${offset + 1}-${offset + notePage.length} of ~${noteTotal} [${mode}] (has_more: ${offset + notePage.length < noteTotal}). Claims and Lexicon pages are only on the first page (offset 0):`;
 
       let used = header.length;
       const blocks: string[] = [];
       let capped = false;
+      let notesShown = 0;
 
       // Claims go FIRST, and not for tidiness. They are the only hits that
       // carry their own dates, so a reader who stops early has stopped on the
@@ -3510,6 +3663,7 @@ server.registerTool(
         if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
         blocks.push(block);
         used += cost;
+        notesShown++;
       }
 
       if (!capped) {
@@ -3526,7 +3680,16 @@ server.registerTool(
       }
 
       let text = `${header}\n\n${blocks.join("\n\n")}`;
-      if (capped) text += `\n\n… capped (response budget reached). Re-run with a higher offset for more notes, or get_note(id) for a full note body.`;
+      if (capped) {
+        const nextOffset = offset + notesShown;
+        text += notesShown === 0 && noteTotal > 0
+          ? `\n\n… capped (response budget reached) before any note was shown. Re-run with include=["note"] for the notes alone.`
+          : nextOffset < noteTotal
+          ? `\n\n… capped (response budget reached). Re-run with offset=${nextOffset} for the next notes (claims and Lexicon pages are not repeated there), or get_note(id) for a full note body.`
+          : `\n\n… capped (response budget reached) before every Lexicon page was shown. Use lexicon_search for the Lexicon pages alone.`;
+      } else if (offset + notePage.length < noteTotal) {
+        text += `\n\nMore notes: re-run with offset=${offset + notePage.length}.`;
+      }
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -3736,14 +3899,19 @@ server.registerTool(
     let notes: any[] = [];
     if (needles.length) {
       const escaped = needles.map((n) => n.replace(/[,()'"\\*%_]/g, " ").trim()).filter(Boolean);
+      // notes has no person_id column. Selecting it made every one of these
+      // queries fail, and with the error unread the entity always came back
+      // with no notes. Trashed notes are left out like everywhere else.
       const nq = supabase
         .from("notes")
-        .select("id, title, created_at, ai_visibility, person_id, metadata")
+        .select("id, title, created_at, ai_visibility, metadata")
         .eq("user_id", userId)
+        .eq("is_trashed", false)
         .or(escaped.map((n) => `title.ilike.*${n}*,content.ilike.*${n}*`).join(","))
         .order("created_at", { ascending: false })
         .limit(10);
-      const { data } = await nq;
+      const { data, error: notesErr } = await nq;
+      if (notesErr) return jsonTool({ error: `Could not load notes for this entity: ${notesErr.message}` });
       notes = await filterVisibleNotes(data || [], supabase, userId);
       notes = notes.map((n: any) => ({ id: n.id, title: n.title, created_at: n.created_at }));
     }
@@ -3871,6 +4039,36 @@ server.registerTool(
   },
 );
 
+/**
+ * Claims whose subject an AI may see. search_brain's claim arm (match_claims)
+ * already drops claims about a contact who is sensitive, hidden or merged away;
+ * get_claims read the table directly and handed them all out, so a sensitive
+ * person's facts were one call away. Entities hidden from AI are dropped too,
+ * as get_entity_context does.
+ */
+async function visibleClaims<T extends { subject_type: string; subject_id: string | null }>(rows: T[]): Promise<T[]> {
+  const contactIds = [...new Set(rows.filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
+  const entityIds = [...new Set(rows.filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
+  const okContacts = new Set<string>();
+  const okEntities = new Set<string>();
+  for (let i = 0; i < contactIds.length; i += 200) {
+    const { data, error } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId())
+      .in("id", contactIds.slice(i, i + 200)).is("merged_into", null).eq("ai_visibility", "visible").not("is_sensitive", "is", true);
+    if (error) throw new Error(`Could not check who the claims are about: ${error.message}`);
+    for (const c of data || []) okContacts.add(c.id);
+  }
+  for (let i = 0; i < entityIds.length; i += 200) {
+    const { data, error } = await supabase.from("entities").select("id").eq("user_id", getCurrentUserId())
+      .in("id", entityIds.slice(i, i + 200)).eq("ai_visibility", "visible");
+    if (error) throw new Error(`Could not check what the claims are about: ${error.message}`);
+    for (const e of data || []) okEntities.add(e.id);
+  }
+  return rows.filter((r) =>
+    r.subject_type === "contact" ? okContacts.has(r.subject_id ?? "")
+    : r.subject_type === "entity" ? okEntities.has(r.subject_id ?? "")
+    : true);
+}
+
 server.registerTool(
   "get_claims",
   {
@@ -3906,7 +4104,7 @@ server.registerTool(
     if (!resolvedId && subject_name && subject_type && subject_type !== "self") {
       if (subject_type === "entity") resolvedId = (await findEntity(subject_name))?.id ?? null;
       else {
-        const { data } = await supabase.from("contacts").select("id").eq("user_id", userId).ilike("name", `%${subject_name}%`).is("merged_into", null).limit(1);
+        const { data } = await supabase.from("contacts").select("id").eq("user_id", userId).ilike("name", `%${escapeLike(subject_name)}%`).is("merged_into", null).limit(1);
         resolvedId = data?.[0]?.id ?? null;
       }
       if (!resolvedId) return jsonTool({ message: `No ${subject_type} found matching "${subject_name}".` });
@@ -3916,7 +4114,7 @@ server.registerTool(
 
     const { data, error } = await q;
     if (error) return jsonTool({ error: error.message });
-    let rows = sortClaims((data || []) as any);
+    let rows = sortClaims(await visibleClaims(data || []) as any);
     if (mode === "current") rows = rows.filter((c: any) => isCurrentClaim(c, today));
     else if (mode === "changed_since") {
       if (!since) return jsonTool({ error: "mode 'changed_since' requires a `since` date (YYYY-MM-DD)." });
@@ -3927,7 +4125,6 @@ server.registerTool(
 );
 
 const app = new Hono();
-const transport = new StreamableHTTPTransport();
 
 // Serve favicon so Claude/ChatGPT show the Menerio logo
 app.get("/favicon.ico", (c) => {
@@ -3983,7 +4180,7 @@ app.all("*", async (c) => {
       version: "1.0.0",
       // Bumped by hand whenever this function is deployed, so anyone can tell
       // which build is live without opening a dashboard.
-      build: "2026-08-18-every-key-a-door",
+      build: "2026-09-23-server-per-request",
       transport: "streamable-http",
       auth: "Authorization: Bearer mnr_<api key>",
       accepts_api_keys: true,
@@ -4001,7 +4198,7 @@ app.all("*", async (c) => {
         ? (authHeader.toLowerCase().startsWith("bearer ") ? "bearer" : "other")
         : "none",
     });
-    return c.json({ error: auth.error.message }, auth.error.status as 401 | 403);
+    return c.json({ error: auth.error.message }, auth.error.status as 401 | 403 | 503);
   }
 
   return await requestContext.run({ userId: auth.userId!, scopes: auth.scopes! }, async () => {
@@ -4011,9 +4208,13 @@ app.all("*", async (c) => {
       // function at once could each be handed the other's collection names
       // and capture instructions in tools/list. The per-user guidance is in
       // the result of list_collections, which the static description points at.
-      if (!server.isConnected()) {
-        await server.connect(transport);
-      }
+      //
+      // A fresh server and transport per request: replies are routed by
+      // JSON-RPC id, and ids are only unique within one caller (see
+      // buildServer). Stateless, so nothing else needs to survive the request.
+      const mcp = buildServer();
+      const transport = new StreamableHTTPTransport();
+      await mcp.connect(transport);
       return await transport.handleRequest(c);
     });
   });

@@ -19,7 +19,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const result = await runGithubSync(client, userId, connection.data, body);
     return new Response(JSON.stringify(result), { status: result.success ? 200 : result.busy ? 409 : 502, headers });
-  } catch {
+  } catch (error) {
+    // The error was dropped without a trace, so every failure here was undiagnosable from the logs.
+    console.error("github-sync-pull error:", error);
     return new Response(JSON.stringify({ success: false, error: "GitHub synchronization failed" }), { status: 502, headers });
   }
 });

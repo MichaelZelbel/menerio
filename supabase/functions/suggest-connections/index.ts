@@ -160,13 +160,13 @@ Don't suggest links just because notes share a common word. The connection shoul
       suggestions = [];
     }
 
-    const enriched = suggestions.map((s: any) => {
+    // Only ids the model was shown. An invented note_id came back as "Unknown"
+    // and the panel inserted it as a wikilink to nowhere.
+    const enriched = suggestions.flatMap((s: any) => {
       const candidate = candidates.find((c: any) => c.id === s.note_id);
-      return {
-        ...s,
-        note_title: candidate?.title || "Unknown",
-        similarity: candidate?.similarity || 0,
-      };
+      return candidate
+        ? [{ ...s, note_title: candidate.title || "Untitled", similarity: candidate.similarity || 0 }]
+        : [];
     });
 
     return json({

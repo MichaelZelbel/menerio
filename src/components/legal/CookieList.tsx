@@ -1,18 +1,21 @@
-// The exact cookies and browser storage this site uses, as measured on menerio.com
+import { BRAND } from "@/lib/brand";
+import { CONSENT_KEY } from "@/lib/consent";
+
+// The exact cookies and browser storage this site uses, as measured on the production site
 // in a fresh browser on 2026-09-22. Both the Cookie Policy and the Privacy Policy
 // render this one list, so the two can never disagree. Update it when a measurement
 // finds something new.
 const ROWS: { name: string; set: string; lifetime: string; purpose: string; consent: string }[] = [
   {
     name: "__cf_bm",
-    set: "Cloudflare, for our hosting (Lovable), on .menerio.com",
+    set: `Cloudflare, for our hosting (Lovable), on .${BRAND.domain}`,
     lifetime: "30 minutes",
     purpose: "Tells real visitors apart from automated traffic so the site stays reachable.",
     consent: "Strictly necessary, always set",
   },
   {
     name: "__dpl",
-    set: "Our hosting (Lovable), on menerio.com",
+    set: `Our hosting (Lovable), on ${BRAND.domain}`,
     lifetime: "7 days",
     purpose: "Keeps you on the same published version of the site while you browse it.",
     consent: "Strictly necessary, always set",
@@ -26,7 +29,7 @@ const ROWS: { name: string; set: string; lifetime: string; purpose: string; cons
   },
   {
     name: "session-id",
-    set: "Our hosting's visitor statistics (Lovable), on menerio.com",
+    set: `Our hosting's visitor statistics (Lovable), on ${BRAND.domain}`,
     lifetime: "30 minutes",
     purpose: "Counts page views as one visit, so we know which pages people read. No ads, not shared for advertising.",
     consent: "Only after “Accept all”. “Just the essentials” deletes it at once.",
@@ -49,7 +52,7 @@ export function CookieList() {
       </ul>
       <p className="text-sm text-muted-foreground">
         Besides cookies, this site keeps two things in your browser's local storage: your cookie choice
-        (<span className="font-mono">menerio-consent</span>, kept until you change it, strictly necessary to remember
+        (<span className="font-mono">{CONSENT_KEY}</span>, kept until you change it, strictly necessary to remember
         it) and, once you sign in, your login session, so you stay signed in. Fonts are served from this site
         itself, so no font request goes to Google or any other third party.
       </p>

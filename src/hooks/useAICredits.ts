@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { onCreditsChange } from "@/lib/credits-events";
@@ -22,8 +22,20 @@ export function useAICredits() {
   const [credits, setCredits] = useState<AICredits | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Every AI call fires a refresh, so several fetches overlap. Only the newest
+  // may write state: an older one that resolved last put back the balance from
+  // before the latest deduction, and the credits gate then let calls through
+  // on credits that were already spent. Also stops writes after unmount.
+  const latestRequest = useRef(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const fetchCredits = useCallback(async () => {
+    const request = ++latestRequest.current;
+    const current = () => mounted.current && request === latestRequest.current;
     if (!session || !user) {
       setIsLoading(false);
       return;
@@ -53,6 +65,7 @@ export function useAICredits() {
         .maybeSingle();
 
       if (fetchErr) throw new Error(fetchErr.message);
+      if (!current()) return;
 
       if (data) {
         const meta = (data as any).metadata || {};
@@ -74,9 +87,9 @@ export function useAICredits() {
         setCredits(null);
       }
     } catch (err: any) {
-      setError(err.message || "Failed to fetch credits");
+      if (current()) setError(err.message || "Failed to fetch credits");
     } finally {
-      setIsLoading(false);
+      if (current()) setIsLoading(false);
     }
   }, [session, user]);
 

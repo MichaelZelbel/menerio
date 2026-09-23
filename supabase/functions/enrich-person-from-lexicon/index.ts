@@ -11,7 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkBalance, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import {
   CANONICAL_LABELS_FOR_PROMPT,
   canonicalProfileLabel,
@@ -402,7 +402,13 @@ async function run(userId: string, contactId: string) {
       },
       callOptions: { response_format: { type: "json_object" } },
     });
-    parsed = JSON.parse(result.content);
+    // parseModelJson, not JSON.parse: a ```json fence after a paid call threw
+    // here and the run ended as llm_error with nothing to show for it.
+    parsed = parseModelJson(result.content);
+    if (!parsed || typeof parsed !== "object") {
+      console.error(`[enrich-person] no parseable JSON (truncated=${result.truncated}); first 200 chars: ${JSON.stringify(String(result.content ?? "").slice(0, 200))}`);
+      return { ok: false, reason: "llm_error" };
+    }
   } catch (err: any) {
     if (err?.message === "INSUFFICIENT_CREDITS") return { ok: false, reason: "insufficient_credits" };
     console.error("[enrich-person] LLM error", err);
@@ -479,6 +485,11 @@ async function run(userId: string, contactId: string) {
   );
 
   const suggestions: any[] = [];
+  // The quote gate process-note has: a fact is kept only when its quote is
+  // really in the evidence the model was shown. Length alone let an invented
+  // "diagnosed with ..." through, auto-applied at the fixed 0.82 below.
+  const flat = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const evidenceText = flat(userPrompt);
 
   // Build profile facts (only for this contact)
   for (const f of rawFacts) {
@@ -488,6 +499,7 @@ async function run(userId: string, contactId: string) {
     const value = String(f?.value || "").trim();
     const sourceQuote = String(f?.source_quote || "").trim();
     if (!name || !slug || !label || !value || sourceQuote.length < 10) continue;
+    if (!evidenceText.includes(flat(sourceQuote))) continue;
     if (!PROFILE_CATEGORY_SLUGS.includes(slug)) continue;
     // Only accept facts about THIS person (alias-aware)
     if (!aliasLowerSet.has(name) && name !== targetNameLower) continue;
@@ -526,7 +538,9 @@ async function run(userId: string, contactId: string) {
       source_title: "Lexicon & timeline enrichment",
       extracted_value: `${label}: ${value}`,
       confidence_score: 0.82,
-      is_sensitive: false,
+      // Was hard-coded false, which bypassed the user's "never auto-add
+      // sensitive facts" setting for health, religion and the like.
+      is_sensitive: isSensitiveSuggestion("add_profile_entry", { category_slug: slug, label, value }, sourceQuote),
     });
     entrySeen.add(key);
     singletonTaken.add(labelLower);

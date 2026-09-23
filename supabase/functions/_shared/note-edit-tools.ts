@@ -157,6 +157,21 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 /**
+ * How much of `find` a replacement actually discards: whatever is not kept as
+ * a shared prefix or suffix. A typo fix inside a long snippet counts as the few
+ * characters it changed; a rewrite of a paragraph counts as the paragraph.
+ */
+export function replacedChars(find: string, replace: string): number {
+  if (replace.includes(find)) return 0;
+  const max = Math.min(find.length, replace.length);
+  let prefix = 0;
+  while (prefix < max && find[prefix] === replace[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < max - prefix && find[find.length - 1 - suffix] === replace[replace.length - 1 - suffix]) suffix++;
+  return find.length - prefix - suffix;
+}
+
+/**
  * Verify no existing text vanished. Returns an error string when the write
  * would delete user content without explicit confirmation.
  */
@@ -164,8 +179,11 @@ function deletionGuard(
   before: string,
   after: string,
   confirmed: boolean,
+  removedOverride?: number,
 ): string | null {
-  const removed = Math.max(0, before.length - after.length);
+  // Net length change alone let a same-length rewrite through: replacing 2,000
+  // characters of the user's text with 2,000 different ones "removed" nothing.
+  const removed = removedOverride ?? Math.max(0, before.length - after.length);
   if (after.includes(before)) return null; // pure insertion
   if (confirmed) return null;
   if (removed > DELETE_ALLOWANCE) {
@@ -262,6 +280,7 @@ export async function executeNoteEditTool(
   const before = current.content;
   let after: string;
   let confirmed = false;
+  let removedChars: number | undefined;
   const meta: Record<string, unknown> = {};
 
   switch (name) {
@@ -347,6 +366,7 @@ export async function executeNoteEditTool(
       // LaTeX `$$E=mc^2$$` would have been written as `$E=mc^2$`.
       after = before.replace(find, () => replace);
       meta.replaced = excerpt(find, 200);
+      removedChars = replacedChars(find, replace);
       break;
     }
 
@@ -360,7 +380,7 @@ export async function executeNoteEditTool(
     return JSON.stringify(res);
   }
 
-  const guardError = deletionGuard(before, after, confirmed);
+  const guardError = deletionGuard(before, after, confirmed, removedChars);
   if (guardError) {
     return JSON.stringify({ error: "deletion_blocked", message: guardError });
   }

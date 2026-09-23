@@ -166,8 +166,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // ── Pairing flow ──
     if (!conn.is_paired) {
       if (conn.pairing_code && text.toUpperCase() === conn.pairing_code.toUpperCase()) {
-        // Pair the user
-        await supabase
+        // Pair the user. The error used to go unread, so a failed write still
+        // answered "Paired successfully!" and every capture after it was told
+        // the chat was not paired.
+        const { error: pairErr } = await supabase
           .from("telegram_connections")
           .update({
             telegram_chat_id: chatId,
@@ -175,6 +177,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
             pairing_code: null,
           })
           .eq("id", conn.id);
+        if (pairErr) {
+          console.error("Pairing update error:", pairErr);
+          await sendTelegramMessage(
+            conn.bot_token,
+            chatId,
+            "❌ Pairing failed on our side. Please send the pairing code again in a minute."
+          );
+          return json({ ok: true });
+        }
 
         await sendTelegramMessage(
           conn.bot_token,

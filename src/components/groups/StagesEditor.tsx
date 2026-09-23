@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { GroupStage } from "@/components/groups/PipelineColumn";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 
 const slugify = (value: string) =>
   value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "stage";
@@ -27,6 +28,7 @@ export function StagesEditor({
 }) {
   const firstStageLabel = stages[0]?.label || "the first stage";
   const counts = useMemo(() => membershipCounts || {}, [membershipCounts]);
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   const update = (index: number, patch: Partial<GroupStage>) => {
     const next = stages.map((stage, i) => (i === index ? { ...stage, ...patch } : stage));
@@ -41,13 +43,17 @@ export function StagesEditor({
     onChange(next);
   };
 
-  const remove = (index: number) => {
+  const remove = async (index: number) => {
     if (stages.length <= 1) return;
     const removed = stages[index];
     const count = counts[removed.id] || 0;
     if (count > 0) {
       const target = index === 0 ? stages[1].label : stages[0].label;
-      const ok = window.confirm(`${count} member${count === 1 ? "" : "s"} currently in "${removed.label}" will move to "${target}". Continue?`);
+      const ok = await confirm({
+        title: `Remove the stage "${removed.label}"?`,
+        description: `${count} member${count === 1 ? "" : "s"} currently in it will move to "${target}" when you save.`,
+        confirmLabel: "Remove stage",
+      });
       if (!ok) return;
     }
     onChange(stages.filter((_, i) => i !== index));
@@ -70,18 +76,19 @@ export function StagesEditor({
           return (
             <div key={stage.id} className="flex items-center gap-2">
               <div className="flex flex-col">
-                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp className="h-3 w-3" /></Button>
-                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" disabled={index === stages.length - 1} onClick={() => move(index, 1)}><ArrowDown className="h-3 w-3" /></Button>
+                <Button aria-label="Move stage up" type="button" variant="ghost" size="icon" className="h-5 w-5" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp className="h-3 w-3" /></Button>
+                <Button aria-label="Move stage down" type="button" variant="ghost" size="icon" className="h-5 w-5" disabled={index === stages.length - 1} onClick={() => move(index, 1)}><ArrowDown className="h-3 w-3" /></Button>
               </div>
-              <Input value={stage.label} onChange={(e) => update(index, { label: e.target.value })} placeholder="Stage label" className="flex-1" />
+              <Input aria-label="Stage label" value={stage.label} onChange={(e) => update(index, { label: e.target.value })} placeholder="Stage label" className="flex-1" />
               <input type="color" value={stage.color || "#94a3b8"} onChange={(e) => update(index, { color: e.target.value })} className="h-9 w-10 cursor-pointer rounded border border-input bg-background" aria-label="Stage color" />
               <span className="w-16 text-right text-xs text-muted-foreground">{count} {count === 1 ? "member" : "members"}</span>
-              <Button type="button" variant="ghost" size="icon" className="text-destructive" disabled={stages.length <= 1} onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
+              <Button aria-label="Remove stage" type="button" variant="ghost" size="icon" className="text-destructive" disabled={stages.length <= 1} onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
             </div>
           );
         })}
         <Button type="button" variant="outline" size="sm" onClick={add} className="mt-2"><Plus className="mr-2 h-4 w-4" />Add stage</Button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

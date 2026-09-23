@@ -22,9 +22,12 @@ knows the URL. The proof is a shared secret:
 - Body markers such as `{"cron": "profile-audit"}` still exist, but they are
   routing information only. They grant nothing.
 
-`scripts/check-edge-functions.mjs` (runs in CI) fails the build if any of the
-five gated functions stops calling `isValidCronRequest`, or if a hardcoded JWT
-literal reappears in function code.
+`scripts/check-edge-functions.mjs` (runs in CI and as part of `npm test`) fails
+the build if any `call_edge` function (the seven in its `CRON_GATED_FLOOR`
+list, plus any function a migration schedules) stops calling
+`isValidCronRequest`, if one of the four "own env key" functions stops checking
+`x-cron-key` against its env secret, or if a hardcoded JWT literal reappears in
+function code.
 
 ## Inventory (live `cron.job`, 2026-08-26)
 
@@ -39,9 +42,10 @@ literal reappears in function code.
 | 16 | profile-audit-sweep | 50 */6 * * * | profile-audit | x-cron-key via call_edge (was job 13 at */15; retimed 2026-09-03) |
 | 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge; **inactive since 2026-09-07**, see runbook |
 | 15 | profile-explode-bags-nightly | 40 3 * * * | normalize-profile (explode_bags) | x-cron-key (own env key, predates call_edge) |
+| 18 | drain-note-ai-jobs | * * * * * | drain-note-ai-jobs | x-cron-key via call_edge; installed inactive by migration `20260907130000`, activated 2026-09-07 (see runbook) |
 | 19 | delete-job-run-details | 0 12 * * * | (SQL only) prunes `cron.job_run_details` to the last 7 days | none; added 2026-09-11, see migration `20260911140000` |
 
-The three "own env key" jobs (gdrive, profile-lint, explode-bags) use secrets
+The four "own env key" jobs (the two gdrive jobs, profile-lint, explode-bags) use secrets
 stored as edge function environment variables plus a literal in the job
 command. They work and stay as they are; migrating them onto `call_edge` is
 optional cleanup, not a security fix.
@@ -58,7 +62,7 @@ sees. Their rule is "no deploys or client connections for over 7 days", and a
 deploy is what demonstrably counts and what restarts a deprovisioned instance.
 
 The keepalive therefore moved to Michael's Mission Control VPS as a scheduled deploy of the
-unchanged sync config (`vps/godspeed/powersync-keepalive.sh` in Mission Control repo, root
+unchanged sync config (`vps/godspeed/powersync-keepalive.sh` in the Mission Control engine repo, root
 cron every 6 h, deploys only when the instance is deprovisioned or five days have
 passed since the last deploy). An unchanged deploy still creates a new sync rules
 version and makes every client re-download its notes, so it deploys as rarely as
@@ -66,7 +70,7 @@ the window allows. Job 14 was set `active = false` the same day
 (`20260907190000_powersync_keepalive_inactive.sql`); the function stays deployed
 and can be re-enabled with `cron.alter_job(14, active := true)`.
 
-### Deferred note worker (local implementation, not yet deployed)
+### Deferred note worker (job 18)
 
 `20260907130000_schedule_note_ai_jobs.sql` adds `drain-note-ai-jobs` at once per minute (job 18, **active since 2026-09-07**, worker setting enabled for all accounts), initially installed inactive with a disabled worker setting and an empty account allowlist. It uses the existing `internal.call_edge` and `isValidCronRequest`, not another secret. Enabling the timer alone cannot enable execution.
 
@@ -74,7 +78,7 @@ The worker admits at most ten jobs per tick and holds at most two execution slot
 
 `internal.call_edge` has a ten-second HTTP timeout. The worker authenticates, reads its configuration and returns acceptance while `EdgeRuntime.waitUntil` runs the drain. HTTP 202 is not completion. Inspect the drain's final counts, `note_ai_jobs` states and `note_ai_completions`, as well as `net._http_response`. Unknown dispatch outcomes retain an uncertainty diagnostic instead of an immediate paid retry.
 
-The full staged activation, verification and pause procedure is in [NOTE_AI_ROLLOUT.md](NOTE_AI_ROLLOUT.md). Nothing in this local change enables production execution.
+The full staged activation, verification and pause procedure is in [NOTE_AI_ROLLOUT.md](NOTE_AI_ROLLOUT.md). The migration alone enables nothing; activation is the separate step described there.
 
 **Rotate the shared secret** (no redeploys, takes effect on the next run of
 each job):
@@ -108,5 +112,5 @@ current secret: check that its command goes through `internal.call_edge`.
 **Add a new scheduled function.** Schedule it as
 `select internal.call_edge('<fn>', '<payload>'::jsonb)`, gate the function with
 `isValidCronRequest` from `_shared/cron-auth.ts`, keep `verify_jwt = false` for
-it in `supabase/config.toml`, add it to `CRON_GATED` in
+it in `supabase/config.toml`, add it to `CRON_GATED_FLOOR` in
 `scripts/check-edge-functions.mjs`, and add it to the inventory above.

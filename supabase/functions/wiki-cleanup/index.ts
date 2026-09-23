@@ -180,7 +180,8 @@ serve(async (req) => {
       const newTitle = parsed.title?.trim() || page.title;
       const newSummary = parsed.summary?.trim() || page.summary;
 
-      await db.from("wiki_revisions").insert({
+      // The revision is the rebuild's only undo: no revision, no overwrite.
+      const { error: revErr } = await db.from("wiki_revisions").insert({
         user_id: userId,
         wiki_page_id: pageId,
         page_slug: page.slug,
@@ -191,6 +192,7 @@ serve(async (req) => {
         change_summary: "Rebuilt from source notes",
         status: "applied",
       });
+      if (revErr) throw revErr;
 
       const { error: uErr } = await db.from("wiki_pages").update({
         title: newTitle,

@@ -196,7 +196,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
                 className="text-[10px] gap-0.5 pr-0.5 h-5"
               >
                 #{topic}
-                <button
+                <button aria-label={`Remove topic ${topic}`}
                   onClick={() => removeTopic(topic)}
                   className="hover:text-destructive ml-0.5"
                 >
@@ -205,7 +205,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
               </Badge>
             ))}
             <div className="flex items-center">
-              <Input
+              <Input aria-label="Add topic"
                 ref={topicInputRef}
                 value={topicInput}
                 onChange={(e) => setTopicInput(e.target.value)}
@@ -219,7 +219,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
                 className="h-5 w-20 text-[10px] border-none shadow-none focus-visible:ring-0 px-1 bg-transparent"
               />
               {topicInput.trim() && (
-                <Button
+                <Button aria-label="Add topic"
                   variant="ghost"
                   size="icon"
                   className="h-4 w-4"
@@ -248,7 +248,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
                   title={matched ? `Linked to ${matched.canonical_name} — click to view` : undefined}
                 >
                   @{matched ? matched.canonical_name : person}
-                  <button
+                  <button aria-label={`Remove ${person}`}
                     onClick={(e) => { e.stopPropagation(); removePerson(person); }}
                     className="hover:text-destructive ml-0.5"
                   >
@@ -258,7 +258,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
               );
             })}
             <div className="flex items-center">
-              <Input
+              <Input aria-label="Add person"
                 value={personInput}
                 onChange={(e) => setPersonInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -271,7 +271,7 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
                 className="h-5 w-20 text-[10px] border-none shadow-none focus-visible:ring-0 px-1 bg-transparent"
               />
               {personInput.trim() && (
-                <Button
+                <Button aria-label="Add person"
                   variant="ghost"
                   size="icon"
                   className="h-4 w-4"

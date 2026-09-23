@@ -251,7 +251,7 @@ export function DiscordIntegration() {
                   Set the <strong>Interactions Endpoint URL</strong> in General Information:
                   <div className="mt-1 flex items-center gap-1.5">
                     <code className="text-[10px] bg-muted px-2 py-1 rounded break-all">{interactionsUrl}</code>
-                    <Button
+                    <Button aria-label="Copy URL"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 shrink-0"

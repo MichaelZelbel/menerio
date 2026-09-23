@@ -155,7 +155,9 @@ export function normalizeText(input: string): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9äöüß\s]/g, " ")
+    // Any script's letters and digits. `[a-z0-9äöüß]` turned a Chinese, Cyrillic
+    // or Greek value into "", so "小明" and "阿强" were "exact duplicates".
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -333,6 +335,9 @@ export function planMerges(entries: AuditEntry[], groups: LlmGroup[]): MergePlan
 export function planExactDuplicates(entries: AuditEntry[]): MergePlanItem[] {
   const clusters = new Map<string, AuditEntry[]>();
   for (const e of entries) {
+    // A value with no letters or digits at all (emoji, punctuation) has no
+    // comparable content; it is never an "exact duplicate" of another.
+    if (!normalizeText(e.value)) continue;
     const key = `${e.category_slug}::${labelKey(e.label)}::${normalizeText(e.value)}`;
     if (!clusters.has(key)) clusters.set(key, []);
     clusters.get(key)!.push(e);

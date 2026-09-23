@@ -28,7 +28,7 @@ interface Props {
  * that the note already created.
  */
 export function AiFootprintDialog({ noteId, open, onOpenChange }: Props) {
-  const { data, isLoading } = useAiFootprint(noteId, open);
+  const { data, isLoading, isError, refetch, isFetching } = useAiFootprint(noteId, open);
   const removeItem = useRemoveFootprintItem(noteId);
   const removeAll = useRemoveAllFootprint(noteId);
 
@@ -52,6 +52,17 @@ export function AiFootprintDialog({ noteId, open, onOpenChange }: Props) {
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…
+          </div>
+        ) : isError && !data ? (
+          // A failed scan is not an empty footprint: saying "nothing to clean
+          // up" here would tell the user their note left no trace when we
+          // simply could not look.
+          <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+            <p>Could not check what AI derived from this note.</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              {isFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Try again
+            </Button>
           </div>
         ) : total === 0 ? (
           <div className="py-10 text-center text-sm text-muted-foreground">

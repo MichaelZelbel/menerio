@@ -31,7 +31,9 @@ Deno.serve(async (req) => {
     }
     const success = results.every(result => result.success);
     return new Response(JSON.stringify({ success, results }), { status: success ? 200 : 502, headers });
-  } catch {
+  } catch (error) {
+    // The error was dropped without a trace, so every failure here was undiagnosable from the logs.
+    console.error("github-sync-scheduled error:", error);
     return new Response(JSON.stringify({ success: false, error: "Scheduled synchronization failed" }), { status: 502, headers });
   }
 });

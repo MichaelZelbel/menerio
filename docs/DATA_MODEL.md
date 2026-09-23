@@ -8,7 +8,7 @@ This document describes the main database entities in plain English. All tables 
 The central entity. A note has a title, rich-text content, optional tags, and an optional embedding vector for semantic search. Notes can be marked as favourites, pinned, or trashed. They may originate from external apps (`source_app`, `source_id`).
 
 ### Note Connections (`note_connections`)
-Links between two notes. Each connection has a type (e.g. `wikilink`, `semantic`, `manual`), a strength score, and optional metadata. Used to build the knowledge graph.
+Links between two notes. Each connection has a type (`manual_link` for wikilinks and manual links, `semantic`, `shared_person`, `shared_topic`), a strength score, and optional metadata. Used to build the knowledge graph.
 
 ### Contacts (`contacts`)
 People the user tracks. Includes name, email, phone, company, role, relationship type, and tags. Linked to interactions and action items.
@@ -25,8 +25,8 @@ People workspaces for pipelines, relationship circles, communities, Dream 100 li
 ### Contact Group Memberships (`contact_group_memberships`)
 Join table between a person and a group. Stores the member’s pipeline status, priority, position, reason, notes, source notes, template-specific attributes, next-step metadata, and archive state. The same contact can appear in multiple groups with different status and context.
 
-### Group Goals (`group_goals`)
-Measurable goals for a group. Supports manual goals as well as goals derived from activity, interactions, or action items.
+### Group Goals (`contact_groups.success_criteria`)
+Measurable goals for a group, stored as a JSON list on the group row rather than in a table of their own. Supports manual goals as well as goals derived from activity, interactions, or action items.
 
 ### Group Briefings (`group_briefings`)
 AI-generated summaries of recent group movement, stale members, priorities, and recommended next actions.
@@ -106,7 +106,7 @@ Named filtered views of profile data based on visibility scopes.
 ## Integrations
 
 ### Connected Apps (`connected_apps`)
-External applications connected via Mission Control API. Stores API key, webhook URL, permissions, and connection status.
+External applications connected for note exchange (`receive-note`, `send-patch`, `patch-response`, `verify-connection`, `link-note`). Stores a hash and prefix of the app's key, webhook URL, permissions, and connection status.
 
 ### Mission Control API Keys (`godspeed_api_keys`)
 API keys for programmatic access to Menerio. Keys are stored as hashes with a visible prefix. Scoped permissions.

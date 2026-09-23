@@ -34,6 +34,12 @@ export interface RunAgentLoopParams {
   tools: any[];
   executeTool: (name: string, args: Record<string, unknown>) => Promise<string>;
   maxIterations?: number;
+  /**
+   * Completion cap per model call (the call site's `max_tokens`). Without one,
+   * OpenRouter reserves the model's full output window against the balance and
+   * a reasoning model may spend it; the admin panel's cap never reached here.
+   */
+  maxTokens?: number | null;
 }
 
 export interface RunAgentLoopResult {
@@ -45,6 +51,11 @@ export interface RunAgentLoopResult {
 
 const SYNTH_INSTRUCTION =
   "Tool budget exhausted — you cannot call more tools. Using everything gathered above, answer the user's last message directly now. If the gathered results don't contain the answer, say so plainly and suggest what to try instead. Do not claim to have completed any actions.";
+
+const DEFAULT_MAX_TOKENS = 8000;
+
+const INTERRUPTED_REPLY =
+  "I had to stop before finishing this answer. Anything listed as done above was really done; nothing else was changed.";
 
 const BUDGET_FALLBACK_REPLY =
   "I couldn't finish researching that within my step budget. Try rephrasing, or point me at a specific note or person to look at.";
@@ -60,18 +71,30 @@ export async function runAgentLoop(
   const toolResults: { tool: string; args: unknown; result: unknown }[] = [];
   let lastCredits: unknown = null;
   let iterations = 0;
+  const maxTokens = p.maxTokens && p.maxTokens > 0 ? p.maxTokens : DEFAULT_MAX_TOKENS;
 
   while (iterations < maxIterations) {
     iterations++;
 
-    const llmResult = await openRouterWithCredits(
-      p.db,
-      p.apiKey,
-      p.userId,
-      p.creditFeature,
-      "chat/completions",
-      { model: p.model, messages: llmMessages, tools: p.tools }
-    );
+    let llmResult: Awaited<ReturnType<typeof openRouterWithCredits>>;
+    try {
+      llmResult = await openRouterWithCredits(
+        p.db,
+        p.apiKey,
+        p.userId,
+        p.creditFeature,
+        "chat/completions",
+        { model: p.model, messages: llmMessages, tools: p.tools, max_tokens: maxTokens }
+      );
+    } catch (err: any) {
+      // Before any tool ran there is nothing to lose: let the caller map it.
+      // After one ran, a note may already have been edited or created, and a
+      // thrown error would drop that from the response (the client then never
+      // learns of the write, and a resend repeats it).
+      if (toolResults.length === 0) throw err;
+      console.error(`[agent-loop] ${p.creditFeature} stopped after tools:`, err?.message);
+      return { reply: INTERRUPTED_REPLY, toolResults, credits: lastCredits };
+    }
     const result: any = llmResult.result;
     lastCredits = llmResult.credits;
 
@@ -94,7 +117,15 @@ export async function runAgentLoop(
       } catch {
         fnArgs = {};
       }
-      const toolOutput = await p.executeTool(fnName, fnArgs);
+      let toolOutput: string;
+      try {
+        toolOutput = await p.executeTool(fnName, fnArgs);
+      } catch (err: any) {
+        if (err?.message === "INSUFFICIENT_CREDITS" && toolResults.length === 0) throw err;
+        // A tool that throws (bad arguments, a failed read) is reported back to
+        // the model like any other tool error instead of failing the whole turn.
+        toolOutput = JSON.stringify({ error: "tool_failed", message: String(err?.message ?? err) });
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(toolOutput);
@@ -121,6 +152,7 @@ export async function runAgentLoop(
         messages: [...llmMessages, { role: "system", content: SYNTH_INSTRUCTION }],
         tools: p.tools,
         tool_choice: "none",
+        max_tokens: maxTokens,
       }
     );
     lastCredits = (synth as any).credits ?? lastCredits;

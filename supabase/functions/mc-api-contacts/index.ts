@@ -39,17 +39,20 @@ Deno.serve(async (req) => {
   try {
     // GET /mc-api-contacts/sync-status
     if (req.method === "GET" && action === "sync-status") {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("contacts")
         .select("updated_at")
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
         .limit(1);
 
-      const { count } = await supabase
+      const { count, error: countError } = await supabase
         .from("contacts")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId);
+
+      // A failed read used to answer 200 with contact_count 0.
+      if (error || countError) return dbErrorResponse((error ?? countError)!);
 
       return json({
         data: {
@@ -63,13 +66,14 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && action && subAction === "interactions") {
       if (!isUuid(action)) return errorJson("NOT_FOUND", "Contact not found", 404);
       // Verify contact belongs to user
-      const { data: contact } = await supabase
+      const { data: contact, error: contactError } = await supabase
         .from("contacts")
         .select("id")
         .eq("id", action)
         .eq("user_id", userId)
-        .single();
+        .maybeSingle();
 
+      if (contactError) return dbErrorResponse(contactError);
       if (!contact) return errorJson("NOT_FOUND", "Contact not found", 404);
 
       const { body, error: bodyErr } = await readJsonObject(req);
@@ -249,13 +253,18 @@ Deno.serve(async (req) => {
     // DELETE /mc-api-contacts/{id}
     if (req.method === "DELETE" && action) {
       if (!isUuid(action)) return errorJson("NOT_FOUND", "Contact not found", 404);
-      const { error } = await supabase
+      // Success for an id that is not one of this user's contacts said a
+      // person was deleted who was never touched.
+      const { data, error } = await supabase
         .from("contacts")
         .delete()
         .eq("id", action)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (error) return errorJson("INTERNAL", error.message, 500);
+      if (!data) return errorJson("NOT_FOUND", "Contact not found", 404);
       return json({ data: { success: true } });
     }
 

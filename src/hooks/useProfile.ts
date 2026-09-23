@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -71,6 +71,15 @@ const DEFAULT_CATEGORIES = [
   { name: "Goals & Aspirations", slug: "goals", icon: "target", description: "Short-term, long-term, anti-goals", sort_order: 15, visibility_scope: "all" },
   { name: "Preferences & Quirks", slug: "preferences", icon: "sliders-horizontal", description: "Morning/night, introvert/extrovert, pet peeves", sort_order: 16, visibility_scope: "all" },
 ];
+
+/**
+ * The dashboard and sidebar read completeness from `profile-summary`, a
+ * separate query over the same three tables; refresh it with the list.
+ */
+function invalidateProfile(qc: QueryClient, key: string) {
+  qc.invalidateQueries({ queryKey: [key] });
+  qc.invalidateQueries({ queryKey: ["profile-summary"] });
+}
 
 export function useProfile() {
   const { user } = useAuth();
@@ -145,7 +154,8 @@ export function useProfile() {
       const { error } = await supabase.from("profile_categories").insert(rows);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile-categories"] }),
+    onSuccess: () => invalidateProfile(qc, "profile-categories"),
+    onError: (error: Error) => showToast.error(error?.message || "Could not create the default sections"),
   });
 
   const upsertCategory = useMutation({
@@ -159,9 +169,10 @@ export function useProfile() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-categories"] });
+      invalidateProfile(qc, "profile-categories");
       showToast.success("Category saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the category"),
   });
 
   const deleteCategory = useMutation({
@@ -170,10 +181,11 @@ export function useProfile() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-categories"] });
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      invalidateProfile(qc, "profile-categories");
+      invalidateProfile(qc, "profile-entries");
       showToast.success("Category deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the category"),
   });
 
   const upsertEntry = useMutation({
@@ -189,9 +201,10 @@ export function useProfile() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      invalidateProfile(qc, "profile-entries");
       showToast.success("Entry saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the entry"),
   });
 
   const deleteEntry = useMutation({
@@ -200,9 +213,10 @@ export function useProfile() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      invalidateProfile(qc, "profile-entries");
       showToast.success("Entry deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the entry"),
   });
 
   const upsertInstruction = useMutation({
@@ -216,9 +230,10 @@ export function useProfile() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-instructions"] });
+      invalidateProfile(qc, "agent-instructions");
       showToast.success("Instruction saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the instruction"),
   });
 
   const deleteInstruction = useMutation({
@@ -227,9 +242,10 @@ export function useProfile() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-instructions"] });
+      invalidateProfile(qc, "agent-instructions");
       showToast.success("Instruction deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the instruction"),
   });
 
   const upsertView = useMutation({
@@ -257,6 +273,7 @@ export function useProfile() {
       qc.invalidateQueries({ queryKey: ["profile-views"] });
       showToast.success("View saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the view"),
   });
 
   const deleteView = useMutation({
@@ -268,6 +285,7 @@ export function useProfile() {
       qc.invalidateQueries({ queryKey: ["profile-views"] });
       showToast.success("View deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the view"),
   });
 
   return {

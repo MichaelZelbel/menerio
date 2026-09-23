@@ -29,6 +29,7 @@ describe('durable note stages',()=>{
     await expect(jobs.runStage(lease,'metadata',async()=>{throw Error('network timeout')})).rejects.toMatchObject({kind:'uncertain'});
     await expect(jobs.runStage(lease,'profile',async()=>{throw Error('INSUFFICIENT_CREDITS')})).rejects.toThrow('INSUFFICIENT_CREDITS');
     await expect(jobs.runStage(lease,'moment',async()=>{throw Error('BALANCE_UNAVAILABLE')})).rejects.toThrow('BALANCE_UNAVAILABLE');
+    await expect(jobs.runStage(lease,'fiction_guard',async()=>{throw Error('REPEAT_CALL_BLOCKED')})).rejects.toThrow('REPEAT_CALL_BLOCKED');
   });
   it('uses atomic generation-fenced note writes and refuses stale output',async()=>{
     const db=database();const argsSeen:any[]=[];const original=db.rpc.bind(db);
@@ -39,6 +40,12 @@ describe('durable note stages',()=>{
   it('never contacts a provider when begin rejected the lease',async()=>{
     let paid=0;const db=database();const original=db.rpc.bind(db);db.rpc=async(n,a)=>n==='begin_note_ai_stage'?{data:null,error:null}:original(n,a);
     await expect(createNoteAIJobs(db).runStage(lease,'metadata',async()=>{paid++;return {}})).rejects.toMatchObject({kind:'stale'});expect(paid).toBe(0);
+  });
+  it('never checkpoints a reply cut off at the token cap',async()=>{
+    const db=database();
+    await expect(createNoteAIJobs(db).runStage(lease,'metadata',async()=>({content:'{"title":"Pack',truncated:true}))).rejects.toMatchObject({kind:'permanent'});
+    expect(db.events).not.toContain('checkpoint_note_ai_stage');
+    expect(db.stages.has('metadata')).toBe(false);
   });
   it('records uncertain billing when saving an answered stage fails',async()=>{
     const db=database();const original=db.rpc.bind(db);db.rpc=async(n,a)=>n==='checkpoint_note_ai_stage'?{data:null,error:{message:'db down'}}:original(n,a);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { User, Sparkles } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,6 +42,16 @@ export default function Profile() {
 
 
   const [seeded, setSeeded] = useState(false);
+  // Status of useProfile's categories query, read from the cache without a
+  // second observer. useProfile turns a failed read into an empty list, and an
+  // empty list is what triggers seeding, so without the status a failed read
+  // inserted a second copy of every default section.
+  const subscribeToCache = useCallback((onChange: () => void) => queryClient.getQueryCache().subscribe(onChange), [queryClient]);
+  const categoriesStatus = useSyncExternalStore(
+    subscribeToCache,
+    () => queryClient.getQueryState(["profile-categories", user?.id])?.status,
+  );
+  const categoriesFailed = categoriesStatus === "error" && categories.length === 0;
   const [tidying, setTidying] = useState(false);
 
   /**
@@ -85,15 +95,30 @@ export default function Profile() {
     enabled: !!user?.id,
   });
 
-  // Seed defaults on first visit
+  // Seed defaults on first visit: only when the read succeeded and was empty.
+  const categoriesLoadedEmpty = categoriesStatus === "success" && categories.length === 0;
   useEffect(() => {
-    if (!isLoading && categories.length === 0 && !seeded) {
+    if (!isLoading && categoriesLoadedEmpty && !seeded) {
       setSeeded(true);
       seedDefaults.mutate();
     }
-  }, [isLoading, categories.length, seeded]);
+  }, [isLoading, categoriesLoadedEmpty, seeded]);
 
   if (isLoading) return <PageLoader />;
+
+  if (categoriesFailed) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <h1 className="text-2xl font-semibold mb-2">Your profile could not be loaded</h1>
+        <p className="text-muted-foreground max-w-md mb-6">
+          Nothing was changed. Check your connection and try again.
+        </p>
+        <Button onClick={() => queryClient.invalidateQueries({ queryKey: ["profile-categories"] })}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
 
   // Welcome state while seeding
   if (categories.length === 0) {

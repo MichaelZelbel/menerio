@@ -308,6 +308,16 @@ async function writeProfileEntrySafely(args: {
   );
   const dedup = dedupIncomingProfileValue({ contactId, label: fact.label, value: fact.value, index: dedupIndex });
   if (dedup.action === "skip") {
+    // A person typing "Current city: Munich" over "Berlin" is not a duplicate:
+    // answering ok/already_exists made the app say "Entry saved" while nothing
+    // was written. Say what happened; the existing entry is where to change it.
+    if ((input.origin ?? "user_manual") === "user_manual" && !reviewId && dedup.reason === "singleton_taken") {
+      return {
+        ok: false,
+        outcome: "rejected_duplicate",
+        reason: `"${fact.label}" already has a value (or a suggestion waiting in the review queue). Edit that entry to change it.`,
+      };
+    }
     const sameLabel = ((entries || []) as any[]).find((entry) => {
       const currentSlug = slugById.get(entry.category_id) || categorySlug;
       const corrected = correctProfileCategory(entry.label, currentSlug);
@@ -647,11 +657,22 @@ async function explodeBags(
       if (hasUnrepresentable) { stats.skipped++; continue; }
       if (writes.length === 0) { stats.skipped++; continue; }
 
-      await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
+      // Resolve every target category BEFORE the delete: a piece whose category
+      // could not be resolved used to be skipped after its source row was gone.
+      const resolved: Array<{ label: string; value: string; categoryId: string }> = [];
       for (const w of writes) {
         const categoryId =
           w.slug === slug ? row.category_id : await resolveCategoryId(db, userId, subj, w.slug);
-        if (!categoryId) continue;
+        if (!categoryId) break;
+        resolved.push({ label: w.label, value: w.value, categoryId });
+      }
+      if (resolved.length !== writes.length) { stats.skipped++; continue; }
+
+      const { error: delErr } = await db.from("profile_entries").delete().eq("id", row.id).eq("user_id", userId);
+      if (delErr) { stats.skipped++; continue; }
+      let written = 0;
+      for (const w of resolved) {
+        const categoryId = w.categoryId;
         const { error: insErr } = await db.from("profile_entries").insert({
           user_id: userId,
           contact_id: subj,
@@ -665,7 +686,24 @@ async function explodeBags(
         } as any);
         // A blocked insert means the fact already exists elsewhere in a
         // cleaner form — the dedup guard is the authority, not this job.
-        if (!insErr) stats.exploded++;
+        if (!insErr) { stats.exploded++; written++; }
+      }
+      // Nothing landed (a constraint, a network error): put the source row back
+      // as it was rather than lose it. If the guard refuses this too, the fact
+      // really is held elsewhere.
+      if (written === 0) {
+        await db.from("profile_entries").insert({
+          id: row.id,
+          user_id: userId,
+          contact_id: subj,
+          category_id: row.category_id,
+          label: row.label,
+          value: row.value,
+          origin: row.origin,
+          evidence_quote: row.evidence_quote,
+          linked_note_id: row.linked_note_id,
+          sort_order: row.sort_order ?? 0,
+        } as any);
       }
     }
   }
@@ -983,7 +1021,10 @@ serve(async (req) => {
       if (row.user_id !== userId) return json({ error: "forbidden" }, 403);
       if (row.suggestion_type !== "normalize_profile_entry") return json({ error: "wrong suggestion_type" }, 400);
 
-      const result = await applyNormalization(db, row.payload as NormalizationPayload);
+      // The payload is stored in a row its owner may write (review_queue RLS is
+      // FOR ALL on user_id), so the account it acts on comes from the session,
+      // never from the payload.
+      const result = await applyNormalization(db, { ...(row.payload as NormalizationPayload), user_id: userId });
       if (!result.ok) {
         // A suggestion may never get permanently stuck in the queue. Only a
         // genuinely transient failure (an unexpected exception) keeps the row
@@ -1028,7 +1069,7 @@ serve(async (req) => {
       if (row.user_id !== userId) return json({ error: "forbidden" }, 403);
       if (row.suggestion_type !== "normalize_profile_entry") return json({ error: "wrong suggestion_type" }, 400);
 
-      await rollbackNormalization(db, row.payload as NormalizationPayload, row.target_entity_id);
+      await rollbackNormalization(db, { ...(row.payload as NormalizationPayload), user_id: userId }, row.target_entity_id);
       await db
         .from("review_queue")
         .update({ status: "removed" })

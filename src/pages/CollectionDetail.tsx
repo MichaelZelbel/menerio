@@ -77,7 +77,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ilikeContains } from "@/lib/postgrest";
+import { fetchAllPages, ilikeContains } from "@/lib/postgrest";
 import {
   Sheet,
   SheetContent,
@@ -106,6 +106,7 @@ import { linkifyText } from "@/lib/linkify";
 import { nextDuplicateTitle } from "@/lib/duplicate-entity";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { CollectionChatPanel } from "@/components/collections/CollectionChatPanel";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { CollectionItemsTree as CollectionItemsFolderTree } from "@/components/collections/CollectionItemsTree";
 import type {
   FolderLite,
@@ -743,14 +744,14 @@ function CollectionItemsTree({
             {items.length} item{items.length === 1 ? "" : "s"}
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewItem}>
+        <Button aria-label="New item" variant="ghost" size="icon" className="h-8 w-8" onClick={onNewItem}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>
       <div className="border-b px-3 py-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <Input aria-label="Search items"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search items"
@@ -1410,6 +1411,7 @@ function ItemNotesPanel({
   const navigate = useNavigate();
   const [notes, setNotes] = useState<ItemNote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkResults, setLinkResults] = useState<ItemNote[]>([]);
@@ -1538,7 +1540,7 @@ function ItemNotesPanel({
 
   const unlinkNote = async (note: ItemNote) => {
     if (!user) return;
-    if (!window.confirm("Unlink this note from the item? The note itself stays in your Notes app.")) return;
+    if (!(await confirm({ title: "Unlink this note from the item?", description: "The note itself stays in your Notes app.", confirmLabel: "Unlink" }))) return;
     // Preserve other metadata, only strip our keys
     const { data: existing } = await supabase
       .from("notes")
@@ -1564,7 +1566,7 @@ function ItemNotesPanel({
 
   const deleteNote = async (note: ItemNote) => {
     if (!user) return;
-    if (!window.confirm("Delete this note? It will be moved to trash.")) return;
+    if (!(await confirm({ title: `Move "${note.title || "Untitled"}" to trash?`, description: "You can restore it from the trash in Notes.", confirmLabel: "Move to trash", destructive: true }))) return;
     const { error } = await supabase
       .from("notes")
       .update({ is_trashed: true, trashed_at: new Date().toISOString() })
@@ -1601,7 +1603,7 @@ function ItemNotesPanel({
             </PopoverTrigger>
             <PopoverContent align="end" className="w-80 p-0">
               <div className="border-b p-2">
-                <Input
+                <Input aria-label="Search notes by title"
                   autoFocus
                   value={linkQuery}
                   onChange={(e) => setLinkQuery(e.target.value)}
@@ -1680,7 +1682,7 @@ function ItemNotesPanel({
                 </button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                    <Button aria-label="Note actions" variant="ghost" size="icon" className="h-7 w-7">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -1707,6 +1709,7 @@ function ItemNotesPanel({
           ))}
         </ul>
       )}
+      {confirmDialog}
     </section>
   );
 }
@@ -2358,6 +2361,7 @@ export default function CollectionDetail() {
   // from the paged/filtered `items` used by the table view — the tree needs the
   // full picture, and refreshing it independently avoids resetting pagination.
   const [treeItems, setTreeItems] = useState<ItemLite[]>([]);
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [folders, setFolders] = useState<FolderLite[]>([]);
   const [treeReloadTick, setTreeReloadTick] = useState(0);
   const refreshTree = useCallback(
@@ -2827,19 +2831,22 @@ export default function CollectionDetail() {
     [items, treeItems, user, collection],
   );
 
-  const deleteItem = async (item: CollectionItem) => {
+  const deleteItem = async (item: CollectionItem): Promise<boolean> => {
     const { error } = await supabase
       .from("collection_items")
       .delete()
       .eq("id", item.id)
       .eq("user_id", item.user_id);
-    if (error)
-      return toast.error("Could not delete item", {
+    if (error) {
+      toast.error("Could not delete item", {
         description: error.message,
       });
+      return false;
+    }
     setWorkingSet((current) => current.filter((row) => row.id !== item.id));
     setItems((current) => current.filter((row) => row.id !== item.id));
     toast.success("Item deleted");
+    return true;
   };
 
   const deleteCollection = async () => {
@@ -2910,22 +2917,36 @@ export default function CollectionDetail() {
     }
     let cancelled = false;
     (async () => {
-      const [itemsRes, foldersRes] = await Promise.all([
-        supabase
-          .from("collection_items")
-          .select("id, title, folder_id, is_favorite, last_viewed_at, updated_at")
-          .eq("user_id", user.id)
-          .eq("collection_id", collection.id),
-        supabase
-          .from("collection_item_folders")
-          .select("id, name, parent_folder_id")
-          .eq("user_id", user.id)
-          .eq("collection_id", collection.id)
-          .order("name"),
+      // Paged with a total order: an unpaged select stops at PostgREST's
+      // 1,000-row cap in no fixed order, so large collections silently lost
+      // tree entries.
+      const [itemsRes, foldersRes] = await Promise.allSettled([
+        fetchAllPages<ItemLite>((from, to) =>
+          supabase
+            .from("collection_items")
+            .select("id, title, folder_id, is_favorite, last_viewed_at, updated_at")
+            .eq("user_id", user.id)
+            .eq("collection_id", collection.id)
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllPages<FolderLite>((from, to) =>
+          supabase
+            .from("collection_item_folders")
+            .select("id, name, parent_folder_id")
+            .eq("user_id", user.id)
+            .eq("collection_id", collection.id)
+            .order("name")
+            .order("id")
+            .range(from, to),
+        ),
       ]);
       if (cancelled) return;
-      setTreeItems((itemsRes.data ?? []) as ItemLite[]);
-      setFolders((foldersRes.data ?? []) as FolderLite[]);
+      if (itemsRes.status === "rejected" || foldersRes.status === "rejected") {
+        toast.error("Could not load the item tree", { description: "Reload the page to try again." });
+      }
+      if (itemsRes.status === "fulfilled") setTreeItems(itemsRes.value);
+      if (foldersRes.status === "fulfilled") setFolders(foldersRes.value);
     })();
     return () => {
       cancelled = true;
@@ -2995,7 +3016,7 @@ export default function CollectionDetail() {
       // FK is ON DELETE SET NULL for items and child folders, so items and
       // subfolders survive and reappear at the parent level. Confirm since
       // the tree structure changes.
-      if (!window.confirm("Delete this folder? Its items and subfolders will move up one level.")) return;
+      if (!(await confirm({ title: "Delete this folder?", description: "Its items and subfolders move up one level.", confirmLabel: "Delete folder", destructive: true }))) return;
       const { error } = await supabase
         .from("collection_item_folders")
         .delete()
@@ -3007,7 +3028,7 @@ export default function CollectionDetail() {
       toast.success("Folder deleted");
       refreshTree();
     },
-    [refreshTree],
+    [refreshTree, confirm],
   );
 
   const handleReparentFolder = useCallback(
@@ -3044,10 +3065,11 @@ export default function CollectionDetail() {
 
   const handleDeleteItemFromTree = useCallback(
     async (itemId: string) => {
-      if (!window.confirm("Delete this item? This cannot be undone.")) return;
+      if (!(await confirm({ title: "Delete this item?", description: "This permanently deletes the item. It cannot be undone.", confirmLabel: "Delete", destructive: true }))) return;
       const target = items.find((row) => row.id === itemId);
       if (target) {
-        await deleteItem(target);
+        // A failed delete keeps the item open instead of closing it as if gone.
+        if (!(await deleteItem(target))) return;
       } else {
         const { error } = await supabase
           .from("collection_items")
@@ -3063,7 +3085,7 @@ export default function CollectionDetail() {
       refreshTree();
     },
     // deleteItem is defined below in the same component; ESLint can't see it.
-    [items, routeItemId, closeItem, refreshTree],
+    [items, routeItemId, closeItem, refreshTree, confirm],
   );
 
   if (isLoading && !collection)
@@ -3265,7 +3287,7 @@ export default function CollectionDetail() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="relative w-full md:max-w-md">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
+              <Input aria-label="Search items"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search items"
@@ -3500,7 +3522,7 @@ export default function CollectionDetail() {
                         <TableCell onClick={(event) => event.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
+                              <Button aria-label="Item actions" variant="ghost" size="icon">
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -3629,6 +3651,7 @@ export default function CollectionDetail() {
           />
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

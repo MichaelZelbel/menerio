@@ -141,6 +141,7 @@ export function useCreatePerson() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       triggerPeopleSync();
       showToast.success("Person added");
     },
@@ -165,6 +166,12 @@ export function useUpdatePerson() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      // Other caches embed the contact's name: group member tables join
+      // contacts(name, aliases), and World lists every person. With a
+      // five-minute staleTime and a persisted cache, a rename kept showing the
+      // old name there.
+      qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       triggerPeopleSync();
     },
     onError: (e: any) => showToast.error(e.message),
@@ -198,8 +205,12 @@ export function useDeletePerson() {
       // no focus refetch, and a 24h persister, stale counts would otherwise
       // linger for the rest of the session.
       qc.invalidateQueries({ queryKey: ["contact_group_memberships"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       showToast.success("Person removed");
     },
+    // Both callers only pass onSuccess; a refused delete used to close the
+    // confirm dialog with the person still there and nothing said.
+    onError: (e: Error) => showToast.error(e?.message ?? "Could not remove the person"),
   });
 }
 

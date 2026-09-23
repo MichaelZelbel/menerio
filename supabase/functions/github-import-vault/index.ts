@@ -5,6 +5,8 @@ import {
   type GitHubBlobLookup,
 } from "../_shared/obsidian-attachments.ts";
 import { parseFrontmatter } from "../_shared/frontmatter.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
+import { syncWikilinkConnections } from "../_shared/wikilinks.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -166,23 +168,6 @@ function frontmatterList(value: unknown): string[] {
   return [...new Set(raw.map((v) => String(v).trim()).filter(Boolean))];
 }
 
-// ─── Wikilink resolution ─────────────────────────────────────────────
-
-function resolveWikilinks(html: string, titleToNoteId: Map<string, string>): string {
-  // Obsidian image embeds already converted by markdownToHtml — skip those
-  // Resolve [[link|display]] and [[link]] patterns that remain in HTML as text
-  return html.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, display) => {
-    const label = display || target;
-    // Strip heading anchors for matching
-    const baseTarget = target.split("#")[0].trim();
-    const noteId = titleToNoteId.get(baseTarget);
-    if (noteId) {
-      return `<a href="/dashboard/notes/${noteId}">${label}</a>`;
-    }
-    return label; // unresolved
-  });
-}
-
 // ─── Main handler ────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -251,17 +236,24 @@ Deno.serve(async (req) => {
       const blobs = await fetchAllBlobs(ghToken, owner, repo, branch);
       const attachmentFolder = (ghConn as any).attachment_folder || "attachments";
 
-      // Get existing notes for duplicate detection
-      const { data: existingNotes } = await serviceClient
-        .from("notes")
-        .select("id, title")
-        .eq("user_id", userId)
-        .eq("is_trashed", false);
+      // Get existing notes for duplicate detection. Every one of them: an
+      // unpaged select stops at 1,000 rows, and past that a re-imported vault
+      // duplicated every note it could not see by title, and a note carrying
+      // its Menerio id failed with a primary-key error instead of updating.
+      const existingNotes = await selectAllRows<{ id: string; title: string | null }>((from, to) =>
+        serviceClient
+          .from("notes")
+          .select("id, title")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .order("id")
+          .range(from, to),
+      );
 
       const existingTitleMap = new Map<string, string>();
       const existingIdSet = new Set<string>();
-      for (const n of existingNotes || []) {
-        existingTitleMap.set(n.title.toLowerCase(), n.id);
+      for (const n of existingNotes) {
+        existingTitleMap.set(String(n.title ?? "").toLowerCase(), n.id);
         existingIdSet.add(n.id);
       }
 
@@ -342,14 +334,24 @@ Deno.serve(async (req) => {
           let noteId: string;
 
           // Update existing or insert new
+          // An update's error used to go unread, so a refused write was
+          // reported as "updated".
           if (fmId && existingIdSet.has(fmId)) {
             // Update
-            await serviceClient.from("notes").update(noteData).eq("id", fmId).eq("user_id", userId);
+            const { error: updateErr } = await serviceClient.from("notes").update(noteData).eq("id", fmId).eq("user_id", userId);
+            if (updateErr) {
+              results.push({ path: file.path, status: "error", error: updateErr.message });
+              continue;
+            }
             noteId = fmId;
             results.push({ path: file.path, status: "updated", noteId });
           } else if (!fmId && existingByTitle && !skip_existing) {
             // Update by title match
-            await serviceClient.from("notes").update(noteData).eq("id", existingByTitle).eq("user_id", userId);
+            const { error: updateErr } = await serviceClient.from("notes").update(noteData).eq("id", existingByTitle).eq("user_id", userId);
+            if (updateErr) {
+              results.push({ path: file.path, status: "error", error: updateErr.message });
+              continue;
+            }
             noteId = existingByTitle;
             results.push({ path: file.path, status: "updated", noteId });
           } else {
@@ -404,7 +406,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Second pass: resolve wikilinks
+      // Second pass: turn [[wikilinks]] into note connections, and leave the
+      // body alone. Note bodies are Markdown and `[[Title]]` is the app's own
+      // link syntax (editor, backlinks, graph). This pass used to rewrite the
+      // body: a resolved link became a raw `<a href>` tag, an unresolved one
+      // was stripped to bare text, and an attachment embed `![[scan.png]]`,
+      // which the same regex also matched, became the literal `!scan.png`, so
+      // every imported image broke. Because unresolved links were stripped,
+      // `unresolved_links` was always empty too.
       const unresolvedLinks: string[] = [];
       const notesWithWikilinks = results.filter(
         (r) => (r.status === "imported" || r.status === "updated") && r.noteId
@@ -415,21 +424,23 @@ Deno.serve(async (req) => {
           .from("notes")
           .select("id, content")
           .eq("id", r.noteId!)
-          .single();
+          .eq("user_id", userId)
+          .maybeSingle();
 
-        if (!note || !note.content.includes("[[")) continue;
+        const content = String(note?.content ?? "");
+        if (!note || !content.includes("[[")) continue;
 
-        const resolved = resolveWikilinks(note.content, importedTitleToId);
-        if (resolved !== note.content) {
-          await serviceClient.from("notes").update({ content: resolved }).eq("id", note.id);
-        }
-
-        // Collect unresolved
-        const remaining = resolved.match(/\[\[([^\]]+)\]\]/g);
-        if (remaining) {
-          for (const link of remaining) {
-            unresolvedLinks.push(`${r.path}: ${link}`);
+        try {
+          const sync = await syncWikilinkConnections(serviceClient, userId, note.id, content);
+          // Embeds are attachments, reported by the attachment step.
+          const embeds = new Set(
+            [...content.matchAll(/!\[\[([^\]|\n]+?)(?:\|[^\]\n]*)?\]\]/g)].map((m) => m[1].trim().toLowerCase()),
+          );
+          for (const title of sync.unresolved) {
+            if (!embeds.has(title.toLowerCase())) unresolvedLinks.push(`${r.path}: [[${title}]]`);
           }
+        } catch (err) {
+          console.error("github-import-vault: wikilink sync failed for", note.id, err);
         }
       }
 

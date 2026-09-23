@@ -113,7 +113,8 @@ Pro Eintrag: **Effort** (S/M/L), **Impact** (★1–3), **Bereich**, **Akzeptanz
 These are real but were left out of the 2026-08-26 fix pass because each needs
 a data check or a schema change, not just a UI edit.
 
-### 19. 🟥 PersonDetail "related notes" is wrong past 50 notes · M · ★★★
+### 19. 🟩 PersonDetail "related notes" is wrong past 50 notes · M · ★★★
+- **Status:** Done (checked in code 2026-09-23): `PersonDetail.tsx` now calls the `notes_mentioning_people` RPC (migration `20260917100100`), which matches over all notes in the database.
 - **Bereich:** People / PersonDetail
 - **Problem:** `PersonDetail.tsx:74-93` fetches the 50 most recent notes globally
   and then filters client-side by `metadata.people`. Any user with >50 notes
@@ -122,7 +123,8 @@ a data check or a schema change, not just a UI edit.
 - **Akzeptanz:** Query filters by person server-side (metadata contains person id)
   before the limit, or paginates; result reflects all of the person's notes.
 
-### 20. 🟥 Collection tree fetch is unbounded and unordered · S · ★★
+### 20. 🟩 Collection tree fetch is unbounded and unordered · S · ★★
+- **Status:** Done (checked in code 2026-09-23): the tree fetch now uses `fetchAllPages` with an explicit `.order("id")` and chunked `.range()` paging, so it no longer inherits PostgREST's row cap in nondeterministic order.
 - **Bereich:** Collections / CollectionItemsTree
 - **Problem:** `CollectionDetail.tsx` tree item fetch has no `.limit()` and no
   `.order()`, so it inherits PostgREST's max-rows cap in nondeterministic order.
@@ -136,20 +138,24 @@ a data check or a schema change, not just a UI edit.
 - **Akzeptanz:** Add FK with `ON DELETE CASCADE` after cleaning existing orphans.
   Needs a data check first (count orphans), then a migration.
 
-### 22. 🟥 Archive group has no confirmation · S · ★
+### 22. 🟩 Archive group has no confirmation · S · ★
+- **Status:** Done (checked in code 2026-09-23): `handleArchiveGroup` shows a toast with Undo.
 - **Bereich:** People / groups
 - **Problem:** `People.tsx handleArchiveGroup` archives with no confirm and no
   visible undo affordance.
 - **Akzeptanz:** AlertDialog (or a toast with Undo).
 
-### 23. 🟥 Normalise remaining window.confirm to AlertDialog · S · ★
+### 23. 🟧 Normalise remaining window.confirm to AlertDialog · S · ★
 - **Bereich:** Collections, Wiki, Notes
 - **Problem:** Several genuinely destructive actions still use native
-  `window.confirm` (e.g. `CollectionDetail` tree/note deletes, `WikiLintPlaceholder`
-  strip-wikilinks, `StagesEditor`) while the app's own AlertDialog convention exists.
+  `window.confirm` while the app's own AlertDialog convention exists. As of
+  2026-09-23 the deletes in `CollectionDetail`, `WikiLintPlaceholder` and
+  `StagesEditor` use the dialog; what remains are "discard unsaved changes"
+  prompts in `CollectionDetail`, `CollectionSchema` and `AICollectionDialog`.
 - **Akzeptanz:** Consistent destructive AlertDialog, matching the people/collection pattern.
 
-### 24. 🟥 ModerationPanel caps at 50 with no pagination · S · ★
+### 24. 🟩 ModerationPanel caps at 50 with no pagination · S · ★
+- **Status:** Done (checked in code 2026-09-23): capped at 50 with an explicit `.order("created_at", ...)`, and an on-screen note ("Showing the 50 newest items. Older ones are not listed here.") appears once the cap is hit.
 - **Bereich:** Admin / ModerationPanel
 - **Problem:** `moderation_review_queue` fetch capped at 50, no pager.
 - **Akzeptanz:** Pagination or an explicit "showing first 50" note.

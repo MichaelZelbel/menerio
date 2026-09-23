@@ -196,7 +196,7 @@ export function WikilinkAutocomplete({
       style={{ top: position.top + 24, left: position.left }}
     >
       <div className="p-2 border-b border-border">
-        <input
+        <input aria-label="Search notes"
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}

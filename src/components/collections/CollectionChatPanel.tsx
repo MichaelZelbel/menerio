@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { Button } from "@/components/ui/button";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
   loadChatState,
@@ -41,6 +42,7 @@ export function CollectionChatPanel({
     : `collection:${collectionId}`;
   const [state, setState] = useState<PersistedChatState>(() => loadChatState(user?.id, contextKey));
   const [input, setInput] = useState("");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -150,8 +152,8 @@ export function CollectionChatPanel({
     }
   };
 
-  const handleClear = () => {
-    if (!confirm("Clear this conversation?")) return;
+  const handleClear = async () => {
+    if (!(await confirm({ title: "Clear this conversation?", description: "The messages are removed from this chat. Changes already made to your data stay.", confirmLabel: "Clear", destructive: true }))) return;
     clearChatState(user?.id, contextKey);
     setState({ messages: [], summary: "", summarizedUpTo: 0 });
     setError(null);
@@ -172,7 +174,7 @@ export function CollectionChatPanel({
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+          <Button aria-label="Close chat" variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -244,7 +246,7 @@ export function CollectionChatPanel({
 
       <div className="p-3 pb-20 border-t border-border shrink-0">
         <div className="flex gap-2">
-          <Textarea
+          <Textarea aria-label="Message"
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -254,11 +256,12 @@ export function CollectionChatPanel({
             rows={1}
             disabled={isLoading}
           />
-          <Button size="icon" className="h-10 w-10 shrink-0" onClick={sendMessage} disabled={!input.trim() || isLoading}>
+          <Button aria-label="Send message" size="icon" className="h-10 w-10 shrink-0" onClick={sendMessage} disabled={!input.trim() || isLoading}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

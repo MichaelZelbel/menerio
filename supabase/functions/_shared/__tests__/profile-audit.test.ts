@@ -31,6 +31,22 @@ describe("valueCovers", () => {
   });
 });
 
+describe("non-Latin values", () => {
+  it("keeps distinct values in other scripts apart", () => {
+    const entries = [
+      entry({ id: "a", value: "小明" }),
+      entry({ id: "b", value: "阿强", created_at: "2026-01-02T00:00:00Z" }),
+      entry({ id: "c", value: "Дмитрий", created_at: "2026-01-03T00:00:00Z" }),
+    ];
+    expect(planExactDuplicates(entries)).toEqual([]);
+    expect(valueCovers("Nickname Sam", "李明")).toBe(false);
+  });
+  it("still collapses a genuine duplicate in another script", () => {
+    const entries = [entry({ id: "a", value: "小明" }), entry({ id: "b", value: "小明 ", created_at: "2026-01-02T00:00:00Z" })];
+    expect(planExactDuplicates(entries).length).toBe(1);
+  });
+});
+
 describe("parseAuditResponse", () => {
   it("parses fenced json", () => {
     const res = parseAuditResponse('```json\n{"groups":[{"ids":["a","b"],"label":"L","value":"V"}]}\n```');

@@ -162,8 +162,11 @@ serve(async (req) => {
       return json({ error: "Could not classify this fact. Please try again." }, 502);
     }
 
-    let label = String(parsed?.label ?? (hasLabelValue ? rawLabel : "")).trim();
-    const value = String(parsed?.value ?? (hasLabelValue ? rawValue : "")).trim();
+    // What the user typed is theirs. The model only picks the category for a
+    // label+value it was given (its prompt says to keep them); preferring its
+    // copy let it paraphrase or translate the value the user entered.
+    let label = hasLabelValue ? rawLabel : String(parsed?.label ?? "").trim();
+    const value = hasLabelValue ? rawValue : String(parsed?.value ?? "").trim();
     let slug = String(parsed?.category_slug ?? "").trim();
     const confidence = typeof parsed?.confidence === "number" ? parsed.confidence : 0.6;
 

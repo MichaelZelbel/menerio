@@ -288,6 +288,22 @@ async function resolveUniqueFilename(supabase: DbClient, userId: string, desired
   return `${base}-${Date.now()}${ext}`;
 }
 
+/**
+ * base64 of the metadata JSON, readable by the existing `JSON.parse(atob(...))`
+ * on the pull and import side. `btoa` throws on any character above U+00FF, and
+ * AI metadata is full of them (an en dash or a curly apostrophe in a summary,
+ * an emoji, a name in Cyrillic): every such note failed to export with
+ * "InvalidCharacterError". Escaping everything outside ASCII as a JSON \u
+ * escape keeps the payload ASCII, and JSON.parse restores the characters.
+ */
+function encodeMetadata(meta: Record<string, unknown>): string {
+  const ascii = JSON.stringify(meta).replace(
+    /[\u007f-￿]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+  return btoa(ascii);
+}
+
 function buildFrontmatter(note: Record<string, unknown>): string {
   const meta = (note.metadata || {}) as Record<string, unknown>;
   const lines: string[] = ["---"];
@@ -307,7 +323,7 @@ function buildFrontmatter(note: Record<string, unknown>): string {
     lines.push(`people: [${(meta.people as string[]).map(p => `"${p}"`).join(", ")}]`);
   }
   if (Object.keys(meta).length > 0) {
-    lines.push(`menerio_metadata: ${btoa(JSON.stringify(meta))}`);
+    lines.push(`menerio_metadata: ${encodeMetadata(meta)}`);
   }
   if (note.is_favorite) lines.push("favorite: true");
   if (note.is_pinned) lines.push("pinned: true");
@@ -469,9 +485,15 @@ async function syncSingleNote(
       supabase, userId, ghToken, owner, repo, branch, vaultPath, attachmentFolder, mdBody,
     );
 
-    // Persist normalized markdown back to the note if it changed (so DB and Web stay in sync)
+    // Persist normalized markdown back to the note if it changed (so DB and Web stay in sync).
+    // Only if the note is still the version read above: the editor calls this
+    // function on every save, and an unconditional write replaced whatever the
+    // user typed in between with the older body. If the note moved on, the
+    // next save's export rewrites the links again.
     if (mdBody !== rawContent && !looksLikeHtml(rawContent)) {
-      await supabase.from("notes").update({ content: mdBody }).eq("id", note.id).eq("user_id", userId);
+      let write = supabase.from("notes").update({ content: mdBody }).eq("id", note.id).eq("user_id", userId);
+      if (note.updated_at) write = write.eq("updated_at", note.updated_at);
+      await write;
     }
 
     const fullContent = `${frontmatter}\n\n${mdBody}`;

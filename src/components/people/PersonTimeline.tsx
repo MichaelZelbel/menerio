@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { parseDateOnly } from "@/lib/local-date";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import AddEventDialog, { type EditMomentData, type TimelineContact } from "@/components/timeline/AddEventDialog";
 
 interface MomentEntry {
@@ -37,6 +38,7 @@ export function PersonTimeline({ personId, personName, people, onAskMira }: Pers
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<EditMomentData | null>(null);
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   const loadTimeline = useCallback(async () => {
     setLoading(true);
@@ -77,7 +79,7 @@ export function PersonTimeline({ personId, personName, people, onAskMira }: Pers
   useEffect(() => { loadTimeline(); }, [loadTimeline]);
 
   const deleteMoment = async (entry: MomentEntry) => {
-    if (!confirm(`Delete "${entry.title}"?`)) return;
+    if (!(await confirm({ title: `Delete "${entry.title}"?`, description: "The moment disappears from this timeline.", confirmLabel: "Delete", destructive: true }))) return;
     // Soft delete: this table's own read filters on deleted_at IS NULL, so a
     // hard delete threw away recoverable history (and cascaded the moment's
     // participants and provenance) for no reason. Setting deleted_at hides it
@@ -109,9 +111,10 @@ export function PersonTimeline({ personId, personName, people, onAskMira }: Pers
       {loading && <div className="py-8 text-center text-sm text-muted-foreground">Loading timeline…</div>}
       {!loading && viewMode !== "ai-summary" && filteredEntries.length === 0 && <Card className="border-dashed"><CardContent className="py-8 text-center"><Calendar className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" /><h3 className="mb-2 text-lg font-medium">No moments yet</h3><p className="mb-4 text-sm text-muted-foreground">Add a moment to build your timeline with {personName}.</p><Button size="sm" onClick={() => setDialogOpen(true)}><Plus className="mr-1 h-4 w-4" />Add Moment</Button></CardContent></Card>}
 
-      {!loading && viewMode !== "ai-summary" && filteredEntries.length > 0 && <div className="relative"><div className="absolute bottom-0 left-6 top-0 w-px bg-border" /><div className="space-y-2">{filteredEntries.map((entry) => <div key={entry.id} className="relative flex gap-4 rounded-lg p-2 transition-colors hover:bg-muted/40"><div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><Calendar className="h-4 w-4" /></div><div className="min-w-0 flex-1 rounded-lg border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex items-center gap-2"><h3 className="font-medium">{entry.title}</h3>{entry.impact_level >= 3 && <Badge>Milestone</Badge>}</div><p className="text-xs text-muted-foreground">{formatDate(entry.happened_at)}</p></div><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onAskMira(`I want to reflect on "${entry.title}" from ${formatDate(entry.happened_at)}. ${entry.description || ""}`)}><MessageSquare className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => { setEditingEntry(entry); setDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteMoment(entry)}><Trash2 className="h-4 w-4" /></Button></div></div>{entry.description && <p className="mt-3 text-sm text-muted-foreground">{entry.description}</p>}</div></div>)}</div></div>}
+      {!loading && viewMode !== "ai-summary" && filteredEntries.length > 0 && <div className="relative"><div className="absolute bottom-0 left-6 top-0 w-px bg-border" /><div className="space-y-2">{filteredEntries.map((entry) => <div key={entry.id} className="relative flex gap-4 rounded-lg p-2 transition-colors hover:bg-muted/40"><div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><Calendar className="h-4 w-4" /></div><div className="min-w-0 flex-1 rounded-lg border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex items-center gap-2"><h3 className="font-medium">{entry.title}</h3>{entry.impact_level >= 3 && <Badge>Milestone</Badge>}</div><p className="text-xs text-muted-foreground">{formatDate(entry.happened_at)}</p></div><div className="flex gap-1"><Button aria-label="Reflect on this moment" variant="ghost" size="icon" onClick={() => onAskMira(`I want to reflect on "${entry.title}" from ${formatDate(entry.happened_at)}. ${entry.description || ""}`)}><MessageSquare className="h-4 w-4" /></Button><Button aria-label="Edit moment" variant="ghost" size="icon" onClick={() => { setEditingEntry(entry); setDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button><Button aria-label="Delete moment" variant="ghost" size="icon" className="text-destructive" onClick={() => deleteMoment(entry)}><Trash2 className="h-4 w-4" /></Button></div></div>{entry.description && <p className="mt-3 text-sm text-muted-foreground">{entry.description}</p>}</div></div>)}</div></div>}
 
       <AddEventDialog people={people} editEvent={editingEntry} open={dialogOpen} onOpenChange={setDialogOpen} onCreated={loadTimeline} />
+      {confirmDialog}
     </div>
   );
 }

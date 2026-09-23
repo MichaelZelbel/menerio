@@ -122,6 +122,17 @@ describe("a key that belongs to no connection", () => {
   });
 });
 
+describe("a key that could not be read", () => {
+  it("says 'try again' rather than calling a good key invalid", async () => {
+    const refusal = { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
+    const dead: Row = { select: () => dead, eq: () => dead, maybeSingle: () => dead, then: (ok: (v: unknown) => unknown) => Promise.resolve(ok(refusal)) };
+    const lookup = await lookupGodspeedKey(LEGACY, { from: () => dead });
+    expect(lookup.result).toBeNull();
+    expect(lookup.errorCode).toBe("unavailable");
+    expect(lookup.errorMessage).not.toMatch(/invalid/i);
+  });
+});
+
 describe("a key minted for a mission control connection", () => {
   it("is accepted while the connection is active and of its generation, at the cost of one query", async () => {
     const { client, reads } = counting(await database());

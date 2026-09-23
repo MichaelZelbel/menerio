@@ -22,6 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authenticateGodspeedKey, requireScope } from "../_shared/mc-auth.ts";
 import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
 import { isSafeOutboundUrl } from "../_shared/ssrf-guard.ts";
+import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
 import {
   decodeEntities,
   extractCanonicalUrl,
@@ -359,7 +360,9 @@ Deno.serve(async (req) => {
   const explicitUrl = (form.get("url") as string | null)?.trim() || null;
   const explicitTitle = (form.get("title") as string | null)?.trim() || null;
   const tagsRaw = (form.get("tags") as string | null)?.trim() || "";
-  const folderPath = (form.get("folder") as string | null)?.trim() || "Web Clips";
+  // Normalised like every other writer: "/Web Clips/" stored verbatim made a
+  // nameless folder above the real one.
+  const folderPath = normalizeFolderPath(form.get("folder")) || "Web Clips";
 
   const tags = tagsRaw
     ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 20)
@@ -551,8 +554,13 @@ Deno.serve(async (req) => {
 
   if (noteErr || !note) {
     console.error("singlefile-capture note insert failed:", noteErr);
-    // Best-effort cleanup of the uploaded snapshot.
-    await supabaseAdmin.storage.from("note-attachments").remove([storagePath]).catch(() => {});
+    // Best-effort cleanup of everything this request stored: the snapshot and
+    // the hero image, and their note_attachments rows (only the snapshot's
+    // bytes were removed before, leaving rows pointing at nothing plus an
+    // orphaned hero image under the user's prefix).
+    const orphanPaths = [storagePath, ...(heroStoragePath ? [heroStoragePath] : [])];
+    await supabaseAdmin.storage.from("note-attachments").remove(orphanPaths).catch(() => {});
+    await supabaseAdmin.from("note_attachments").delete().eq("user_id", userId).in("storage_path", orphanPaths);
     return err(`Note creation failed: ${noteErr?.message || "unknown error"}`, 500);
   }
 

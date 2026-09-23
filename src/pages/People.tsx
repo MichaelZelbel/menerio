@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { SEOHead } from "@/components/SEOHead";
@@ -30,7 +31,7 @@ import { PeopleTree } from "@/components/people/PeopleTree";
 import { PersonDetail } from "@/components/people/PersonDetail";
 import { MergePersonDialog } from "@/components/people/MergePersonDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useGroups, useCreateGroup, useUpdateGroup, useArchiveGroup } from "@/hooks/useGroups";
+import { useGroups, useCreateGroup, useUpdateGroup, useArchiveGroup, useRestoreGroup } from "@/hooks/useGroups";
 import { useAllMemberships, useAddMembership, useRemoveMembership } from "@/hooks/useGroupMemberships";
 import {
   usePeople,
@@ -93,6 +94,7 @@ export default function People() {
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup();
   const archiveGroup = useArchiveGroup();
+  const restoreGroup = useRestoreGroup();
   const addMembership = useAddMembership();
   const removeMembership = useRemoveMembership();
 
@@ -127,7 +129,14 @@ export default function People() {
   };
 
   const handleArchiveGroup = (groupId: string) => {
-    archiveGroup.mutate(groupId, { onSuccess: () => showToast.success("Group archived") });
+    // Archiving hides the group from the tree with one click, so the toast
+    // carries an Undo instead of a confirmation dialog in front of it.
+    // Failures are toasted by the archive/restore hooks themselves.
+    archiveGroup.mutate(groupId, {
+      onSuccess: () => toast.success("Group archived", {
+        action: { label: "Undo", onClick: () => restoreGroup.mutate(groupId) },
+      }),
+    });
   };
 
   const handleReparentGroup = (groupId: string, parentGroupId: string | null) => {
@@ -214,7 +223,7 @@ export default function People() {
         <div className="shrink-0 border-b border-border px-2 py-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
+            <Input aria-label="Search people"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => {

@@ -71,7 +71,9 @@ Changes made in one app propagate back to the owning app through Menerio, ensuri
 1. Clone the repository
 2. Copy `.env.example` to `.env`
 3. Fill in your environment variables
-4. Start the development environment
+4. Install dependencies and start the dev server: `npm install`, then `npm run dev`
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and details.
 
 ## Open Source
 

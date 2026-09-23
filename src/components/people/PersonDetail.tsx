@@ -198,7 +198,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                         <User className="h-5 w-5 text-primary" />
                       </div>
                       {isEditing ? (
-                        <Input
+                        <Input aria-label="Name"
                           value={editingName ?? ""}
                           onChange={(e) => setEditingName(e.target.value)}
                           placeholder="Name"
@@ -215,7 +215,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                         <Badge key={alias} variant="secondary" className="text-xs gap-1">
                           {alias}
                           {isEditing && (
-                            <button onClick={() => removeAlias(alias)} className="ml-0.5 hover:text-destructive">
+                            <button aria-label={`Remove alias ${alias}`} onClick={() => removeAlias(alias)} className="ml-0.5 hover:text-destructive">
                               <X className="h-3 w-3" />
                             </button>
                           )}
@@ -223,7 +223,7 @@ export function PersonDetail({ person, people, onClose }: PersonDetailProps) {
                       ))}
                       {isEditing && (
                         <div className="flex items-center gap-1">
-                          <Input
+                          <Input aria-label="Add alias"
                             className="h-7 w-32 text-xs"
                             placeholder="Add alias..."
                             value={newAlias}

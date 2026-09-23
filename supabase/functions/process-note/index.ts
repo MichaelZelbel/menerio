@@ -1,12 +1,13 @@
 import { createNoteAIJobs, NoteAIJobError, classifyNoteAIError, type NoteAILease } from "../_shared/note-ai-jobs.ts";
 import { handleNoteAIRequest, changedProfileSubjects } from "../_shared/note-ai-processing.ts";
 import { createNoteAIExecutionDatabase } from "../_shared/note-ai-db.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   checkBalance,
 
 } from "../_shared/llm-credits.ts";
-import { outputLanguageRule, parseModelJson, runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
+import { outputLanguageRule, parseModelJson, runChat, sourceIsDataRule, sourceLanguageRule } from "../_shared/llm-router.ts";
 import {
   PROCESS_NOTE_METADATA_PROMPT,
   PROCESS_NOTE_MOMENT_PROMPT,
@@ -647,6 +648,11 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       // from a note is never written — it waits for human review instead.
       const relEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
       if ([...relEvidenceQuote].length < 10) return { ...suggestion, status: "pending_review" };
+      // The judge's "review" means "a human should look": its confidence is
+      // confidence in that verdict, not in the relationship, and cleared the
+      // auto-apply threshold on its own. Only "keep" is written automatically.
+      const relOutcome = (suggestion.payload as any)?.adjudication_outcome;
+      if (relOutcome !== undefined && relOutcome !== "keep") return { ...suggestion, status: "pending_review" };
       const { data, error } = await supabase
         .from("contact_relationships")
         .insert({ user_id: suggestion.user_id, source_type, source_id: source_id || null, target_type, target_id: target_id || null, label: relationshipDecision.label, custom_label: custom_label || null, origin: "ai_note", evidence_quote: relEvidenceQuote, evidence_note_id: (suggestion.payload as any)?.note_id || (suggestion as any).source_note_id || null })
@@ -672,8 +678,8 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
           description: p.description || null,
           happened_at: happenedAt,
           impact_level: Math.max(1, Math.min(4, Number(p.impact_level) || 2)),
-          confidence_date: Math.max(0, Math.min(10, Number(p.confidence_date) || 7)),
-          confidence_truth: Math.max(0, Math.min(10, Number(p.confidence_truth) || 7)),
+          confidence_date: Math.max(0, Math.min(10, modelScore(p.confidence_date, 7))),
+          confidence_truth: Math.max(0, Math.min(10, modelScore(p.confidence_truth, 7))),
           person_id: personId,
           source: "note_auto",
           status: "past_fact",
@@ -707,6 +713,18 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
   }
 
   return { ...suggestion, status: "pending_review" };
+}
+
+/** A model-reported text field as a trimmed string; numbers are kept, anything else is "". */
+function modelText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
+/** A model-reported number, or `fallback` only when the field is absent or not a number. */
+function modelScore(value: unknown, fallback: number): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 const corsHeaders = {
@@ -1261,6 +1279,11 @@ async function generateReviewItems(
         .from("review_queue")
         .select("id, suggestion_type, source_note_id, title, status")
         .eq("user_id", userId)
+        // Only the rows these suggestions could collide with. Reading every
+        // row of every type stopped at PostgREST's 1,000-row cap for an active
+        // account, and past it the "already exists" set silently missed rows.
+        .in("suggestion_type", [...new Set(suggestions.map((s) => s.suggestion_type))])
+        .in("title", [...new Set(suggestions.map((s) => s.title))])
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "removed", "blocked", "accepted", "dismissed", "skipped"]);
 
       const existingSet = new Set(
@@ -1403,6 +1426,7 @@ async function generateProfileSuggestions(
         systemSuffix: [
           profileExtractionContract(),
           outputLanguageRule(preferences.profileLanguage),
+          sourceIsDataRule(),
         ].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
       }));
@@ -1445,14 +1469,14 @@ async function generateProfileSuggestions(
         // Extract relationships
         if (Array.isArray(parsed.relationships)) {
           extractedRelationships = parsed.relationships.filter(
-            (r: any) => r.person_a && r.person_b && r.label_a_to_b
+            (r: any) => r && r.person_a && r.person_b && r.label_a_to_b
           ).map((r: any) => ({
-            person_a: (r.person_a || "").trim(),
-            person_b: (r.person_b || "").trim(),
-            label_a_to_b: (r.label_a_to_b || "").trim().toLowerCase(),
-            label_b_to_a: (r.label_b_to_a || r.label_a_to_b || "").trim().toLowerCase(),
-             source_quote: (r.source_quote || "").trim(),
-             source_context: (r.source_context || "").trim(),
+            person_a: modelText(r.person_a),
+            person_b: modelText(r.person_b),
+            label_a_to_b: modelText(r.label_a_to_b).toLowerCase(),
+            label_b_to_a: modelText(r.label_b_to_a || r.label_a_to_b).toLowerCase(),
+             source_quote: modelText(r.source_quote),
+             source_context: modelText(r.source_context),
           }));
         }
       } else {
@@ -1461,12 +1485,14 @@ async function generateProfileSuggestions(
       }
 
       // Normalize string fields
-      extractedFacts = extractedFacts.map((f: any) => ({
-        contact_name: (f.contact_name || "").trim(),
-        category_slug: (f.category_slug || "").trim().toLowerCase(),
-        label: (f.label || "").trim(),
-        value: (f.value || "").trim(),
-        source_quote: (f.source_quote || "").trim(),
+      // A number (an age, a postal code) or a null element used to throw here,
+      // and the checkpointed reply replayed the TypeError on every retry.
+      extractedFacts = extractedFacts.filter((f: any) => f && typeof f === "object").map((f: any) => ({
+        contact_name: modelText(f.contact_name),
+        category_slug: modelText(f.category_slug).toLowerCase(),
+        label: modelText(f.label),
+        value: modelText(f.value),
+        source_quote: modelText(f.source_quote),
       }));
 
       // Deterministic post-pass: derive Date of birth / Anniversary from age + ref date,
@@ -1767,12 +1793,15 @@ async function generateProfileSuggestions(
 
     // Existing review_queue items — count toward dedup so we don't
     // regenerate a suggestion already waiting in the queue.
-    const { data: existingQueueItems } = await supabase
+    // Paged: past 1,000 profile cards the dedup set was silently short.
+    const existingQueueItems = await selectAllRows<{ payload: any; status: string }>((from, to) => supabase
       .from("review_queue")
       .select("payload, status")
       .eq("user_id", userId)
       .eq("suggestion_type", "add_profile_entry")
-      .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"]);
+      .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "blocked", "accepted", "dismissed"])
+      .order("id", { ascending: true })
+      .range(from, to));
 
     // Token-aware dedup index. For list-valued canonical labels
     // (Health conditions, Favorite food, Allergies, Nickname, …) it stores
@@ -1936,12 +1965,14 @@ async function generateProfileSuggestions(
           .from("contact_relationships")
           .select("source_type, source_id, target_type, target_id, label")
           .eq("user_id", userId),
-        supabase
+        selectAllRows<{ payload: any; status: string }>((from, to) => supabase
           .from("review_queue")
           .select("payload, status")
           .eq("user_id", userId)
           .eq("suggestion_type", "add_relationship")
-          .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"]),
+          .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "accepted"])
+          .order("id", { ascending: true })
+          .range(from, to)).then((data) => ({ data })),
       ]);
 
       const seenKeys = new Set<string>();
@@ -2244,7 +2275,10 @@ async function generateMomentSuggestions(
       .map((p) => `${p.canonical_name || p.name}${p.is_self ? " (owner)" : ""}`)
       .join(", ");
     const datesHint = dates.join(", ");
-    const userPrompt = `Known people in this note: ${peopleHint}\nDates mentioned: ${datesHint}\n\nNote title: ${noteTitle}\nNote content (including [Media content] OCR):\n${stripHtmlIfNeeded(fullText).slice(0, 16000)}`;
+    // Without today's date the model cannot tell a planned event from one that
+    // happened, and every moment is stored as a past fact.
+    const todayForMoments = new Date().toISOString().slice(0, 10);
+    const userPrompt = `Today's date: ${todayForMoments}\nKnown people in this note: ${peopleHint}\nDates mentioned: ${datesHint}\n\nNote title: ${noteTitle}\nNote content (including [Media content] OCR):\n${stripHtmlIfNeeded(fullText).slice(0, 16000)}`;
 
     let parsed: any;
     {
@@ -2264,7 +2298,7 @@ async function generateMomentSuggestions(
         // AUTO_APPLY_THRESHOLDS, so this one writes to the timeline without a
         // review card. It had the same missing language rule as the removed
         // world extractor, with nothing on screen to make it visible.
-        systemSuffix: outputLanguageRule(preferences.profileLanguage),
+        systemSuffix: [outputLanguageRule(preferences.profileLanguage), sourceIsDataRule()].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
       }));
       await noteJobs.assertCurrent(lease);
@@ -2282,11 +2316,23 @@ async function generateMomentSuggestions(
     const happenedAt = String(parsed.happened_at || "").trim();
     const title = String(parsed.title || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(happenedAt) || !title) return;
+    // Shape is not validity: "2023-13-01" passed the pattern and then threw a
+    // RangeError in toISOString below, failing the job on every retry.
+    const happenedDate = new Date(`${happenedAt}T00:00:00Z`);
+    if (Number.isNaN(happenedDate.getTime()) || happenedDate.toISOString().slice(0, 10) !== happenedAt) return;
+    // Moments are written as `past_fact`; a planned wedding is not one yet.
+    // One day of slack for time zones east of UTC.
+    if (happenedDate.getTime() > Date.now() + 86_400_000) {
+      console.log(`[moment-extract] ${happenedAt} is in the future for note ${noteId}; not a past fact`);
+      return;
+    }
 
     const description = String(parsed.description || "").trim() || null;
     const impact = Math.max(1, Math.min(4, Number(parsed.impact_level) || 2));
-    const confDate = Math.max(0, Math.min(10, Number(parsed.confidence_date) || 7));
-    const confTruth = Math.max(0, Math.min(10, Number(parsed.confidence_truth) || 7));
+    // An explicit 0 ("not sure at all") is an answer, not a missing field:
+    // `Number(0) || 7` scored it 7 and auto-applied the moment.
+    const confDate = Math.max(0, Math.min(10, modelScore(parsed.confidence_date, 7)));
+    const confTruth = Math.max(0, Math.min(10, modelScore(parsed.confidence_truth, 7)));
 
     // Map LLM participants → matched contacts / self
     type ParticipantPayload = { name: string; contact_id: string | null; is_self: boolean };
@@ -2519,14 +2565,23 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
         // demanded here rather than only in the prompt above: this call site has
         // a row in llm_call_configs that never asked for the field, which left
         // both fiction gates permanently off.
-        systemSuffix: [metadataFieldContract(), sourceLanguageRule()].join("\n\n"),
+        systemSuffix: [metadataFieldContract(), sourceLanguageRule(), sourceIsDataRule()].join("\n\n"),
         callOptions: { response_format: { type: "json_object" } },
       }));
 
       metadata = parseModelJson<Record<string, unknown>>(chatResult!.content) ?? {};
-      if (Object.keys(metadata).length === 0) {
+      if (Array.isArray(metadata) || typeof metadata !== "object" || Object.keys(metadata).length === 0) {
         // The paid response is checkpointed; invalid output needs review, not re-billing.
         throw new NoteAIJobError("permanent", "Invalid metadata JSON");
+      }
+      // `people` is read as string[] everywhere downstream (`person.toLowerCase()`);
+      // a model that answers [{"name":"Anna"}] made every retry throw on the
+      // same checkpointed reply.
+      if (metadata.people !== undefined) {
+        metadata.people = (Array.isArray(metadata.people) ? metadata.people : [metadata.people])
+          .map((p: unknown) => typeof p === "string" ? p : (p && typeof p === "object" && typeof (p as any).name === "string" ? (p as any).name : ""))
+          .map((p: string) => p.trim())
+          .filter(Boolean);
       }
 
       // Smart-chunk the note and embed each chunk. The note-level embedding is
@@ -2598,27 +2653,32 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
           }
         }
 
-        const recalled = selfCtx.enabled && nameMatchesAlias(person, selfCtx.aliases)
+        // What this note itself says wins. The remembered decision is only a
+        // tie-breaker for a mention the note leaves ambiguous: it is built from
+        // this function's own earlier guesses (nothing a person confirms writes
+        // to it), and letting it override "Sam, my colleague" or an exact
+        // contact name filed a contact's facts under the owner.
+        let decision: SelfDecision = disambiguateMention(person, noteFullText, selfCtx, candidates, selfCtx.preferredName);
+        const recalled = decision.kind === "ambiguous" && selfCtx.enabled && nameMatchesAlias(person, selfCtx.aliases)
           ? await recallDisambiguation(note.user_id, person)
           : null;
-
-        let decision: SelfDecision;
         if (recalled?.target === "self") {
           decision = { kind: "self", contactCandidates: [], reason: "recalled_self" };
         } else if (recalled?.target === "contact" && recalled.contact_id) {
           const c = candidates.find((x) => x.id === recalled.contact_id) || { id: recalled.contact_id, name: person };
           decision = { kind: "contact", contactCandidates: [c], reason: "recalled_contact" };
-        } else {
-          decision = disambiguateMention(person, noteFullText, selfCtx, candidates, selfCtx.preferredName);
         }
+        // A recalled decision is not new evidence; counting it again made one
+        // early guess reinforce itself on every later note.
+        const isRecalled = decision.reason === "recalled_self" || decision.reason === "recalled_contact";
 
         if (decision.kind === "self") {
           matchedPeople.push({ name: person, is_self: true, canonical_name: selfCtx.preferredName || person });
-          await recordDisambiguation(note.user_id, person, "self", null, 0.7);
+          if (!isRecalled) await recordDisambiguation(note.user_id, person, "self", null, 0.7);
         } else if (decision.kind === "contact" && decision.contactCandidates.length > 0) {
           const c = decision.contactCandidates[0];
           matchedPeople.push({ name: person, contact_id: c.id, canonical_name: c.name });
-          await recordDisambiguation(note.user_id, person, "contact", c.id, 0.7);
+          if (!isRecalled) await recordDisambiguation(note.user_id, person, "contact", c.id, 0.7);
         } else if (decision.kind === "ambiguous") {
           ambiguousMentions.push({ name: person, candidates: decision.contactCandidates });
         }
@@ -2714,7 +2774,22 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
             suppression_key: buildSuppressionKey("name_disambiguation", null, null, m.name),
           };
         });
-        await supabase.from("review_queue").insert(items);
+        // Every revision and retry of the note used to add the same card again
+        // (inserted as pending_review, which the pending-only unique index does
+        // not cover), and a dismissed card came back. Ask once per note.
+        const { data: asked, error: askedErr } = await supabase
+          .from("review_queue")
+          .select("suppression_key")
+          .eq("user_id", note.user_id)
+          .eq("source_note_id", noteId)
+          .eq("suggestion_type", "name_disambiguation");
+        if (askedErr) throw askedErr;
+        const askedKeys = new Set((asked || []).map((r: any) => r.suppression_key));
+        const fresh = await filterSuppressedSuggestions(
+          note.user_id,
+          items.filter((i) => !askedKeys.has(i.suppression_key)) as unknown as ReviewSuggestion[],
+        );
+        if (fresh.length > 0) await supabase.from("review_queue").insert(fresh);
       } catch (e) {
         console.error("ambiguous mention insert error:", e);
       }
@@ -2794,6 +2869,7 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
         dry_run: false,
         include_contacts: true,
         target_user_id: note.user_id,
+        pending_only: true,
       }),
     })
       .then(async (r) => {
@@ -2803,7 +2879,10 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
           );
         }
       })
-      .catch((err) => { throw err; });
+      // Logged, never rethrown: as the note above says, a claim must never fail
+      // the note. Rethrowing failed every note of a user whose promotion kept
+      // erroring, three attempts each, before the finishing write below.
+      .catch((err) => console.error("[process-note] claim promotion failed:", (err as Error)?.message ?? err));
 
     // Await connection computation while the analysis lease is still held.
     //

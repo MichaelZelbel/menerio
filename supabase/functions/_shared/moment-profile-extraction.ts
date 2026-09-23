@@ -102,6 +102,24 @@ function isLikelyEventOnlyMoment(title: string, description: string | null | und
   return verbRegex.test(t);
 }
 
+/**
+ * The one computed value the prompt allows: "Anna's 30th birthday" on a moment
+ * dated 2024-03-12 gives 1994-03-12. Checked here because the value is never in
+ * the text, so the verbatim filter below dropped every one the model computed.
+ * Accepts English "30th birthday" and German "30. Geburtstag".
+ */
+export function birthdayDobMatches(value: string, source: string, happenedAt: string | null | undefined): boolean {
+  const v = value.trim();
+  const day = String(happenedAt || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const m = source.match(/\b(\d{1,3})(?:st|nd|rd|th)\s+birthday\b/i) || source.match(/\b(\d{1,3})\.\s*geburtstag/i);
+  if (!m) return false;
+  const years = Number(m[1]);
+  if (!Number.isInteger(years) || years < 1 || years > 120) return false;
+  const expected = `${String(Number(day.slice(0, 4)) - years).padStart(4, "0")}${day.slice(4)}`;
+  return v === expected;
+}
+
 function valueAppearsInSource(value: string, label: string, source: string): boolean {
   const v = value.toLowerCase().trim();
   const s = source.toLowerCase();
@@ -527,7 +545,9 @@ export async function extractProfileFromMoment(
 
     // Post-filter: value must appear in source text (with birthday exception).
     const sourceText = `${(moment as any).title} ${(moment as any).description || ""}`;
-    if (!valueAppearsInSource(value, label, sourceText)) {
+    const computedBirthday = labelLower === "date of birth" &&
+      birthdayDobMatches(value, sourceText, (moment as any).happened_at);
+    if (!computedBirthday && !valueAppearsInSource(value, label, sourceText)) {
       console.log(`[moment-extract] post-filter dropped: value not in source (label="${label}", value="${value}", moment ${momentId})`);
       continue;
     }

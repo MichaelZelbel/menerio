@@ -82,7 +82,7 @@ export function TodaysConnections() {
           <Link2 className="h-4 w-4 text-primary" />
           Today's Connections
         </CardTitle>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDismissed(true)}>
+        <Button aria-label="Dismiss" variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDismissed(true)}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </CardHeader>

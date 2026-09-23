@@ -176,7 +176,7 @@ export function CompactCategorySection({
       {entry.linked_note_id && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
+            <Button aria-label="Open linked note"
               variant="ghost"
               size="icon"
               className="h-7 w-7"
@@ -191,14 +191,14 @@ export function CompactCategorySection({
       {allowPin && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onTogglePin(entry)}>
+            <Button aria-label={entry.is_pinned ? "Unpin" : "Pin"} variant="ghost" size="icon" className="h-7 w-7" onClick={() => onTogglePin(entry)}>
               {entry.is_pinned ? <PinOff className="h-3.5 w-3.5 text-primary" /> : <Pin className="h-3.5 w-3.5" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
         </Tooltip>
       )}
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
+      <Button aria-label="Edit entry" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
         <Pencil className="h-3.5 w-3.5" />
       </Button>
       <Button
@@ -244,10 +244,10 @@ export function CompactCategorySection({
               }}
               className="h-7 text-sm"
             />
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRenameSave}>
+            <Button aria-label="Save name" variant="ghost" size="icon" className="h-6 w-6" onClick={handleRenameSave}>
               <Check className="h-3.5 w-3.5" />
             </Button>
-            <Button
+            <Button aria-label="Cancel rename"
               variant="ghost"
               size="icon"
               className="h-6 w-6"
@@ -268,10 +268,10 @@ export function CompactCategorySection({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
+            <Button aria-label="Category actions"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100"
+              className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity data-[state=open]:opacity-100"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </Button>

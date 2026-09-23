@@ -86,10 +86,13 @@ export default function Settings() {
   const { logActivity } = useLogActivity();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "account");
+  // The URL is the only source of the tab: links to ?tab=... from inside
+  // Settings (the Web Clipper's "API keys" link, the sidebar's "Connect AI",
+  // the credits banner) change the search params without remounting the page,
+  // and a copy in state never heard about them.
+  const activeTab = searchParams.get("tab") || "account";
 
   const handleTabChange = (value: string) => {
-    setActiveTab(value);
     const next = new URLSearchParams(searchParams);
     next.set("tab", value);
     setSearchParams(next, { replace: true });
@@ -260,6 +263,7 @@ export default function Settings() {
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
+          <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Picture</TabsTrigger>
           <TabsTrigger value="godspeed" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Integrations</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
@@ -288,29 +292,32 @@ export default function Settings() {
               <CardDescription>Upload a new avatar. JPG, PNG, GIF, or WebP. Max 2MB.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-6">
-              <div
-                className="relative group cursor-pointer"
+              <button
+                type="button"
+                aria-label="Upload a new profile picture"
+                disabled={avatarUploading}
+                className="relative group cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Avatar className="h-32 w-32">
                   {avatarPublicUrl && <AvatarImage src={avatarPublicUrl} />}
                   <AvatarFallback className="bg-primary text-primary-foreground text-3xl">{initials}</AvatarFallback>
                 </Avatar>
-                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className={`absolute inset-0 flex items-center justify-center rounded-full bg-foreground/50 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity ${avatarUploading ? "opacity-100" : ""}`}>
                   {avatarUploading ? (
                     <Loader2 className="h-8 w-8 animate-spin text-background" />
                   ) : (
                     <Camera className="h-8 w-8 text-background" />
                   )}
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
-                  className="hidden"
-                  onChange={handleAvatarUpload}
-                />
-              </div>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                className="hidden"
+                onChange={handleAvatarUpload}
+              />
               <p className="text-sm text-muted-foreground">Click the avatar to upload a new picture</p>
             </CardContent>
           </Card>
@@ -359,7 +366,7 @@ export default function Settings() {
                       required
                       minLength={8}
                     />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                    <button aria-label={showPassword ? "Hide password" : "Show password"} type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
@@ -381,7 +388,7 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        {/* ── Integrations Mission Control ── */}
+        {/* ── Integrations Tab ── */}
         <TabsContent value="godspeed" className="space-y-6">
           <IntegrationsOverview onOpenTab={handleTabChange} />
           <ConnectedGodspeedsCard />

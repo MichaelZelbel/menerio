@@ -648,7 +648,7 @@ const settingsAccount: DocPage = {
   content: () => (
     <>
       <h2 id="general">General Settings</h2>
-      <p>Update your display name, avatar, bio, and website from <strong>Settings → Profile</strong>. Theme switching (light/dark mode) is available from the toggle in the header.</p>
+      <p>Update your display name in <strong>Settings → Account</strong> and your profile picture in <strong>Settings → Picture</strong>. Theme switching (light/dark mode) is available from the toggle in the header.</p>
 
       <h2 id="notifications">Notifications</h2>
       <p>Configure what notifications you receive:</p>
@@ -662,18 +662,18 @@ const settingsAccount: DocPage = {
 
       <h2 id="api-keys">API Keys</h2>
       <p>Generate API keys in <strong>Settings → API Keys</strong> to access Menerio's Mission Control API. Each key has configurable scopes (notes, contacts, actions, stats) and can be revoked at any time.</p>
-      <CodeBlock code={`curl -H "Authorization: Bearer mb_abc123..." \\\n  https://your-project.supabase.co/functions/v1/hub-api-notes`} language="bash" title="Using Mission Control API" />
+      <CodeBlock code={`curl -H "Authorization: Bearer mnr_abc123..." \\\n  https://your-project.supabase.co/functions/v1/mc-api-notes`} language="bash" title="Using Mission Control API" />
       <p><code>GET /mc-api-notes/search?q=…</code> searches by meaning and by text at once. Add <code>source_app=godspeed</code> or <code>source_app=native</code> to narrow it and <code>limit</code> (up to 50) to size it. The response says <code>mode: "semantic+text"</code>, or <code>"text_only"</code> when no AI credits are left.</p>
       <p>The same keys connect AI assistants over MCP. An assistant can call <code>list_note_folders</code> to see your folders, then <code>capture_note</code> with a title, folder and tags to file a note where it belongs; <code>[[Exact Title]]</code> in the text links it to another note. Notes mirrored from a mission control folder rank below your own notes in every search and are marked as godspeed files in MCP results.</p>
 
       <h2 id="subscription">Subscription & Credits</h2>
-      <p>View your current plan and AI credit usage in <strong>Settings → Subscription</strong>. Free accounts include a monthly AI credit allowance; upgrade to Premium for more credits and features.</p>
+      <p>View your current plan in <strong>Settings → Plan</strong> and your AI credit usage in <strong>Settings → Credits</strong>. Free accounts include a monthly AI credit allowance; upgrade to Premium for more credits and features.</p>
 
       <h2 id="data-export">Data Export</h2>
-      <p>Export all your notes as JSON or Markdown from <strong>Settings → Export</strong>. Your data is always yours.</p>
+      <p>Export your notes as Markdown files to a GitHub repository from <strong>Settings → GitHub</strong>, and download your profile from <strong>Profile → Export &amp; Share</strong>. Your data is always yours.</p>
 
       <h2 id="delete-account">Delete Account</h2>
-      <p>If you need to leave, go to <strong>Settings → Danger Zone</strong> to permanently delete your account and all associated data. This action cannot be undone.</p>
+      <p>If you need to leave, go to <strong>Settings → Danger</strong> to permanently delete your account and all associated data. This action cannot be undone.</p>
       <Callout type="warning" title="Before deleting">Export your data first. Once deleted, your notes, contacts, and profile cannot be recovered.</Callout>
     </>
   ),

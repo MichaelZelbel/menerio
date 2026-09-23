@@ -84,7 +84,14 @@ export async function lookupGodspeedKey(
       .maybeSingle());
   }
 
-  if (error || !keyRow) {
+  // A failed read is not a verdict on the key. Answering "Invalid API key." for
+  // a statement timeout told every client, and every connected mission control, that
+  // its key was dead, and a caller that acts on that throws a good key away.
+  if (error) {
+    console.error(`[mc-auth] key lookup failed: ${[error.code, error.message].filter(Boolean).join(" ")}`);
+    return refused("unavailable", "Could not check this API key right now. Try again in a moment.");
+  }
+  if (!keyRow) {
     return refused("invalid", "Invalid API key.");
   }
 
@@ -171,8 +178,8 @@ export async function authenticateGodspeedKey(
       result: null,
       error: new Response(
         JSON.stringify({ error: errorMessage ?? "Invalid API key." }),
-        // 503 only for a connected mission control's key whose connection could not be read;
-        // every refusal a key could get before connections existed is still 401.
+        // 503 when the key or its connection could not be read (retry);
+        // every verdict on the key itself is 401.
         { status: errorCode === "unavailable" ? 503 : 401, headers: { "Content-Type": "application/json" } }
       ),
     };

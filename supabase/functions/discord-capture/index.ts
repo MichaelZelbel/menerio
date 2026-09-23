@@ -217,6 +217,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const commandName = interaction.data?.name;
 
       if (commandName === "capture") {
+        // /capture is registered as a global command, so Discord delivers it
+        // from every server the bot is in and from DMs, by anyone. Nothing
+        // checked where it came from: any member of any server with the bot
+        // could write notes into the owner's account. Only the server the
+        // owner saved in Settings may capture.
+        if (!interaction.guild_id || interaction.guild_id !== conn.discord_guild_id) {
+          return json({
+            type: 4,
+            data: {
+              content: "❌ /capture only works in the Discord server linked in Menerio (Settings → Integrations → Discord).",
+              flags: 64,
+            },
+          });
+        }
+
         const thought = interaction.data?.options?.find(
           (o: any) => o.name === "thought"
         )?.value;
@@ -311,6 +326,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ type: 1 }); // Default PONG for unhandled types
   } catch (err) {
     console.error("discord-capture error:", err);
+    // A PONG is not a valid answer to a slash command: Discord showed the
+    // user only "The application did not respond" and nothing was saved.
+    if (interaction.type === 2) {
+      return json({
+        type: 4,
+        data: { content: "❌ Something went wrong and the note was not saved. Please try again.", flags: 64 },
+      });
+    }
     return json({ type: 1 }); // Always respond to Discord
   }
 });

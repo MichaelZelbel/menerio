@@ -64,7 +64,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if (embResult) embedding = embResult.embedding;
         try { metadata = JSON.parse(chatResult.content); } catch { /* keep default */ }
       } catch (err: any) {
-        if (err.message !== "INSUFFICIENT_CREDITS") throw err;
+        // A provider timeout or 5xx used to be rethrown before the insert, so
+        // the capture was answered 500 and lost. Save it with the default
+        // metadata; the note_ai_jobs trigger enriches it later.
+        if (err?.message !== "INSUFFICIENT_CREDITS") {
+          console.error("slack-capture: AI enrichment failed, saving without it:", err);
+        }
       }
     }
 

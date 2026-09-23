@@ -68,13 +68,26 @@ Deno.serve(async (req) => {
     const contentFields = body.content_fields ?? {};
     const action = body.action ?? "share_note";
     const itemType = body.item_type ?? "note";
-    const itemId = body.item_id ?? null;
+    let itemId = body.item_id ?? null;
 
     const rawText = [contentFields.title ?? "", contentFields.content ?? ""].join(" ");
     if (!rawText.trim()) return ok({ approved: true });
 
     // Strip HTML tags for checking
     const plainText = rawText.replace(/<[^>]+>/g, " ");
+
+    // item_id comes from the client. ai-moderate-content later unshares the
+    // queued item_id when the snapshot is judged a violation, so an item that
+    // is not the caller's own note is not recorded against that note.
+    if (itemId && itemType === "note") {
+      const { data: owned } = await admin
+        .from("notes")
+        .select("id")
+        .eq("id", itemId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!owned) itemId = null;
+    }
 
     // --- Check suspension ---
     const { data: sus } = await admin
@@ -107,13 +120,18 @@ Deno.serve(async (req) => {
     const stopwords = (words ?? []) as { word: string; category: string }[];
 
     // --- Normalize & match ---
-    const norm = normalize(plainText);
+    // Whole words only. A plain substring test blocked "class", "pass" and
+    // "assistant" for a stopword "ass", and each block is a strike (five
+    // suspend the account). A stopword that normalises to nothing (all
+    // punctuation) matched every text there is.
+    const norm = ` ${normalize(plainText)} `;
     const matched: string[] = [];
     let hitCategory = "";
 
     for (const sw of stopwords) {
       const normWord = normalize(sw.word);
-      if (norm.includes(normWord)) {
+      if (!normWord) continue;
+      if (norm.includes(` ${normWord} `)) {
         matched.push(sw.word);
         if (!hitCategory) hitCategory = sw.category;
       }

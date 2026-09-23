@@ -107,7 +107,7 @@ export function LinkToNoteDialog({
         </DialogHeader>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
+          <Input aria-label="Search notes"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search notes…"

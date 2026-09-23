@@ -418,7 +418,7 @@ export async function executeReadTool(
     }
 
     case "search_notes_text": {
-      const q = (args.query as string).toLowerCase();
+      const q = String(args.query ?? "").toLowerCase();
       const { data, error } = await db
         .from("notes")
         .select("id, title, content, tags, metadata")
@@ -439,7 +439,7 @@ export async function executeReadTool(
     }
 
     case "search_media_text": {
-      const q = (args.query as string).toLowerCase();
+      const q = String(args.query ?? "").toLowerCase();
       const { data, error } = await db
         .from("media_analysis")
         .select("id, note_id, storage_path, media_type, page_number, original_filename, extracted_text, description, topics")
@@ -452,10 +452,19 @@ export async function executeReadTool(
       const noteIds = [...new Set((data || []).map((m: any) => m.note_id))];
       let noteTitles: Record<string, string> = {};
       if (noteIds.length > 0) {
-        const { data: notes } = await db.from("notes").select("id, title").in("id", noteIds);
+        // OCR text is as private as the note it belongs to: a scan in a note
+        // hidden from AI, or in the bin, must not reach the model through here.
+        const { data: notes, error: notesErr } = await db
+          .from("notes")
+          .select("id, title")
+          .in("id", noteIds)
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .eq("ai_visibility", "visible");
+        if (notesErr) return JSON.stringify({ error: notesErr.message });
         noteTitles = Object.fromEntries((notes || []).map((n: any) => [n.id, n.title]));
       }
-      const results = (data || []).map((m: any) => ({
+      const results = (data || []).filter((m: any) => m.note_id in noteTitles).map((m: any) => ({
         id: m.id,
         note_id: m.note_id,
         note_title: noteTitles[m.note_id] || "Unknown",

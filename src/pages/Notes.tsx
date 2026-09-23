@@ -1065,14 +1065,14 @@ export default function Notes() {
           <div className="px-3 py-2 border-b border-border shrink-0 space-y-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
+              <Input aria-label="Search notes"
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
                 placeholder={searchType === "semantic" ? "Smart search…" : "Exact search…"}
                 className="pl-8 pr-8 h-8 text-sm"
                 autoFocus
               />
-              <button
+              <button aria-label="Close search"
                 onClick={exitSearch}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
@@ -1171,19 +1171,19 @@ export default function Notes() {
             {topicFilter && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium inline-flex items-center gap-1">
                 #{topicFilter}
-                <button onClick={() => setTopicFilter(null)}><X className="h-2.5 w-2.5" /></button>
+                <button aria-label="Clear topic filter" onClick={() => setTopicFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
             {personFilter && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-400 font-medium inline-flex items-center gap-1">
                 @{personFilter}
-                <button onClick={() => setPersonFilter(null)}><X className="h-2.5 w-2.5" /></button>
+                <button aria-label="Clear person filter" onClick={() => setPersonFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
             {metaTypeFilter && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium inline-flex items-center gap-1">
                 {metaTypeFilter.replace("_", " ")}
-                <button onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
+                <button aria-label="Clear type filter" onClick={() => setMetaTypeFilter(null)}><X className="h-2.5 w-2.5" /></button>
               </span>
             )}
             <button onClick={clearAllFilters} className="text-[10px] text-muted-foreground hover:text-foreground ml-auto">

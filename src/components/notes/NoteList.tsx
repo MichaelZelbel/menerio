@@ -153,7 +153,7 @@ const NoteRow = memo(function NoteRow({
           <span className="text-[10px] text-muted-foreground/70">{relativeTime}</span>
           <button
             onClick={handleCopy}
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
             title="Copy link"
           >
             <Link2 className="h-2.5 w-2.5" />

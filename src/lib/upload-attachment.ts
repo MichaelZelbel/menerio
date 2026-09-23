@@ -78,6 +78,14 @@ async function resolveUniqueFilename(userId: string, desired: string): Promise<s
   return `${stem}-${Date.now()}${ext}`;
 }
 
+/** `photo.png` -> `photo-1a2b3c4d.png`: unique without another lookup. */
+export function withUniqueSuffix(filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  const ext = dot > 0 ? filename.slice(dot) : "";
+  const stem = ext ? filename.slice(0, -ext.length) : filename;
+  return `${stem}-${crypto.randomUUID().slice(0, 8)}${ext}`;
+}
+
 async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", buffer);
   return Array.from(new Uint8Array(digest))
@@ -103,7 +111,7 @@ export async function uploadAttachment(file: File, userId: string): Promise<Uplo
 
   // Resolve a unique, Obsidian-compatible filename
   const desired = sanitizeFilename(file.name);
-  const filename = await resolveUniqueFilename(userId, desired);
+  let filename = await resolveUniqueFilename(userId, desired);
 
   // Upload to bucket
   const { error: uploadError } = await supabase.storage
@@ -120,16 +128,25 @@ export async function uploadAttachment(file: File, userId: string): Promise<Uplo
     // ignore
   }
 
-  // Register in note_attachments
-  const { error: insertError } = await supabase.from("note_attachments").insert({
-    user_id: userId,
-    filename,
-    storage_path: storagePath,
-    size_bytes: file.size,
-    mime_type: file.type || null,
-    sha256,
-    source: "menerio",
-  });
+  // Register in note_attachments. (user_id, filename) is UNIQUE, and the name
+  // picked above can already be taken: two pastes at once are both
+  // "image.png", and past 1,000 similar names the lookup does not see them
+  // all. A clash used to fail the whole upload; take a name that cannot clash.
+  const register = (name: string) =>
+    supabase.from("note_attachments").insert({
+      user_id: userId,
+      filename: name,
+      storage_path: storagePath,
+      size_bytes: file.size,
+      mime_type: file.type || null,
+      sha256,
+      source: "menerio",
+    });
+  let { error: insertError } = await register(filename);
+  if (insertError && (insertError as { code?: string }).code === "23505") {
+    filename = withUniqueSuffix(filename);
+    ({ error: insertError } = await register(filename));
+  }
   if (insertError) {
     // Without this row the note's `![[filename]]` embed can never be resolved
     // again after the signed URL expires: the image showed once, then became a

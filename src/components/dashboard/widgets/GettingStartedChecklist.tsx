@@ -39,7 +39,7 @@ export function GettingStartedChecklist({ hasProfile, hasNotes }: GettingStarted
             {completedCount}/{checklistItems.length} completed
           </CardDescription>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6 -mr-1 -mt-1" onClick={dismissChecklist}>
+        <Button aria-label="Dismiss checklist" variant="ghost" size="icon" className="h-6 w-6 -mr-1 -mt-1" onClick={dismissChecklist}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </CardHeader>

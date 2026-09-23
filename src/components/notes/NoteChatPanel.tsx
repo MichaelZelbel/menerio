@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { Note } from "@/hooks/useNotes";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { Button } from "@/components/ui/button";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
   loadChatState,
@@ -57,6 +58,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     loadChatState(user?.id, contextKey),
   );
   const [input, setInput] = useState("");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -225,7 +227,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
   const undoNoteEdit = useCallback(
     async (previousContent: string | null) => {
       if (previousContent === null) return;
-      if (!confirm("Restore the note to how it was before this AI edit?")) return;
+      if (!(await confirm({ title: "Undo this AI edit?", description: "The note goes back to how it was before this edit. Anything written since then is replaced.", confirmLabel: "Restore" }))) return;
       const { data, error: updErr } = await supabase
         .from("notes")
         .update({ content: previousContent })
@@ -239,7 +241,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       onNoteChanged();
       applyNoteEdit(note.id, previousContent, (data as any)?.updated_at ?? null);
     },
-    [note.id, onNoteChanged],
+    [note.id, onNoteChanged, confirm],
   );
 
 
@@ -250,8 +252,8 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     }
   };
 
-  const handleClear = () => {
-    if (!confirm("Clear this conversation?")) return;
+  const handleClear = async () => {
+    if (!(await confirm({ title: "Clear this conversation?", description: "The messages are removed from this chat. Changes already made to your data stay.", confirmLabel: "Clear", destructive: true }))) return;
     clearChatState(user?.id, contextKey);
     setState({ messages: [], summary: "", summarizedUpTo: 0 });
     setError(null);
@@ -282,7 +284,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button
+          <Button aria-label="Close chat"
             variant="ghost"
             size="icon"
             className="h-7 w-7"
@@ -401,7 +403,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
       {/* Input */}
       <div className="p-3 pb-20 border-t border-border shrink-0">
         <div className="flex gap-2">
-          <Textarea
+          <Textarea aria-label="Message"
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -411,7 +413,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
             rows={1}
             disabled={isLoading}
           />
-          <Button
+          <Button aria-label="Send message"
             size="icon"
             className="h-10 w-10 shrink-0"
             onClick={sendMessage}
@@ -421,6 +423,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
           </Button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

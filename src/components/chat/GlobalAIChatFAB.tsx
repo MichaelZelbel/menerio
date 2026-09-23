@@ -23,6 +23,7 @@ import {
   type PersistedChatState,
 } from "@/lib/chat-history";
 import { Button } from "@/components/ui/button";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -60,6 +61,7 @@ export function GlobalAIChatFAB() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -376,8 +378,8 @@ export function GlobalAIChatFAB() {
     }
   };
 
-  const handleClear = () => {
-    if (!confirm("Clear this conversation?")) return;
+  const handleClear = async () => {
+    if (!(await confirm({ title: "Clear this conversation?", description: "The messages are removed from this chat. Changes already made to your data stay.", confirmLabel: "Clear", destructive: true }))) return;
     clearChatState(user?.id, contextKey);
     setState({ messages: [], summary: "", summarizedUpTo: 0 });
     setError(null);
@@ -623,7 +625,7 @@ export function GlobalAIChatFAB() {
             {/* Input */}
             <div className={cn("border-t border-border shrink-0", isLarge ? "p-4" : "p-3")}>
               <div className="flex gap-2">
-                <Textarea
+                <Textarea aria-label="Message"
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -636,7 +638,7 @@ export function GlobalAIChatFAB() {
                   rows={1}
                   disabled={isLoading}
                 />
-                <Button
+                <Button aria-label="Send message"
                   size="icon"
                   className="h-10 w-10 shrink-0"
                   onClick={sendMessage}
@@ -650,6 +652,7 @@ export function GlobalAIChatFAB() {
           </div>
         </div>
       )}
+      {confirmDialog}
     </>
   );
 }

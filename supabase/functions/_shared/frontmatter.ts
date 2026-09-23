@@ -106,3 +106,22 @@ export function serializeFrontmatter(fields: Array<[string, unknown]>): string {
   lines.push("---");
   return lines.join("\n");
 }
+
+/**
+ * The `menerio_metadata` frontmatter value: base64 of the metadata JSON, read
+ * back everywhere with `JSON.parse(atob(...))`.
+ *
+ * `btoa` throws on any character above U+00FF, and AI metadata is full of
+ * them (an en dash or a curly apostrophe in a summary, an emoji, a Cyrillic
+ * name), so a sync that wrote such a note failed with InvalidCharacterError.
+ * Everything outside ASCII is written as a JSON \u escape first: the payload
+ * stays ASCII and JSON.parse restores the characters. Same encoding as
+ * github-sync-export's encodeMetadata, so either side reads the other.
+ */
+export function encodeMenerioMetadata(meta: Record<string, unknown>): string {
+  const ascii = JSON.stringify(meta).replace(
+    /[\u007f-\uffff]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+  return btoa(ascii);
+}

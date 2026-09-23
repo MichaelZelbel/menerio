@@ -158,16 +158,26 @@ function noteContentToText(content: unknown): string {
     .trim();
 }
 
-function extractJson(raw: string): SynthesisResult {
+function extractJson(raw: string, noteId: string): SynthesisResult {
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) throw new Error("No JSON object found in model response");
   const parsed = JSON.parse(cleaned.slice(start, end + 1));
-  if (!Array.isArray(parsed.actions) || !Array.isArray(parsed.source_links) || typeof parsed.log_summary !== "string") {
+  // Only `actions` is essential. A reply that left out log_summary (which
+  // normalizeResult defaults anyway) or source_links threw away a paid, usable
+  // synthesis.
+  if (!parsed || !Array.isArray(parsed.actions)) {
     throw new Error("Model response does not match required shape");
   }
-  return parsed as SynthesisResult;
+  return {
+    ...parsed,
+    // Missing links: every page the reply touches came from this note.
+    source_links: Array.isArray(parsed.source_links)
+      ? parsed.source_links
+      : [{ note_id: noteId, page_slugs: parsed.actions.map((a: { slug?: unknown }) => String(a?.slug ?? "")).filter(Boolean) }],
+    log_summary: typeof parsed.log_summary === "string" ? parsed.log_summary : "",
+  } as SynthesisResult;
 }
 
 function normalizeResult(result: SynthesisResult, noteId: string): SynthesisResult {
@@ -380,6 +390,9 @@ async function callSynthesis(
     callOptions: { response_format: { type: "json_object" } },
     templateVars,
   });
+  // Checked here rather than left to runStage: only `raw` is checkpointed, so
+  // the flag would be gone by then and the cut-off JSON replayed on every retry.
+  if (result.truncated) throw new NoteAIJobError("permanent", `Reply cut off at the token cap: ${callSite}`);
   return { raw: result.content || "" };
 }
 
@@ -607,7 +620,7 @@ async function processIngest(
 
   let parsed: SynthesisResult;
   try {
-    parsed = normalizeResult(extractJson(raw), noteId);
+    parsed = normalizeResult(extractJson(raw, noteId), noteId);
   } catch (parseError) {
     await logWiki(db, userId, "ingest_failed", {
       note_id: noteId,
@@ -615,7 +628,10 @@ async function processIngest(
       raw_response: raw,
       error: parseError instanceof Error ? parseError.message : String(parseError),
     });
-    throw parseError;
+    // The reply is checkpointed and replayed on every retry, so an unparseable
+    // one fails the same way each time: a transient error only burned the
+    // retries and logged the whole reply three times.
+    throw new NoteAIJobError("permanent", `Unparseable synthesis: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
   }
 
   // Build the set of slugs that may legitimately be linked to: every existing page

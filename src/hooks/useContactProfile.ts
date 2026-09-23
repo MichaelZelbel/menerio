@@ -137,6 +137,9 @@ export function useContactProfile(contactId: string | null) {
       });
   }, [categoriesQuery.isLoading, contactId, entriesQuery.data, entriesQuery.isLoading, qc, triggerPeopleSync, userId]);
 
+  // Every mutation below reports its own failure: the pages call plain
+  // mutate() with no handler, so a refused write (including the duplicate
+  // guard's reason that describeWriteFailure spells out) used to vanish.
   const upsertCategory = useMutation({
     mutationFn: async (cat: Partial<ProfileCategory> & { id?: string }) => {
       if (cat.id) {
@@ -156,6 +159,7 @@ export function useContactProfile(contactId: string | null) {
       triggerPeopleSync();
       showToast.success("Category saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the category"),
   });
 
   const deleteCategory = useMutation({
@@ -170,6 +174,7 @@ export function useContactProfile(contactId: string | null) {
       triggerPeopleSync(contactId ? { people: [contactId] } : undefined);
       showToast.success("Category deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the category"),
   });
 
   const upsertEntry = useMutation({
@@ -215,6 +220,7 @@ export function useContactProfile(contactId: string | null) {
       triggerPeopleSync();
       showToast.success("Entry saved");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not save the entry"),
   });
 
   const deleteEntry = useMutation({
@@ -228,6 +234,7 @@ export function useContactProfile(contactId: string | null) {
       triggerPeopleSync(contactId ? { people: [contactId] } : undefined);
       showToast.success("Entry deleted");
     },
+    onError: (error: Error) => showToast.error(error?.message || "Could not delete the entry"),
   });
 
   return {

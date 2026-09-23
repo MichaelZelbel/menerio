@@ -66,6 +66,13 @@ Deno.serve(async (req: Request) => {
       source_url: source_url || null,
     };
 
+    // Idempotent: a sender that retries after a timeout used to append the
+    // same linked record again on every attempt.
+    const alreadyLinked = existing.some((r: { type?: string; source_app?: string; source_id?: string } | null) =>
+      r && r.type === "linked_record" && r.source_app === newEntry.source_app && r.source_id === source_id
+    );
+    if (alreadyLinked) return json({ status: "linked", already_linked: true });
+
     const updated = [...existing, newEntry];
 
     const { error: updateErr } = await supabase

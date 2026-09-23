@@ -147,7 +147,7 @@ const ItemRow = memo(function ItemRow({
             title={item.is_favorite ? "Remove from favorites" : "Add to favorites"}
             className={cn(
               "shrink-0 text-muted-foreground transition-opacity hover:text-warning",
-              item.is_favorite ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+              item.is_favorite ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
             )}
           >
             <Star

@@ -158,7 +158,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
                   ) : isEditing ? (
                     <div className="flex gap-1">
-                      <Button
+                      <Button aria-label="Save"
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
@@ -166,7 +166,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
                       >
                         <Check className="h-3.5 w-3.5 text-emerald-600" />
                       </Button>
-                      <Button
+                      <Button aria-label="Cancel"
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
@@ -176,7 +176,7 @@ export function ExternalNotePanel({ note }: ExternalNotePanelProps) {
                       </Button>
                     </div>
                   ) : (
-                    <Button
+                    <Button aria-label="Edit"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"

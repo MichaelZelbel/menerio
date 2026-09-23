@@ -4,7 +4,6 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
   insufficientCreditsResponse,
-  balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
 import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { QUICK_CAPTURE_METADATA_PROMPT, metadataFieldContract } from "../_shared/llm-defaults.ts";
@@ -66,13 +65,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (!userId) return json({ error: "unauthorized" }, 401);
 
-    // Pre-check balance
+    // Pre-check balance. An empty or unreadable balance skips the AI step; it
+    // no longer refuses the capture. It used to answer 402/503 before the note
+    // existed, so a capture was lost, and Settings → Import (which sends every
+    // imported item through here) counted every item after the allowance ran
+    // out as failed and imported none of them. The note_ai_jobs queue enriches
+    // the note once there is allowance again.
     const balance = await checkBalance(supabase, userId);
-    if (!balance.allowed) {
-      return balance.unavailable
-        ? balanceUnavailableResponse(corsHeaders)
-        : insufficientCreditsResponse(corsHeaders);
-    }
 
     const body = await req.json();
     const content = (body.content || "").trim();
@@ -99,6 +98,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let metadata: Record<string, unknown> = {};
     let credits = null;
     try {
+      if (!balance.allowed) {
+        throw new Error(balance.unavailable ? "BALANCE_UNAVAILABLE" : "INSUFFICIENT_CREDITS");
+      }
       const [embResult, chatResult] = await Promise.all([
         getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, userId, "quick-capture", content).catch(() => null),
         runChat({
@@ -134,10 +136,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const updatePayload: Record<string, unknown> = { metadata, title: aiTitle };
       if (embResult) updatePayload.embedding = embResult.embedding;
 
-      await supabase.from("notes").update(updatePayload).eq("id", note.id);
+      const { error: updateErr } = await supabase.from("notes").update(updatePayload).eq("id", note.id);
+      if (updateErr) throw updateErr;
       title = aiTitle;
     } catch (err: any) {
-      if (err.message === "INSUFFICIENT_CREDITS") {
+      if (err.message === "INSUFFICIENT_CREDITS" || err.message === "BALANCE_UNAVAILABLE") {
         // Note was created but AI processing skipped due to credits
         console.log("Quick capture: note created but AI processing skipped (insufficient credits)");
       } else {

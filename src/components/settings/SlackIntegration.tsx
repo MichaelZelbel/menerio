@@ -43,7 +43,11 @@ export function SlackIntegration() {
   const [appId, setAppId] = useState<string | null>(null);
 
   const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
-  const captureUrl = `https://${projectRef}.supabase.co/functions/v1/slack-capture`;
+  // Slack's Event Subscriptions call this URL without a user session. It must
+  // be ingest-thought (answers the url_verification challenge and checks the
+  // Slack signature); slack-capture requires a signed-in user's token, so
+  // Slack's verification against it always failed.
+  const captureUrl = `https://${projectRef}.supabase.co/functions/v1/ingest-thought`;
 
   // Load existing config
   useEffect(() => {
@@ -218,7 +222,7 @@ export function SlackIntegration() {
                   Go to <strong>Event Subscriptions</strong> → Enable Events → Set Request URL:
                   <div className="mt-1 flex items-center gap-1.5">
                     <code className="text-[10px] bg-muted px-2 py-1 rounded break-all">{captureUrl}</code>
-                    <Button
+                    <Button aria-label="Copy URL"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 shrink-0"

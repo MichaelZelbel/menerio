@@ -49,6 +49,24 @@ Deno.serve(async (req) => {
     const lovableKey = Deno.env.get("LOVABLE_API_KEY");
     const resendKey = Deno.env.get("RESEND_API_KEY");
 
+    // Only the admin panel ("Run AI review") or a service caller may run a
+    // batch. There was no check at all: with verify_jwt on, any signed-in
+    // user (or anyone holding the public anon key) could run the platform-paid
+    // classifier, unshare notes and hand out strikes.
+    const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    if (!bearer) return ok({ error: "Unauthorized" }, 401);
+    if (bearer !== serviceKey) {
+      const authClient = createClient(supabaseUrl, serviceKey);
+      const { data: { user }, error: authErr } = await authClient.auth.getUser(bearer);
+      if (authErr || !user) return ok({ error: "Unauthorized" }, 401);
+      const { data: role } = await authClient
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (role?.role !== "admin") return ok({ error: "Forbidden" }, 403);
+    }
+
     // No longer a hard requirement for classifying: the model and its key now come
     // from the row via runChat, which may well be OpenRouter. This key is still
     // needed for the violation email, which goes through Lovable's Resend
@@ -93,10 +111,12 @@ Deno.serve(async (req) => {
 
         if (isViolation) {
           // 1. Revoke share link
+          // Only the queued user's own share: item_id came from the client.
           await admin
             .from("shared_notes")
             .update({ is_active: false })
-            .eq("note_id", item.item_id);
+            .eq("note_id", item.item_id)
+            .eq("user_id", item.user_id);
 
           // 2. Log moderation event
           await admin.from("moderation_events").insert({
@@ -244,6 +264,11 @@ async function incrementStrikes(admin: any, userId: string) {
   }
 }
 
+/** The title is the user's own text; unescaped it was HTML in the email. */
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function extractTitle(content: string): string {
   const firstLine = content.split("\n")[0]?.trim();
   if (firstLine && firstLine.length > 0) return firstLine.slice(0, 100);
@@ -275,6 +300,7 @@ async function sendViolationEmail(
     return;
   }
 
+  const safeTitle = escapeHtml(noteTitle);
   try {
     const resp = await fetch(RESEND_GATEWAY, {
       method: "POST",
@@ -287,7 +313,7 @@ async function sendViolationEmail(
         from: "Menerio <noreply@menerio.com>",
         to: [email],
         subject: `Your shared note "${noteTitle}" has been unshared`,
-        html: `<p>Our automated content review found that your note "<strong>${noteTitle}</strong>" may violate our <a href="https://menerio.lovable.app/terms">Community Guidelines</a> (Category: ${category}).</p>
+        html: `<p>Our automated content review found that your note "<strong>${safeTitle}</strong>" may violate our <a href="https://menerio.lovable.app/terms">Community Guidelines</a> (Category: ${escapeHtml(category)}).</p>
 <p>Your note's public link has been removed. You can still access and edit your note privately.</p>
 <p>If you believe this is a mistake, please contact <a href="mailto:support@menerio.com">support@menerio.com</a>.</p>`,
       }),

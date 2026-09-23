@@ -31,7 +31,7 @@ Mobile at 390px and desktop at 1280px were captured in light and dark themes and
 | --- | --- |
 | ![Mobile light](assets/contact-topics/mobile-light.png) | ![Mobile dark](assets/contact-topics/mobile-dark.png) |
 
-[Desktop light](assets/contact-topics/desktop-light.png) · [Desktop dark](assets/contact-topics/desktop-dark.png)
+[Desktop light](assets/contact-topics/desktop-light.png) Â· [Desktop dark](assets/contact-topics/desktop-dark.png)
 
 The first acceptance run used a local adapter. A subsequent release run exercised actual hosted Supabase authentication, PostgREST, and Realtime with two temporary synthetic owners. All eight MCP tools were advertised. Owner isolation, hidden-person denial, retry receipts, recurring close/undo, history, and stale-version rejection passed.
 
@@ -39,7 +39,7 @@ On the actual public site, browser capture was retrieved through MCP, browser di
 
 The hosted check exposed PostgREST retrying intentional SQLSTATE 40001 business conflicts. The additive conflict migration changes only those codes to PT409, producing HTTP 409. Both browser and MCP recognize it. All 51 SQL assertions and 29 focused UI/MCP tests passed after this change, along with TypeScript, edge import checks, a production build, scoped review, and GitHub CI. See the [PostgREST retry issue](https://github.com/PostgREST/postgrest/issues/3673) and [custom HTTP error documentation](https://postgrest.org/en/v11/references/errors.html#raise-errors-with-http-status-codes).
 
-[Public-site mobile screenshot](assets/contact-topics/live-mobile-dark.png) · [Public-site desktop screenshot](assets/contact-topics/live-desktop-dark.png)
+[Public-site mobile screenshot](assets/contact-topics/live-mobile-dark.png) Â· [Public-site desktop screenshot](assets/contact-topics/live-desktop-dark.png)
 
 Physical touch hardware and a screen reader were not manually exercised.
 
@@ -49,4 +49,4 @@ Published code: `223b5bdd585ca2e4f48512c207d3f39370c31153`, present in Lovable b
 
 Both migrations are recorded in production: `20260907140000` and `20260907141000`. MCP version 73 and merge-contacts version 200 are active, with their existing authentication settings preserved. Topic Realtime publication membership and restricted function grants were checked live. The pre-release database backup completed on 7 September at 04:24 UTC.
 
-The shared mission control skill is pushed to godspeed origin. Menerio code is pushed to `main` and `codex/person-conversation-topics`. No production deployment remains pending for this feature. Open [People](https://menerio.com/dashboard/people), choose a person, and use the checklist below their name. This is live account data, not a separate test database.
+The shared mission control skill is pushed to the Mission Control repository. Menerio code is pushed to `main` and `codex/person-conversation-topics`. No production deployment remains pending for this feature. Open [People](https://menerio.com/dashboard/people), choose a person, and use the checklist below their name. This is live account data, not a separate test database.

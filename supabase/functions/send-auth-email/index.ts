@@ -152,6 +152,19 @@ function contentFor(actionType: string, brand: BrandTheme): EmailContent {
         ignoreLine: "If you didn't request this code, you can safely ignore this email.",
       };
     default:
+      // Security notices (password_changed_notification, identity_linked_notification, …)
+      // carry no token. The "Continue" fallback below would link to /verify with an
+      // empty token, which fails; these get a plain notice with no button and no code.
+      if (actionType.endsWith("_notification")) {
+        const what = actionType.replace(/_notification$/, "").replace(/_/g, " ");
+        return {
+          subject: `Security notice for your ${brand.name} account`,
+          heading: "Account security notice",
+          paragraph: `This is a notice that your ${brand.name} account had this change: ${what}.`,
+          buttonLabel: null,
+          ignoreLine: "If this was you, there is nothing to do. If it was not, reset your password and review your account.",
+        };
+      }
       return {
         subject: `Confirm this action on ${brand.name}`,
         heading: "Confirm this action",
@@ -173,7 +186,9 @@ function renderHtml(brand: BrandTheme, c: EmailContent, actionUrl: string | null
           </td>
         </tr>
       </table>`
-    : `<p style="margin:0 0 24px;text-align:center;font-size:28px;font-weight:700;letter-spacing:6px;color:${brand.accent};">${token ?? ""}</p>`;
+    : token
+    ? `<p style="margin:0 0 24px;text-align:center;font-size:28px;font-weight:700;letter-spacing:6px;color:${brand.accent};">${token}</p>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -302,42 +317,65 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const brand = resolveBrand(user.user_metadata, email_data.redirect_to);
   const content = contentFor(actionType, brand);
 
-  // Same verify-link shape Supabase's built-in {{ .ConfirmationURL }} produces.
-  const actionUrl =
-    `${SUPABASE_URL}/auth/v1/verify?token=${encodeURIComponent(email_data.token_hash)}` +
-    `&type=${encodeURIComponent(actionType)}&redirect_to=${encodeURIComponent(email_data.redirect_to)}`;
-
-  // email_change_new confirms the NEW address; everything else goes to the
-  // account's current email.
-  const to = actionType === "email_change_new" && user.new_email ? user.new_email : user.email;
-
-  const html = renderHtml(brand, content, content.buttonLabel ? actionUrl : null, email_data.token);
-  const text = content.buttonLabel
-    ? `${content.heading}\n\n${content.paragraph}\n\n${content.buttonLabel}: ${actionUrl}\n\n${content.ignoreLine}`
-    : `${content.heading}\n\n${content.paragraph} ${email_data.token}\n\n${content.ignoreLine}`;
-
-  let result = await sendViaResend({ from: brand.from, to: [to], subject: content.subject, html, text });
-
-  // If the brand's From domain is not verified in this Resend account,
-  // retry once from the verified menerio.com domain — keeping the Cherishly
-  // display name and routing replies to the real Cherishly mailbox.
-  if (!result.ok && brand.id === "cherishly") {
-    console.error(
-      `[SEND-AUTH-EMAIL] Send as "${brand.from}" failed (${result.status}): ${result.body} — retrying with fallback sender`,
-    );
-    result = await sendViaResend({
-      from: CHERISHLY_FALLBACK_FROM,
-      reply_to: CHERISHLY_REPLY_TO,
-      to: [to],
-      subject: content.subject,
-      html,
-      text,
-    });
+  // Who gets which link. For everything but an email change it is one mail to
+  // the account's address. An email change is ONE hook call carrying both
+  // pairs when secure email change is on, and Supabase documents the hash
+  // names as reversed for backward compatibility: the current address gets
+  // token_hash_new, the new address gets token_hash. With secure change off
+  // there is one pair, and it belongs to the new address. This used to send
+  // one mail, to the current address, with the new address's hash: the new
+  // address never heard of the change, so a secure change could never
+  // complete and an insecure one was confirmed from the old mailbox.
+  const sends: Array<{ to: string; tokenHash: string; token: string }> = [];
+  if (actionType === "email_change") {
+    if (email_data.token_hash_new && email_data.token_hash && user.new_email) {
+      sends.push({ to: user.email, tokenHash: email_data.token_hash_new, token: email_data.token });
+      sends.push({ to: user.new_email, tokenHash: email_data.token_hash, token: email_data.token_new ?? "" });
+    } else {
+      sends.push({
+        to: user.new_email || user.email,
+        tokenHash: email_data.token_hash || email_data.token_hash_new || "",
+        token: email_data.token || email_data.token_new || "",
+      });
+    }
+  } else {
+    sends.push({ to: user.email, tokenHash: email_data.token_hash, token: email_data.token });
   }
 
-  if (!result.ok) {
-    console.error(`[SEND-AUTH-EMAIL] Resend error ${result.status}: ${result.body}`);
-    return new Response(JSON.stringify({ error: "Email send failed" }), { status: 500 });
+  for (const send of sends) {
+    // Same verify-link shape Supabase's built-in {{ .ConfirmationURL }} produces.
+    const actionUrl =
+      `${SUPABASE_URL}/auth/v1/verify?token=${encodeURIComponent(send.tokenHash)}` +
+      `&type=${encodeURIComponent(actionType)}&redirect_to=${encodeURIComponent(email_data.redirect_to)}`;
+
+    const html = renderHtml(brand, content, content.buttonLabel ? actionUrl : null, send.token);
+    const text = content.buttonLabel
+      ? `${content.heading}\n\n${content.paragraph}\n\n${content.buttonLabel}: ${actionUrl}\n\n${content.ignoreLine}`
+      : `${content.heading}\n\n${content.paragraph}${send.token ? ` ${send.token}` : ""}\n\n${content.ignoreLine}`;
+
+    let result = await sendViaResend({ from: brand.from, to: [send.to], subject: content.subject, html, text });
+
+    // If the brand's From domain is not verified in this Resend account,
+    // retry once from the verified menerio.com domain — keeping the Cherishly
+    // display name and routing replies to the real Cherishly mailbox.
+    if (!result.ok && brand.id === "cherishly") {
+      console.error(
+        `[SEND-AUTH-EMAIL] Send as "${brand.from}" failed (${result.status}): ${result.body} — retrying with fallback sender`,
+      );
+      result = await sendViaResend({
+        from: CHERISHLY_FALLBACK_FROM,
+        reply_to: CHERISHLY_REPLY_TO,
+        to: [send.to],
+        subject: content.subject,
+        html,
+        text,
+      });
+    }
+
+    if (!result.ok) {
+      console.error(`[SEND-AUTH-EMAIL] Resend error ${result.status}: ${result.body}`);
+      return new Response(JSON.stringify({ error: "Email send failed" }), { status: 500 });
+    }
   }
 
   console.log(`[SEND-AUTH-EMAIL] Sent ${actionType} email, brand=${brand.id}`);

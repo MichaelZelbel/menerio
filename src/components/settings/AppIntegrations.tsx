@@ -249,7 +249,7 @@ export function AppIntegrations() {
                         />
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                            <Button aria-label="Delete" variant="ghost" size="icon" className="text-destructive hover:text-destructive">
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </AlertDialogTrigger>
@@ -308,7 +308,7 @@ export function AppIntegrations() {
               <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono break-all select-all">
                 {newApiKey}
               </code>
-              <Button variant="outline" size="icon" onClick={() => newApiKey && handleCopy(newApiKey)}>
+              <Button aria-label={copied ? "Copied" : "Copy API key"} variant="outline" size="icon" onClick={() => newApiKey && handleCopy(newApiKey)}>
                 {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>

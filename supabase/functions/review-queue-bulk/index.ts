@@ -48,12 +48,16 @@ type ReviewRow = {
 
 type KeepOutcome =
   | { kind: "applied" }
-  | { kind: "already_satisfied"; reason?: string }
+  | { kind: "already_satisfied"; reason?: string; leftPending?: boolean }
   | { kind: "skipped"; reason: string };
 
-type KeepStats = { applied: number; alreadySatisfied: number; skipped: number; skipReasons: Map<string, number> };
+type KeepStats = {
+  applied: number; alreadySatisfied: number; skipped: number; skipReasons: Map<string, number>;
+  /** Rows deliberately left in the queue (judge unavailable / wants a human). */
+  leftPending: Set<string>;
+};
 
-const emptyKeepStats = (): KeepStats => ({ applied: 0, alreadySatisfied: 0, skipped: 0, skipReasons: new Map() });
+const emptyKeepStats = (): KeepStats => ({ applied: 0, alreadySatisfied: 0, skipped: 0, skipReasons: new Map(), leftPending: new Set() });
 
 function recordKeepOutcome(stats: KeepStats, outcome: KeepOutcome) {
   if (outcome.kind === "applied") stats.applied += 1;
@@ -210,7 +214,9 @@ async function runJob(
 
   // A completed Keep is terminal. Any remaining active row means an
   // unexpected backend failure, so fail the job instead of claiming success.
-  const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id), wikiIds);
+  // Rows the keep deliberately left pending are not failures; counting them
+  // failed the whole job ("N item(s) were not resolved") and lost its stats.
+  const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id).filter((id) => !keepStats.leftPending.has(id)), wikiIds);
   if (outstanding > 0) throw new Error(`${outstanding} item(s) were not resolved`);
   failed = 0;
   done = total;
@@ -309,6 +315,7 @@ async function runKeep(
   for (const r of others) {
     try {
       const outcome = await keepPending(db, userId, r);
+      if (outcome.kind === "already_satisfied" && outcome.leftPending) stats.leftPending.add(r.id);
       recordKeepOutcome(stats, outcome);
       bump(1, 0);
     } catch (e) {
@@ -509,7 +516,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
           return skip(`relationship ${verdict.outcome}`);
         }
         if (verdict.outcome !== "keep") {
-          return { kind: "already_satisfied", reason: judgeUnavailable ? "evidence judge unavailable, left pending" : "evidence needs a human look, left pending" };
+          return { kind: "already_satisfied", leftPending: true, reason: judgeUnavailable ? "evidence judge unavailable, left pending" : "evidence needs a human look, left pending" };
         }
       }
       const { data: inserted, error } = await db.from("contact_relationships").insert({
@@ -719,11 +726,17 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
   const p = (r.payload || {}) as any;
 
   if (r.suggestion_type === "normalize_profile_entry") {
-    await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
       body: JSON.stringify({ action: "rollback", review_id: r.id, user_id: userId }),
     });
+    // An unanswered rollback left the merged entry in place while the row was
+    // filed as reverted. Throwing keeps it in revertFailed, and active.
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok || out?.ok !== true) {
+      throw new Error(`normalize-profile rollback failed (${res.status}): ${out?.error ?? ""}`);
+    }
     return;
   }
 
@@ -733,9 +746,11 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
       const contactId = p.contact_id as string | undefined;
       const alias = String(p.alias || "").trim();
       if (contactId && alias) {
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+        // contact_id comes from the payload, which its owner can write.
+        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (!c) return;
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId);
+        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId);
       }
     }
     return;
@@ -751,17 +766,23 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
     case "add_relationship":
       await db.from("contact_relationships").delete().eq("id", r.target_entity_id).eq("user_id", userId);
       return;
-    case "add_moment":
-      await db.from("moment_participants").delete().eq("moment_id", r.target_entity_id);
-      await db.from("moments").delete().eq("id", r.target_entity_id).eq("user_id", userId);
+    case "add_moment": {
+      // target_entity_id is user-writable: only touch a moment this user owns.
+      const { data: m } = await db.from("moments").select("id").eq("id", r.target_entity_id).eq("user_id", userId).maybeSingle();
+      if (!m) return;
+      await db.from("moment_participants").delete().eq("moment_id", m.id);
+      await db.from("moments").delete().eq("id", m.id).eq("user_id", userId);
       return;
+    }
     case "add_alias": {
       const contactId = p.contact_id as string | undefined;
       const alias = String(p.alias || "").trim();
       if (contactId && alias) {
-        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).maybeSingle();
+        // contact_id comes from the payload, which its owner can write.
+        const { data: c } = await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle();
+        if (!c) return;
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
-        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId);
+        await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId);
       }
       return;
     }

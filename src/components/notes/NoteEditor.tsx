@@ -1205,9 +1205,10 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   };
 
   const moveToTrash = () => {
-    // useUpdateNote has no onError of its own. The success toast and the GitHub
-    // delete used to fire before the write settled, so a failed trash said
-    // "moved to trash" and removed the file from GitHub while the note stayed.
+    // The success toast and the GitHub delete wait for the write: they used to
+    // fire before it settled, so a failed trash said "moved to trash" and
+    // removed the file from GitHub while the note stayed. A failure is toasted
+    // by useUpdateNote itself, so no onError here (it would say it twice).
     updateNote.mutate(
       { id: note.id, is_trashed: true, trashed_at: new Date().toISOString() },
       {
@@ -1217,7 +1218,6 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           }
           showToast.success("Note moved to trash");
         },
-        onError: (error) => showToast.error(`Could not move the note to trash: ${error.message || "unknown error"}`),
       },
     );
   };
@@ -1226,8 +1226,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     updateNote.mutate(
       { id: note.id, is_trashed: false, trashed_at: null },
       {
+        // Failure is toasted by useUpdateNote.
         onSuccess: () => showToast.success("Note restored"),
-        onError: (error) => showToast.error(`Could not restore the note: ${error.message || "unknown error"}`),
       },
     );
   };
@@ -1630,7 +1630,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           </div>
         )}
         <div className="flex items-center gap-2 mb-4">
-          <input
+          <input aria-label="Note title"
             ref={titleInputRef}
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
@@ -1674,7 +1674,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             </div>
           )}
         {sourceMode ? (
-          <textarea
+          <textarea aria-label="Markdown source"
             value={sourceText}
             onChange={(e) => {
               setSourceText(e.target.value);
@@ -1719,7 +1719,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               <Link2 className="h-3.5 w-3.5 text-primary" /> Connections
             </h4>
-            <button onClick={() => setShowConnections(false)} className="text-muted-foreground hover:text-foreground">
+            <button aria-label="Close connections" onClick={() => setShowConnections(false)} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />
             </button>
           </div>

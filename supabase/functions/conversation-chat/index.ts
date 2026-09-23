@@ -197,6 +197,7 @@ Deno.serve(async (req) => {
         userId: user.id,
         creditFeature: "conversation-chat",
         model: cfg.model,
+        maxTokens: cfg.max_tokens,
         systemPrompt,
         chatMessages,
         tools,

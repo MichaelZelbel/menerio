@@ -47,7 +47,7 @@ export function AddMemberDialog({ group, existingPersonIds }: { group: ContactGr
         <div className="space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search people..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Input aria-label="Search people" className="pl-9" placeholder="Search people..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="max-h-80 space-y-1 overflow-y-auto">
             {isLoading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> : available.map((contact) => (

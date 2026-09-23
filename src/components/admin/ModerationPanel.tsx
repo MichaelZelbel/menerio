@@ -36,6 +36,9 @@ import { format } from "date-fns";
 
 // ── Shared helpers ──
 
+/** The review queue shows this many of the newest rows; the badge counts all pending. */
+const REVIEW_QUEUE_LIMIT = 50;
+
 type ProfileMap = Record<string, string>;
 
 async function fetchProfileNames(userIds: string[]): Promise<ProfileMap> {
@@ -162,7 +165,7 @@ function AIReviewQueueTab() {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     const [{ data, error }, { count, error: countError }] = await Promise.all([
-      supabase.from("moderation_review_queue").select("*").order("created_at", { ascending: false }).limit(50),
+      supabase.from("moderation_review_queue").select("*").order("created_at", { ascending: false }).limit(REVIEW_QUEUE_LIMIT),
       supabase.from("moderation_review_queue").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
     if (error || countError) {
@@ -269,6 +272,11 @@ function AIReviewQueueTab() {
               )}
             </TableBody>
           </Table>
+          {!loading && items.length >= REVIEW_QUEUE_LIMIT && (
+            <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+              Showing the {REVIEW_QUEUE_LIMIT} newest items. Older ones are not listed here.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

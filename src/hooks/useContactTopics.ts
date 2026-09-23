@@ -42,7 +42,12 @@ export function useContactTopics(contactId: string, status: TopicStatus | 'all' 
     };
     const visibleRefresh = () => { if (document.visibilityState === 'visible') refresh(); };
     const connectivity = () => { setOnline(navigator.onLine); if (navigator.onLine) refresh(); };
-    const channel = db.channel(`contact-topics:${userId}:${contactId}`)
+    // A unique topic per subscription: supabase-js hands back the EXISTING
+    // channel for a topic name, and removeChannel only drops it once the leave
+    // is acknowledged. Reopening the same person inside that window re-used the
+    // dying channel, so its realtime listener closed with it and external
+    // writes stopped arriving until the 30 s poll.
+    const channel = db.channel(`contact-topics:${userId}:${contactId}:${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_topics', filter: `contact_id=eq.${contactId}` }, refresh)
       .subscribe((state) => { if (state === 'SUBSCRIBED') refresh(); });
     const timer = window.setInterval(visibleRefresh, 30_000);

@@ -49,7 +49,7 @@ export function ChatInput({ input, setInput, onSend, loading, attachments, onAdd
               <FileText className="h-3 w-3 text-muted-foreground" />
               <span className="max-w-[140px] truncate">{attachment.name}</span>
               <span className="text-muted-foreground">({formatSize(attachment.size)})</span>
-              <button type="button" onClick={() => onRemoveAttachment(index)} className="text-muted-foreground hover:text-destructive">
+              <button aria-label={`Remove ${attachment.name}`} type="button" onClick={() => onRemoveAttachment(index)} className="text-muted-foreground hover:text-destructive">
                 <X className="h-3 w-3" />
               </button>
             </div>
@@ -58,10 +58,10 @@ export function ChatInput({ input, setInput, onSend, loading, attachments, onAdd
       )}
       <div className="flex items-end gap-2">
         <input ref={fileInputRef} type="file" multiple className="hidden" accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.yaml,.yml,.toml,.log,.cfg,.ini,.rtf" onChange={handleFileSelect} />
-        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" disabled={loading} onClick={() => fileInputRef.current?.click()}>
+        <Button aria-label="Attach files" variant="ghost" size="icon" className="h-9 w-9 shrink-0" disabled={loading} onClick={() => fileInputRef.current?.click()}>
           <Paperclip className="h-4 w-4" />
         </Button>
-        <textarea
+        <textarea aria-label="Message"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }}
@@ -70,7 +70,7 @@ export function ChatInput({ input, setInput, onSend, loading, attachments, onAdd
           placeholder={`Ask ${BRAND.personaName}…`}
           className="min-h-[56px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <Button size="icon" className="shrink-0" disabled={loading || (!input.trim() && attachments.length === 0)} onClick={onSend}>
+        <Button aria-label="Send message" size="icon" className="shrink-0" disabled={loading || (!input.trim() && attachments.length === 0)} onClick={onSend}>
           <Send className="h-4 w-4" />
         </Button>
       </div>

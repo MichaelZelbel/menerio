@@ -38,14 +38,21 @@ export const WIKILINK_SOURCE = "wikilink-sync";
 /** A body is scanned for at most this many distinct titles. */
 const MAX_WIKILINKS_PER_NOTE = 50;
 
-/** Distinct wikilink titles in reading order, trimmed, compared case-insensitively. */
+/**
+ * Distinct wikilink titles in reading order, trimmed, compared case-insensitively.
+ *
+ * `[[Title|shown text]]`, `[[Title#Heading]]` and `[[Title#^block]]` all point
+ * at the note called Title. The whole inner text used to be taken as the
+ * title, so every aliased or heading link was reported unresolved and never
+ * became a connection. `[[#Heading]]` is a link inside the same note: skipped.
+ */
 export function extractWikilinkTitles(content: string | null | undefined): string[] {
   const text = String(content ?? "");
   if (!text.includes("[[")) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const m of text.matchAll(WIKILINK_REGEX)) {
-    const title = m[1].trim();
+    const title = m[1].split("|")[0].split("#")[0].trim();
     const key = title.toLowerCase();
     if (!title || seen.has(key)) continue;
     seen.add(key);

@@ -12,7 +12,7 @@ import {
   insufficientCreditsResponse,
   balanceUnavailableResponse,
 } from "../_shared/llm-credits.ts";
-import { resolveConfig, resolveSystemPrompt } from "../_shared/llm-router.ts";
+import { parseModelJson, resolveConfig, resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { NOTE_CHAT_SUMMARIZE_PROMPT } from "../_shared/llm-defaults.ts";
 import { getUserProfile, formatUserProfileDigest } from "../_shared/user-profile.ts";
 import { buildAwarenessContext } from "../_shared/awareness.ts";
@@ -313,8 +313,17 @@ Return JSON only, no prose.`;
           },
         );
         const raw = llm.result?.choices?.[0]?.message?.content ?? "{}";
-        let parsed: Record<string, unknown> = {};
-        try { parsed = JSON.parse(raw); } catch { /* pass */ }
+        // An unparseable reply, or the model's own {"error": "no match"}, used
+        // to come back as a successful empty draft.
+        const parsed = parseModelJson<Record<string, unknown>>(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || "error" in parsed) {
+          return JSON.stringify({
+            error: "extraction_failed",
+            message: parsed && typeof parsed === "object" && "error" in parsed
+              ? `The page does not fit this collection: ${String((parsed as any).error)}`
+              : "Could not read a draft from that page.",
+          });
+        }
         return JSON.stringify({
           success: true,
           action: "extract_item_from_url",
@@ -485,6 +494,7 @@ Guidelines:
         userId: user.id,
         creditFeature: "collection-chat",
         model: cfg.model,
+        maxTokens: cfg.max_tokens,
         systemPrompt: systemContent,
         chatMessages,
         tools: loopTools,

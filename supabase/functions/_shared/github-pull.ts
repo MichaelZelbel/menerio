@@ -2,7 +2,7 @@ import { selectAllRows } from "./paged-select.ts";
 import { checkedDatabase } from "./sync-database.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildBlobLookup, importNoteAttachments } from "./obsidian-attachments.ts";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { encodeMenerioMetadata, parseFrontmatter } from "./frontmatter.ts";
 import { isGodspeedMirror } from "./mc-source.ts";
 import { isGodspeedFolderPath } from "./mc-ranking.ts";
 import {
@@ -512,7 +512,7 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
         const allTags = [...new Set([...(note.tags || []), ...(Array.isArray(meta.topics) ? meta.topics as string[] : [])])];
         if (allTags.length > 0) frontmatterLines.push(`tags: [${allTags.map((t: string) => `"${t}"`).join(", ")}]`);
         if (meta.type || note.entity_type) frontmatterLines.push(`type: ${meta.type || note.entity_type}`);
-        if (Object.keys(meta).length > 0) frontmatterLines.push(`menerio_metadata: ${btoa(JSON.stringify(meta))}`);
+        if (Object.keys(meta).length > 0) frontmatterLines.push(`menerio_metadata: ${encodeMenerioMetadata(meta)}`);
         if (note.is_favorite) frontmatterLines.push("favorite: true");
         if (note.is_pinned) frontmatterLines.push("pinned: true");
         frontmatterLines.push("---");
@@ -600,7 +600,7 @@ async function resolveConflict(
     frontmatterLines.push(`title: "${String(note.title || "").replace(/"/g, '\\"')}"`);
     frontmatterLines.push(`created: ${note.created_at}`);
     frontmatterLines.push(`modified: ${note.updated_at}`);
-    if (Object.keys(meta).length > 0) frontmatterLines.push(`menerio_metadata: ${btoa(JSON.stringify(meta))}`);
+    if (Object.keys(meta).length > 0) frontmatterLines.push(`menerio_metadata: ${encodeMenerioMetadata(meta)}`);
     frontmatterLines.push("---");
 
     const rawContent = String(note.content || "");

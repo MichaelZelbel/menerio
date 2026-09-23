@@ -89,6 +89,7 @@ export function useCreateEntity() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["entities"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       showToast.success("Added");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not add it"),
@@ -110,6 +111,7 @@ export function useUpdateEntity() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["entities"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       showToast.success("Saved");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not save"),
@@ -126,7 +128,9 @@ export function useDeleteEntity() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["entities"] });
+      qc.invalidateQueries({ queryKey: ["world-entities"] });
       qc.invalidateQueries({ queryKey: ["claims"] });
+      qc.invalidateQueries({ queryKey: ["world-claims"] });
       showToast.success("Removed");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not remove it"),

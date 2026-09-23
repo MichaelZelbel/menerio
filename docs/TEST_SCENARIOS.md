@@ -1,6 +1,6 @@
 # Menerio — End-to-End Test Scenarios
 
-> **Last updated:** 2026-05-01
+> **Last updated:** 2026-09-23
 
 ## Person conversation topics (2026-09-07)
 
@@ -64,8 +64,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
    5. Observe password strength indicator updates
    6. Check "I agree to the Terms of Service and Privacy Policy"
    7. Click "Create Account"
-- **Expected Outcome:** Toast "Account created!" appears with instruction to check email. Password strength shows "Strong" (4 bars).
-- **Variations:** Try weak password (< 8 chars) — strength indicator shows "Too short"
+- **Expected Outcome:** A "Check your email" confirmation panel replaces the form. Password strength shows "Strong" (4 bars).
+- **Variations:** Try a short lowercase-only password (e.g. "abc"): indicator shows "Too short"
 
 ### TS-AUTH-002: Sign In with Email/Password
 
@@ -76,7 +76,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   2. Ensure "Sign In" tab is active
   3. Enter email and password for the Free User persona
   4. Click "Sign In"
-- **Expected Outcome:** User is redirected to `/dashboard`. Sidebar shows user display name. Role badge shows "Free".
+- **Expected Outcome:** User is redirected to `/dashboard`. The dashboard's "Your Role" card shows "Free".
 - **Variations:** 
   - Wrong password → toast "Invalid email or password. Please try again."
   - Navigate to `/auth?redirect=/dashboard/notes` → after sign-in, redirected to `/dashboard/notes`
@@ -97,7 +97,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Account exists
 - **Steps:**
   1. Navigate to `/auth`
-  2. Click "Forgot your password?" link
+  2. Click "Forgot password?" link
   3. Enter email address
   4. Click "Send Reset Link"
 - **Expected Outcome:** Toast "Password reset email sent" appears. Email contains link to `/reset-password`.
@@ -108,7 +108,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User is signed in
 - **Steps:**
   1. Navigate to `/dashboard/settings`
-  2. Scroll to "Change Password" section (or click "Security" tab)
+  2. Scroll to "Change Password" section (on the "Account" tab)
   3. Enter new password with strength ≥ "Good"
   4. Confirm new password
   5. Click "Update Password"
@@ -119,9 +119,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate logout
 - **Preconditions:** User is signed in
 - **Steps:**
-  1. Navigate to `/dashboard/settings`
-  2. Click "Sign Out" button
-- **Expected Outcome:** User is redirected to `/auth`. Attempting to navigate to `/dashboard` redirects back to `/auth`.
+  1. Click "Sign Out" at the bottom of the sidebar
+- **Expected Outcome:** User is redirected to `/`. Attempting to navigate to `/dashboard` redirects to `/auth`.
 
 ### TS-AUTH-007: Protected Route Redirect
 
@@ -136,7 +135,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 ### TS-AUTH-008: First Captures Wizard
 
 - **Objective:** Validate onboarding wizard for new users
-- **Preconditions:** User just created account, has 0 notes
+- **Preconditions:** User has the admin role and fewer than 5 notes, and has not finished the wizard before
 - **Steps:**
   1. Sign in as new user
   2. Navigate to `/dashboard`
@@ -181,7 +180,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Navigate to `/dashboard/notes`
   2. Select "E2E Test Note — Updated"
   3. Click the star/favorite icon in the editor header
-  4. Switch filter to "Favorites" using the filter dropdown
+  4. Open the "Favorites" section in the note tree
 - **Expected Outcome:** Note appears in Favorites filter. Star icon is filled/active. Clicking again removes from favorites.
 
 ### TS-NOTES-004: Pin a Note
@@ -191,7 +190,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Select the second note in the list
-  3. Pin it via the overflow menu (⋮) → "Pin note"
+  3. Click the pin icon ("Pin to top") in the editor toolbar
 - **Expected Outcome:** Pinned note moves to the top of the note list. Pin icon visible on the note card.
 
 ### TS-NOTES-005: Trash and Restore a Note
@@ -201,8 +200,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Select a note
-  3. Click overflow menu (⋮) → "Move to Trash"
-  4. Switch filter to "Trash"
+  3. Click the trash icon ("Move to trash") in the editor toolbar; confirm "Move to Trash"
+  4. Open the "Trash" section in the note tree
   5. Select the trashed note
   6. Click "Restore" button
 - **Expected Outcome:** Note disappears from "All Notes" when trashed. Appears in "Trash" filter. After restore, reappears in "All Notes".
@@ -213,9 +212,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** At least one note in trash
 - **Steps:**
   1. Navigate to `/dashboard/notes`
-  2. Switch filter to "Trash"
+  2. Open the "Trash" section in the note tree
   3. Select a trashed note
-  4. Click "Delete Permanently" button
+  4. Click "Delete Forever" button
   5. Confirm in the alert dialog
 - **Expected Outcome:** Toast "Note permanently deleted" appears. Note is removed from all views. Cannot be recovered.
 
@@ -240,7 +239,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate file upload handling
 - **Preconditions:** User has a note open
 - **Steps:**
-  1. Click the image/attachment button in the toolbar
+  1. Drag a test image into the editor, or paste it
   2. Upload a test image (PNG, < 5MB)
   3. Wait for upload to complete
 - **Expected Outcome:** Image appears inline in the note content. Image is stored in `note-attachments` bucket. Media analysis is triggered (pending status).
@@ -274,21 +273,21 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Click the search icon
-  3. Switch to "Semantic" search mode (Brain icon)
+  3. Switch to "Smart" search mode (Sparkles icon)
   4. Type a conceptual query like "personal goals for this year"
   5. Wait for results
 - **Expected Outcome:** Results appear ranked by similarity score. Results may include notes that don't contain the exact words. AI credits are deducted.
-- **Variations:** Test scope filter: "All", "Notes only", "Media only"
+- **Variations:** Test scope filter: "All", "Notes", "Media"
 
 ### TS-NOTES-012: Filter Notes by Entity Type
 
 - **Objective:** Validate entity-type filter dropdown
-- **Preconditions:** Notes exist with different entity types (Observation, Task, Idea, etc.)
+- **Preconditions:** Notes exist with different entity types (person, event, idea, prompt, document, note)
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Click the filter/entity-type dropdown
-  3. Select "Task"
-- **Expected Outcome:** Only notes with `entity_type = "Task"` are shown. Clearing filter shows all notes.
+  3. Select "Idea"
+- **Expected Outcome:** Only notes with `entity_type = "idea"` are shown. Clearing filter shows all notes.
 
 ### TS-NOTES-013: Download Note as Markdown
 
@@ -297,7 +296,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Select the note
-  3. Click the download icon in the editor action bar
+  3. Open the "More actions" menu (⋯) and click "Download Markdown"
 - **Expected Outcome:** Browser downloads a `.md` file named after the note title. File contains YAML frontmatter and the current Markdown body.
 
 ### TS-NOTES-014: Source Mode Round Trip
@@ -305,23 +304,23 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate Markdown source editing
 - **Preconditions:** A note is open and editable
 - **Steps:**
-  1. Click the Markdown source icon
+  1. Open the "More actions" menu (⋯) and click "Markdown source"
   2. Edit raw Markdown, including a checklist or wikilink
   3. Switch back to rich text mode
   4. Refresh the page
 - **Expected Outcome:** Markdown changes persist without HTML conversion artifacts. Checklists and wikilinks render correctly.
 
-### TS-NOTES-013: Process Note with AI
+### TS-NOTES-015: Process Note with AI
 
 - **Objective:** Validate AI note processing (tagging, classification)
 - **Preconditions:** User has AI credits. A note with substantive content exists.
 - **Steps:**
   1. Open a note with at least 2 paragraphs of content
-  2. Click "Process with AI" (Sparkles icon) in the editor toolbar/menu
+  2. Open the "More actions" menu (⋯) and click "Classify with AI" (shown only while the note has no type)
   3. Wait for processing to complete
-- **Expected Outcome:** Note metadata is populated: entity_type, tags, topics, people, sentiment, summary. Smart Tags panel shows extracted data. AI credits are deducted.
+- **Expected Outcome:** Note metadata is populated: entity_type, tags, topics, people, sentiment, summary. The "Note Metadata" panel shows extracted data. AI credits are deducted.
 
-### TS-NOTES-014: External Note — Read-Only Toolbar
+### TS-NOTES-016: External Note — Read-Only Toolbar
 
 - **Objective:** Validate that external (synced) notes show a simplified read-only action bar instead of the full editor toolbar
 - **Preconditions:** An external note exists (synced from Querino via `receive-note`)
@@ -329,9 +328,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Navigate to `/dashboard/notes`
   2. Select an external note (identified by the orange source-app badge)
   3. Observe the toolbar area above the editor content
-- **Expected Outcome:** No rich-text formatting toolbar (bold, italic, headings, etc.) is shown. Instead, a read-only bar displays: 🔒 lock icon, "Read-only · Synced from {source_app}" label, "Open in {app}" button (if `source_url` exists), and "Duplicate to Menerio" button.
+- **Expected Outcome:** No rich-text formatting toolbar (bold, italic, headings, etc.) is shown. Instead, a read-only bar displays: 🔒 lock icon, "Synced from {source_app}" label, "Open in {app}" button (if `source_url` exists), and "Duplicate to edit" button.
 
-### TS-NOTES-015: External Note — Open in Source App
+### TS-NOTES-017: External Note — Open in Source App
 
 - **Objective:** Validate one-click jump to the originating app
 - **Preconditions:** An external note with a `source_url` exists
@@ -340,17 +339,17 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   2. Click "Open in {app}" button in the read-only bar
 - **Expected Outcome:** A new browser tab opens with the `source_url`, navigating to the note in Querino.
 
-### TS-NOTES-016: External Note — Duplicate to Local Note
+### TS-NOTES-018: External Note — Duplicate to Local Note
 
 - **Objective:** Validate duplicating an external note to create a local editable copy
 - **Preconditions:** An external note exists
 - **Steps:**
   1. Open the external note
-  2. Click "Duplicate to Menerio" in the read-only bar
+  2. Click "Duplicate to edit" in the read-only bar
   3. Wait for the duplication to complete
 - **Expected Outcome:** Toast "Duplicated to a local note" appears. User is navigated to the new note. The new note title is "{original title} (copy)", has the same content and tags, and is NOT external (full editor toolbar is visible, note is editable).
 
-### TS-NOTES-017: External Note — Structured Fields & Patch
+### TS-NOTES-019: External Note — Structured Fields & Patch
 
 - **Objective:** Validate the External Note Panel for viewing/editing structured fields
 - **Preconditions:** An external note with structured fields exists
@@ -372,9 +371,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/notes`
   2. Select a note
-  3. Click overflow menu (⋮) → "Share Note"
+  3. Click "More actions" menu (⋯) → "Share publicly"
   4. Observe clipboard notification
-- **Expected Outcome:** Toast "Public link copied to clipboard" appears. A "Shared" badge (globe icon) appears in the editor header. The overflow menu now shows "Copy Public Link" and "Stop Sharing" instead of "Share Note".
+- **Expected Outcome:** Toast "Public link copied to clipboard" appears. A "Shared" badge (globe icon) appears in the editor header. The overflow menu now shows "Copy public link" and "Stop sharing" instead of "Share publicly".
 
 ### TS-SHARE-002: Access Shared Note as Anonymous User
 
@@ -392,7 +391,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** A note is currently shared
 - **Steps:**
   1. Open the shared note in the editor
-  2. Click overflow menu (⋮) → "Stop Sharing"
+  2. Click "More actions" menu (⋯) → "Stop sharing"
   3. In incognito window, try to access the previously shared URL
 - **Expected Outcome:** "Shared" badge disappears from editor. The public URL now shows "Note not found" or 404 state.
 
@@ -406,10 +405,10 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User is signed in
 - **Steps:**
   1. Navigate to `/dashboard/people`
-  2. Click "Add Contact" (Plus icon) button
-  3. Fill in: Name "Jane Doe", Email "jane@example.com", Company "Acme Corp", Role "CTO", Relationship "Professional"
-  4. Click "Save" / submit
-- **Expected Outcome:** Contact card appears in the list. All fields display correctly.
+  2. Click "Add person" (Plus icon)
+  3. Enter Name "Jane Doe"
+  4. Click "Create"
+- **Expected Outcome:** The person appears in the People list.
 
 ### TS-PEOPLE-002: View Contact Detail
 
@@ -418,7 +417,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/people`
   2. Click on "Jane Doe" contact card
-- **Expected Outcome:** Detail view shows all contact fields, interaction history, and linked notes.
+- **Expected Outcome:** Detail view shows the person header and the Profile, Groups, Conversation, Timeline and Documents tabs, with related notes on the Profile tab.
 
 ### TS-PEOPLE-003: Edit a Contact
 
@@ -426,9 +425,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** At least one contact exists
 - **Steps:**
   1. Open contact detail for "Jane Doe"
-  2. Edit the role to "VP Engineering"
-  3. Add a tag
-  4. Save changes
+  2. Click "Edit" and change the name or add an alias
+  3. Save changes
 - **Expected Outcome:** Updated fields persist after refresh.
 
 ### TS-PEOPLE-004: Delete a Contact
@@ -455,10 +453,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate interaction logging
 - **Preconditions:** At least one contact exists
 - **Steps:**
-  1. Open contact detail
-  2. Click "Log Interaction" or similar button
-  3. Select type (e.g., "Meeting"), enter summary, set date
-  4. Save
+  1. Log the interaction through the MCP `log_interaction` tool (the person page has no interaction logging UI)
 - **Expected Outcome:** Interaction appears in the contact's interaction history with correct date and type.
 
 ### TS-PEOPLE-007: Merge Duplicate Contacts
@@ -478,11 +473,11 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** A contact exists with no profile categories yet
 - **Steps:**
   1. Open the contact detail and switch to the "Profile" tab
-  2. Wait for default categories to auto-seed
+  2. Note that no categories exist until a fact is added
   3. Add an entry under "Identity & Basics" (label: "Hometown", value: "Berlin")
-  4. Add a custom category "Side Projects" with scope "Professional"
+  4. Add a custom category "Side Projects" with scope "Professional only"
   5. Edit and delete an entry
-- **Expected Outcome:** Default categories appear automatically. Entries persist. Profile completeness ring updates. Custom categories show scope badges.
+- **Expected Outcome:** A category appears once a fact is added to it. Entries persist. Profile completeness ring updates.
 
 ### TS-PEOPLE-009: Contact Profile Suggestions from Notes
 
@@ -490,7 +485,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Multiple notes mention the contact by name. AI credits available.
 - **Steps:**
   1. Open the contact's Profile tab
-  2. Trigger "Suggest from notes" (or save a note that mentions the contact to fire `process-note`)
+  2. Trigger "Enrich from notes & timeline" (or save a note that mentions the contact to fire `process-note`)
   3. Open `/dashboard/review-queue`
 - **Expected Outcome:** `add_profile_entry` items for that contact appear in the Review Queue with category, label, value, and source note link.
 
@@ -509,7 +504,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** A contact exists
 - **Steps:**
   1. Open the contact → Documents tab
-  2. Add a document (title + body)
+  2. Click "Add Memory" under Long-term Memory, enter title and content, then Save
   3. Open the contact → Conversation tab and ask a question that requires that document
 - **Expected Outcome:** Document is embedded (`person_documents.embedding`). The Conversation answer cites the document via `match_person_documents`.
 
@@ -528,7 +523,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** The contact is a member of at least one group
 - **Steps:**
   1. Open the contact → Groups tab
-- **Expected Outcome:** All groups the person belongs to are listed with stage, position, and a link to the group.
+- **Expected Outcome:** All groups the person belongs to are listed with stage, priority, and a link to the group.
 
 ---
 
@@ -544,7 +539,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   3. Click "Add"
   4. Pick label "employee", target type "A contact", target person "Michael"
   5. Click "Add"
-- **Expected Outcome:** Relationship row appears showing "→ employee — Michael" with a clickable link to Michael's contact. Toast "Relationship saved".
+- **Expected Outcome:** A row "Employee: Michael" appears in the "Professional & service contacts" card (expand it).
 
 ### TS-REL-002: Add a Self-Relationship
 
@@ -555,7 +550,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   2. In Relationships, click "Add"
   3. Pick label "mentor", target type "Me ({your name})"
   4. Save
-- **Expected Outcome:** Row shows the user's display name as the linked target, navigating to `/dashboard/profile`. The same relationship is visible from the user's own Profile page (mirrored perspective).
+- **Expected Outcome:** A row in the "Professional & service contacts" card shows the user's display name as the linked target, navigating to `/dashboard/profile`. The same relationship is visible from the user's own Profile page (mirrored perspective).
 
 ### TS-REL-003: Custom Relationship Label
 
@@ -583,7 +578,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. View Max's profile — observe the displayed label
   2. View Michael's profile — observe the displayed label
-- **Expected Outcome:** Max's profile shows "employer — Michael". Michael's profile shows "employee — Max". Same row, opposite perspectives.
+- **Expected Outcome:** Max's profile shows "Employer: Michael". Michael's profile shows "Employee: Max". Same row, opposite perspectives.
 
 ### TS-REL-006: LLM-Suggested Relationship via Review Queue
 
@@ -593,7 +588,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Create or edit a note containing wording like "Max is Michael's employee"
   2. Save and wait for `process-note` to finish
   3. Open `/dashboard/review-queue`
-- **Expected Outcome:** An `add_relationship` suggestion appears with the proposed label pair and the two people. Accepting it creates the forward record and queues the inverse "suggested mirror" suggestion.
+- **Expected Outcome:** An `add_relationship` suggestion appears with the proposed label pair and the two people. Keeping it creates the forward record and queues the inverse "suggested mirror" suggestion.
 
 ### TS-REL-007: Relationship Deduplication
 
@@ -614,14 +609,14 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Observe the sidebar — "Review Queue" should show a numeric badge
   2. Navigate to `/dashboard/review-queue`
-- **Expected Outcome:** Pending items list renders. Sidebar badge count matches the list count. Both refresh roughly every 60 seconds.
+- **Expected Outcome:** Pending items list renders. Sidebar badge count matches the list count. The badge refreshes roughly every 60 seconds; the list itself does not poll.
 
 ### TS-RQ-002: Accept an `add_contact` Suggestion
 
 - **Objective:** Validate contact creation via Review Queue
 - **Preconditions:** A pending `add_contact` item exists
 - **Steps:**
-  1. Click "Accept" on the suggestion
+  1. Click "Keep" on the suggestion
 - **Expected Outcome:** New contact created. People page updates immediately (React Query cache invalidated). Item moves out of the pending list.
 
 ### TS-RQ-003: Accept an `add_alias` Suggestion
@@ -629,7 +624,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate alias merging into an existing contact
 - **Preconditions:** A pending `add_alias` item references an existing contact
 - **Steps:**
-  1. Accept the suggestion
+  1. Click "Keep" on the suggestion
 - **Expected Outcome:** The alias is appended to the contact's `aliases` array (no duplicates).
 
 ### TS-RQ-004: Accept an `add_profile_entry` Suggestion
@@ -637,34 +632,34 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate profile fact insertion
 - **Preconditions:** A pending `add_profile_entry` item exists for self or a contact
 - **Steps:**
-  1. Accept the suggestion
-- **Expected Outcome:** Default categories are seeded for the target if missing. The entry is inserted under the suggested category. Profile completeness updates.
+  1. Click "Keep" on the suggestion
+- **Expected Outcome:** If the suggested category is missing for the target, only that one category is created. The entry is inserted under the suggested category. Profile completeness updates.
 
-### TS-RQ-005: Accept an `add_event` Suggestion
+### TS-RQ-005: Accept an `add_moment` Suggestion
 
-- **Objective:** Validate calendar/event extraction
-- **Preconditions:** A pending `add_event` item exists
+- **Objective:** Validate timeline moment extraction
+- **Preconditions:** A pending `add_moment` item ("Timeline Moment") exists with a title and a date
 - **Steps:**
-  1. Accept the suggestion
-- **Expected Outcome:** Event is created (or forwarded according to feature config). Item resolves.
+  1. Click "Keep" on the suggestion
+- **Expected Outcome:** A moment is created with `source: "note_auto"` and linked to every participant that has a contact. The item is marked kept and points at the new moment. If the participants cannot be linked, the moment still exists and a warning says so. A suggestion without a title or date is refused with "Incomplete moment suggestion".
 
 ### TS-RQ-006: Accept an `add_relationship` Suggestion (Mirror)
 
 - **Objective:** Validate the suggested-mirror workflow
 - **Preconditions:** A pending `add_relationship` suggestion exists
 - **Steps:**
-  1. Accept it
+  1. Click "Keep"
   2. Stay on the Review Queue page
-- **Expected Outcome:** The forward relationship row is inserted in `contact_relationships`. A new pending item for the inverse relationship appears in the Review Queue for the other person.
+- **Expected Outcome:** The forward relationship row is inserted in `contact_relationships`. For an asymmetric label, a new pending item for the inverse relationship appears in the Review Queue for the other person.
 
-### TS-RQ-007: Skip vs. Never
+### TS-RQ-007: Roll Back vs. Never Again
 
 - **Objective:** Validate the three-option resolution model
 - **Preconditions:** Pending suggestions exist
 - **Steps:**
-  1. Click "Skip" on one item
-  2. Click "Never" on another item
-- **Expected Outcome:** "Skip" removes from pending but leaves room to be re-suggested. "Never" dismisses permanently — re-running extraction does not re-create the same item (deduplication via `uq_review_queue_pending`).
+  1. Click "Roll Back" on one item
+  2. Click "Never Again" on another item
+- **Expected Outcome:** "Roll Back" undoes the change, marks the item removed, and leaves room for it to be suggested again. "Never Again" undoes the change and records a block in `ai_suggestion_suppressions`, so re-running extraction does not re-create the same item.
 
 ### TS-RQ-008: Source Note Link
 
@@ -685,7 +680,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/groups`
   2. Create a new Group using the Dream 100 template
-  3. Enter name, purpose, and description
+  3. Enter name and description (the purpose comes from the template)
 - **Expected Outcome:** Group is created with slug, stages, template fields, and default goals. User lands on `/dashboard/groups/<slug>`.
 
 ### TS-GROUPS-002: Add and Move Group Members
@@ -846,8 +841,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/media`
   2. Use the content type filter dropdown
-  3. Select "Image"
-- **Expected Outcome:** Only image-type media items are shown.
+  3. Select "screenshot"
+- **Expected Outcome:** Only items whose analysed content type is screenshot are shown.
 
 ### TS-MEDIA-004: Click Media to Navigate to Parent Note
 
@@ -855,7 +850,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** At least one analyzed media item exists
 - **Steps:**
   1. Navigate to `/dashboard/media`
-  2. Click on a media item card
+  2. Click on a media item card, then click "Open note" in the detail dialog
 - **Expected Outcome:** Browser navigates to `/dashboard/notes/<parentNoteId>`.
 
 ### TS-MEDIA-005: Batch Media Analysis (Backfill)
@@ -864,9 +859,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Unanalyzed media exists
 - **Steps:**
   1. Navigate to `/dashboard/media`
-  2. Click "Analyze All" or batch analysis button
+  2. In the Batch Media Analysis card, click "Scan", then "Start analysis"
   3. Wait for processing
-- **Expected Outcome:** Pending items transition to "analyzing" then "complete". Progress indicator updates. AI credits are deducted.
+- **Expected Outcome:** Pending items transition to "processing" then "complete". Progress indicator updates. AI credits are deducted.
 
 ---
 
@@ -878,8 +873,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User has notes created in the past week. AI credits available.
 - **Steps:**
   1. Navigate to `/dashboard/review`
-  2. Select the current week
-  3. Click "Generate Review" (Sparkles icon)
+  2. Select a period (Last 7, 14 or 30 days)
+  3. Click "Create Review" (Sparkles icon)
   4. Wait for AI processing
 - **Expected Outcome:** Review card displays with summary, trends, and highlights from the week's notes. AI credits deducted.
 
@@ -903,7 +898,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/profile`
   2. Observe welcome state / initial seeding
-- **Expected Outcome:** Default categories are created: Identity & Basics, Professional Life, Health & Body, Values & Principles, Goals & Aspirations, Preferences & Quirks. Completeness indicator shows 0%.
+- **Expected Outcome:** 17 categories are seeded (via "Get Started"), including Identity & Basics, Professional Life, Health & Wellness, Personality & Values, Principles & Operating System, Goals & Aspirations, Preferences & Quirks. Completeness indicator shows 0%.
 
 ### TS-PROFILE-002: Add a Profile Entry
 
@@ -912,7 +907,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/profile`
   2. Find "Identity & Basics" category
-  3. Click "Add Entry" button
+  3. Open the category's actions menu and click "Add entry"
   4. Enter label "Full Name", value "Test User"
   5. Optionally link a note
   6. Save
@@ -943,8 +938,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Profile page is loaded
 - **Steps:**
   1. Navigate to `/dashboard/profile`
-  2. Click "Add Category" button
-  3. Enter name "Hobbies", select icon, select scope "Personal"
+  2. Open the Facts section menu and click "Add custom category"
+  3. Enter name "Hobbies", type an icon (e.g. "heart"), select scope "Personal only"
   4. Save
 - **Expected Outcome:** New "Hobbies" category appears in the list with a "Personal" scope badge.
 
@@ -998,7 +993,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate instruction deletion
 - **Preconditions:** At least one instruction exists
 - **Steps:**
-  1. Click delete on an instruction
+  1. Click delete on an instruction, then confirm "Delete"
 - **Expected Outcome:** Instruction is removed from the list.
 
 ### TS-PROFILE-011: Export Tab — Generate Profile Text
@@ -1011,8 +1006,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   3. Select format: "Markdown"
   4. Toggle scope filters
   5. Toggle "Include linked note content"
-  6. Click "Copy to Clipboard"
-- **Expected Outcome:** Live preview updates in real-time. Clipboard contains formatted profile text. Toast confirms copy.
+  6. Click "Copy to clipboard"
+- **Expected Outcome:** Live preview updates in real-time. Clipboard contains formatted profile text. The button briefly reads "Copied!".
 - **Variations:** Test all formats: Structured Text, Markdown, XML
 
 ### TS-PROFILE-012: Profile Suggestions from Notes
@@ -1023,7 +1018,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Navigate to `/dashboard/profile`
   2. Click "Suggest entries from my notes" button
   3. Wait for analysis
-- **Expected Outcome:** Suggestion cards appear with proposed entries, each showing category, label, value, confidence, and source note link. User can accept (adds entry) or dismiss.
+- **Expected Outcome:** Suggestion cards appear with proposed entries, each showing category, label, value, confidence, and reason. User can accept (adds entry) or dismiss.
 
 ---
 
@@ -1085,7 +1080,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/settings?tab=credits` (or Credits section)
   2. Observe credit display
-- **Expected Outcome:** Shows credits used / credits granted, remaining credits, period dates, and usage history.
+- **Expected Outcome:** Shows credits used / credits granted, remaining credits, period dates, and rollover.
 
 ### TS-AI-002: AI Credits Gate — Sufficient Credits
 
@@ -1102,7 +1097,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User has 0 remaining credits
 - **Steps:**
   1. Attempt to process a note with AI
-- **Expected Outcome:** Toast "Out of AI credits" with description about waiting for next billing cycle. Operation does not proceed.
+- **Expected Outcome:** A toast says the AI credits for this period are used up and when they reset; a banner reads "No AI credits left this period. AI features are paused until the next reset." Operation does not proceed.
 
 ### TS-AI-004: AI Credits Gate — No Credits Plan
 
@@ -1110,7 +1105,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User's allowance period has `tokens_granted = 0`
 - **Steps:**
   1. Attempt semantic search or AI processing
-- **Expected Outcome:** Toast "No AI credits available" with message to contact admin or upgrade.
+- **Expected Outcome:** A toast says the plan has no AI credits for this period.
 
 ### TS-AI-005: Note Chat (AI Assistant)
 
@@ -1126,6 +1121,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 ---
 
 ## Section 16: Premium Feature Gating
+
+> **Not currently reachable in the UI.** `PremiumGate` (`src/components/subscription/PremiumGate.tsx`) exists, but no page or component renders it, so no feature is gated today. Keep these scenarios for when a feature is wrapped again.
 
 ### TS-PREMIUM-001: Premium Gate — Free User Blocked
 
@@ -1154,9 +1151,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/settings`
   2. Change display name to "E2E Test User"
-  3. Update bio
-  4. Click "Save Changes"
-- **Expected Outcome:** Toast "Profile updated" appears. Changes persist on refresh. Sidebar shows updated name.
+  3. Click "Save Name" (no bio field on this tab; bio lives on `/dashboard/profile`)
+- **Expected Outcome:** The Display Name field shows the new name after refresh.
 
 ### TS-SETTINGS-002: Upload Avatar
 
@@ -1164,8 +1160,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User is signed in
 - **Steps:**
   1. Navigate to `/dashboard/settings`
-  2. Click avatar/camera icon
-  3. Upload a small image
+  2. Click the "Picture" tab
+  3. Click the avatar to open the file picker
+  4. Upload a small JPG, PNG, GIF, or WebP image (max 2MB)
 - **Expected Outcome:** Avatar updates immediately. Stored in `avatars` bucket. Visible in sidebar and settings.
 
 ### TS-SETTINGS-003: MCP Connection Manager
@@ -1173,10 +1170,10 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate MCP setup instructions
 - **Preconditions:** User is signed in
 - **Steps:**
-  1. Navigate to `/dashboard/settings?tab=mcp` (or AI Tools tab)
+  1. Navigate to `/dashboard/settings?tab=mcp` (or the sidebar's "Connect AI" link)
   2. Observe MCP configuration instructions
   3. Observe "Tip: Make sure your profile is filled in..." message
-- **Expected Outcome:** MCP endpoint URL and access key are displayed. Copy buttons work. Profile tip banner visible.
+- **Expected Outcome:** The MCP Server URL is displayed; keys are made under Settings, API Keys. Copy buttons work. Profile tip banner visible.
 
 ### TS-SETTINGS-004: GitHub Sync Settings
 
@@ -1195,7 +1192,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User is signed in
 - **Steps:**
   1. Navigate to `/dashboard/settings`
-  2. Go to Notifications section
+  2. Go to the "Alerts" tab
   3. Toggle daily digest, weekly review notifications
   4. Set digest time
   5. Save
@@ -1221,7 +1218,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   3. Click delete button
   4. Type confirmation text
   5. Click final confirm
-- **Expected Outcome:** Account and all data deleted. User is signed out and redirected to `/auth`.
+- **Expected Outcome:** Account and all data deleted. User is signed out and redirected to `/`.
 
 ---
 
@@ -1233,7 +1230,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in as Admin persona
 - **Steps:**
   1. Navigate to `/dashboard/admin`
-- **Expected Outcome:** Admin dashboard loads with Users, Stats, and Settings tabs.
+- **Expected Outcome:** Admin dashboard loads with Overview, Users, AI Credits, Moderation, System and LLM Config tabs.
 
 ### TS-ADMIN-002: Admin Route Blocked for Non-Admin
 
@@ -1251,7 +1248,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Navigate to `/dashboard/admin`
   2. Observe users table
   3. Search for a user by name
-- **Expected Outcome:** Table shows all users with display name, email, role badge, avatar, and created date. Search filters results.
+- **Expected Outcome:** Table shows all users with display name, short user id, role badge, avatar, and joined date. Search filters results.
 
 ### TS-ADMIN-004: Change User Role
 
@@ -1271,7 +1268,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in as Admin
 - **Steps:**
   1. Navigate to `/dashboard/admin`
-  2. Go to Settings/Credits tab
+  2. Go to AI Credits tab
   3. Update credit allocation values
   4. Save
 - **Expected Outcome:** Settings persist. New users get updated credit allocations.
@@ -1282,7 +1279,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in as Admin
 - **Steps:**
   1. Navigate to `/dashboard/admin`
-  2. Observe statistics: total users, total notes, AI usage
+  2. Observe statistics: Total Users, Premium Users, New This Week, Total Tokens Used
 - **Expected Outcome:** Stats cards show accurate counts. Charts/trends render if present.
 
 ---
@@ -1322,20 +1319,20 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Wait for the scheduled run of `daily-digest` (or trigger it manually as admin)
   2. Check the configured inbox
-- **Expected Outcome:** Digest email arrives summarizing recent notes, pending review items, and stale actions.
+- **Expected Outcome:** Digest email arrives summarizing yesterday's notes, open action items, and overdue contacts.
 
 ---
 
 ## Section 20: Content Moderation
 
-### TS-MOD-001: Stopword Filter on Note Save
+### TS-MOD-001: Stopword Filter on Note Share
 
 - **Objective:** Validate the first-tier moderation
-- **Preconditions:** A stopword exists in `moderation_stopwords`
+- **Preconditions:** A stopword with severity `block` exists in `moderation_stopwords` (matching is whole-word)
 - **Steps:**
   1. Create a note containing the stopword
-  2. Save the note
-- **Expected Outcome:** A `moderation_events` row is recorded with the matched word. Depending on severity, the note is either flagged for review or blocked from saving via `ModerationBlockDialog`.
+  2. Share the note (create a share link)
+- **Expected Outcome:** A strike is added and sharing is blocked via `ModerationBlockDialog`.
 
 ### TS-MOD-002: AI Moderation Review Queue
 
@@ -1345,8 +1342,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Sign in as Admin
   2. Open the Moderation Panel from the Admin dashboard
   3. Inspect AI category, confidence and reason
-  4. Approve or reject the item
-- **Expected Outcome:** Item status transitions to `approved` or `rejected`. Strikes/suspensions update on the user via `user_suspensions` if rejected.
+  4. Click "Process Queue Now" (or "Re-review" on a finished item)
+- **Expected Outcome:** Item status transitions to `reviewed` or `violation`. On a violation, strikes and suspensions update in `user_suspensions`.
 
 ### TS-MOD-003: Suspended User Blocked
 
@@ -1354,8 +1351,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** A test user has `suspended = true`
 - **Steps:**
   1. Sign in as that user
-  2. Try to create a note
-- **Expected Outcome:** Creation is blocked with a moderation/suspension message. User can still read existing data per policy.
+  2. Try to share a note
+- **Expected Outcome:** Sharing is blocked with a moderation/suspension message. User can still read existing data per policy.
 
 ---
 
@@ -1390,7 +1387,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Navigate to `/privacy`
   2. Navigate to `/terms`
   3. Navigate to `/cookies`
-- **Expected Outcome:** Each page renders legal content in the LegalLayout with proper headings.
+- **Expected Outcome:** Each page renders legal content in the shared page layout with proper headings.
 
 ### TS-PUBLIC-005: 404 Page
 
@@ -1406,7 +1403,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/`
   2. Observe cookie consent banner
-  3. Click "Accept" or "Decline"
+  3. Click "Accept all" or "Just the essentials"
 - **Expected Outcome:** Banner appears on first visit. Dismisses on action. Does not reappear on subsequent visits.
 
 ### TS-PUBLIC-007: Theme Toggle (Light/Dark)
@@ -1426,7 +1423,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate all sidebar navigation items
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Click each sidebar item in order: Dashboard, Notes, People, Groups, Collections, Timeline, Lexicon, Review Queue, Knowledge Graph, Media Library, Weekly Review, Activity, My Profile, Settings
+  1. Click each sidebar item in order: Dashboard, Notes, Note Graph, Lexicon, People, World, Groups, Timeline, Collections, Media Library, Review Queue, Weekly Review, My Profile, Settings, Connect AI, Documentation
 - **Expected Outcome:** Each click navigates to the correct page. Active item is highlighted.
 
 ### TS-NAV-002: Profile Completeness Dot in Sidebar
@@ -1437,8 +1434,8 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Observe the dot next to "My Profile" in sidebar
 - **Expected Outcome:** 
   - Red dot if profile completeness < 30%
-  - Yellow dot if 30-70%
-  - Green dot if > 70%
+  - Yellow dot if 30–69%
+  - Green dot if 70% or more
 
 ---
 
@@ -1478,7 +1475,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate the unresolved-link state
 - **Steps:**
   1. In a note, type `[[Brand New Topic]]` for a title that does not exist
-- **Expected Outcome:** The wikilink renders in an "unresolved" style. Clicking it offers to create a new note with that title.
+- **Expected Outcome:** The wikilink renders in an "unresolved" style. Hovering shows "No note found with this title". To create the note, type `[[` and pick "Create: ..." in the autocomplete.
 
 ---
 
@@ -1490,7 +1487,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in
 - **Steps:**
   1. Navigate to `/dashboard/notes`
-  2. Use the folder tree's "+ Folder" action
+  2. Click the "New folder" button in the notes header (or right-click a folder, "New folder here")
   3. Enter folder name "Projects"
 - **Expected Outcome:** Folder appears in the tree. Notes can be moved into it.
 
@@ -1499,17 +1496,17 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate `folder_path` updates
 - **Preconditions:** A folder and at least one note exist
 - **Steps:**
-  1. Drag a note onto the folder, or use the overflow menu → "Move to folder"
+  1. Drag a note onto the folder, or right-click the note and use "Move to" (or "Move to folder" in the bulk action bar)
   2. Pick the target folder
 - **Expected Outcome:** Note's `folder_path` updates. The note now appears under that folder in the sidebar tree.
 
-### TS-VAULT-003: Vault Insights Popover
+### TS-VAULT-003: Tags & Insights Popover
 
 - **Objective:** Validate metrics popover (counts, recently edited)
 - **Preconditions:** User has multiple notes across folders
 - **Steps:**
-  1. Open the Vault Insights popover from the notes sidebar header
-- **Expected Outcome:** Popover shows total notes, folder count, recent activity. Numbers update after creating a new note.
+  1. Open the "Tags & Insights" popover (# icon) from the notes sidebar header
+- **Expected Outcome:** Popover shows note counts By Type, Topics and People. Numbers update after creating a new note.
 
 ---
 
@@ -1522,9 +1519,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Navigate to `/dashboard/settings` → GitHub Sync
   2. Paste token, owner, repo name, branch
-  3. Optional: set vault path and attachment folder (default `attachments`)
+  3. Optional: set vault path (attachment folder is not configurable in the UI; it defaults to `attachments`)
   4. Save
-- **Expected Outcome:** Connection row created in `github_connections`. Status panel shows "Connected" with repo name. Sync direction selector visible.
+- **Expected Outcome:** Connection row created in `github_connections`. Status panel shows "Connected" with the GitHub username and last sync time. Sync direction selector visible.
 
 ### TS-GH-002: Bulk Export to GitHub
 
@@ -1532,7 +1529,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Connection exists; user has notes
 - **Steps:**
   1. Open GitHub Sync settings
-  2. Click "Sync all to GitHub"
+  2. Click "Export All"
 - **Expected Outcome:** Repository is created if missing. Each note appears in the repo as a `.md` file with YAML frontmatter (`id`, `title`, `tags`, `menerio_metadata`). `github_sync_log` rows are created with `synced` status. Toast shows succeeded/failed counts.
 
 ### TS-GH-003: Round-Trip — DB Markdown Stays Obsidian-Compatible
@@ -1554,7 +1551,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. Drag-and-drop a PNG into the editor (or use the toolbar upload)
   2. Wait for the upload to complete
   3. Open source mode
-- **Expected Outcome:** The image renders inline using a signed URL. The serialized markdown contains `![[filename.png]]` (no signed URL, no http reference). A `note_attachments` row is created with `source = 'editor_upload'`.
+- **Expected Outcome:** The image renders inline using a signed URL. The serialized markdown contains `![[filename.png]]` (no signed URL, no http reference). A `note_attachments` row is created with `source = 'menerio'`.
 
 ### TS-GH-005: Editor Resolves `![[filename.ext]]` to Signed URL (Phase A)
 
@@ -1595,9 +1592,9 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate the one-time vault import action
 - **Preconditions:** A connected vault with multiple notes and binaries
 - **Steps:**
-  1. Open Import Vault Dialog
-  2. Click "List files" to preview
-  3. Confirm and run "Import"
+  1. Click "Import from Obsidian"
+  2. Click "Scan Repository" to preview
+  3. Click "Import N Notes"
 - **Expected Outcome:** Notes are inserted with `source_app = 'obsidian'`, `metadata.imported_from = 'obsidian'`, and `metadata.original_path`. Wikilinks are resolved to internal note IDs in a second pass. Unresolved wikilinks and unresolved attachments are surfaced in the response.
 
 ### TS-GH-010: Conflict Resolution
@@ -1607,7 +1604,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Trigger a pull
   2. Open the Sync Conflicts panel
-  3. Choose "Keep local", "Keep remote", or "Open both"
+  3. Choose "Keep Menerio", "Keep GitHub", or "Keep Both"
 - **Expected Outcome:** Conflict appears with `sync_status = 'conflict'`. The chosen resolution updates the note and clears the conflict state.
 
 ---
@@ -1620,14 +1617,14 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** User has notes, events, and (optionally) people
 - **Steps:**
   1. Navigate to `/dashboard/timeline`
-- **Expected Outcome:** Events render grouped by date. Each card shows title, importance, linked people, and an importance indicator.
+- **Expected Outcome:** Moments render grouped by year, newest first. Each card shows the title, date, a status badge, and icons for a source document and verified.
 
 ### TS-TIMELINE-002: Add a Timeline Event Manually
 
 - **Objective:** Validate event creation
 - **Preconditions:** Timeline page is open
 - **Steps:**
-  1. Click "Add event"
+  1. Click "Add Moment"
   2. Fill in title, date, importance, and link 1–2 people
   3. Save
 - **Expected Outcome:** Event appears at the right position in the timeline. Importance slider value persists. Linked people render as chips.
@@ -1642,12 +1639,12 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 
 ### TS-TIMELINE-004: AI Event Extraction from Notes
 
-- **Objective:** Validate the `extract-event` / `add_event` Review Queue suggestion
+- **Objective:** Validate the `add_moment` Review Queue suggestion made by `process-note`
 - **Preconditions:** A note like "Wedding on July 14, 2026 in Lisbon" exists; AI credits available
 - **Steps:**
   1. Save / process the note
   2. Open the Review Queue
-  3. Accept the `add_event` suggestion
+  3. Accept the `add_moment` suggestion
 - **Expected Outcome:** A timeline event with the parsed date is created and appears on `/dashboard/timeline`.
 
 ---
@@ -1659,17 +1656,17 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate template-based collection creation
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Navigate to `/dashboard/collections`
-  2. Pick a template (e.g. "Books")
-  3. Confirm the suggested schema
-- **Expected Outcome:** Collection is created with field schema, slug, and starter categories. Template usage counter increments.
+  1. Navigate to `/collections/templates`
+  2. Pick a template (e.g. "Reading List")
+  3. Click "Use This Template", keep or change the name, then click "Create"
+- **Expected Outcome:** Collection is created with the template's field schema, a slug, and its agent instructions. Template usage counter increments.
 
 ### TS-COLLECTIONS-002: Generate Schema from Description (AI)
 
 - **Objective:** Validate the AI schema generator
 - **Preconditions:** AI credits available
 - **Steps:**
-  1. From `/dashboard/collections`, choose "Create with AI"
+  1. From `/collections`, choose "✨ Create with AI"
   2. Describe the collection (e.g. "Vinyl records — artist, album, year, genre, condition")
   3. Confirm the suggested schema
 - **Expected Outcome:** The proposed schema appears with field types (text, number, select, etc.) and a primary field. Saving creates the collection. Credits are deducted.
@@ -1703,20 +1700,20 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Type in the search bar
   2. Sort by an indexable date or number field
-- **Expected Outcome:** Search uses the `search_vector` (case-insensitive across all fields). Sorting uses the corresponding `indexable_*` column for predictable order.
+- **Expected Outcome:** Search matches the title and text fields, ignoring case, in the browser. Sorting by a column orders the loaded items by that field's value, compared by field type.
 
 ---
 
-## Section 29: Capture Integrations (Telegram, Discord, Slack, Email, MCP)
+## Section 29: Capture Integrations (Telegram, Discord, Slack, Connected Apps, MCP)
 
 ### TS-CAPTURE-001: Telegram — Pair via 6-Char Code
 
 - **Objective:** Validate Telegram bot pairing
 - **Preconditions:** User is signed in
 - **Steps:**
-  1. Open `/dashboard/settings` → Telegram Integration
-  2. Generate a pairing code
-  3. In Telegram, message the bot with `/pair <code>`
+  1. Open `/dashboard/settings` → Telegram
+  2. Paste the bot token and click "Connect" to get a pairing code
+  3. In Telegram, send the pairing code itself as a message to the bot
 - **Expected Outcome:** UI flips to "Connected". The user's `telegram_chat_id` is stored.
 
 ### TS-CAPTURE-002: Telegram — Capture a Note
@@ -1725,16 +1722,16 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Telegram is paired
 - **Steps:**
   1. Send a text message to the bot
-- **Expected Outcome:** A note is created with `source_app = 'telegram'`. The Telegram source badge is visible in the editor header. Bot replies with confirmation.
+- **Expected Outcome:** A note is created with `metadata.source = 'telegram'` (no `source_app`). Bot replies with confirmation.
 
-### TS-CAPTURE-003: Discord — Pair Slash Command
+### TS-CAPTURE-003: Discord — Connect the Bot
 
 - **Objective:** Validate Discord bot pairing
 - **Preconditions:** User can send DMs to the Menerio bot
 - **Steps:**
-  1. Open `/dashboard/settings` → Discord Integration
-  2. Generate a pairing code
-  3. In Discord, run `/pair <code>` with the bot
+  1. Open `/dashboard/settings` → Discord
+  2. Paste the Discord bot credentials and click "Save"
+  3. Click "Register /capture command"
 - **Expected Outcome:** "Connected" state in the UI. Discord interaction signature is verified server-side (Ed25519).
 
 ### TS-CAPTURE-004: Discord — `/capture` Creates a Note
@@ -1742,27 +1739,29 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate slash-command capture
 - **Preconditions:** Discord is paired
 - **Steps:**
-  1. Run `/capture text:"My new idea"` in Discord
-- **Expected Outcome:** A note is created with `source_app = 'discord'`. Discord replies with a confirmation message.
+  1. Run `/capture thought:"My new idea"` in Discord
+- **Expected Outcome:** A note is created with `metadata.source = 'discord'`. Discord replies with a confirmation message.
 
-### TS-CAPTURE-005: Slack — Pair and Capture
+### TS-CAPTURE-005: Slack — Connect and Capture
 
 - **Objective:** Validate the Slack capture flow
 - **Preconditions:** Slack workspace allows the configured bot
 - **Steps:**
-  1. Pair via `/dashboard/settings` → Slack
+  1. Save the Slack bot token and channel ID in `/dashboard/settings` → Slack, and point Slack's Event Subscriptions at the URL shown there (the `ingest-thought` function)
   2. Send a message in the configured capture channel
-- **Expected Outcome:** Note is created with `source_app = 'slack'`.
+- **Expected Outcome:** Note is created with `metadata.source = 'slack'`.
 
-### TS-CAPTURE-006: Email Forwarding (`receive-note`)
+### TS-CAPTURE-006: Connected App Pushes a Note (`receive-note`)
 
-- **Objective:** Validate inbound email capture via the `receive-note` function
-- **Preconditions:** User has the per-user inbox address from settings
+- **Objective:** Validate that a connected app pushes a note via `receive-note` with its `x-api-key`
+- **Preconditions:** An app is connected under `/dashboard/settings` → Apps and its key is at hand
 - **Steps:**
-  1. Forward an email to that address
-- **Expected Outcome:** A note is created with subject as title, body as content, and source set accordingly. Attachments are uploaded to `note-attachments` and rendered as wikilinks.
+  1. `POST /functions/v1/receive-note` with the app's `x-api-key` and a note body
+- **Expected Outcome:** A note is created with `source_app` set to the app name and `is_external = true`. Menerio has no email capture: there is no inbox address, forwarding or attachment handling.
 
 ### TS-CAPTURE-007: Quick Capture FAB
+
+> **Not currently reachable in the UI.** The `QuickCapture` component (`src/components/notes/QuickCapture.tsx`) exists but nothing renders it, and the "New Note" split button offers only New Note, New Person, New Moment and New Prompt (Querino). Kept for when it is wired back in.
 
 - **Objective:** Validate in-app quick capture
 - **Preconditions:** Signed in
@@ -1782,17 +1781,17 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in; AI credits available
 - **Steps:**
   1. Press `Cmd+Shift+K` (or `Ctrl+Shift+K`)
-- **Expected Outcome:** The Global AI Chat panel opens in "General" mode. Previous conversations are listed.
+- **Expected Outcome:** The AI Assistant panel opens with the saved conversation for the current page.
 
-### TS-CHAT-002: Switch Between General and Note Modes
+### TS-CHAT-002: Chat Follows the Open Note
 
-- **Objective:** Validate mode switching
-- **Preconditions:** A note is open in the editor
+- **Objective:** Validate that the chat context follows the page
+- **Preconditions:** A note is open at `/dashboard/notes/<id>`
 - **Steps:**
-  1. Open the chat FAB
-  2. Switch to "Note" mode
-  3. Ask a question about the open note
-- **Expected Outcome:** The model receives the note's content as context. Switching back to "General" loses note context. Conversations are persisted per mode.
+  1. Open the chat FAB (the header reads "Editing current note")
+  2. Ask a question about the open note
+  3. Leave the note page and open the chat again
+- **Expected Outcome:** The model receives the note as context. Leaving the note page returns to the general conversation. Each context keeps its own conversation.
 
 ### TS-CHAT-003: Smart Tags Panel from Processed Note
 
@@ -1823,17 +1822,17 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Preconditions:** Signed in
 - **Steps:**
   1. Navigate to `/dashboard/settings` → API Keys
-  2. Create a new key with selected scopes (e.g. `notes:read`, `notes:write`)
+  2. Create a new key with selected scopes (e.g. `notes`)
   3. Copy the `mnr_…` key once shown
-- **Expected Outcome:** A SHA-256 hashed row is stored. The plaintext key is shown only once. The label, scopes, and rate-limit info are visible.
+- **Expected Outcome:** A SHA-256 hashed row is stored. The plaintext key is shown only once. The name and scopes are visible.
 
 ### TS-API-002: Mission Control API — Create a Note via REST
 
 - **Objective:** Validate `mc-api-notes` POST
-- **Preconditions:** A key with `notes:write` scope
+- **Preconditions:** A key with the `notes` scope
 - **Steps:**
   1. `curl -X POST` to `/functions/v1/mc-api-notes` with `Authorization: Bearer mnr_…` and a JSON body
-- **Expected Outcome:** 201 with the created note. Note appears in the user's Notes list. Rate-limit headers are present.
+- **Expected Outcome:** 201 with the created note. Note appears in the user's Notes list.
 
 ### TS-API-002b: Mission Control API — Combined Search
 
@@ -1843,7 +1842,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
   1. `GET /functions/v1/mc-api-notes/search?q=<a phrase that describes the note without using its words>`
   2. Repeat with `&source_app=godspeed`, with `&source_app=native`, and with `&limit=1`
   3. Repeat with an account that has no AI credits left
-- **Expected Outcome:** Step 1 returns the note with a `similarity`, a `snippet` of about 300 characters and `mode: "semantic+text"`; the native note is listed before Mission Control file. Step 2 returns only Mission Control files, only non-godspeed notes, and exactly one result. Step 3 still answers 200 with `mode: "text_only"` and `similarity: null`. One `mc-api-search:embedding` usage row is recorded for the key's owner per semantic search.
+- **Expected Outcome:** Step 1 returns the note with a `similarity`, a `snippet` of about 300 characters and `mode: "semantic+text"`; the native note is listed before the Mission Control file. Step 2 returns only Mission Control files, only native notes, and exactly one result. Step 3 still answers 200 with `mode: "text_only"` and `similarity: null`. One `mc-api-search:embedding` usage row is recorded for the key's owner per semantic search.
 
 ### TS-API-003: Mission Control API — Rate Limit Enforcement
 
@@ -1858,18 +1857,18 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Objective:** Validate `/sync-status` for spoke apps
 - **Preconditions:** A valid key
 - **Steps:**
-  1. `GET /functions/v1/mc-api-stats/sync-status`
-- **Expected Outcome:** Response includes counts (notes, contacts, last activity) for the calling user.
+  1. `GET /functions/v1/mc-api-notes/sync-status`
+- **Expected Outcome:** Response includes `note_count` and `last_modified` for the calling user.
 
-### TS-API-005: MCP — Generate Token and Connect Client
+### TS-API-005: MCP — Connect a Client with an API Key
 
-- **Objective:** Validate MCP token issuance and `menerio-mcp` proxy
+- **Objective:** Validate connecting an MCP client to `menerio-mcp`
 - **Preconditions:** Signed in
 - **Steps:**
-  1. Open `/dashboard/settings` → MCP Connection Manager
-  2. Generate a token; copy MCP endpoint URL
-  3. Configure the MCP client (e.g. Claude Desktop) with URL + token
-- **Expected Outcome:** MCP client lists Menerio tools (read notes, search, write notes…). Tool calls succeed and respect user RLS via the per-request Supabase client.
+  1. Open `/dashboard/settings` → MCP
+  2. Make a key under API Keys and copy the MCP Server URL
+  3. Configure the MCP client (e.g. Claude Desktop) with URL + key
+- **Expected Outcome:** MCP client lists Menerio tools (read notes, search, write notes…). Tool calls succeed and are limited to the key owner's data and the key's scopes. Older personal MCP tokens can still be revoked there, but new ones cannot be made.
 
 ### TS-API-005b: MCP — File a Note in a Folder
 
@@ -1889,7 +1888,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 - **Steps:**
   1. Call `search_notes` with the query
   2. Repeat with `source: "native"` and with `source: "godspeed"`
-- **Expected Outcome:** Step 1 lists the native note first; Mission Control result carries `Source: [godspeed file: <path>]`. Step 2 returns only native notes, then only Mission Control files.
+- **Expected Outcome:** Step 1 lists the native note first; the Mission Control result carries `Source: [godspeed file: <path>]`. Step 2 returns only native notes, then only Mission Control files.
 
 ### TS-API-006: App Integrations Mission Control (UI)
 
@@ -1957,9 +1956,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 | Wikilink | TS-WIKI-001 | A → B reference | Free |
 | Folder | TS-VAULT-001 | "Projects" | Free |
 | GitHub Connection | TS-GH-001 | Test repo configured | Free |
-| Timeline Event | TS-TIMELINE-002 | Manual test event | Free |
-| Collection | TS-COLLECTIONS-001 | Books collection from template | Free |
+| Timeline Moment | TS-TIMELINE-002 | Manual test moment | Free |
+| Collection | TS-COLLECTIONS-001 | Reading List collection from template | Free |
 | Telegram Pairing | TS-CAPTURE-001 | Bot paired to test account | Free |
-| Mission Control API Key | TS-API-001 | `mnr_…` key with `notes:read/write` | Free |
-| Agent Instruction | TS-PROFILE-008 | "Always address me informally" | Free |
-| Weekly Review | TS-REVIEW-001 | Generated review for current week | Premium |
+| Mission Control API Key | TS-API-001 | `mnr_…` key with the `notes` scope | Free |

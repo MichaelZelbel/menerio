@@ -368,15 +368,15 @@ export function ExportTab({ categories, entries, instructions, views, onSaveView
                     Scopes: {v.included_scopes.join(", ")}
                   </p>
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+                  <Button aria-label="Edit view" variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
                     setEditingViewId(v.id);
                     setViewName(v.name);
                     setViewScopes([...v.included_scopes]);
                   }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDeleteView(v.id)}>
+                  <Button aria-label="Delete view" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDeleteView(v.id)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>

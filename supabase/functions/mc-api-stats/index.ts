@@ -59,6 +59,11 @@ Deno.serve(async (req) => {
           .limit(200),
       ]);
 
+      // Every error used to be ignored, so a failed count answered 200 with 0
+      // notes, 0 contacts and 0 open actions.
+      const readError = noteRes.error ?? contactRes.error ?? actionRes.error ?? recentNotesRes.error;
+      if (readError) return errorJson("INTERNAL", readError.message, 500);
+
       // Compute top tags
       const tagCounts: Record<string, number> = {};
       for (const note of recentNotesRes.data || []) {

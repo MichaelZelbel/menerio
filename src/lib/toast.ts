@@ -45,8 +45,10 @@ export const showToast = {
   success: (message = "Changes saved successfully") =>
     toast.success(message),
 
+  // Keyed by its text: a failure a mutation hook reports and the calling
+  // component reports again with the same words shows once, not twice.
   error: (message = "Failed to save changes. Please try again.") =>
-    toast.error(message),
+    toast.error(message, { id: `error:${message}` }),
 
   warning: (message: string) =>
     toast.warning(message),

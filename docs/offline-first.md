@@ -15,7 +15,7 @@ PowerSync syncs it with Supabase in the background:
 
 - **Down:** the PowerSync service tails the `powersync` Postgres publication
   (`supabase/migrations/20260710120000_powersync_publication.sql`) and streams
-  per-user rows to devices (sync rules keyed on `request.user_id()`; the
+  per-user rows to devices (sync streams keyed on `auth.user_id()`; the
   `embedding` column is never synced).
 - **Up:** `src/sync/connector.ts` replays queued local writes through the
   normal supabase-js client — RLS, the `updated_at` trigger, and all server
@@ -90,7 +90,7 @@ count. Long-lived desktop sessions and sync-config deploys are what kept it aliv
 between those dates.
 
 **What runs now:** a job on Michael's Mission Control VPS (`vps/godspeed/powersync-keepalive.sh` in
-Mission Control repo) checks every six hours through the PowerSync CLI and redeploys the
+the Mission Control engine repo) checks every six hours through the PowerSync CLI and redeploys the
 unchanged sync config only when the instance is deprovisioned or the last deploy is
 five days old. A deploy restarts a deprovisioned instance without anyone touching the
 dashboard. Measured cost: PowerSync Cloud treats an unchanged deploy as a new sync

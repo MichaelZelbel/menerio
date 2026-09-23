@@ -47,6 +47,12 @@ type PageRow = {
 
 /** Raised when the provider is out of credit: abort the sweep, don't burn the rest. */
 class SweepAbort extends Error {}
+/**
+ * Raised when ONE page owner's allowance is empty or unreadable. runChat's
+ * INSUFFICIENT_CREDITS matched isOutOfCredit's /insufficient/ and aborted the
+ * sweep for every account, stamping everyone's pages with a six-hour block.
+ */
+class OwnerOutOfCredit extends Error {}
 
 async function contentHash(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
@@ -131,6 +137,7 @@ async function callReformat(
     return parseReformatted(result.content);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === "INSUFFICIENT_CREDITS" || message === "BALANCE_UNAVAILABLE") throw new OwnerOutOfCredit(message);
     if (isOutOfCredit(message)) throw new SweepAbort(message);
     throw error;
   }
@@ -225,7 +232,7 @@ async function restructurePage(db: any, billingDb: any, page: PageRow, dryRun: b
           method = "llm";
         }
       } catch (error) {
-        if (error instanceof SweepAbort) throw error;
+        if (error instanceof SweepAbort || error instanceof OwnerOutOfCredit) throw error;
         method = "llm_rejected";
         rejectedReason = error instanceof Error ? error.message : String(error);
         llmFailed = true;
@@ -318,12 +325,24 @@ async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[]
   let failed = 0;
   let aborted: string | null = null;
   const operation = dryRun ? "restructure_dry_run" : "restructure";
+  const ownersOutOfCredit = new Set<string>();
 
   for (const page of pages) {
     let result: unknown;
+    if (page.user_id && ownersOutOfCredit.has(page.user_id)) {
+      results.push({ slug: page.slug, method: "skipped", changed: false, rejected_reason: "owner out of credit" });
+      continue;
+    }
     try {
       result = await restructurePage(db, billingDb, page, dryRun);
     } catch (error) {
+      if (error instanceof OwnerOutOfCredit) {
+        // Skip this owner's remaining pages; nothing was bought, so no attempt
+        // is counted against the page.
+        if (page.user_id) ownersOutOfCredit.add(page.user_id);
+        results.push({ slug: page.slug, method: "skipped", changed: false, rejected_reason: error.message });
+        continue;
+      }
       if (error instanceof SweepAbort) {
         // Provider out of credit — stop immediately instead of burning the
         // remaining pages on calls that can only fail.

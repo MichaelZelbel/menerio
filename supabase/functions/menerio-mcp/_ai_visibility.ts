@@ -21,10 +21,15 @@ export function enterVisibilityScope<T>(fn: () => Promise<T> | T): Promise<T> | 
 async function ensureLoaded(supabase: any, userId: string) {
   const store = cache.getStore();
   if (!store || store.loaded) return store;
-  const [{ data: prefs }, { data: sensitive }] = await Promise.all([
+  const [{ data: prefs, error: prefsError }, { data: sensitive, error: sensitiveError }] = await Promise.all([
     supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
     supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null),
   ]);
+  // Fail closed. A read error used to leave the sensitive set empty, which is
+  // exactly "nobody is sensitive": every filter below then let their notes,
+  // moments and action items through for the rest of the request.
+  const loadError = prefsError ?? sensitiveError;
+  if (loadError) throw new Error(`Could not load AI visibility settings: ${loadError.message}. Try again in a moment.`);
   store.hideSensitiveLinked = prefs?.hide_sensitive_from_ai ?? true;
   store.sensitivePersonIds = new Set((sensitive ?? []).map((r: any) => r.id));
   store.loaded = true;
@@ -44,8 +49,8 @@ export async function shouldHideSensitiveLinked(supabase: any, userId: string): 
 /**
  * Apply visibility filters to a Supabase query builder.
  * - Always excludes ai_visibility='hidden'.
- * - For tables with a person_id column (notes/moments/action_items), excludes rows
- *   whose person_id is in the sensitive set (when hide_sensitive_from_ai is on).
+ * - For moments (person_id) and action_items (contact_id), excludes rows whose
+ *   person is in the sensitive set (when hide_sensitive_from_ai is on).
  */
 export async function applyVisibility(
   query: any,
@@ -61,7 +66,12 @@ export async function applyVisibility(
       const ids = await getSensitivePersonIds(supabase, userId);
       if (ids.size > 0) {
         const list = `(${Array.from(ids).join(",")})`;
-        q = q.or(`person_id.is.null,person_id.not.in.${list}`);
+        // action_items has no person_id; its person is contact_id (the same
+        // column ai_can_see checks). Filtering on person_id made PostgREST
+        // answer "column does not exist", so get_action_items failed for
+        // everyone with at least one sensitive person.
+        const column = table === "action_items" ? "contact_id" : "person_id";
+        q = q.or(`${column}.is.null,${column}.not.in.${list}`);
       }
     }
   }

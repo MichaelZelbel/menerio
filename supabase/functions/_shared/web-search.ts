@@ -10,6 +10,7 @@
  * body of `runWebSearch` — the tool schema and call site stay the same.
  */
 import { openRouterWithCredits } from "./llm-credits.ts";
+import { wrapUntrusted } from "./read-url-tool.ts";
 
 // Cheap model to synthesize the web results. The `web` plugin does the actual
 // searching; the model just summarizes + cites.
@@ -85,7 +86,9 @@ export async function runWebSearch(
 
     return JSON.stringify({
       query: q,
-      answer: answer || "(no result)",
+      // A synthesis of pages written by strangers: the same untrusted text as
+      // read_url returns, reaching an agent that can edit the open note.
+      answer: answer ? wrapUntrusted(answer) : "(no result)",
       sources,
     });
   } catch (err: any) {

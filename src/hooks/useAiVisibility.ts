@@ -28,9 +28,12 @@ export function useToggleAiVisibility(kind: AiKind) {
       if (error) throw error;
       return { id, visibility };
     },
-    onSuccess: ({ visibility }) => {
+    onSuccess: ({ id, visibility }) => {
       qc.invalidateQueries({ queryKey: [kind] });
       qc.invalidateQueries({ queryKey: ["notes"] });
+      // The open editor reads the single-row ["note", id] query, which the
+      // ["notes"] prefix does not reach.
+      if (kind === "notes") qc.invalidateQueries({ queryKey: ["note", id] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
       qc.invalidateQueries({ queryKey: ["ai_hidden_counts"] });
       showToast.success(

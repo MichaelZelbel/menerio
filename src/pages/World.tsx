@@ -110,7 +110,7 @@ export default function World() {
     return (
       <>
         <SEOHead title="World — Menerio" description="Everything in your life as entities, events and claims." />
-        <EntityDetail entity={selected} onDeleted={() => navigate("/dashboard/world")} />
+        <EntityDetail key={selected.id} entity={selected} onDeleted={() => navigate("/dashboard/world")} />
       </>
     );
   }
@@ -166,7 +166,7 @@ export default function World() {
 
         <div className="relative max-w-sm">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <Input aria-label="Search the whole world"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search the whole world"

@@ -97,7 +97,7 @@ export function Chat({ personId, personName, conversationContext }: ChatProps) {
     <Card className="flex h-[620px] flex-col">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" /> {BRAND.personaName} with {personName}</CardTitle>
-        <Button variant="ghost" size="icon" onClick={() => setFullscreen((value) => !value)}>
+        <Button aria-label={fullscreen ? "Exit full screen" : "Full screen"} variant="ghost" size="icon" onClick={() => setFullscreen((value) => !value)}>
           {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </Button>
       </CardHeader>

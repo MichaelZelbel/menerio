@@ -126,7 +126,7 @@ export function QuickCapture() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-muted-foreground hidden sm:inline">⌘⇧K</span>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
+                  <Button aria-label="Close" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -134,7 +134,7 @@ export function QuickCapture() {
 
               {/* Input */}
               <div className="p-3">
-                <Textarea
+                <Textarea aria-label="Quick capture"
                   ref={textareaRef}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}

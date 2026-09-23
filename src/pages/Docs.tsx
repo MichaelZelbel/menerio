@@ -98,7 +98,7 @@ export default function Docs() {
       />
       {/* Search bar */}
       <div className="mb-6 flex items-center gap-3">
-        <Button
+        <Button aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
           variant="ghost"
           size="icon"
           className="lg:hidden"
@@ -108,7 +108,7 @@ export default function Docs() {
         </Button>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
+          <Input aria-label="Search documentation"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search documentation..."

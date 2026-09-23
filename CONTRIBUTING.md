@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Here's what you need to get started.
 ## Local Setup
 
 1. Clone the repository
-2. Copy `.env.example` to `.env` and fill in your Supabase credentials
+2. Copy `.env.example` to `.env` and fill in your Supabase credentials. Note: the main Supabase client in `src/integrations/supabase/client.ts` is generated with the hosted project's URL and key written in, so pointing the app at your own project also means changing that file.
 3. Install dependencies: `npm install`
 4. Start the dev server: `npm run dev`
 
@@ -34,13 +34,13 @@ If your change touches the database schema or overall architecture:
 
 ```bash
 npm run lint      # ESLint
-npm run test      # Vitest (unit tests)
+npm run test      # Edge function check, then Vitest (unit tests)
 npm run build     # Verify the production build compiles
 ```
 
 ## CI
 
-A GitHub Actions workflow runs automatically on every pull request and push to `main`. It executes the same three checks listed above (`lint`, `test`, `build`). All checks must pass before a PR can be merged.
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs automatically on every pull request and push to `main`. Besides the three checks above it runs `node scripts/check-brand-strings.mjs`, a type check (`npx tsc --noEmit -p tsconfig.app.json`), SQL tests against a throwaway Postgres, and a browser test. All checks must pass before a PR can be merged.
 
 ## Secrets & Environment
 

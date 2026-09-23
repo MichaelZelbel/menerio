@@ -76,6 +76,10 @@ Deno.serve(async (req) => {
     const dryRun = body?.dry_run === undefined ? true : Boolean(body.dry_run);
     const includeContacts = Boolean(body?.include_contacts ?? false);
     const limit = Math.max(1, Math.min(2000, Number(body?.limit ?? 500)));
+    // process-note's per-note hop: only entries with no claim yet, newest first.
+    // Reading the oldest 500 of every entry meant a user past 500 entries never
+    // had a new fact promoted, because the window never reached it.
+    const pendingOnly = body?.pending_only === true;
 
     let userId: string | null = null;
     const bearer = authHeader.replace(/^Bearer\s+/i, "");
@@ -98,9 +102,10 @@ Deno.serve(async (req) => {
       .from("profile_entries")
       .select("id, contact_id, label, value, origin, evidence_quote, linked_note_id, derived_from_claim_id, created_at")
       .eq("user_id", userId)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: !pendingOnly })
       .limit(limit);
     if (!includeContacts) entryQuery = entryQuery.is("contact_id", null);
+    if (pendingOnly) entryQuery = entryQuery.is("derived_from_claim_id", null);
 
     const [entriesRes, claimsRes, contactsRes, rulesRes] = await Promise.all([
       entryQuery,

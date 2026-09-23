@@ -37,10 +37,14 @@ interface Gate {
  * repository, so a redacted row is still a row somebody can read forever.
  */
 async function loadGate(supabase: any, userId: string): Promise<Gate> {
-  const [{ data: prefs }, { data: sensitive }] = await Promise.all([
+  const [{ data: prefs, error: prefsError }, { data: sensitive, error: sensitiveError }] = await Promise.all([
     supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
     supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null),
   ]);
+  // Fail closed. An unread error left the sensitive list empty, and every
+  // sensitive person, with the facts and moments about them, went out to be
+  // written into a git repository.
+  if (prefsError || sensitiveError) throw (prefsError ?? sensitiveError);
   return {
     hideSensitive: prefs?.hide_sensitive_from_ai ?? true,
     sensitiveIds: (sensitive ?? []).map((r: any) => r.id),
@@ -92,6 +96,9 @@ Deno.serve(async (req) => {
     const gate = await loadGate(supabase, userId);
     const hideIds = gate.hideSensitive ? gate.sensitiveIds : [];
 
+    // updated_at alone is not a total order: rows touched by one bulk update
+    // share it, and PostgREST may return them in a different order on the next
+    // page, so a client paging by offset skipped some and saw others twice.
     const fetchEntities = async () => {
       let q = supabase
         .from("world_entities")
@@ -99,6 +106,7 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .neq("ai_visibility", "hidden")
         .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
         .range(offset, offset + limit - 1);
       if (since.value) q = q.gte("updated_at", since.value);
       if (hideIds.length > 0) q = q.not("id", "in", notInList(hideIds));
@@ -114,6 +122,7 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .neq("ai_visibility", "hidden")
         .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
         .range(offset, offset + limit - 1);
       if (since.value) q = q.gte("updated_at", since.value);
       if (hideIds.length > 0) {
@@ -130,6 +139,7 @@ Deno.serve(async (req) => {
         .select("*")
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
         .range(offset, offset + limit - 1);
       if (since.value) q = q.gte("updated_at", since.value);
       if (hideIds.length > 0) {

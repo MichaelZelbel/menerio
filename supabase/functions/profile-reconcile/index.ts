@@ -127,17 +127,25 @@ async function reconcileUser(db: any, userId: string) {
   // A contact record that is really the account owner turns every fact about
   // the owner into a fact about a stranger ("Yumei — partner of michael").
   // Fold those records into "self" before anything else looks at the graph.
-  const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
+  // Letters of any script. `[^a-z]` turned a name written in Chinese, Cyrillic
+  // or Greek into "", and "" then matched every such contact: each one was
+  // deleted and its facts moved onto the owner.
+  const normalizeName = (value: string) => value.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "");
   const selfNames = new Set<string>();
-  if (selfName) selfNames.add(normalizeName(selfName));
+  const selfDisplay = normalizeName(selfName);
+  if (selfDisplay.length >= 2) selfNames.add(selfDisplay);
   for (const row of aliasRows) {
-    const normalized = normalizeName(String(row.alias || ""));
-    // Single-word pronoun aliases ("I", "me") are not person names.
-    if (normalized.length >= 4) selfNames.add(normalized);
+    const alias = String(row.alias || "").trim();
+    const normalized = normalizeName(alias);
+    // Only full-name aliases fold a contact. A first name ("Mike") is shared
+    // with friends: folding on it deleted a real friend called Mike and filed
+    // his facts under the owner, with no review. Pronouns are not names either.
+    if (normalized.length >= 4 && /\s/.test(alias)) selfNames.add(normalized);
   }
   const selfDuplicateIds = new Set<string>();
   for (const contact of contacts.values()) {
-    if (selfNames.has(normalizeName(contact.name || ""))) selfDuplicateIds.add(contact.id);
+    const key = normalizeName(contact.name || "");
+    if (key && selfNames.has(key)) selfDuplicateIds.add(contact.id);
   }
   if (selfDuplicateIds.size) {
     const ids = [...selfDuplicateIds];

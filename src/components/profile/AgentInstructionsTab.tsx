@@ -184,8 +184,8 @@ export function AgentInstructionsTab({ instructions, onSave, onDelete }: Props) 
                 </p>
                 <ScopeBadge scope={inst.applies_to} className="mt-1.5" />
               </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(inst)}>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shrink-0">
+                <Button aria-label="Edit instruction" variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(inst)}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" aria-label="Delete instruction" onClick={() => setPendingDelete(inst)}>

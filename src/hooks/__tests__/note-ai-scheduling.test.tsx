@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   local: false,
   invoke: vi.fn(),
   rpc: vi.fn(),
+  batchedError: vi.fn(),
   save: vi.fn(),
   execute: vi.fn(),
   editorOptions: null as null | { onUpdate: (event: { editor: { getJSON: () => unknown; getText: () => string } }) => void },
@@ -37,7 +38,7 @@ vi.mock("@/sync/notes-mapping", () => ({ rowToNote: (row: unknown) => row, toSql
 vi.mock("@powersync/tanstack-react-query", () => ({ useQuery: vi.fn() }));
 vi.mock("@/lib/query-sync", () => ({ broadcastInvalidation: vi.fn() }));
 vi.mock("@/lib/credits-events", () => ({ triggerCreditsRefresh: vi.fn() }));
-vi.mock("@/lib/toast", () => ({ showToast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ showToast: { error: vi.fn(), success: vi.fn(), batched: { error: state.batchedError, success: vi.fn() } } }));
 import { useProcessingSweep } from "../useProcessingSweep";
 import { useCreateNote, useDuplicateNote, useUpdateNote, useProcessNote } from "../useNotes";
 
@@ -87,6 +88,7 @@ beforeEach(() => {
   state.invoke.mockReset().mockResolvedValue({ data: { accepted: true, queued: true }, error: null });
   state.save.mockReset().mockImplementation(async () => ({ data: { ...state.row }, error: null }));
   state.execute.mockReset().mockResolvedValue(undefined);
+  state.batchedError.mockReset();
   state.rpc.mockReset().mockImplementation(async (_name, args) => ({ data: { ...state.row, ...args._note }, error: null }));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -129,6 +131,10 @@ describe("browser note scheduling", () => {
     typeContent("retain this failed save");
     await act(async () => { fireEvent.click(view.getByText("Classify with AI")); });
     expect(state.invoke).not.toHaveBeenCalled();
+    // The failure is reported even though the editor's own callbacks handle it.
+    expect(state.batchedError).toHaveBeenCalledWith("note:update-failed", expect.any(Function));
+    const format = state.batchedError.mock.calls[0][1] as (n: number) => string;
+    expect(format(1)).toContain("save failed");
     view.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(state.save).toHaveBeenCalledTimes(2);

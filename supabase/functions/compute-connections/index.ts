@@ -102,12 +102,16 @@ Deno.serve(async (req: Request) => {
     // --- Semantic connections ---
     if (note.embedding) {
       const embedding = typeof note.embedding === "string" ? note.embedding : JSON.stringify(note.embedding);
-      const { data: matches } = await supabase.rpc("match_notes", {
+      const { data: matches, error: matchError } = await supabase.rpc("match_notes", {
         query_embedding: embedding,
         match_threshold: 0.65,
         match_count: 11,
         p_user_id: userId,
       });
+      // A failed match read as "no matches" made an empty keep-set below and
+      // deleted every semantic connection of the note (fixed the same way in
+      // recompute-all-connections on 2026-09-16).
+      if (matchError) throw new Error(`match_notes failed: ${matchError.message}`);
 
       const semanticMatches = (matches || []).filter((m: { id: string }) => m.id !== note_id).slice(0, 10);
 
@@ -142,16 +146,21 @@ Deno.serve(async (req: Request) => {
 
     // Fetch other notes once for both person + topic matching.
     const needOthers = people.length > 0 || topics.length > 0;
-    const otherNotes = needOthers
-      ? (await supabase
-          .from("notes")
-          .select("id, title, metadata")
-          .eq("user_id", userId)
-          .eq("is_trashed", false)
-          .eq("ai_visibility", "visible")
-          .neq("id", note_id)
-          .limit(1000)).data || []
-      : [];
+    let otherNotes: Array<{ id: string; title: string | null; metadata: unknown }> = [];
+    if (needOthers) {
+      const { data, error: othersError } = await supabase
+        .from("notes")
+        .select("id, title, metadata")
+        .eq("user_id", userId)
+        .eq("is_trashed", false)
+        .eq("ai_visibility", "visible")
+        .neq("id", note_id)
+        .limit(1000);
+      // Same reason: an empty list would delete every shared_person and
+      // shared_topic edge of the note in the stale cleanup below.
+      if (othersError) throw new Error(`notes read failed: ${othersError.message}`);
+      otherNotes = data || [];
+    }
 
     // --- Shared person connections (alias-aware, incidental-aware) ---
     if (people.length > 0) {

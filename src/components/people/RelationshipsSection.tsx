@@ -360,7 +360,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
             aria-label="Add relationship"
             onClick={() => {
               setAdding(true);
@@ -382,7 +382,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
               label={description.role}
               actions={
                 <>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
+                  <Button aria-label="Edit relationship" variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button
@@ -526,7 +526,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
                 label={description.role}
                 actions={
                   <>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
+                    <Button aria-label="Edit relationship" variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rel)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
                     <Button

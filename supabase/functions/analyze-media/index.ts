@@ -305,22 +305,23 @@ async function processPdf(
       defaults: { model: OCR_MODEL },
     });
   };
+  // Always a range, even for a "short" document: the count is read from the
+  // file itself (the first uncompressed /Count), so a hybrid or crafted PDF
+  // claiming one page was OCR'd, and billed, in full. Sized to the stated count
+  // so an honest short document never asks for pages it lacks; capped when the
+  // count is unreadable. If the provider refuses the range because the document
+  // is shorter than it, the document is short, so asking again without a range
+  // cannot run up a long bill.
+  const range = pageCount !== null
+    ? { pages: `0-${Math.max(1, Math.min(pageCount, MAX_PDF_OCR_PAGES)) - 1}` }
+    : capRange;
   let ocrResult;
-  if (pageCount !== null && pageCount <= MAX_PDF_OCR_PAGES) {
+  try {
+    ocrResult = await runPdfOcr(range);
+  } catch (err) {
+    const message = (err as Error).message || "";
+    if (!/\((400|422)\)/.test(message) || !/page/i.test(message)) throw err;
     ocrResult = await runPdfOcr({});
-  } else if (pageCount !== null) {
-    ocrResult = await runPdfOcr(capRange);
-  } else {
-    // Page count unreadable: still cap. If the provider refuses the range
-    // because the document is shorter than it, the document is short, so
-    // asking again without a range cannot run up a long bill.
-    try {
-      ocrResult = await runPdfOcr(capRange);
-    } catch (err) {
-      const message = (err as Error).message || "";
-      if (!/\((400|422)\)/.test(message) || !/page/i.test(message)) throw err;
-      ocrResult = await runPdfOcr({});
-    }
   }
   const ocrResp = ocrResult.raw;
   const pages = ocrResult.pages.slice(0, MAX_PDF_OCR_PAGES);
@@ -510,20 +511,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser(token);
-    if (authErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    // gdrive-sync hands imports over with the service key, which getUser()
+    // refuses, so every Drive import skipped OCR with a 401. A service call
+    // acts for the owner of the note it names; a user call acts for the user.
+    const isService = !!SUPABASE_SERVICE_ROLE_KEY && token === SUPABASE_SERVICE_ROLE_KEY;
 
     const body = await req.json();
     const { note_id, storage_path, media_type, original_filename } = body;
+
+    let user: { id: string } | null = null;
+    if (isService) {
+      if (typeof note_id !== "string" || !note_id) {
+        return new Response(JSON.stringify({ error: "note_id required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: noteRow, error: noteErr } = await supabase
+        .from("notes").select("user_id").eq("id", note_id).maybeSingle();
+      if (noteErr) throw noteErr;
+      if (!noteRow) {
+        return new Response(JSON.stringify({ error: "Note not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      user = { id: (noteRow as { user_id: string }).user_id };
+    } else {
+      const { data: { user: authed }, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !authed) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      user = authed;
+    }
 
     if (!note_id || !storage_path || !media_type) {
       return new Response(

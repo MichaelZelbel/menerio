@@ -115,6 +115,7 @@ serve(async (req) => {
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(user.id);
 
     if (deleteError) {
+      console.error("[DELETE-ACCOUNT] auth delete failed:", deleteError);
       return new Response(JSON.stringify({ error: "Failed to delete account" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -126,6 +127,8 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
+    // Was swallowed without a log line, so a failed deletion left no trace.
+    console.error("[DELETE-ACCOUNT] error:", err);
     return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

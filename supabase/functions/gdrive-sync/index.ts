@@ -129,16 +129,16 @@ async function claimImport(userId: string, file: DriveFile): Promise<boolean> {
   });
   if (!error) return true;
   if (error.code !== "23505") throw new Error(`Could not claim ${file.id}: ${error.message}`);
-  // The row exists. Only a claim abandoned by a run that died mid-import may
-  // be taken over; the conditional update is atomic, so two runs cannot both
-  // succeed here either.
+  // The row exists. Only a claim abandoned by a run that died mid-import, or
+  // a failed import whose back-off has passed, may be taken over; the
+  // conditional update is atomic, so two runs cannot both succeed here either.
   const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
   const { data } = await admin
     .from("gdrive_imports")
-    .update({ imported_at: now })
+    .update({ status: "importing", error: null, imported_at: now })
     .eq("user_id", userId)
     .eq("file_id", file.id)
-    .eq("status", "importing")
+    .in("status", ["importing", "failed"])
     .lt("imported_at", cutoff)
     .select("id");
   return (data?.length ?? 0) > 0;
@@ -214,6 +214,13 @@ async function importFile(conn: Conn, file: DriveFile): Promise<string> {
     return "failed";
   }
 
+  // The note exists: record the import now, before the analysis call. It used
+  // to be recorded after it, so a run that hit the function's wall clock during
+  // analysis (ten files per run, each awaited) left the claim in "importing";
+  // thirty minutes later another run took the claim over and imported the same
+  // file again as a second note.
+  await recordImport(conn.user_id, file, "imported", note.id, null);
+
   // Hand off to OCR / analysis — that pipeline re-triggers process-note itself.
   try {
     const analyzeRes = await fetch(`${SUPABASE_URL}/functions/v1/analyze-media`, {
@@ -236,7 +243,6 @@ async function importFile(conn: Conn, file: DriveFile): Promise<string> {
     console.error("analyze-media call failed", e);
   }
 
-  await recordImport(conn.user_id, file, "imported", note.id, null);
   return "imported";
 }
 
@@ -275,11 +281,12 @@ async function syncConnection(conn: Conn) {
       .order("file_id")
       .range(from, to),
   );
-  const seen = new Set(
-    seenRows
-      .filter((r) => !(r.status === "importing" && new Date(r.imported_at).getTime() < staleCutoff))
-      .map((r) => r.file_id),
-  );
+  // A "failed" row is retried too, once the same window has passed: a
+  // transient Drive 5xx, a rate limit or a storage hiccup used to mark the file
+  // failed forever, so that scan was never imported and nothing said so.
+  const retryable = (r: { status: string; imported_at: string }) =>
+    (r.status === "importing" || r.status === "failed") && new Date(r.imported_at).getTime() < staleCutoff;
+  const seen = new Set(seenRows.filter((r) => !retryable(r)).map((r) => r.file_id));
 
   // List the folder newest first and follow the page token until this run has
   // its fill. The old single page of 100 oldest files meant that once a folder
@@ -333,9 +340,16 @@ async function syncConnection(conn: Conn) {
     }
   }
 
+  // last_error was cleared on every run, failures included, so Settings showed
+  // a healthy connection while files were failing.
   await admin
     .from("gdrive_connections")
-    .update({ last_sync_at: new Date().toISOString(), last_error: null })
+    .update({
+      last_sync_at: new Date().toISOString(),
+      last_error: summary.failed > 0
+        ? `${summary.failed} file${summary.failed === 1 ? "" : "s"} could not be imported. Menerio will try again in about 30 minutes.`
+        : null,
+    })
     .eq("user_id", conn.user_id);
 
   return summary;

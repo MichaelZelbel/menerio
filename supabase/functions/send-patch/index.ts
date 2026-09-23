@@ -82,11 +82,11 @@ Deno.serve(async (req: Request) => {
       return json({ error: `App "${app.display_name}" is deactivated` }, 400);
     }
     if (!app.webhook_url) {
-      return json({ error: "App unterstützt keine Patch-Requests (keine webhook_url konfiguriert)" }, 400);
+      return json({ error: `"${app.display_name}" cannot receive changes: it has no webhook URL configured.` }, 400);
     }
     if (!isSafeOutboundUrl(app.webhook_url)) {
       return json(
-        { error: "Die konfigurierte webhook_url ist nicht erlaubt (nur öffentliche HTTPS-Adressen)." },
+        { error: `The webhook URL configured for "${app.display_name}" is not allowed. Only public HTTPS addresses can receive changes.` },
         400,
       );
     }
@@ -127,14 +127,14 @@ Deno.serve(async (req: Request) => {
         .eq("id", note_id);
 
       return json(
-        { error: `Owner-App "${app.display_name}" ist nicht erreichbar. Patch wurde abgelehnt.` },
+        { error: `"${app.display_name}" could not be reached, so the change was not sent. Try again later.` },
         502
       );
     }
 
     return json({
       status: "pending",
-      message: `Änderung wurde an ${app.display_name} gesendet`,
+      message: `Change sent to ${app.display_name}. Waiting for it to confirm.`,
     });
   } catch (err) {
     console.error("send-patch error:", err);

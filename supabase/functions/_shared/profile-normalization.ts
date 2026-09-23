@@ -1139,8 +1139,20 @@ export async function rollbackNormalization(
   payload: NormalizationPayload,
   appliedEntryId?: string | null,
 ): Promise<void> {
-  // Restore every `before` row byte-for-byte by id.
-  const rowsToRestore = payload.before.map((r) => ({
+  // Restore every `before` row byte-for-byte by id. The upsert is keyed on id
+  // alone, so an id that now belongs to another account would be rewritten and
+  // handed to this one: such ids are skipped. The payload is user-writable.
+  const ids = payload.before.map((r) => r.id).filter(Boolean);
+  const { data: existing, error: ownErr } = ids.length
+    ? await supabase.from("profile_entries").select("id, user_id").in("id", ids)
+    : { data: [], error: null };
+  if (ownErr) throw new Error(`rollback ownership read failed: ${ownErr.message}`);
+  const foreign = new Set(
+    ((existing || []) as Array<{ id: string; user_id: string }>)
+      .filter((r) => r.user_id !== payload.user_id)
+      .map((r) => r.id),
+  );
+  const rowsToRestore = payload.before.filter((r) => !foreign.has(r.id)).map((r) => ({
     id: r.id,
     user_id: payload.user_id,
     category_id: r.category_id,

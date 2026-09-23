@@ -199,7 +199,7 @@ export function LocalGraphPanel({
           <FileText className="h-3.5 w-3.5 text-primary" />
           Local Graph
         </h4>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+        <Button aria-label="Close local graph" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>

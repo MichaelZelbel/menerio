@@ -41,7 +41,7 @@ This tests both browser/MCP directions and the real visible-page fallback, and w
 
 ```sh
 npm test
-npx tsc --noEmit
+npx tsc --noEmit -p tsconfig.app.json
 npm run build
 npm run lint
 ```

@@ -235,3 +235,62 @@ verify_jwt = false
 
 [functions.daily-digest]
 verify_jwt = false
+
+# The 17 functions below had no entry, so the next deploy of any of them would
+# flip it to verify_jwt = true (found by the 2026-09-23 audit). Two of them are
+# never called with a JWT and would stop working outright: gdrive-webhook is
+# called by Google Drive push notifications (X-Goog-Channel-Token, no
+# Authorization header) and link-note by external apps with an x-api-key. The
+# rest check the caller themselves (auth.getUser, getClaims or the service key)
+# and are pinned to the live setting like every other function here
+# (ai-moderate-content gained its own admin-or-service check in this audit).
+[functions.gdrive-webhook]
+verify_jwt = false
+
+[functions.link-note]
+verify_jwt = false
+
+[functions.ai-moderate-content]
+verify_jwt = false
+
+[functions.backfill-claim-embeddings]
+verify_jwt = false
+
+[functions.backfill-metadata]
+verify_jwt = false
+
+[functions.backfill-person-documents]
+verify_jwt = false
+
+[functions.backfill-profile-extraction]
+verify_jwt = false
+
+[functions.backfill-wikilinks]
+verify_jwt = false
+
+[functions.draft-event]
+verify_jwt = false
+
+[functions.embed-document]
+verify_jwt = false
+
+[functions.enrich-people]
+verify_jwt = false
+
+[functions.find-connections]
+verify_jwt = false
+
+[functions.gdrive-proxy]
+verify_jwt = false
+
+[functions.moderate-content]
+verify_jwt = false
+
+[functions.search-documents]
+verify_jwt = false
+
+[functions.sweep-note-processing]
+verify_jwt = false
+
+[functions.wiki-cleanup]
+verify_jwt = false

@@ -147,9 +147,9 @@ export default function ActivityPage() {
 
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px] h-9" />
+          <Input type="date" aria-label="From date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-[140px] sm:flex-none" />
           <span className="text-xs text-muted-foreground">to</span>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px] h-9" />
+          <Input type="date" aria-label="To date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-[140px] sm:flex-none" />
         </div>
 
         {hasFilters && (

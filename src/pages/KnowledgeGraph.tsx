@@ -554,14 +554,14 @@ export default function KnowledgeGraph() {
         <div className="flex items-center gap-2">
           <div className="relative w-56">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
+            <Input aria-label="Search nodes"
               value={filters.searchTerm}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search nodes…"
               className="pl-8 h-8 text-xs"
             />
             {filters.searchTerm && (
-              <button
+              <button aria-label="Clear search"
                 onClick={() => setFilters((f) => ({ ...f, searchTerm: "" }))}
                 className="absolute right-2 top-1/2 -translate-y-1/2"
               >
@@ -581,7 +581,7 @@ export default function KnowledgeGraph() {
             <Filter className="h-3.5 w-3.5" />
             Filters
           </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setFullscreen(!fullscreen)}>
+          <Button aria-label={fullscreen ? "Exit full screen" : "Full screen"} variant="outline" size="icon" className="h-8 w-8" onClick={() => setFullscreen(!fullscreen)}>
             {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </Button>
         </div>
@@ -815,7 +815,7 @@ export default function KnowledgeGraph() {
                 <h2 className="text-sm font-semibold text-foreground leading-tight">
                   {selectedNode.title || "Untitled"}
                 </h2>
-                <Button
+                <Button aria-label="Close details"
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 shrink-0"

@@ -103,7 +103,7 @@ function MembershipRow({ membership }: { membership: PersonGroupMembership }) {
               {membership.reason && <p className="text-sm text-muted-foreground">{membership.reason}</p>}
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setEditing((current) => !current)}>
+          <Button aria-label={editing ? "Done editing groups" : "Edit groups"} variant="ghost" size="icon" onClick={() => setEditing((current) => !current)}>
             <Edit2 className="h-4 w-4" />
           </Button>
         </div>

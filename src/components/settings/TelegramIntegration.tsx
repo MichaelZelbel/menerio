@@ -315,7 +315,7 @@ export function TelegramIntegration() {
               <code className="text-2xl font-mono font-bold tracking-[0.3em] text-foreground bg-muted px-4 py-2 rounded-lg select-all">
                 {connection.pairing_code}
               </code>
-              <Button
+              <Button aria-label="Copy pairing code"
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"

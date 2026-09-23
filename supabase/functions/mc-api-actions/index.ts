@@ -40,23 +40,27 @@ Deno.serve(async (req) => {
   try {
     // GET /mc-api-actions/sync-status
     if (req.method === "GET" && action === "sync-status") {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("action_items")
         .select("updated_at")
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
         .limit(1);
 
-      const { count: totalCount } = await supabase
+      const { count: totalCount, error: totalError } = await supabase
         .from("action_items")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId);
 
-      const { count: openCount } = await supabase
+      const { count: openCount, error: openError } = await supabase
         .from("action_items")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
         .eq("status", "open");
+
+      // A failed read used to answer 200 with every count 0.
+      const readError = error ?? totalError ?? openError;
+      if (readError) return dbErrorResponse(readError);
 
       return json({
         data: {
@@ -70,9 +74,16 @@ Deno.serve(async (req) => {
     // GET /mc-api-actions — List
     if (req.method === "GET" && !action) {
       const { limit, offset } = paginationParams(url);
-      const status = url.searchParams.get("status");
+      // "completed" is the old word for "done" (see PUT); filtering on it
+      // matched nothing. A contact_id that is not a UUID was a 500.
+      const rawStatus = url.searchParams.get("status");
+      const status = rawStatus === "completed" ? "done" : rawStatus;
       const priority = url.searchParams.get("priority");
       const contactId = url.searchParams.get("contact_id");
+      if (status && !ACTION_STATUSES.includes(status)) {
+        return errorJson("BAD_REQUEST", `status must be one of: ${ACTION_STATUSES.join(", ")}`, 400);
+      }
+      if (contactId && !isUuid(contactId)) return errorJson("BAD_REQUEST", "contact_id must be a UUID", 400);
 
       let query = supabase
         .from("action_items")

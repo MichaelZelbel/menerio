@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sha256Hex } from "../_shared/sha256.ts";
+import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -77,7 +78,11 @@ Deno.serve(async (req: Request) => {
       content,
     } = body;
     const externalBody = typeof noteBody === "string" ? noteBody : content;
-    const folderPathFromPayload = typeof body.folder_path === "string" ? body.folder_path : null;
+    // Normalised the way every other writer does (mc-api-notes, MCP): stored
+    // verbatim, "/Research/" put the note in a nameless folder above the real
+    // one, and an all-slash or blank value filed it at the root instead of in
+    // the app's default folder.
+    const folderPathFromPayload = normalizeFolderPath(body.folder_path) || null;
 
     if (!source_id || typeof source_id !== "string") {
       return json({ error: "source_id is required (string)" }, 400);

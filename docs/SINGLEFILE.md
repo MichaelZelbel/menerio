@@ -78,7 +78,7 @@ Content-Type: multipart/form-data
 
 ## Security model
 
-- Authentication uses the existing **Godspeed API key** system (`mnr_` prefix,
+- Authentication uses the existing **Mission Control API key** system (`mnr_` prefix,
   SHA-256 hashed at rest, scoped, rate-limited to 1000 req/h per key).
 - Uploaded HTML is **never executed** in the Menerio app; it is stored as a
   binary attachment in the private `note-attachments` bucket and only fetched

@@ -215,12 +215,12 @@ export function SmartTagsPanel({
         if (idx >= 0) completed.splice(idx, 1);
       }
 
-      // We need to update via edge function or direct — use updateNote which handles metadata
-      // Actually metadata isn't in NoteUpdate type, so we use supabase directly
-      await supabase
+      // metadata isn't in the NoteUpdate type, so this writes directly.
+      const { error } = await supabase
         .from("notes" as any)
         .update({ metadata: { ...meta, completed_actions: completed } })
         .eq("id", noteId);
+      if (error) showToast.error(`Could not update the action item: ${error.message}`);
     },
     [notes]
   );

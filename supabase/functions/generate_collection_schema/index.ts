@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import {
   balanceUnavailableResponse,
   insufficientCreditsResponse,
@@ -95,8 +95,11 @@ function uniqueKeys(fields: Array<Record<string, unknown>>) {
 }
 
 function extractJson(text: string) {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  return JSON.parse(trimmed);
+  // parseModelJson also finds the object inside prose ("Here is the schema:"),
+  // which a bare JSON.parse threw on, paying for a second call and then a 500.
+  const parsed = parseModelJson(text);
+  if (parsed === null) throw new Error("Model returned no JSON");
+  return parsed;
 }
 
 function validateAndNormalize(value: unknown) {

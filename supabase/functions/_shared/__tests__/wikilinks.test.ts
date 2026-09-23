@@ -34,6 +34,13 @@ describe("extractWikilinkTitles", () => {
     const pattern = /const WIKILINK_REGEX = (.+);/;
     expect(pattern.exec(shared)?.[1]).toBe(pattern.exec(backfill)?.[1]);
   });
+  it("reads the title out of an aliased or heading link", () => {
+    expect(extractWikilinkTitles("[[Ownward Studio|the studio]], [[Berlin#History]], [[Paris#^abc123]], [[ownward studio#Team|team]]"))
+      .toEqual(["Ownward Studio", "Berlin", "Paris"]);
+  });
+  it("skips a link to a heading of the same note", () => {
+    expect(extractWikilinkTitles("[[#Summary]] and [[|x]]")).toEqual([]);
+  });
   it("survives an empty or missing body", () => {
     expect(extractWikilinkTitles("")).toEqual([]);
     expect(extractWikilinkTitles(null)).toEqual([]);

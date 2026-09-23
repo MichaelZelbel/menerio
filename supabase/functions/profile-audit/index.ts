@@ -337,11 +337,19 @@ async function finish(
   return { ok: true, run_id: runId, ...patch, ...stats };
 }
 
-async function sweepDirty(db: any, limit: number) {
-  const { data } = await db
+/**
+ * Audit dirty scopes, oldest first. `userId` limits the sweep to one account;
+ * only the scheduler (cron key) and a service-role call without a user may
+ * sweep everyone. Until 2026-09-23 a signed-in user's `sweep` or `backfill`
+ * drained every account's dirty scopes, paid from their owners' allowances.
+ */
+async function sweepDirty(db: any, limit: number, userId?: string) {
+  let q = db
     .from("profile_audit_runs")
     .select("user_id, contact_id")
-    .eq("status", "dirty")
+    .eq("status", "dirty");
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q
     .order("dirty_at", { ascending: true })
     .limit(limit);
   let done = 0;
@@ -435,8 +443,10 @@ serve(async (req) => {
 
     if (action === "sweep") {
       const limit = Math.min(Number(body?.limit ?? 25), 200);
+      // A user sweeps only their own scopes; `userId` is "" only for a
+      // service-role call that named no user.
       // @ts-ignore Deno runtime global
-      EdgeRuntime.waitUntil(sweepDirty(db, limit));
+      EdgeRuntime.waitUntil(sweepDirty(db, limit, userId || undefined));
       return json({ accepted: true, limit }, 202);
     }
 
@@ -451,7 +461,7 @@ serve(async (req) => {
         }
         // Drain in batches so one invocation covers a whole vault.
         for (let i = 0; i < 20; i++) {
-          const done = await sweepDirty(db, 25);
+          const done = await sweepDirty(db, 25, userId);
           if (done === 0) break;
         }
       })();

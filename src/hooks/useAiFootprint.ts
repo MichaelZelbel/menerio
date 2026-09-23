@@ -53,6 +53,11 @@ export async function fetchAiFootprint(noteId: string): Promise<AiFootprint> {
       .select("id, source_note_id, connection_type, source:source_note_id(id, title)")
       .eq("target_note_id", id),
   ]);
+  // Throw rather than report an empty footprint: callers (the hide-from-AI
+  // flow, the footprint dialog) treat "nothing derived" as "nothing to clean
+  // up", so a failed read silently skipped the cleanup offer.
+  const failed = wikiRes.error || profileRes.error || connSrcRes.error || connTgtRes.error;
+  if (failed) throw failed;
 
   const wikiPages = (wikiRes.data ?? [])
     .filter((r: any) => r.wiki_pages)

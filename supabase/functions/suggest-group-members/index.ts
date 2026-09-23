@@ -130,17 +130,20 @@ serve(async (req) => {
       .map((suggestion: any) => {
         const reasoning = suggestion.reasoning || "";
         const contactId = String(suggestion.contact_id);
+        // The name shown and stored comes from the contact row, not the model:
+        // "Add Alice" for Bob's id added Bob.
+        const contactName = candidates.find((c: any) => c.id === contactId)?.name || null;
         const sensitive = isSensitiveSuggestion(`${group.name} ${group.description || ""} ${reasoning}`);
         return {
           user_id: userId,
           suggestion_type: "group_member_suggestion",
-          title: `Add ${suggestion.contact_name || "contact"} to ${group.name}`,
+          title: `Add ${contactName || "contact"} to ${group.name}`,
           description: reasoning || null,
           confidence_score: Number(suggestion.confidence),
           is_sensitive: sensitive,
           target_entity_type: "contact_group",
           target_entity_id: group_id,
-          payload: { group_id, contact_id: contactId, contact_name: suggestion.contact_name || null, group_name: group.name, reasoning, default_status: defaultStatus },
+          payload: { group_id, contact_id: contactId, contact_name: contactName, group_name: group.name, reasoning, default_status: defaultStatus },
           suppression_key: buildSuppressionKey(group_id, contactId),
         };
       });

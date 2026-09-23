@@ -5,6 +5,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RefreshCw, RotateCcw, Scissors } from "lucide-react";
 import { toast } from "sonner";
 import { SEOHead } from "@/components/SEOHead";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -126,6 +127,10 @@ export default function WikiLintPlaceholder() {
   const [result, setResult] = useState<LintResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  // One cleanup at a time: a strip or rebuild runs an edge function (the
+  // rebuild a paid model call), and a second click used to start another.
+  const [cleanupBusy, setCleanupBusy] = useState<string | null>(null);
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   const pageTitles = useMemo(() => new Map((pagesQuery.data || []).map((page) => [page.slug, page.title])), [pagesQuery.data]);
   const findings = result?.findings || emptyFindings;
@@ -149,7 +154,9 @@ export default function WikiLintPlaceholder() {
   const openPage = (slug: string) => navigate(pagePath(slug));
 
   const stripDeadLinks = async () => {
-    if (!confirm("Strip all dead [[wikilinks]] from every Lexicon page?")) return;
+    if (cleanupBusy) return;
+    if (!(await confirm({ title: "Strip all dead [[wikilinks]] from every Lexicon page?", description: "Links to pages that do not exist become plain words.", confirmLabel: "Strip dead links", destructive: true }))) return;
+    setCleanupBusy("strip");
     try {
       const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
       if (invokeError) throw invokeError;
@@ -157,13 +164,17 @@ export default function WikiLintPlaceholder() {
       await runLint();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Strip failed");
+    } finally {
+      setCleanupBusy(null);
     }
   };
 
   const rebuildPage = async (slug: string) => {
     const page = pagesQuery.data?.find((p) => p.slug === slug);
     if (!page) return toast.error("Page not found");
-    if (!confirm(`Rebuild "${page.title}" strictly from its source notes? This discards the current content.`)) return;
+    if (cleanupBusy) return;
+    if (!(await confirm({ title: `Rebuild "${page.title}" from its source notes?`, description: "This discards the page's current content and writes it again strictly from the notes it came from.", confirmLabel: "Rebuild", destructive: true }))) return;
+    setCleanupBusy(slug);
     try {
       const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", {
         body: { mode: "rebuild_page", page_id: page.id },
@@ -173,6 +184,8 @@ export default function WikiLintPlaceholder() {
       toast.success(`Rebuilt "${page.title}"`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Rebuild failed");
+    } finally {
+      setCleanupBusy(null);
     }
   };
 
@@ -189,8 +202,8 @@ export default function WikiLintPlaceholder() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={stripDeadLinks} disabled={isRunning || hasNoPages}>
-            <Scissors className="h-4 w-4" /> Strip dead links
+          <Button variant="outline" onClick={stripDeadLinks} disabled={isRunning || hasNoPages || !!cleanupBusy}>
+            {cleanupBusy === "strip" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Scissors className="h-4 w-4" />} Strip dead links
           </Button>
           <Button onClick={runLint} disabled={isRunning || hasNoPages}>
             {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -281,7 +294,7 @@ export default function WikiLintPlaceholder() {
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => openPage(item.pages[0])}><ExternalLink className="h-4 w-4" /> Open page</Button>
-                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.pages[0])}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                  <Button size="sm" variant="outline" disabled={!!cleanupBusy} onClick={() => rebuildPage(item.pages[0])}>{cleanupBusy === item.pages[0] ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Rebuild from sources</Button>
                 </div>
               </div>
             ))}
@@ -294,7 +307,7 @@ export default function WikiLintPlaceholder() {
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                  <Button size="sm" variant="outline" disabled={!!cleanupBusy} onClick={() => rebuildPage(item.page)}>{cleanupBusy === item.page ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Rebuild from sources</Button>
                 </div>
               </div>
             ))}
@@ -307,7 +320,7 @@ export default function WikiLintPlaceholder() {
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                  <Button size="sm" variant="outline" disabled={!!cleanupBusy} onClick={() => rebuildPage(item.page)}>{cleanupBusy === item.page ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Rebuild from sources</Button>
                 </div>
               </div>
             ))}
@@ -320,13 +333,14 @@ export default function WikiLintPlaceholder() {
                 <p className="mt-3 text-muted-foreground">{item.description}</p><Separator className="my-3" /><p>{item.suggested_fix}</p>
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="outline" asChild><Link to={pagePath(item.page)}>Open page</Link></Button>
-                  <Button size="sm" variant="outline" onClick={() => rebuildPage(item.page)}><RefreshCw className="h-4 w-4" /> Rebuild from sources</Button>
+                  <Button size="sm" variant="outline" disabled={!!cleanupBusy} onClick={() => rebuildPage(item.page)}>{cleanupBusy === item.page ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Rebuild from sources</Button>
                 </div>
               </div>
             ))}
           </LintSection>
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

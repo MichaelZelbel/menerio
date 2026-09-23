@@ -127,3 +127,12 @@ describe('analysis request compatibility',()=>{
   expect(result.status).toBe(202);expect(result.body).toMatchObject({ok:true,queued:true,processing:false});expect(calls).toEqual(['enqueue:automatic']);
  });
 });
+it.each([['impossible date','2023-13-01'],['future date','2999-06-01']])('real moment extractor drops an %s without a database write',async(_label,happened)=>{
+ const lease={id:'j',user_id:'u',note_id:'n',lease_id:'l',pipeline:'analysis',desired_generation:1,captured_generation:1,fingerprint:'f',snapshot:{}};
+ const raw=JSON.stringify({is_event:true,happened_at:happened,title:'Wedding',confidence_date:0,confidence_truth:0,participants:[{name:'Fixture',is_self:true}]});
+ let reads=0;const stages=new Map<string,any>();
+ const db={rpc:async(name:string,args:any)=>{if(name==='begin_note_ai_stage')return {data:stages.get(args._stage)??{status:'started'},error:null};if(name==='checkpoint_note_ai_stage')stages.set(args._stage,{status:'checkpointed',result:args._result});return {data:name==='get_note_ai_job_snapshot'?lease:true,error:null}},from:()=>{reads++;throw Error('no table access expected')}};
+ const processor=loadProcessor({Deno:{env:{get:()=>''},serve:()=>{}},createClient:()=>db,createNoteAIJobs,NoteAIJobError,classifyNoteAIError,handleNoteAIRequest,checkBalance:async()=>({allowed:true}),runChat:async()=>({content:raw}),parseModelJson:(s:string)=>JSON.parse(s),outputLanguageRule:()=>'',PROCESS_NOTE_MOMENT_PROMPT:'fixture',console:{log:()=>{},warn:()=>{},error:()=>{}}},'getSuggestionPreferences=async()=>({mode:"review",profileLanguage:"en"});');
+ await processor.generateMomentSuggestions('u','n','Fixture','Fixture content',[{name:'Fixture',canonical_name:'Fixture',is_self:true}],{dates_mentioned:[happened]},lease);
+ expect(reads).toBe(0);
+});

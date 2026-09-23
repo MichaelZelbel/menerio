@@ -293,14 +293,28 @@ export function useUpdateNote() {
         const row = await db.get<NoteRow>("SELECT * FROM notes WHERE id = ?", [id]);
         return rowToNote(row);
       }
+      // NOTE_COLUMNS, not `*`: the row is merged into every cached list and
+      // persisted to IndexedDB, and `*` carried the note's embedding vector
+      // (thousands of floats) back on every autosave.
       const { data, error } = await supabase
         .from("notes" as any)
         .update(updates)
         .eq("id", id)
-        .select()
+        .select(NOTE_COLUMNS)
         .single();
       if (error) throw error;
       return data as unknown as Note;
+    },
+    // Most callers fire and forget (favourite, pin, tags, drag-to-folder, bulk
+    // actions, and the editor's final flush on unmount, whose own callbacks
+    // never run once the editor is gone). Without this a refused write left
+    // the UI showing the change with nothing saved and no word about it.
+    onError: (error: Error) => {
+      showToast.batched.error("note:update-failed", (n) =>
+        n === 1
+          ? `Could not save the change to the note: ${error?.message || "unknown error"}`
+          : `Could not save ${n} note changes`,
+      );
     },
     onSuccess: (note, variables) => {
       // On the local-first path the list cache holds raw SQLite rows (the

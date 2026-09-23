@@ -75,7 +75,8 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
       showToast.success("Version restored");
       setPreviewOpen(false);
     } catch {
-      showToast.error("Failed to restore version");
+      // useUpdateNote already toasts the failure; the preview stays open so
+      // the version can be restored again.
     }
   };
 
@@ -88,7 +89,7 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
           <GitCommit className="h-3.5 w-3.5 text-primary" />
           Version History
         </h4>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+        <button aria-label="Close version history" onClick={onClose} className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
       </div>

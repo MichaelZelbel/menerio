@@ -75,7 +75,13 @@ Deno.serve(async (req: Request) => {
         updateData.content = updatedBody;
       }
 
-      await supabase.from("notes").update(updateData).eq("id", menerio_note_id);
+      // The write's error went unread and the app was told "processed", so it
+      // never retried and the note stayed "pending" with the old content.
+      const { error: ackErr } = await supabase.from("notes").update(updateData).eq("id", menerio_note_id);
+      if (ackErr) {
+        console.error("patch-response ack update error:", ackErr);
+        return json({ error: "Could not apply the change; please retry" }, 500);
+      }
 
       // Log
       await supabase.from("sync_log").insert({
@@ -95,10 +101,14 @@ Deno.serve(async (req: Request) => {
         _last_reject_reason: reject_reason || "No reason provided",
       };
 
-      await supabase
+      const { error: rejectErr } = await supabase
         .from("notes")
         .update({ sync_status: "rejected", structured_fields: updatedStructuredFields })
         .eq("id", menerio_note_id);
+      if (rejectErr) {
+        console.error("patch-response reject update error:", rejectErr);
+        return json({ error: "Could not record the rejection; please retry" }, 500);
+      }
 
       // Log
       await supabase.from("sync_log").insert({

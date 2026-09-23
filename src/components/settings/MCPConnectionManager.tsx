@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -280,9 +281,9 @@ export function MCPConnectionManager() {
               </CardDescription>
             </div>
             <Button size="sm" variant="outline" asChild className="shrink-0">
-              <a href="/dashboard/settings?tab=apikeys">
+              <Link to="/dashboard/settings?tab=apikeys">
                 <Plus className="mr-2 h-4 w-4" /> Make a key
-              </a>
+              </Link>
             </Button>
           </div>
         </CardHeader>
@@ -297,9 +298,9 @@ export function MCPConnectionManager() {
             </div>
             <p className="text-xs text-muted-foreground">
               Use a key from{" "}
-              <a href="/dashboard/settings?tab=apikeys" className="underline text-primary hover:text-primary/80">
+              <Link to="/dashboard/settings?tab=apikeys" className="underline text-primary hover:text-primary/80">
                 Settings → API Keys
-              </a>{" "}
+              </Link>{" "}
               (any key connects here; which tools answer depends on the boxes that key
               carries). Older <code className="font-mono">mnr_mcp_</code> tokens
               listed below keep working too.

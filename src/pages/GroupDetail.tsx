@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent } from "@dnd-kit/core";
-import { ArrowLeft, Archive, CalendarDays, Check, Clapperboard, Compass, ExternalLink, Handshake, Landmark, Loader2, Podcast, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
+import { ArrowLeft, Archive, ArchiveRestore, CalendarDays, Check, Clapperboard, Compass, ExternalLink, Handshake, Landmark, Loader2, Podcast, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -27,8 +27,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { useArchiveGroup, useGroup, useTrashGroup, useUpdateGroup } from "@/hooks/useGroups";
+import { useArchiveGroup, useGroup, useRestoreGroup, useTrashGroup, useUpdateGroup } from "@/hooks/useGroups";
 import { useGroupMemberships, useMoveMembershipStage } from "@/hooks/useGroupMemberships";
+import { toast } from "sonner";
 import { showToast } from "@/lib/toast";
 import { parseArray, pretty, relativeDate } from "@/lib/group-utils";
 import { AddMemberDialog } from "@/components/groups/AddMemberDialog";
@@ -62,6 +63,7 @@ export default function GroupDetail() {
   const updateGroup = useUpdateGroup();
   const archiveGroup = useArchiveGroup();
   const trashGroup = useTrashGroup();
+  const restoreGroup = useRestoreGroup();
   const moveMembership = useMoveMembershipStage();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [aboutForm, setAboutForm] = useState<AboutForm | null>(null);
@@ -73,6 +75,14 @@ export default function GroupDetail() {
   // is undefined and stages parse to [], so flipping then would strand pipeline
   // groups on the List tab before their stages ever arrive.
   const hasPipeline = stages.length > 0;
+  // The route reuses this component when moving from one group to another, so
+  // an unsaved About draft or an open member sheet must not carry over (the
+  // draft would otherwise be saved onto the next group).
+  const groupId = group?.id;
+  useEffect(() => {
+    setAboutForm(null);
+    setSelectedMembershipId(null);
+  }, [groupId]);
   useEffect(() => {
     if (group && !hasPipeline && activeTab === "pipeline") setActiveTab("list");
   }, [group, hasPipeline, activeTab]);
@@ -127,7 +137,14 @@ export default function GroupDetail() {
         <div className="flex shrink-0 items-center gap-2">
           <AddMemberDialog group={group} existingPersonIds={existingPersonIds} />
           <Button variant="outline" size="sm" onClick={() => setActiveTab("about")}>Edit</Button>
-          <Button variant="outline" size="icon" onClick={() => archiveGroup.mutate(group.id, { onSuccess: () => showToast.success("Group archived") })}><Archive className="h-4 w-4" /></Button>
+          {group.archived_at ? (
+            <Button variant="outline" size="sm" disabled={restoreGroup.isPending} onClick={() => restoreGroup.mutate(group.id, { onSuccess: () => showToast.success("Group unarchived") })}><ArchiveRestore className="mr-1 h-4 w-4" />Unarchive</Button>
+          ) : (
+            <Button aria-label="Archive group" title="Archive group" variant="outline" size="icon" disabled={archiveGroup.isPending} onClick={() => archiveGroup.mutate(group.id, {
+              // Failures are toasted by the archive/restore hooks themselves.
+              onSuccess: () => toast.success("Group archived", { action: { label: "Undo", onClick: () => restoreGroup.mutate(group.id) } }),
+            })}><Archive className="h-4 w-4" /></Button>
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="icon" className="text-destructive" aria-label="Move group to trash"><Trash2 className="h-4 w-4" /></Button>

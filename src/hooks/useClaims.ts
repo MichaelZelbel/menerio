@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
@@ -15,6 +15,16 @@ import {
 export type { Claim } from "@/lib/claims";
 
 const db = supabase as any;
+
+/**
+ * World reads the same claims through the `world_claims` view under its own
+ * key; without this a fact added or ended on a person page kept its old state
+ * on the World page for the cache lifetime (and across reloads).
+ */
+function invalidateClaimViews(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["claims"] });
+  qc.invalidateQueries({ queryKey: ["world-claims"] });
+}
 
 /** All claims (current AND history) for one subject. Filtering happens in the UI. */
 export function useClaims(subjectType: ClaimSubjectType, subjectId: string | null) {
@@ -110,7 +120,7 @@ export function useAddClaim() {
       return { claim: data as Claim, superseded };
     },
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ["claims"] });
+      invalidateClaimViews(qc);
       showToast.success(
         result.superseded > 0 ? "Fact added — the previous one moved to history" : "Fact added",
       );
@@ -133,7 +143,7 @@ export function useUpdateClaim() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["claims"] });
+      invalidateClaimViews(qc);
       showToast.success("Fact updated");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not update the fact"),
@@ -150,7 +160,7 @@ export function useEndClaim() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["claims"] });
+      invalidateClaimViews(qc);
       showToast.success("Marked as no longer true — kept in history");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not update the fact"),
@@ -167,7 +177,7 @@ export function useDeleteClaim() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["claims"] });
+      invalidateClaimViews(qc);
       showToast.success("Fact removed");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not remove the fact"),
