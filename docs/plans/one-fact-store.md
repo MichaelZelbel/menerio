@@ -19,7 +19,7 @@ How to read the markers:
 4. With one list, a fact cannot appear twice. A new value keeps the old one as "was true until". Assistants, search and Godspeed all read the same thing.
 5. Your typed words stay protected. The same rule that guards the profile list today moves onto the facts themselves.
 6. Relationships between people stay in their own table. They link two people, and that works well already.
-7. How it ships: everything is built and rehearsed first (8-10 days of work, nothing changes in production), then goes live in one sitting of about three hours, tested straight away. There are no waiting periods between steps. Every job that writes facts is paused during the switch. The data switch is one transaction that checks its own counts, there is one rollback script, and the old table is archived, not deleted. Nothing from production goes into this public repository except counts (section 5.1).
+7. How it ships: everything is built and rehearsed first (8-10 days of work, nothing changes in production), then goes live in one sitting of about three hours, tested straight away. There are no waiting periods between steps. Every job that writes facts is paused during the switch. The data switch is one transaction that checks its own counts, there is one rollback script, and the old table is archived, not deleted. Fact data never leaves the database during any of this: the session sees counts and ids only (section 5.1).
 8. Godspeed: the pull becomes a straight copy of the facts, and existing files keep their ids. Its hourly pull learns paging during the build (see Risk R1).
 9. Decided (section 7): changing a fact keeps the old value as history; removing offers "not true any more" and "this was wrong"; private sections stay out of the Godspeed repo.
 10. Separately, I found a bug that can lose facts today: the tidy-up job deletes rows it then cannot re-insert (Risk R2). That job and the nightly bag splitter are deleted, not rewritten: facts are tidied on the way in instead.
@@ -538,7 +538,12 @@ Why this is safe without staged holds:
 
 ### 5.1 Ground rules
 
-- **Nothing from production goes into git or the pull request, except counts.** This repository is public. Dumps of live functions and cron jobs (some cron commands contain secrets as literal text, `docs/CRON_JOBS.md:48-49`), the label map, the claim list for A6, rehearsal output, MCP answers and the Godspeed removal list all stay in the session scratchpad. They are shown to Michael in the chat, never committed. Before every commit, `scripts/check-no-prod-data.mjs` scans the staged diff for `x-cron-key`, JWTs (`eyJ`), `sb_secret`, and fact-shaped content in `docs/plans/`, and refuses the commit on a hit.
+- **Fact data never leaves the database. This is the first rule, and every other step obeys it.** The migration moves facts from one table to another *inside* Postgres; nothing about that needs a copy anywhere else. Concretely:
+  - No query this plan runs against production selects a fact's value, label, evidence quote or a person's name. The session sees **counts and ids only**. The switch, the rehearsal and the rollback do all their work in SQL, inside the database.
+  - Where TypeScript logic is needed (the label map), it runs **inside Supabase**, as a one-off edge function that reads from the database and writes its result back into a database table. Nothing passes through the Claude session, the cloud container or git.
+  - When Michael needs to look at facts (the unshown facts in A6), he reads them the normal way, through the Menerio app or the Menerio MCP in his own chat, and never through a dump.
+  - Nothing from production goes into git or the pull request except counts. The only other thing read out of production is the live **schema** (table and function definitions, no rows) for the rehearsal database. It is kept in the session scratchpad, which is discarded with the container, and never committed, because function and cron definitions can contain secrets (`docs/CRON_JOBS.md:48-49`).
+  - `scripts/check-no-prod-data.mjs` scans every staged commit for secrets (`x-cron-key`, `eyJ`, `sb_secret`) as a backstop. It is a backstop only; the rule above is what prevents it.
 - **Migrations.** One file per change in `supabase/migrations/`, each with `supabase/rollback/<name>_rollback.sql`. They are applied through the Supabase management API and recorded by hand in `supabase_migrations.schema_migrations`. Never `supabase db push`. Every function a migration redefines is written from its **live** text (A1 dump), not from the repo's oldest version. For example, `match_claims` starts from `20260923150000:221-340`, which carries the cross-account check.
 - **Edge functions** are deployed with a script that deploys the listed functions one after another and stops at the first failure.
 - **Frontend.** Pushing to `main` only rebuilds the preview. Part A step 1 writes down exactly how production is published, so B4 is one known action.
@@ -547,9 +552,9 @@ Why this is safe without staged holds:
 
 ### 5.2 Part A: build and rehearse (no production changes)
 
-**A1. Baseline and inventory (read-only). Output goes to the scratchpad; only the counts go to `docs/plans/one-fact-store-baseline.md`.**
+**A1. Baseline and inventory (read-only; counts and definitions only, never rows). The counts go to `docs/plans/one-fact-store-baseline.md`.**
 - Dump the live schema of `public` (and `internal` function signatures only), without data, with `pg_dump --schema-only` through the management API, or the equivalent catalog queries. It is the base for A5's local database and for every migration (R3, R5). It stays in the scratchpad: live function and cron bodies can carry secrets.
-- Dump the cron jobs: `jobid, jobname, schedule, active` only in anything that is kept; the `command` column is read in the scratchpad to learn which jobs write facts, and is never committed.
+- List the cron jobs: `jobid, jobname, schedule, active`. Which jobs write facts is read from the function each one calls (in the repo), not from the `command` column, which can hold a secret.
 - Write down how the production frontend is published, and the current deployed version of every edge function that Part B touches (for the rollback).
 - Find every path that runs `process-note` or another fact writer without a cron (for example a database webhook on `notes`, or a direct call from the editor). B1 must be able to pause each one.
 - Baseline counts:
@@ -615,6 +620,7 @@ Why this is safe without staged holds:
 
 **A2. Code** (one branch, one pull request):
 - `supabase/functions/_shared/fact-store.ts` (`writeFact`, section 3.5). `placeClaim()` (today in `adopt-claims.ts:86`) moves in first.
+- `supabase/functions/build-fact-label-map/` (one-off, service role): computes the label map inside Supabase and writes it to the `fact_label_map` table.
 - Every writer and reader in section 2.3, moved to `writeFact`, `profile_facts` and `agent_facts`. That covers the page (`useFacts`, the components, `useAiFootprint`, `RelationshipsSection`, `ReviewQueue`, `useAddClaim`), all edge functions and MCP tools, the merge SQL, and the query-persister buster set to `"account-v4"`.
 - `write_profile_entry` stays as an alias of `write_fact`, so a tab left open from before go-live can still add a fact.
 - The two TypeScript copies of the cardinality rules are removed (section 3.6).
@@ -633,9 +639,9 @@ Why this is safe without staged holds:
   - `match_claims`, from its live text (`20260923150000:221-340`), keeping its caller check and its REVOKE/GRANT block, and reading visibility from `agent_facts`;
   - `claims_follow_subject_delete`;
   - the guards on `profile_categories` (section 3.6).
-- `…_fact_store_switch.sql` (applied in B5; one transaction). It is **plain SQL over the live rows**, committed and reviewed like any migration. It contains no data. Its two inputs are loaded into temp tables in the same transaction and are **not committed**:
-  - `fact_label_map`: one row per distinct entry label and claim attribute, with `normalizeAttribute()` and `placeClaim()`'s label and section slug, built by `scripts/build-fact-label-map.ts` into the scratchpad. Both are pure functions of the label, so there is one implementation and no SQL copy.
-  - `fact_unshown_drop`: the ids of the unshown claims that Michael marked "I deleted this" in A6.
+- `…_fact_store_switch.sql` (applied in B5; one transaction). It is **plain SQL over the live rows**, committed and reviewed like any migration. It contains no data. Its two inputs are tables that already sit in the database; neither passes through the session or git:
+  - `fact_label_map`: one row per distinct entry label and claim attribute, with `normalizeAttribute()` and `placeClaim()`'s label and section slug. It is built **inside Supabase** by a one-off edge function, `build-fact-label-map` (service role), that reads the labels and writes the map into a table of that name. Both functions are pure functions of the label, so there is one implementation and no SQL copy. The function is deleted in B6, and the table with it.
+  - `fact_unshown_drop`: the claim ids that Michael marked "I deleted this" in A6 (ids only).
 
   It does, in order:
   1. `SET LOCAL menerio.fact_migration = 'on'`; lock `profile_entries`, `claims`, `fact_slots` and `profile_categories` in exclusive mode; **`ALTER TABLE profile_entries DISABLE TRIGGER USER`**. The old triggers must not fire on the switch's own updates: `profile_entry_canonicalize` fires on UPDATE and rewrites *other* rows' values (`20260816020759:181-201, 245-246`), `profile_entry_require_origin` raises on legacy AI rows, and the quality guard silently skips rows. The claim guards do nothing while the flag is set.
@@ -700,15 +706,15 @@ Why this is safe without staged holds:
   - `useFacts.test.tsx`;
   - updated: `useContactProfile.test.tsx`, `CompactCategorySection.test.tsx`, `useAiFootprint.test.ts`, `profile-insert-suppression.test.ts`, `people-vault.test.ts`, `world-records.test.ts`, `mc-visibility.test.ts`; the normalizer tests are deleted with the normalizer;
   - `add_claim` refuses a fact without a quote.
-- **Grep tests** in `npm test`: `scripts/check-no-profile-entry-writes.mjs` (no application code reads or writes `profile_entries`; migrations, rollbacks and `scripts/build-fact-label-map.ts` are exempt), and `scripts/check-no-prod-data.mjs` (5.1).
+- **Grep tests** in `npm test`: `scripts/check-no-profile-entry-writes.mjs` (no application code reads or writes `profile_entries`; migrations, rollbacks and the `build-fact-label-map` function are exempt), and `scripts/check-no-prod-data.mjs` (5.1).
 - **Godspeed:** the engine's `test_world_pull.py` cases (section 6) and a kit paging test.
 - `npm test`, `npm run build`, lint and type-check.
 
 **A6. Dress rehearsal on production (changes nothing).**
-- Build the label map. Then list the B6 claims (unshown on any page today) for Michael, **in the chat only**, grouped by person and section, each with its value. He marks the ones he deleted on purpose; the rest are kept. If he does not want to go through them, all are kept: that is what assistants see today anyway.
-- Run `BEGIN; <schema migration>; <switch migration>; <count queries>; ROLLBACK;` through the management API. This proves that the assertions pass on the real data, and it prints the real numbers: folded duplicates, claims made preferred in step 3, kept and dropped unshown claims, attributes placed private by the "most private wins" rule, the number of legacy bags, and the Godspeed removal list.
+- Run `build-fact-label-map` (inside Supabase). Then Michael looks at the B6 claims (unshown on any page today) the normal way: in his own chat through the Menerio MCP (`get_claims`, which returns them today), grouped by person. He names the ones he deleted on purpose, and only their **ids** are written into `fact_unshown_drop`. If he does not want to go through them, all are kept: that is what assistants see today anyway.
+- Run `BEGIN; <schema migration>; <switch migration>; <count queries>; ROLLBACK;` through the management API. This proves that the assertions pass on the real data, and it prints the real **counts**: folded duplicates, claims made preferred in step 3, kept and dropped unshown claims, attributes placed private by the "most private wins" rule, legacy bags, and Godspeed files to be removed (as a count; Michael sees the files themselves in his own dry run in C6).
 - The rehearsal holds locks for a few seconds and leaves nothing behind. A read-only query afterwards confirms `fact_slots` does not exist.
-- **The rehearsal numbers go to Michael with the go-live request**, in the chat. His one approval covers Part B.
+- **The rehearsal counts go to Michael with the go-live request.** His one approval covers Part B.
 
 ### 5.3 Part B: go live (one sitting, about 1½ hours, no pauses)
 
@@ -720,14 +726,14 @@ Michael does not use Menerio during Parts B and C, except for the walk-through i
 | B2 | Apply `…_fact_store_schema.sql`. | It applied. The views answer as the `authenticated` role. |
 | B3 | Deploy every changed edge function (script, in dependency order: `_shared` users first, `menerio-mcp` last). | Every deploy succeeded; if one fails, stop and roll back (5.4). |
 | B4 | Publish the production frontend. | The new bundle is served (its asset hash changed). |
-| B5 | Rebuild the label map (seconds), load it and the drop list, and apply `…_fact_store_switch.sql`. | The transaction committed, so every assertion held. If it raised, nothing changed: fix the cause and retry once, else roll back. |
+| B5 | Re-run `build-fact-label-map` (seconds), then apply `…_fact_store_switch.sql`. | The transaction committed, so every assertion held. If it raised, nothing changed: fix the cause and retry once, else roll back. |
 | B6 | **Restart.** Run the one-time bag split (`writeFact`'s splitter over the carried-over bag values, service role: pieces inserted, the bag retracted; a bag Michael typed becomes a review suggestion instead). Delete crons 4, 15 and 16 and the `promote-profile-entries`, `profile-audit` and `admin-normalize` functions. Resume crons 9, 11, 12 and 18, and the other paths paused in B1. Add the `backfill-claim-embeddings` cron (every 10 minutes, `call_edge`) and run it once now. `VALIDATE CONSTRAINT claims_origin_known` (0 violations was shown in A6). Update `docs/CRON_JOBS.md` (job names and schedules only). | The bag split and the embedding run finished without errors. |
 
 ### 5.4 Rollback (one script, usable at any point in Part B or C)
 
 `supabase/rollback/fact_store_rollback.sql`, then the function and frontend redeploy. The order matters, and the harness runs it exactly like this:
 
-1. **List what the restore will drop**, in the chat: every claim created or changed since B1. In this window that is test data plus the bag split. Anything real is re-entered by hand after the restore.
+1. **Keep what the restore will drop, inside the database**: every claim created or changed since B1 is copied into `fact_backup.dropped_by_rollback`, and the session sees only their count. In this window that is test data plus the bag split. Anything real is re-entered by Michael after the restore.
 2. **Remove the new guards first**: the claim guards, the `profile_categories` guards and `claims_follow_subject_delete`. Otherwise they refuse or rewrite the restore.
 3. **Restore the data**, if B5 committed:
    - rename `profile_entries_archive` back to `profile_entries` (it keeps its RLS, policies and indexes);
@@ -763,7 +769,7 @@ In this order. Each failure is either fixed on the spot (a small code fix, redep
 4. **The page**, walked through by Michael (about 10 minutes). On a test contact and on his own profile: add, "It changed", "Fix a mistake", "No longer true", "Was wrong", pin, move to another section, and open "History". After each action, Claude checks the resulting `claims` / `fact_slots` rows.
 5. **Merge:** merge two test contacts that share a fact. One fact remains, and no suppression row was written.
 6. **Godspeed:**
-   - Michael runs the kit pull with `--dry-run`. The removals must equal the list from A6 (folded duplicates, private rows, hidden subjects), plus the bag files replaced in B6;
+   - Michael runs the kit pull with `--dry-run`. The number of removals must equal the count from A6 (folded duplicates, private rows, hidden subjects), plus the bag files replaced in B6. The list itself stays on his machine;
    - then `--apply`, and `git diff --stat world/claims`;
    - then he turns the hourly runner back on.
 7. **Logs:** the edge function logs since B1 show no new errors, in particular none mentioning `profile_entries`.
@@ -846,7 +852,7 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
   - `useAddClaim` writes claims with no cardinality, origin or embedding.
 
   These are reported, not all read line-level; each is fixed by the rewrite of that reader.
-- **R10: production data or secrets in this public repository.** The sixth review would have committed every fact, and A1 would have committed cron commands that hold secrets. Rule 5.1 and `scripts/check-no-prod-data.mjs` guard every commit. Already in the repo, low: `docs/LIVE_REPAIRS_2026-09-23.sql:19-22` holds one user id and one contact id (ids only, no values).
+- **R10: fact data leaving the database.** The sixth review would have committed every fact to this public repo, and A1 would have committed cron commands that hold secrets. The root fault was not the destination but copying data out at all. Rule 5.1 now forbids it: the session sees counts and ids only, and TypeScript that needs data runs inside Supabase. Already in the repo, low: `docs/LIVE_REPAIRS_2026-09-23.sql:19-22` holds one user id and one contact id (ids only, no values).
 - **R11: this plan was reviewed as prose eight times, and every review found real bugs.** Most of them (triggers firing on the switch's own updates, a revoked function in a view, cascading foreign keys, RLS after a restore) only show up when the SQL runs against the live schema. The live-schema rehearsal in A5 is therefore the first thing built in Part A, before the page or the edge functions, and a ninth prose review is not the next step.
 - **R9: out of scope, noticed.**
   - `get_user_profile` ignores relationships stored with self as the source (reported);
@@ -896,7 +902,9 @@ Michael asked for one more review after the seventh found personal data headed f
 
 **Would have exposed data or secrets**
 
-1. **Cron secrets in the public repo.** A1 saved `cron.job.command` into the committed baseline file, and four jobs carry a secret as literal text in that command (`docs/CRON_JOBS.md:48-49`). Now dumps stay in the scratchpad, only counts are committed, and a pre-commit check scans for secrets (5.1).
+1. **Cron secrets in the public repo.** A1 saved `cron.job.command` into the committed baseline file, and four jobs carry a secret as literal text in that command (`docs/CRON_JOBS.md:48-49`). Now the plan never reads rows or cron commands out of production at all (5.1), and a pre-commit check scans for secrets as a backstop.
+
+   **Follow-up the same day (Michael):** the underlying fault is copying fact data out of the database at all, whatever the destination. Section 5.1's first rule now forbids it. The session sees counts and ids only, the label map is computed inside Supabase, and Michael reviews the unshown facts through the Menerio MCP, not through a dump.
 2. **A rollback could have left `profile_entries` readable by anyone.** It dropped the archive and restored "grants" without RLS or policies. Now the archive is renamed back (keeping RLS), rows are restored with `TRUNCATE`/`INSERT`, and RLS and policies are asserted against B16.
 3. **`match_claims` would have been rebuilt from its old text**, reopening the cross-account read that `20260923150000` closed. Every redefinition now starts from the live text.
 4. **Private facts could have landed in public slots.** A slot holds one section per attribute, so an attribute with entries in a private and a public section, or an unshown claim sharing an attribute with a public slot, would have gone public. The most private placement now wins, and the switch asserts that every private fact is still private.
@@ -933,4 +941,4 @@ Michael asked for one more review after the seventh found personal data headed f
   - The cloud environment carries `SUPABASE_ACCESS_TOKEN`, and its network allows `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` (confirmed working on 2026-09-28). Only sessions started after that change see it.
   - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
   - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
-- **One pull request** holds all code, both migrations, the label map script, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.
+- **One pull request** holds all code, both migrations, the `build-fact-label-map` function, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.
