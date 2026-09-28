@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: 2026-09-28. The data half is built and proven: both migrations, the rollback and the label map pass 39/39 on a copy of the live schema, and the A6 trial run on production matched every prediction. Michael's two open decisions are now automatic rules in the switch (section 7, "Decisions, second round"), and the whole plan runs without him (section 10). Remaining: A2 (the application code), then one unattended go-live.
+Status: 2026-09-29. **Built and ready for an unattended go-live.** Everything in Part A is done on branch `claude/wonderful-keller-sashcq`: both migrations with Michael's two rules, the rollback, the pause flag, the bag split, all application code moved to the one fact store (no code touches `profile_entries`), the Godspeed changes (engine and `godspeed` on branch `claude/one-fact-store`, the kit as a patch). Checks: 1,200 unit tests, type check, build, live-schema harness 42/42, A6 on production matched every prediction. Next: paste `docs/plans/one-fact-store-golive-prompt.md` into Claude Code on X30 or the VPS (section 10).
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.

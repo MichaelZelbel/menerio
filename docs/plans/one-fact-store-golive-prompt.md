@@ -1,5 +1,7 @@
 # One fact store: the go-live prompt
 
+Status: final (2026-09-29). The code it deploys is on `claude/wonderful-keller-sashcq` and passes: 1,200 unit tests, type check, build, and the live-schema switch harness (42/42).
+
 Paste everything below the line into Claude Code on Michael's machine (X30) or the VPS, in the `menerio` checkout. That session has production access; nothing else is needed from Michael. It runs Parts B and C of `docs/plans/one-fact-store.md` unattended, rolls back by itself if any check fails, and ends with one short message.
 
 ---
@@ -24,13 +26,13 @@ Run the go-live of Menerio's "one fact store" (docs/plans/one-fact-store.md on `
 - B2. Apply `…090100_fact_store_schema.sql`, record it. Check that `profile_facts` answers as the `authenticated` role.
 - B5. Re-run the label map, then apply `…090200_fact_store_switch.sql` in one transaction, record it. If it raises, nothing changed: fix the cause only if it is obvious and in your power, retry once, else roll back.
 - B4. Merge `claude/wonderful-keller-sashcq` into `main` (a merge commit; the pull request if one exists) and publish that revision through Lovable. Check that the served bundle changed.
-- B6. `select internal.call_edge('split-legacy-bags','{}'::jsonb)`, wait for it, read its counts from the function logs. Apply `…090300_fact_store_cleanup.sql`, record it. Delete crons 4, 15, 16 and the functions `promote-profile-entries`, `profile-audit`, `admin-normalize`, `build-fact-label-map`, `split-legacy-bags`. Add the `backfill-claim-embeddings` cron every 10 minutes through `internal.call_edge` and run it once. Resume crons 9, 11, 12, 18. Set the pause flag off. Resume the Godspeed runner. Update `docs/CRON_JOBS.md` (names and schedules only).
+- B6. `select internal.call_edge('split-legacy-bags','{}'::jsonb)`, wait for it, read its counts from the function logs (a bag a human typed, or one with a piece that cannot be filed, is left as it is). Apply `…090300_fact_store_cleanup.sql`, record it. Delete crons 4, 15, 16 and the functions `promote-profile-entries`, `profile-audit`, `admin-normalize`, `build-fact-label-map`, `split-legacy-bags`. Add the `backfill-claim-embeddings` cron every 10 minutes through `internal.call_edge` and run it once. Resume crons 9, 11, 12, 18. Set the pause flag off. Resume the Godspeed runner. Update `docs/CRON_JOBS.md` (names and schedules only).
 
 **C. Test live (plan 5.5, with section 10's changes).** Every check is automatic.
 1. Database invariants from 5.5 step 1, plus: no current fact shows two answers.
 2. Through the Menerio MCP tools: `get_user_profile`; `get_contact_profile` and `get_claims` for one normal contact, one with a private section, one hidden (pick them by id with counts-only queries): each fact once, nothing private or hidden. Five `search_brain` questions answer. `add_claim` on a throwaway test account: refused without a quote, accepted with one, a repeat is a no-op.
 3. Note pipeline: create a note on the test account; its facts arrive as claims with origin `ai_note`, a quote and a slot.
-4. The page: run the Playwright walk-through `scripts/golive/page-walkthrough.mjs` against https://menerio.com with the throwaway test account (create it through the admin API, delete it afterwards). It adds a fact and uses "It changed", "Fix a mistake", "No longer true", "Was wrong", pin, move to another section and History, checking the rows after each step.
+4. The page: `SUPABASE_URL=… SUPABASE_ANON_KEY=… SUPABASE_SERVICE_ROLE_KEY=… SITE_URL=https://menerio.com node scripts/golive/page-walkthrough.mjs` (read the keys through the management API; never print or commit them). It creates and deletes its own test user. Layer 1 (every page action through the page's own calls, rows checked) is authoritative. Layer 2 (`page_smoke`, the live page in a browser) is a first run: if only it fails, look at the screenshot; a wrong selector in the script is fixed in the script and re-run, and only a page that really does not show the fact counts as a failure.
 5. Merge two test contacts that share a fact: one fact remains, no suppression row was written.
 6. Godspeed: run the kit's pull with `--dry-run`: removals ≈ the A6 Godspeed removal count plus the replaced bag files. Then run it for real and `git diff --stat world/claims` in the godspeed checkout. Merge branch `claude/one-fact-store` into `main` in `MichaelZelbel/godspeed-engine` and `MichaelZelbel/godspeed`.
 7. Edge function logs since B1: no new errors, none mentioning `profile_entries`.
