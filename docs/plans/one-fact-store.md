@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: 2026-09-28. A1 ran; A3 (both migrations, the rollback, the label map) and the A5 SQL harness are built on branch `claude/wonderful-keller-sashcq` and pass on a database built from the live schema (section 8, "A3 built"). A6 is waiting for write access to production. A2 (the application code) is not started.
+Status: 2026-09-28. A1 ran; A3 (both migrations, the rollback, the label map) and the A5 SQL harness are built on branch `claude/wonderful-keller-sashcq` and pass on a database built from the live schema (section 8, "A3 built"). A6 ran on production on 2026-09-28 and passed: every predicted count matched (section 8, "A3 built"). A2 (the application code) is not started.
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -1002,7 +1002,7 @@ Built on `claude/wonderful-keller-sashcq` (code stays off `main` until the one p
 7. `merge_contacts_atomic`'s receipt now snapshots the source's claims and slots instead of its entries.
 8. The archive keeps `contact_id → contacts ON DELETE CASCADE` (A1 "Minor"): accepted.
 
-**A6 is blocked.** Its first write-mode call (creating the two empty input tables) was refused by Claude Code's auto mode ("Production Deploy"). A6 needs three writes that Michael allows: the inputs migration, deploying `build-fact-label-map` and running it once (`select internal.call_edge('build-fact-label-map', '{}')`), and the rehearsal statement from `dress-rehearsal-sql.sh`. Either approve each when asked, or add a rule for `bash scripts/rehearsal/prod-apply.sh *` and the function deploy.
+**A6 done (2026-09-28).** The inputs migration `20260929090000` is applied and recorded in `schema_migrations`; `build-fact-label-map` is deployed and ran once (516 map rows, 0 labels and 0 attributes missing). The rehearsal statement ended in the expected `FACT_STORE_REHEARSAL_DONE` error, so the assertions pass on the real data and nothing stayed: `fact_slots` does not exist afterwards. `fact_unshown_drop` was left empty, so all 159 unshown claims are kept (Michael may still name ones to drop before B). `prod-apply.sh` was missing from the branch and is now committed there. Full table: `docs/plans/one-fact-store-baseline.md`, "A6 dress rehearsal".
 
 **Predicted counts (read-only, 2026-09-28, `predict-switch-counts.sql`).** On the fixture this query matches the switch's own report. Production:
 
@@ -1017,7 +1017,7 @@ Built on `claude/wonderful-keller-sashcq` (code stays off `main` until the one p
 | attributes showing "two answers" | 25 |
 | attributes placed private by "most private wins" | 0 |
 
-A6 replaces these with the real numbers and adds the Godspeed removals.
+**A6 real counts:** every row above matched exactly. Also: 406 slots after (268 from entries, 138 added in step 7, 1 of those in a private section), 451 agent facts and 451 `world_claims` claim rows (519 before), Godspeed removals 101 and additions 11, 479 normalize items superseded, 234 review items repointed and 1,654 pointing at a missing entry, 73 live claims holding a list value (legacy bags), 2 many-valued entries whose words differ, 0 `claims_origin_known` violations.
 
 ## 9. Running this plan
 
@@ -1026,7 +1026,7 @@ A6 replaces these with the real numbers and adds the Godspeed removals.
 - **Sessions.** Part A can take one or several sessions; each continues from this file and the implementation branch, and none of them waits for anything in production. Parts B and C run in **one** session, back to back, with Michael available for about three hours: one approval before B, pausing and resuming the Godspeed runner on his machine, and the 10-minute page walk-through in C. Before that, in A6, he goes through the list of unshown facts (or keeps them all).
 - **Credentials.**
   - The cloud environment carries `SUPABASE_ACCESS_TOKEN`, and its network allows `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` (confirmed working on 2026-09-28). Only sessions started after that change see it.
-  - **Status 2026-09-28 (later):** `.claude/settings.json` on `main` allows `bash scripts/rehearsal/prod-read.sh`, which runs with `read_only: true` as `supabase_read_only_user`. A1 ran with it (section 8, "A1 run"). Write-mode calls (`scripts/rehearsal/prod-apply.sh`) are refused by auto mode, which blocks A6 (section 8, "A3 built"). The live-schema database is built by `scripts/rehearsal/build-local-db.sh` on the implementation branch; the schema stays in the session scratchpad.
+  - **Status 2026-09-28 (later):** `.claude/settings.json` on `main` allows `bash scripts/rehearsal/prod-read.sh`, which runs with `read_only: true` as `supabase_read_only_user`. A1 ran with it (section 8, "A1 run"). Write-mode calls (`scripts/rehearsal/prod-apply.sh`) were refused by auto mode at first; A6 then ran with Michael's approval on 2026-09-28 (section 8, "A3 built"). The live-schema database is built by `scripts/rehearsal/build-local-db.sh` on the implementation branch; the schema stays in the session scratchpad.
   - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
   - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
 - **One pull request** holds all code, both migrations, the `build-fact-label-map` function, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.

@@ -44,3 +44,31 @@ From `scripts/rehearsal/predict-switch-counts.sql` (branch `claude/wonderful-kel
 | step 7 unshown claims kept (drop list empty) | 159 |
 | attributes with two answers after the switch | 25 |
 | entries in private sections | 2 |
+
+## A6 dress rehearsal, real counts (2026-09-28)
+
+`dress-rehearsal-sql.sh` run on production through `prod-apply.sh`. It ended in the expected `FACT_STORE_REHEARSAL_DONE` error, which undid everything; `fact_slots` does not exist afterwards. Before it: the inputs migration `20260929090000` applied and recorded, `build-fact-label-map` deployed and run (516 map rows, 0 missing labels, 0 missing attributes). Drop list `fact_unshown_drop` empty, so every unshown claim is kept.
+
+| Step | Predicted | Real |
+|---|---|---|
+| entries / claims before | 273 / 519 | 273 / 519 |
+| live claims shown by no entry (B6) | 248 | 248 |
+| claims after | 454 | 454 |
+| step 3 made preferred | 17 | 17 |
+| step 4 folded duplicates | 96 | 96 |
+| step 5 entries equal / differs / closed / unlinked | 238 / 12 / 1 / 22 | 238 / 12 / 1 / 22 |
+| step 5 new claims / folded into existing | 31 / 3 | 31 (11 differs + 20 unlinked) / 3 |
+| step 6 placed private by "most private wins" | 0 | 0 |
+| step 6 slots from entries | | 268 |
+| step 7 unshown claims kept / dropped | 159 / 0 | 159 / 0 |
+| step 7 slots added / of them in a private section | | 138 / 1 |
+| slots after / with two answers | / 25 | 406 / 25 |
+| agent facts after | | 451 |
+| step 12 normalize items superseded | 479 (B9) | 479 |
+| step 12 review items repointed / entry missing | about 250 / about 1,500 (B9) | 234 / 1,654 |
+| `world_claims` claim rows after | | 451 (519 before) |
+| Godspeed removals / additions | | 101 / 11 |
+| many-valued entries whose words differ (listed for Michael) | 2 (B3) | 2 |
+| live claims holding a list value (legacy bags) | | 73 |
+| `claims_origin_known` violations | 0 | 0 |
+| B15 rows Godspeed pulls after go-live (claims + relationships) | | 469 |
