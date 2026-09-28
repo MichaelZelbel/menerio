@@ -20,6 +20,9 @@ import {
 import { profileValueDecision, relationshipWriteDecision } from "./profile-integrity.ts";
 
 import { buildProfileTokenIndex, dedupIncomingProfileValue } from "./profile-dedup.ts";
+import { factWritesPaused, suppressionKey, writeFact } from "./fact-store.ts";
+import { normalizeAttribute } from "./claims.ts";
+import { selectAllRows } from "./paged-select.ts";
 
 const PROFILE_CATEGORY_SLUGS = [
   "identity", "location", "professional", "education", "relationships",
@@ -258,7 +261,7 @@ async function getPrefs(supabase: SupabaseClient, userId: string) {
   };
 }
 
-async function prepareForInsert(
+export async function prepareForInsert(
   supabase: SupabaseClient,
   s: Suggestion,
   prefs: { mode: string; sensitivity: string; autoAddSensitive: boolean },
@@ -279,22 +282,42 @@ async function prepareForInsert(
   try {
     if (s.suggestion_type === "add_profile_entry") {
       const contactId = s.payload.contact_id as string | undefined;
-      const categoryId = s.payload.category_id as string | null | undefined;
+      const categorySlug = String(s.payload.category_slug || "");
+      const momentId = s.payload.moment_id as string | undefined;
       const label = String(s.payload.label || "").trim();
       const value = String(s.payload.value || "").trim();
-      if (!contactId || !categoryId || !label || !value) return { ...s, status: "pending_review" };
-      const fact = profileValueDecision(String(s.payload.category_slug || ""), label, value);
+      if (!contactId || !momentId || !label || !value) return { ...s, status: "pending_review" };
+      const fact = profileValueDecision(categorySlug, label, value);
       if (!fact.ok) return { ...s, status: "removed" };
       const evidenceQuote = String(s.payload.evidence_quote || "").trim();
-      if (evidenceQuote.length < 10) return { ...s, status: "pending_review" };
-      const { data, error } = await supabase
-        .from("profile_entries")
-        .insert({ user_id: s.user_id, contact_id: contactId, category_id: categoryId, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_moment", evidence_quote: evidenceQuote })
-        .select("id")
-        .single();
-        if (error && (error as any).code === "23505") return { ...s, status: "removed" };
-      if (error || !data) return { ...s, status: "pending_review" };
-      return { ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() };
+      if ([...evidenceQuote].length < 10) return { ...s, status: "pending_review" };
+      // The one write path (fact-store.ts). The slot carries the section.
+      const result = await writeFact(supabase, s.user_id, {
+        subject: { type: "contact", id: contactId },
+        label: fact.label,
+        value: fact.value,
+        origin: "ai_moment",
+        categorySlug: categorySlug || null,
+        evidenceQuote,
+        sourceType: "moment",
+        sourceId: momentId,
+      }, { isHuman: false });
+      const insertedClaims = result.facts.filter((f) => f.outcome === "inserted" && f.claimId).map((f) => f.claimId as string);
+      if (insertedClaims.length > 0) {
+        return {
+          ...s,
+          status: "auto_applied_unreviewed",
+          target_entity_type: "claim",
+          target_entity_id: insertedClaims[0],
+          // A bag becomes several claims; a Revert removes all of them.
+          payload: insertedClaims.length > 1 ? { ...s.payload, claim_ids: insertedClaims } : s.payload,
+          applied_at: new Date().toISOString(),
+        };
+      }
+      if (result.facts.length > 0 && result.facts.every((f) => f.outcome === "already_recorded" || f.outcome === "history_not_revived" || f.outcome === "suppressed")) {
+        return { ...s, status: "removed" };
+      }
+      return { ...s, status: "pending_review" };
     }
     if (s.suggestion_type === "add_relationship") {
       const p = s.payload as Record<string, string | null>;
@@ -374,13 +397,17 @@ export async function extractProfileFromMoment(
   if ((moment as any).ai_visibility === "hidden") {
     return { ...empty, skipped_reason: "ai_hidden" };
   }
+  // Go-live has paused every fact writer: nothing is bought or written.
+  if (await factWritesPaused(supabase)) {
+    return { ...empty, skipped_reason: "fact_writes_paused" };
+  }
 
   // Pre-filter: skip moments whose title is dominated by event-only verbs
   // (e.g. "Yumei adds Michael to her Discord banner"). Saves an LLM call and
   // prevents the model from hallucinating ongoing attributes from one-time
   // actions.
   if (isLikelyEventOnlyMoment((moment as any).title, (moment as any).description)) {
-    console.log(`[moment-extract] pre-filter skipped: event-only verb (moment ${momentId}, title="${(moment as any).title}")`);
+    console.log(`[moment-extract] pre-filter skipped: event-only verb (moment ${momentId})`);
     return { ...empty, skipped_reason: "event_only_moment" };
   }
 
@@ -481,13 +508,27 @@ export async function extractProfileFromMoment(
 
   const nameToContact = new Map(matchedPeople.map((p) => [p.canonical_name.toLowerCase(), p]));
 
-  // 6. Load existing entries / queue items for dedup.
+  // 6. Load what the page already shows (current facts), the values the user
+  // called wrong, and queue items, for dedup.
   const contactIds = matchedPeople.map((p) => p.contact_id);
-  const { data: existingEntries } = await supabase
-    .from("profile_entries")
-    .select("contact_id, label, value")
+  const existingEntries = await selectAllRows<{ contact_id: string | null; label: string; value: string }>((from, to) => supabase
+    .from("profile_facts")
+    .select("claim_id, contact_id, label, value")
     .eq("user_id", userId)
-    .in("contact_id", contactIds);
+    .eq("is_current", true)
+    .eq("subject_type", "contact")
+    .in("subject_id", contactIds)
+    .order("claim_id", { ascending: true })
+    .range(from, to) as any);
+  const claimSuppressions = new Set<string>(
+    (await selectAllRows<{ suppression_key: string }>((from, to) => supabase
+      .from("ai_suggestion_suppressions")
+      .select("suppression_key")
+      .eq("user_id", userId)
+      .eq("suggestion_type", "claim")
+      .order("suppression_key", { ascending: true })
+      .range(from, to) as any)).map((r) => r.suppression_key),
+  );
   const { data: existingQueue } = await supabase
     .from("review_queue")
     .select("payload, status")
@@ -499,7 +540,7 @@ export async function extractProfileFromMoment(
   // multi-item values (e.g. "MDD, BPD" vs "MDD, BPD, ASD") stop looking
   // like distinct facts. See _shared/profile-dedup.ts for the details.
   const dedupIndex = buildProfileTokenIndex(
-    (existingEntries || []) as any[],
+    existingEntries,
     (existingQueue || []).map((q: any) => ({
       contact_id: q.payload?.contact_id ?? null,
       label: String(q.payload?.label || ""),
@@ -508,7 +549,7 @@ export async function extractProfileFromMoment(
   );
 
 
-  // 7. Load profile_categories so we can map slug → id for auto-apply.
+  // 7. Load profile_categories so the review card can name the section.
   const { data: categories } = await supabase
     .from("profile_categories")
     .select("id, slug, contact_id")
@@ -539,7 +580,7 @@ export async function extractProfileFromMoment(
 
     // Post-filter: label must be in the allowlist.
     if (!ALLOWED_LABEL_SET.has(labelLower)) {
-      console.log(`[moment-extract] post-filter dropped: label not in allowlist (label="${label}", moment ${momentId})`);
+      console.log(`[moment-extract] post-filter dropped: label not in allowlist (moment ${momentId})`);
       continue;
     }
 
@@ -548,7 +589,7 @@ export async function extractProfileFromMoment(
     const computedBirthday = labelLower === "date of birth" &&
       birthdayDobMatches(value, sourceText, (moment as any).happened_at);
     if (!computedBirthday && !valueAppearsInSource(value, label, sourceText)) {
-      console.log(`[moment-extract] post-filter dropped: value not in source (label="${label}", value="${value}", moment ${momentId})`);
+      console.log(`[moment-extract] post-filter dropped: value not in source (moment ${momentId})`);
       continue;
     }
 
@@ -559,10 +600,11 @@ export async function extractProfileFromMoment(
       index: dedupIndex,
     });
     if (dd.action === "skip") {
-      console.log(`[moment-extract] dedup skip (${dd.reason}) "${label}: ${value}" for ${contact.canonical_name}`);
+      console.log(`[moment-extract] dedup skip (${dd.reason}) (moment ${momentId})`);
       continue;
     }
     const effectiveValue = dd.value;
+    if (claimSuppressions.has(suppressionKey({ type: "contact", id: contact.contact_id }, normalizeAttribute(label), effectiveValue))) continue;
 
     const catRow = (categories || []).find((c: any) => c.slug === categorySlug && c.contact_id === contact.contact_id);
 
@@ -587,7 +629,7 @@ export async function extractProfileFromMoment(
       description: `"${effectiveValue}" — extracted from timeline moment "${(moment as any).title}"`,
       payload,
       status: "pending_review",
-      target_entity_type: "profile_entry",
+      target_entity_type: "claim",
       source_title: noteTitleLike,
       extracted_value: `${label}: ${effectiveValue}`,
       confidence_score: baseConfidence,
@@ -693,7 +735,9 @@ export async function extractProfileFromMoment(
 
   // 9. Filter suppressed + prepare + insert.
   const unsuppressed = await filterSuppressed(supabase, userId, suggestions);
-  const prepared = await Promise.all(unsuppressed.map((s) => prepareForInsert(supabase, s, prefs)));
+  // One at a time, so two values of one attribute see each other in the fact store.
+  const prepared: Suggestion[] = [];
+  for (const s of unsuppressed) prepared.push(await prepareForInsert(supabase, s, prefs));
   if (prepared.length === 0) return { ...empty, scanned: 1 };
 
   const { error: insErr } = await supabase.from("review_queue").insert(prepared);

@@ -34,7 +34,8 @@ it('real processor reuses checkpointed metadata after embedding fails and finish
  await expect(processor.processInBackground(lease,'Bearer service')).rejects.toThrow('embedding fixture failure');
  await processor.processInBackground(lease,'Bearer service');
  expect(paid).toBe(1);expect(events.indexOf('finished-output')).toBeGreaterThan(events.indexOf('moment'));expect(events.indexOf('pending-output')).toBeGreaterThan(-1);
- expect(events.filter(e=>e==='downstream-complete')).toHaveLength(2);
+ // compute-connections only: the claim promotion call is gone (facts are claims when written).
+ expect(events.filter(e=>e==='downstream-complete')).toHaveLength(1);
  expect(events.lastIndexOf('downstream-complete')).toBeLessThan(events.indexOf('finished-output'));
  events.length=0;
  db.from=()=>{const q:any=new Proxy({}, {get:(_,key)=>key==='then'?(resolve:any)=>Promise.resolve({data:null,error:{code:'XX001'}}).then(resolve):()=>q});return q};

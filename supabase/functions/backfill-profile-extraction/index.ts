@@ -1,7 +1,7 @@
 // Re-runs the metadata + profile-fact extraction pipeline on a user's existing
 // notes so newly-loosened extraction rules can populate profiles from the
 // backlog. Idempotent: dedup logic in process-note prevents duplicate
-// suggestions or profile_entries.
+// suggestions or facts.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 

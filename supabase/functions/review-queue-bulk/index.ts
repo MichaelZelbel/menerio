@@ -12,6 +12,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
 import { findOrCreateContact } from "../_shared/find-or-create-contact.ts";
+import { suppressionKey, writeFact, type FactSubject } from "../_shared/fact-store.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "npm:zod@3.23.8";
 
@@ -50,6 +51,12 @@ type KeepOutcome =
   | { kind: "applied" }
   | { kind: "already_satisfied"; reason?: string; leftPending?: boolean }
   | { kind: "skipped"; reason: string };
+
+type RollbackStats = {
+  /** Rows left active because their fact cannot be reverted. */
+  notRevertible: Set<string>;
+  superseded: number;
+};
 
 type KeepStats = {
   applied: number; alreadySatisfied: number; skipped: number; skipReasons: Map<string, number>;
@@ -200,6 +207,7 @@ async function runJob(
   let failed = 0;
   let lastError: string | null = null;
   const keepStats = emptyKeepStats();
+  const rollbackStats: RollbackStats = { notRevertible: new Set(), superseded: 0 };
   let lastFlush = 0;
   const note = (msg: string) => { lastError = msg; };
   const flush = async (force = false) => {
@@ -212,16 +220,19 @@ async function runJob(
   if (body.action === "keep") {
     await runKeep(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, note, keepStats);
   } else if (body.action === "rollback") {
-    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false);
+    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ false, rollbackStats);
   } else {
-    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ true);
+    await runRollback(db, userId, reviewRows, wikiIds, (ok, fail) => { done += ok; failed += fail; }, flush, /*block*/ true, rollbackStats);
   }
 
   // A completed Keep is terminal. Any remaining active row means an
   // unexpected backend failure, so fail the job instead of claiming success.
   // Rows the keep deliberately left pending are not failures; counting them
   // failed the whole job ("N item(s) were not resolved") and lost its stats.
-  const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id).filter((id) => !keepStats.leftPending.has(id)), wikiIds);
+  // Rows a rollback could not revert (a fact that is no longer only the
+  // machine's, or whose entry was folded at the fact-store switch) stay in the
+  // queue on purpose and are reported below.
+  const outstanding = await countOutstanding(db, reviewRows.map((r) => r.id).filter((id) => !keepStats.leftPending.has(id) && !rollbackStats.notRevertible.has(id)), wikiIds);
   if (outstanding > 0) throw new Error(`${outstanding} item(s) were not resolved`);
   failed = 0;
   done = total;
@@ -232,6 +243,11 @@ async function runJob(
       const reasons = [...keepStats.skipReasons.entries()].map(([reason, count]) => `${count} ${humanizeReason(reason)}`).join(", ");
       parts.push(`${keepStats.skipped} skipped${reasons ? ` (${reasons})` : ""}`);
     }
+    lastError = parts.join("; ") || null;
+  } else {
+    const parts: string[] = [];
+    if (rollbackStats.notRevertible.size > 0) parts.push(`${rollbackStats.notRevertible.size} not revertible`);
+    if (rollbackStats.superseded > 0) parts.push(`${rollbackStats.superseded} superseded`);
     lastError = parts.join("; ") || null;
   }
   const { error: finishError } = await db.from("review_queue_bulk_jobs").update({
@@ -271,7 +287,8 @@ async function runKeep(
     const ids = chunk.map((r) => r.id);
     const { error } = await db.from("review_queue")
       .update({ status: "kept", reviewed_at: new Date().toISOString() })
-      .in("id", ids);
+      .in("id", ids)
+      .eq("user_id", userId);
     if (error) throw error;
     bump(chunk.length, 0);
     stats.applied += chunk.length;
@@ -394,7 +411,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
   const p = (r.payload || {}) as any;
   const now = new Date().toISOString();
   const markKept = async (extra?: Record<string, unknown>) => {
-    const { error } = await db.from("review_queue").update({ status: "kept", reviewed_at: now, ...(extra || {}) }).eq("id", r.id);
+    const { error } = await db.from("review_queue").update({ status: "kept", reviewed_at: now, ...(extra || {}) }).eq("id", r.id).eq("user_id", userId);
     if (error) throw error;
   };
   const skip = async (reason: string): Promise<KeepOutcome> => {
@@ -404,21 +421,10 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
 
   switch (r.suggestion_type) {
     case "normalize_profile_entry": {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
-        body: JSON.stringify({ action: "apply", review_id: r.id, user_id: userId }),
-      });
-      const j = await res.json().catch(() => ({} as any));
-      // `resolved: true` means the row was closed server-side (stale suggestion).
-      if (!res.ok || (j?.ok !== true && j?.resolved !== true)) {
-        throw new Error(`normalize-profile apply failed (${res.status}): ${String(j?.reason || j?.error || "unknown")}`);
-      }
-      if (j?.resolved === true || j?.outcome === "already_exists") {
-        return { kind: "already_satisfied", reason: String(j?.reason || "normalization already satisfied") };
-      }
-      if (j?.outcome === "rejected_duplicate") return skip(String(j?.reason || "normalization rejected"));
-      return { kind: "applied" };
+      // The normalizer is retired (normalize-profile answers 410): facts are
+      // cleaned when they are written. Its open suggestions are superseded.
+      await markSuperseded(db, userId, r.id);
+      return { kind: "already_satisfied", reason: "profile cleanup retired, superseded" };
     }
 
     case "add_contact": {
@@ -568,8 +574,7 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
       const categorySlug = String(p.category_slug || "").trim();
       const canonicalLabel = String(p.canonical_label || p.label || "").trim();
       const value = String(p.value || "").trim();
-      const categoryId = p.category_id as string | undefined;
-      if (!categorySlug || !canonicalLabel || !value || !categoryId) {
+      if (!categorySlug || !canonicalLabel || !value) {
         return skip("missing required profile data");
       }
       const { data: existingField, error: fieldLookupError } = await db.from("profile_fields")
@@ -590,45 +595,32 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
         if (fieldInsertError && fieldInsertError.code !== "23505") throw fieldInsertError;
       }
 
-      let existingQuery = db.from("profile_entries").select("id,value")
-        .eq("user_id", userId).eq("category_id", categoryId).ilike("label", canonicalLabel);
-      existingQuery = p.contact_id ? existingQuery.eq("contact_id", p.contact_id) : existingQuery.is("contact_id", null);
-      const { data: existingEntries, error: existingError } = await existingQuery;
-      if (existingError) throw existingError;
-      const comparableValue = normalizeComparableValue(value);
-      const absorbing = (existingEntries || []).find((entry: { id: string; value: string }) => {
-        const current = normalizeComparableValue(entry.value);
-        return current === comparableValue || current.includes(comparableValue);
-      });
-      if (absorbing?.id) {
-        await markKept({ target_entity_type: "profile_entry", target_entity_id: absorbing.id, applied_at: now });
-        return { kind: "already_satisfied", reason: "fact already present" };
-      }
-      const { data: entry, error } = await db.from("profile_entries").insert({
-        user_id: userId,
-        contact_id: p.contact_id || null,
-        category_id: categoryId,
+      // The one write path (fact-store.ts). Accepting from the queue is the
+      // user's decision about a machine's fact: origin review_queue, written
+      // as a machine (it only inserts, it never closes a human's value).
+      const quote = String(p.evidence_quote || "").trim();
+      const result = await writeFact(db, userId, {
+        subject: p.contact_id ? { type: "contact", id: String(p.contact_id) } : { type: "self", id: null },
         label: canonicalLabel,
         value,
-        origin: r.source_note_id ? "review_queue" : "user_manual",
-        evidence_quote: p.evidence_quote || null,
-        linked_note_id: p.linked_note_id || r.source_note_id || null,
-      }).select("id").maybeSingle();
-      if (error) throw error;
-      if (!entry?.id) {
-        const { data: after, error: afterError } = await existingQuery;
-        if (afterError) throw afterError;
-        const survivor = (after || []).find((candidate: { id: string; value: string }) =>
-          normalizeComparableValue(candidate.value).includes(comparableValue)
-        );
-        if (survivor?.id) {
-          await markKept({ target_entity_type: "profile_entry", target_entity_id: survivor.id, applied_at: now });
-          return { kind: "already_satisfied", reason: "fact absorbed by existing entry" };
-        }
-        return skip("profile integrity guard rejected the fact");
+        origin: "review_queue",
+        categorySlug,
+        evidenceQuote: quote || null,
+        sourceType: r.source_note_id ? "note" : "ai",
+        sourceId: r.source_note_id || null,
+      }, { isHuman: false });
+      const inserted = result.facts.find((f) => f.outcome === "inserted" && f.claimId);
+      if (inserted) {
+        await markKept({ target_entity_type: "claim", target_entity_id: inserted.claimId, applied_at: now });
+        return { kind: "applied" };
       }
-      await markKept(entry?.id ? { target_entity_type: "profile_entry", target_entity_id: entry.id, applied_at: now } : undefined);
-      return { kind: "applied" };
+      const existing = result.facts.find((f) => (f.outcome === "already_recorded" || f.outcome === "history_not_revived") && f.claimId);
+      if (existing) {
+        await markKept({ target_entity_type: "claim", target_entity_id: existing.claimId, applied_at: now });
+        return { kind: "already_satisfied", reason: "fact already present" };
+      }
+      if (result.facts.some((f) => f.outcome === "suppressed")) return skip("value was marked wrong before");
+      return skip(result.facts.find((f) => f.reason)?.reason ?? "profile integrity guard rejected the fact");
     }
     default: {
       await markKept();
@@ -637,8 +629,11 @@ async function keepPending(db: SupabaseClient, userId: string, r: ReviewRow): Pr
   }
 }
 
-function normalizeComparableValue(value: unknown) {
-  return String(value || "").normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+async function markSuperseded(db: SupabaseClient, userId: string, id: string) {
+  const { error } = await db.from("review_queue")
+    .update({ status: "superseded", reviewed_at: new Date().toISOString() })
+    .eq("id", id).eq("user_id", userId);
+  if (error) throw error;
 }
 
 // ---------------- ROLLBACK / NEVER AGAIN ----------------
@@ -651,6 +646,7 @@ async function runRollback(
   bump: (ok: number, fail: number) => void,
   flush: (force?: boolean) => Promise<void>,
   block: boolean,
+  stats: RollbackStats,
 ) {
   const now = new Date().toISOString();
   const finalStatus = block ? "blocked" : "removed";
@@ -685,9 +681,12 @@ async function runRollback(
 
   // Revert side-effects per row (only where a target_entity_id exists).
   const revertFailed = new Set<string>();
+  const leaveAlone = new Set<string>();
   for (const r of rows) {
     try {
-      await revertOne(db, userId, r);
+      const outcome = await revertOne(db, userId, r);
+      if (outcome === "not_revertible") { stats.notRevertible.add(r.id); leaveAlone.add(r.id); }
+      if (outcome === "superseded") { stats.superseded += 1; leaveAlone.add(r.id); }
       bump(1, 0);
     } catch (e) {
       console.warn("rollback failed", r.id, e);
@@ -702,12 +701,12 @@ async function runRollback(
   // entity in the brain while the queue reports a clean success; leaving it
   // active instead lets countOutstanding() surface the failure and keeps the
   // row available for retry.
-  const ids = rows.filter((r) => !revertFailed.has(r.id)).map((r) => r.id);
+  const ids = rows.filter((r) => !revertFailed.has(r.id) && !leaveAlone.has(r.id)).map((r) => r.id);
   for (let i = 0; i < ids.length; i += PAGE) {
     const chunk = ids.slice(i, i + PAGE);
     const patch: Record<string, unknown> = { status: finalStatus, reviewed_at: now };
     if (block) patch.blocked_at = now;
-    await db.from("review_queue").update(patch).in("id", chunk);
+    await db.from("review_queue").update(patch).in("id", chunk).eq("user_id", userId);
   }
 
   // Wiki revisions — rollback via existing RPC (per-row; runs server-side).
@@ -735,22 +734,20 @@ function must<T>(result: { data: T; error: { message: string } | null }): T {
   return result.data;
 }
 
-async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
+type RevertOutcome = "reverted" | "superseded" | "not_revertible";
+
+async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow): Promise<RevertOutcome> {
   const p = (r.payload || {}) as any;
 
   if (r.suggestion_type === "normalize_profile_entry") {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/normalize-profile`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
-      body: JSON.stringify({ action: "rollback", review_id: r.id, user_id: userId }),
-    });
-    // An unanswered rollback left the merged entry in place while the row was
-    // filed as reverted. Throwing keeps it in revertFailed, and active.
-    const out = await res.json().catch(() => ({}));
-    if (!res.ok || out?.ok !== true) {
-      throw new Error(`normalize-profile rollback failed (${res.status}): ${out?.error ?? ""}`);
-    }
-    return;
+    // The normalizer is retired (normalize-profile answers 410); its merges
+    // cannot be undone any more. The item is superseded.
+    await markSuperseded(db, userId, r.id);
+    return "superseded";
+  }
+
+  if (r.suggestion_type === "add_profile_entry" || r.suggestion_type === "unknown_profile_field") {
+    return revertFact(db, userId, r);
   }
 
   if (!r.target_entity_id) {
@@ -766,27 +763,24 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
         must(await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId));
       }
     }
-    return;
+    return "reverted";
   }
 
   switch (r.suggestion_type) {
     case "add_contact":
       must(await db.from("contacts").delete().eq("id", r.target_entity_id).eq("user_id", userId));
-      return;
-    case "add_profile_entry":
-      must(await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId));
-      return;
+      return "reverted";
     case "add_relationship":
       must(await db.from("contact_relationships").delete().eq("id", r.target_entity_id).eq("user_id", userId));
-      return;
+      return "reverted";
     case "add_moment": {
       // target_entity_id is user-writable: only touch a moment this user owns.
       const m = must(await db.from("moments").select("id").eq("id", r.target_entity_id).eq("user_id", userId).maybeSingle());
-      if (!m) return;
+      if (!m) return "reverted";
       // Participants cascade from the moment; deleting them first left a
       // moment with nobody in it whenever the moment delete then failed.
       must(await db.from("moments").delete().eq("id", m.id).eq("user_id", userId));
-      return;
+      return "reverted";
     }
     case "add_alias": {
       const contactId = p.contact_id as string | undefined;
@@ -794,25 +788,63 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow) {
       if (contactId && alias) {
         // contact_id comes from the payload, which its owner can write.
         const c = must(await db.from("contacts").select("aliases").eq("id", contactId).eq("user_id", userId).maybeSingle());
-        if (!c) return;
+        if (!c) return "reverted";
         const cur: string[] = Array.isArray(c?.aliases) ? c!.aliases as string[] : [];
         must(await db.from("contacts").update({ aliases: cur.filter((a) => a.toLowerCase() !== alias.toLowerCase()) }).eq("id", contactId).eq("user_id", userId));
       }
-      return;
+      return "reverted";
     }
     case "group_member_suggestion":
       must(await db.from("contact_group_memberships").delete().eq("id", r.target_entity_id).eq("user_id", userId));
-      return;
-    case "unknown_profile_field":
-      // If a target row was written, delete the value. The field definition
-      // stays so any manual edits are not lost.
-      if (r.target_entity_id) {
-        must(await db.from("profile_entries").delete().eq("id", r.target_entity_id).eq("user_id", userId));
-      }
-      return;
+      return "reverted";
     default:
-      return;
+      return "reverted";
   }
+}
+
+/**
+ * Revert an applied profile fact: "this was wrong". The item's target is the
+ * claim it wrote (a split bag lists every claim in payload.claim_ids). Each
+ * claim is deleted and a "never suggest again" row is written for it, so the
+ * value does not come back from the same note.
+ *
+ * Not revertible, and left in the queue: items the fact-store switch marked
+ * so (their entry was folded into another claim, or no longer existed), items
+ * still pointing at the retired profile table, and claims a human has made
+ * their own since (rank 'preferred': their words, which a Revert must not
+ * delete). The field definition of an unknown_profile_field item stays.
+ */
+async function revertFact(db: SupabaseClient, userId: string, r: ReviewRow): Promise<RevertOutcome> {
+  const p = (r.payload || {}) as any;
+  if (!r.target_entity_id) return "reverted"; // nothing was written
+  const switchInfo = p.fact_store_switch || {};
+  if (switchInfo.revertible === false || switchInfo.entry_missing === true) return "not_revertible";
+  if (r.target_entity_type !== "claim") return "not_revertible";
+
+  const ids = [...new Set([r.target_entity_id, ...(Array.isArray(p.claim_ids) ? p.claim_ids.map(String) : [])])];
+  const claims = must(await db.from("claims")
+    .select("id, subject_type, subject_id, attribute, value, rank")
+    .eq("user_id", userId)
+    .in("id", ids)) as Array<{ id: string; subject_type: FactSubject["type"]; subject_id: string | null; attribute: string; value: string; rank: string }>;
+  if ((claims || []).some((c) => c.rank === "preferred")) return "not_revertible";
+
+  for (const c of claims || []) {
+    // The suppression first: should the delete fail, the value is still
+    // never suggested again, and the item stays active for another try.
+    must(await db.from("ai_suggestion_suppressions").upsert({
+      user_id: userId,
+      suggestion_type: "claim",
+      target_entity_type: "claim",
+      target_entity_id: c.id,
+      normalized_value: String(c.value ?? "").trim().toLowerCase(),
+      suppression_key: suppressionKey({ type: c.subject_type, id: c.subject_id }, c.attribute, c.value),
+    } as any, { onConflict: "user_id,suppression_key" }));
+    const deleted = must(await db.from("claims").delete().eq("id", c.id).eq("user_id", userId).select("id")) as Array<{ id: string }> | null;
+    // A claim guard can cancel a delete without an error; say so instead of
+    // reporting a revert that did not happen.
+    if (!deleted || deleted.length === 0) throw new Error("claim delete was refused");
+  }
+  return "reverted";
 }
 
 async function wikiRollbackAsService(db: SupabaseClient, userId: string, revisionId: string) {
