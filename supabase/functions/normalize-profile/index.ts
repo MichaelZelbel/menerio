@@ -36,6 +36,8 @@ const WriteFactSchema = z.object({
   entity_id: z.string().uuid().nullable().optional(),
   category_slug: z.string().trim().min(1).max(80).nullable().optional(),
   label: z.string().trim().min(1).max(160),
+  // An existing slot's key ("It changed"): used as is, never re-derived from the label.
+  attribute: z.string().trim().min(1).max(120).regex(/^\S+$/).nullable().optional(),
   value: z.string().trim().min(1).max(2000),
   origin: Origin.optional(),
   evidence_quote: z.string().trim().max(2000).nullable().optional(),
@@ -74,6 +76,7 @@ function toFactInput(p: z.infer<typeof WriteFactSchema>, fallbackOrigin: FactInp
   return {
     subject,
     label: p.label,
+    attribute: p.attribute ?? null,
     value: p.value,
     origin: p.origin ?? fallbackOrigin,
     categorySlug: p.category_slug ?? null,

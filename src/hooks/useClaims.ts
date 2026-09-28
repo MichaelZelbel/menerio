@@ -82,6 +82,7 @@ export function useAddClaim() {
         contact_id: input.subject_type === "contact" ? input.subject_id : null,
         entity_id: input.subject_type === "entity" ? input.subject_id : null,
         label: attributeLabel(attribute),
+        attribute,
         value: input.value.trim(),
         valid_from: input.valid_from || null,
         source_type: input.source_type && input.source_type !== "manual" ? input.source_type : undefined,

@@ -224,7 +224,9 @@ describe("useFacts", () => {
     expect(fake.current!.invocations[0].body).toMatchObject({
       action: "write_fact",
       contact_id: "p1",
-      label: "current city",
+      // The slot's own key goes along, so an old key is never re-derived from the label.
+      label: "Current city",
+      attribute: "current-city",
       value: "London",
       valid_from: "2026-09-01",
     });

@@ -35,6 +35,12 @@ export interface FactInput {
   subject: FactSubject;
   /** What the user or the extractor called it, e.g. "Favourite foods". */
   label: string;
+  /**
+   * The attribute key, when the caller already knows it ("It changed" on an
+   * existing slot). Then the label is not re-derived into a key, and the value
+   * is not split: an old slot keyed "languages" must not become "language".
+   */
+  attribute?: string | null;
   value: string;
   origin: FactOrigin;
   /** The section the caller suggests; the slot keeps its own once it exists. */
@@ -92,6 +98,11 @@ export function suppressionKey(subject: FactSubject, attribute: string, value: s
 
 /** The single facts a value holds, each with the label and section it belongs under. */
 export function piecesOf(input: FactInput): Array<{ label: string; categorySlug: string; value: string }> | { reason: string } {
+  if (input.attribute) {
+    const value = String(input.value ?? "").trim();
+    if (!value) return { reason: "empty_after_guards" };
+    return [{ label: input.label, categorySlug: input.categorySlug ?? "", value }];
+  }
   const clean = cleanIncomingFact(input.categorySlug ?? "", input.label, input.value);
   if (!clean.ok) return { reason: clean.reason };
   const { fact } = clean;
@@ -132,7 +143,7 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
   const out: PieceOutcome[] = [];
   const planned = new Map<string, string[]>(); // attribute → values planned in this call
   for (const piece of pieces) {
-    const attribute = normalizeAttribute(piece.label);
+    const attribute = input.attribute ? input.attribute : normalizeAttribute(piece.label);
     if (!attribute) { out.push({ kind: "rejected", attribute: null, reason: "empty_attribute" }); continue; }
     if (isReservedAttribute(attribute)) { out.push({ kind: "rejected", attribute, reason: "relationships_are_links" }); continue; }
     if (ctx.suppressed.has(suppressionKey(input.subject, attribute, piece.value))) { out.push({ kind: "suppressed", attribute }); continue; }
@@ -210,7 +221,9 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
   }
 
   const pieces = piecesOf(input);
-  const attributes = Array.isArray(pieces) ? [...new Set(pieces.map((p) => normalizeAttribute(p.label)).filter(Boolean))] : [];
+  const attributes = Array.isArray(pieces)
+    ? [...new Set(pieces.map((p) => input.attribute || normalizeAttribute(p.label)).filter(Boolean))]
+    : [];
   const subjectFilter = (q: any) => {
     q = q.eq("user_id", userId).eq("subject_type", input.subject.type);
     return input.subject.id === null ? q.is("subject_id", null) : q.eq("subject_id", input.subject.id);

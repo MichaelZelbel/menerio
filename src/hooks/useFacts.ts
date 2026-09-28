@@ -297,6 +297,8 @@ export interface WriteFactBody {
   contact_id?: string | null;
   entity_id?: string | null;
   label: string;
+  /** An existing slot's key: the server uses it as is instead of re-deriving it from the label. */
+  attribute?: string | null;
   value: string;
   category_slug?: string | null;
   valid_from?: string | null;
@@ -471,7 +473,8 @@ export function useFacts(subject: FactSubject | null) {
       if (!subject) throw new Error("Nothing to change");
       const result = await invokeWriteFact({
         ...subjectBody(),
-        label: attributeLabel(fact.attribute),
+        label: fact.label || attributeLabel(fact.attribute),
+        attribute: fact.attribute,
         value: value.trim(),
         category_slug: fact.category_slug,
         valid_from: validFrom,

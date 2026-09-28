@@ -98,6 +98,14 @@ describe("planFacts", () => {
     expect(p.close).toEqual(["c1"]);
   });
 
+  it("an explicit attribute is kept as is (an old slot keyed 'languages' stays 'languages')", () => {
+    const [p] = inserts(planFacts(human({ label: "Languages", attribute: "languages", value: "French, Spanish" }),
+      ctx({ isHuman: true, rules: { languages: "many" }, claims: [claim({ attribute: "languages", value: "German" })] })));
+    expect(p.attribute).toBe("languages");
+    expect(p.value).toBe("French, Spanish");
+    expect(p.close).toEqual([]);
+  });
+
   it("no plan step carries a value in its reason", () => {
     const secret = "Top-secret-diagnosis";
     const plan = planFacts(machine({ value: secret, evidenceQuote: null }), ctx());
