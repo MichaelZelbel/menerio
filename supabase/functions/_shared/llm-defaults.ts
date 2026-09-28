@@ -16,7 +16,6 @@
  */
 
 import type { Provider } from "./llm-router.ts";
-import { PROFILE_AUDIT_SYSTEM_PROMPT } from "./profile-audit.ts";
 import {
   BLOCKED_LABELS_FOR_PROMPT,
   CANONICAL_LABELS_FOR_PROMPT,
@@ -784,31 +783,6 @@ function normalizeSchemaDescription(): string {
   return lines.join("\n");
 }
 
-export const NORMALIZE_PROFILE_PLAN_PROMPT = `You normalize ONE person's profile (owner or contact). You receive a JSON list of their CURRENT profile_entries. Your job: produce groups of entries that should be merged/relabeled/recategorized/reformatted into a single canonical entry.
-
-Canonical schema (per category, [single]=one truth per subject, [multi]=many allowed):
-${normalizeSchemaDescription()}
-
-Canonical label vocabulary you may use:
-${CANONICAL_LABELS_FOR_PROMPT}
-
-Rules:
-1. Group entries that describe the SAME underlying fact. For each group choose:
-   - canonical_category_slug (from the schema)
-   - canonical_label (use the EXACT canonical label from the schema when it fits; for OPEN categories keep the user's natural label)
-   - canonical_value: the RICHEST/most complete value (e.g. "Dortmund, Germany" over "Dortmund"; an ISO date "2006-01-23" over "January 23 2006"). Normalize dates to YYYY-MM-DD.
-2. A [single] label may appear ONCE per subject. If two [single] entries hold genuinely DIFFERENT values that look like a CHANGE OVER TIME (moved cities, changed jobs), DO NOT merge them. Keep the most current as canonical. If a "Previous X" canonical exists (Previous city, Previous address, Previous employer) emit a separate relabel group for the older one. Otherwise leave both alone (do not emit a group).
-3. NEVER collapse two genuinely different facts into one.
-4. Open categories (personality, principles, health, hobbies, food, entertainment, travel, digital, goals, preferences): only group EXACT-meaning duplicates and fix wrong category. Never force a canonical label onto them.
-5. Fix obviously wrong categories (e.g. "Place of birth" filed under location → identity; wedding/spouse → relationships).
-6. Output ONLY groups that require a CHANGE. If an entry is already canonical, unique, and correctly categorized, omit it.
-7. survivor_entry_id: pick the existing row that already best matches the canonical (richest value + correct category) so we UPDATE it in place. Set null only when no member is a good survivor; in that case the apply step will INSERT a fresh canonical and delete all members.
-8. Only map an entry to a canonical label when the entry's VALUE is consistent with that label's meaning. Never relabel based on the label name alone when the value contradicts it (e.g. 'Humor Style: Witty' is NOT a Social handle). If a field is really a personality/communication-style trait, recategorize it to 'personality' and KEEP its existing label rather than forcing a canonical label. If you are unsure, leave the entry untouched (emit no group for it).
-9. TIME-BASED CONFLICTS (only when a "DATED EVIDENCE" section is provided below): When two [single] entries hold DIFFERENT values and the dated evidence shows the subject CHANGED over time (moved city/address, changed job/employer), set the MOST RECENT/current value as the canonical [single] entry (operation 'reformat' or 'relabel' as appropriate), AND emit a SEPARATE group that relabels the OLDER entry to its 'Previous X' canonical (Previous city / Previous address / Previous employer), operation 'relabel', keeping that older entry's value. Cite the evidence (note title or date) in the rationale. Only do this when the dated evidence supports it; if it remains unclear, leave both entries unchanged (emit nothing). Each such group has exactly one member entry.
-
-Return JSON ONLY in this shape (no prose):
-{ "groups": [ { "member_entry_ids": ["uuid", ...], "survivor_entry_id": "uuid"|null, "canonical_category_slug": "string", "canonical_label": "string", "canonical_value": "string", "operation": "merge"|"relabel"|"recategorize"|"reformat", "confidence": 0.0, "rationale": "short string" } ] }`;
-
 // ---------- registry ----------
 
 export interface CallSiteDefault {
@@ -1009,25 +983,6 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     model: "deepseek/deepseek-v4-flash",
     system_prompt: NOTE_CHAT_SUMMARIZE_PROMPT,
     temperature: null, max_tokens: 6000, extra_options: {}, enabled: true, placeholders: [],
-  },
-  {
-    // Registered 2026-09-11. Ran on inline defaults only before that, with no
-    // cap, and it is the most expensive call site in the app (see the note on
-    // compact JSON in profile-normalization.ts).
-    call_site: "normalize-profile.plan",
-    description: "Plans which profile entries of one person to merge, relabel, recategorize or reformat.",
-    provider: "openrouter",
-    model: "deepseek/deepseek-v4-flash",
-    system_prompt: NORMALIZE_PROFILE_PLAN_PROMPT,
-    temperature: null, max_tokens: 4000, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
-  },
-  {
-    call_site: "profile-audit.main",
-    description: "Whole-profile duplicate auditor: reads all profile entries of one person and reports which entries state the same fact.",
-    provider: "openrouter",
-    model: "google/gemini-2.5-flash",
-    system_prompt: PROFILE_AUDIT_SYSTEM_PROMPT,
-    temperature: 0, max_tokens: 2500, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },
   {
 

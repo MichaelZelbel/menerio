@@ -1,4 +1,6 @@
 import { selectAllRows } from "./paged-select.ts";
+import { FACT_COLUMNS, labelOf, sectionOf, type FactRow } from "./agent-facts.ts";
+import { CATEGORY_DISPLAY } from "./fact-placement.ts";
 // Sweep-export and pull-apply logic for the People & Groups vault mirror.
 // Used by github-people-sync (export/conflicts) and github-sync-pull (pull).
 //
@@ -52,7 +54,10 @@ interface PeopleData {
   /** ALL memberships incl. archived — archived rows still count for dirty
    * detection (archiving bumps updated_at); content uses liveMemberships. */
   memberships: any[];
-  entries: any[];
+  /** Current facts about contacts, from profile_facts (the owner's view). */
+  facts: FactRow[];
+  /** Display rows of those facts; only their updated_at is used, for dirty detection. */
+  slots: any[];
   categories: any[];
   syncRows: any[];
 }
@@ -70,15 +75,19 @@ function entityKey(type: string, id: string): string {
 }
 
 export async function loadPeopleData(db: DbClient, userId: string): Promise<PeopleData> {
-  const [contacts, groups, memberships, entries, categories, syncRows] = await Promise.all([
+  // The vault is the owner's own private export, so it reads profile_facts,
+  // not agent_facts: private sections and hidden or sensitive people are
+  // written as they always were (the vault repository is private).
+  const [contacts, groups, memberships, facts, slots, categories, syncRows] = await Promise.all([
     selectAllRows((from,to)=>db.from("contacts").select("*").eq("user_id",userId).order("id").range(from,to)),
     selectAllRows((from,to)=>db.from("contact_groups").select("*").eq("user_id",userId).order("id").range(from,to)),
     selectAllRows((from,to)=>db.from("contact_group_memberships").select("*").eq("user_id",userId).order("id").range(from,to)),
-    selectAllRows((from,to)=>db.from("profile_entries").select("*").eq("user_id",userId).not("contact_id","is",null).order("id").range(from,to)),
+    selectAllRows<FactRow>((from,to)=>db.from("profile_facts").select(FACT_COLUMNS).eq("user_id",userId).eq("subject_type","contact").eq("is_current",true).order("claim_id").range(from,to)),
+    selectAllRows((from,to)=>db.from("fact_slots").select("id, subject_id, updated_at").eq("user_id",userId).eq("subject_type","contact").order("id").range(from,to)),
     selectAllRows((from,to)=>db.from("profile_categories").select("*").eq("user_id",userId).not("contact_id","is",null).order("id").range(from,to)),
     selectAllRows((from,to)=>db.from("github_sync_log").select("*").eq("user_id",userId).in("entity_type",["person","group"]).order("id").range(from,to)),
   ]);
-  return { contacts, groups, memberships, entries, categories, syncRows };
+  return { contacts, groups, memberships, facts, slots, categories, syncRows };
 }
 
 // ─── Indexing helpers ────────────────────────────────────────────────
@@ -92,9 +101,14 @@ function indexData(data: PeopleData) {
     membershipsByContact.set(m.contact_id, [...(membershipsByContact.get(m.contact_id) || []), m]);
     membershipsByGroup.set(m.group_id, [...(membershipsByGroup.get(m.group_id) || []), m]);
   }
-  const entriesByContact = new Map<string, any[]>();
-  for (const e of data.entries) {
-    entriesByContact.set(e.contact_id, [...(entriesByContact.get(e.contact_id) || []), e]);
+  const factsByContact = new Map<string, FactRow[]>();
+  for (const f of data.facts) {
+    if (!f.subject_id) continue;
+    factsByContact.set(f.subject_id, [...(factsByContact.get(f.subject_id) || []), f]);
+  }
+  const slotsByContact = new Map<string, any[]>();
+  for (const sl of data.slots) {
+    slotsByContact.set(sl.subject_id, [...(slotsByContact.get(sl.subject_id) || []), sl]);
   }
   const categoriesByContact = new Map<string, any[]>();
   for (const c of data.categories) {
@@ -109,7 +123,8 @@ function indexData(data: PeopleData) {
     groupsById,
     membershipsByContact,
     membershipsByGroup,
-    entriesByContact,
+    factsByContact,
+    slotsByContact,
     categoriesByContact,
     syncByEntity,
   };
@@ -120,7 +135,8 @@ type Index = ReturnType<typeof indexData>;
 function personClusterUpdatedAt(contact: any, idx: Index): number {
   let max = ts(contact.updated_at);
   for (const m of idx.membershipsByContact.get(contact.id) || []) max = Math.max(max, ts(m.updated_at));
-  for (const e of idx.entriesByContact.get(contact.id) || []) max = Math.max(max, ts(e.updated_at));
+  for (const f of idx.factsByContact.get(contact.id) || []) max = Math.max(max, ts(f.updated_at));
+  for (const sl of idx.slotsByContact.get(contact.id) || []) max = Math.max(max, ts(sl.updated_at));
   for (const c of idx.categoriesByContact.get(contact.id) || []) max = Math.max(max, ts(c.updated_at));
   return max;
 }
@@ -142,19 +158,43 @@ function personPageData(contact: any, idx: Index) {
   return {
     contact,
     groupNames: [...new Set(groupNames)],
-    categories: idx.categoriesByContact.get(contact.id) || [],
-    entries: entriesForPage(contact.id, idx),
+    ...factsForPage(contact.id, idx),
   };
 }
 
-function entriesForPage(contactId: string, idx: Index) {
-  return (idx.entriesByContact.get(contactId) || []).map((e) => ({
-    category_id: e.category_id,
-    label: String(e.label || ""),
-    value: String(e.value || ""),
-    is_pinned: !!e.is_pinned,
-    sort_order: e.sort_order ?? null,
-  }));
+const TAXONOMY_ORDER = Object.keys(CATEGORY_DISPLAY);
+
+/**
+ * A person's current facts as the vault page lists them: pinned first (the
+ * page's Highlights), each under its section. A fact's section is a slug; the
+ * person's own section row gives its name and order, else the taxonomy does.
+ */
+export function factsForPage(contactId: string, idx: Pick<Index, "factsByContact" | "categoriesByContact">) {
+  const ownCategories = (idx.categoriesByContact.get(contactId) || []) as any[];
+  const bySlug = new Map<string, any>(ownCategories.map((c) => [String(c.slug || ""), c]));
+  const categories = ownCategories.map((c) => ({ id: String(c.id), name: String(c.name || ""), sort_order: c.sort_order ?? null }));
+  const facts = [...(idx.factsByContact.get(contactId) || [])].sort((a, b) =>
+    Number(!!b.is_pinned) - Number(!!a.is_pinned) ||
+    labelOf(a).localeCompare(labelOf(b)) ||
+    String(a.value).localeCompare(String(b.value)));
+  const entries = facts.map((f, i) => {
+    const { slug, name } = sectionOf(f);
+    let cat = bySlug.get(slug);
+    if (!cat) {
+      const t = TAXONOMY_ORDER.indexOf(slug);
+      cat = { id: `section:${slug}`, name, slug, sort_order: slug === "other" ? 100000 : 10000 + (t === -1 ? TAXONOMY_ORDER.length : t) };
+      bySlug.set(slug, cat);
+      categories.push({ id: cat.id, name: cat.name, sort_order: cat.sort_order });
+    }
+    return {
+      category_id: String(cat.id),
+      label: labelOf(f),
+      value: String(f.value || ""),
+      is_pinned: !!f.is_pinned,
+      sort_order: i,
+    };
+  });
+  return { categories, entries };
 }
 
 function groupPageData(group: any, idx: Index) {

@@ -18,9 +18,10 @@ interface Suggestion {
 
 interface ProfileSuggestionsProps {
   categories: ProfileCategory[];
-  entryCount: number;
+  factCount: number;
   noteCount: number;
-  onAccept: (data: { category_id: string; label: string; value: string; sort_order: number }) => void;
+  /** Adds the fact (write_fact files it under the section slug). */
+  onAccept: (data: { category_slug: string; label: string; value: string }) => void;
 }
 
 const STORAGE_KEY = "menerio-dismissed-profile-suggestions";
@@ -58,7 +59,7 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   low: "bg-muted-foreground/50",
 };
 
-export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept }: ProfileSuggestionsProps) {
+export function ProfileSuggestions({ categories, factCount, noteCount, onAccept }: ProfileSuggestionsProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>(getDismissed());
@@ -68,12 +69,12 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
 
   // Show nudge if sparse profile + many notes
   useEffect(() => {
-    if (entryCount < 3 && noteCount > 10 && suggestions.length === 0 && !loading) {
+    if (factCount < 3 && noteCount > 10 && suggestions.length === 0 && !loading) {
       setShowNudge(true);
     } else {
       setShowNudge(false);
     }
-  }, [entryCount, noteCount, suggestions.length, loading]);
+  }, [factCount, noteCount, suggestions.length, loading]);
 
   const newNotesSinceRun = Math.max(0, noteCount - lastRunNoteCount);
   const hasEverRun = lastRun > 0;
@@ -124,9 +125,9 @@ export function ProfileSuggestions({ categories, entryCount, noteCount, onAccept
   }
 
   function handleAccept(s: Suggestion) {
-    const cat = categories.find((c) => c.slug === s.category_slug);
-    if (!cat) return;
-    onAccept({ category_id: cat.id, label: s.label, value: s.value, sort_order: 0 });
+    // The section needs no row of its own: the fact is filed by slug and
+    // shows under the taxonomy's section name until one exists.
+    onAccept({ category_slug: s.category_slug, label: s.label, value: s.value });
     handleDismiss(s);
   }
 

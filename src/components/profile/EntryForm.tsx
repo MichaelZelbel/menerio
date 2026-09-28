@@ -2,43 +2,68 @@ import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { todayISO } from "@/lib/claims";
 import { NoteSearchInput } from "./NoteSearchInput";
-import type { ProfileEntry } from "@/hooks/useProfile";
 
 const CUSTOM_ENTRY_VALUE = "__custom__";
 
+export interface EntryFormData {
+  label: string;
+  value: string;
+  linked_note_id: string | null;
+  category_slug: string | null;
+  /** "It changed" only: the day the new value became true. */
+  valid_from?: string | null;
+}
+
 interface EntryFormProps {
-  initial?: ProfileEntry;
-  categoryId: string;
+  /**
+   * add: a new fact (label + value).
+   * changed: "It changed", a new value from a date; the old one becomes history.
+   * fix: "Fix a mistake", the value is corrected in place.
+   */
+  mode?: "add" | "changed" | "fix";
+  /** The fact being changed or fixed. */
+  initial?: { label: string; value: string };
+  categorySlug: string | null;
   suggestedLabels?: string[];
   existingLabels?: string[];
-  onSave: (data: { label: string; value: string; linked_note_id: string | null; category_id: string; id?: string }) => void;
+  onSave: (data: EntryFormData) => void;
   onCancel: () => void;
 }
 
-export function EntryForm({ initial, categoryId, suggestedLabels = [], existingLabels = [], onSave, onCancel }: EntryFormProps) {
+export function EntryForm({
+  mode = "add",
+  initial,
+  categorySlug,
+  suggestedLabels = [],
+  existingLabels = [],
+  onSave,
+  onCancel,
+}: EntryFormProps) {
+  const editing = mode !== "add";
   // Filter out already-used labels (case-insensitive)
   const lowerExisting = existingLabels.map((l) => l.toLowerCase());
-  const availableSuggestions = suggestedLabels.filter(
-    (s) => !lowerExisting.includes(s.toLowerCase())
-  );
+  const availableSuggestions = suggestedLabels.filter((s) => !lowerExisting.includes(s.toLowerCase()));
 
   const hasSuggestions = availableSuggestions.length > 0;
-  const defaultSelection = initial ? initial.label : hasSuggestions ? availableSuggestions[0] : CUSTOM_ENTRY_VALUE;
+  const defaultSelection = editing ? initial?.label ?? "" : hasSuggestions ? availableSuggestions[0] : CUSTOM_ENTRY_VALUE;
 
   const [selectedOption, setSelectedOption] = useState(defaultSelection);
   const [customLabel, setCustomLabel] = useState(initial?.label ?? "");
-  const [value, setValue] = useState(initial?.value ?? "");
-  const [noteId, setNoteId] = useState<string | null>(initial?.linked_note_id ?? null);
+  const [value, setValue] = useState(mode === "fix" ? initial?.value ?? "" : "");
+  const [validFrom, setValidFrom] = useState(todayISO());
+  const [noteId, setNoteId] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState<string | null>(null);
 
   const isCustom = selectedOption === CUSTOM_ENTRY_VALUE;
-  const resolvedLabel = isCustom ? customLabel : selectedOption;
+  const resolvedLabel = editing ? initial?.label ?? "" : isCustom ? customLabel : selectedOption;
 
-  // Reset form when category changes or after save
+  // Reset the add form when the suggestions change or after a save.
   useEffect(() => {
-    if (!initial) {
+    if (!editing) {
       const next = hasSuggestions ? availableSuggestions[0] : CUSTOM_ENTRY_VALUE;
       setSelectedOption(next);
       setCustomLabel("");
@@ -51,43 +76,50 @@ export function EntryForm({ initial, categoryId, suggestedLabels = [], existingL
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resolvedLabel.trim() || !value.trim()) return;
+    if (mode === "changed" && !validFrom) return;
     onSave({
       label: resolvedLabel.trim(),
       value: value.trim(),
       linked_note_id: noteId,
-      category_id: categoryId,
-      id: initial?.id,
+      category_slug: categorySlug,
+      valid_from: mode === "changed" ? validFrom : null,
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
-      {/* Label selection */}
-      {hasSuggestions || initial ? (
-        <div className="space-y-2">
-          {!initial && (
-            <Select value={selectedOption} onValueChange={setSelectedOption}>
-              <SelectTrigger className="text-sm">
-                <SelectValue placeholder="What would you like to add?" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSuggestions.map((label) => (
-                  <SelectItem key={label} value={label}>
-                    {label}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_ENTRY_VALUE}>✏️ Custom entry</SelectItem>
-              </SelectContent>
-            </Select>
+      {editing ? (
+        <p className="text-xs text-muted-foreground">
+          {mode === "changed" ? (
+            <>
+              <span className="font-medium text-foreground">{initial?.label}</span> changed. "{initial?.value}" stays in history.
+            </>
+          ) : (
+            <>
+              Fix <span className="font-medium text-foreground">{initial?.label}</span>. The old words are replaced.
+            </>
           )}
-          {(isCustom || initial) && (
+        </p>
+      ) : hasSuggestions ? (
+        <div className="space-y-2">
+          <Select value={selectedOption} onValueChange={setSelectedOption}>
+            <SelectTrigger className="text-sm">
+              <SelectValue placeholder="What would you like to add?" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableSuggestions.map((label) => (
+                <SelectItem key={label} value={label}>
+                  {label}
+                </SelectItem>
+              ))}
+              <SelectItem value={CUSTOM_ENTRY_VALUE}>✏️ Custom entry</SelectItem>
+            </SelectContent>
+          </Select>
+          {isCustom && (
             <Input
               placeholder="Enter a label..."
-              value={isCustom ? customLabel : initial?.label ?? ""}
-              onChange={(e) => {
-                if (isCustom) setCustomLabel(e.target.value);
-              }}
-              readOnly={!!initial}
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
               className="text-sm"
             />
           )}
@@ -102,31 +134,53 @@ export function EntryForm({ initial, categoryId, suggestedLabels = [], existingL
       )}
 
       <Textarea
-        placeholder="Your answer..."
+        placeholder={mode === "changed" ? "The new value..." : "Your answer..."}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className="text-sm min-h-[60px]"
         rows={2}
-        autoFocus={!isCustom && hasSuggestions}
+        autoFocus={editing || (!isCustom && hasSuggestions)}
+        aria-label={mode === "changed" ? "New value" : "Value"}
       />
 
-      <div>
-        <p className="text-xs text-muted-foreground mb-1">Link a note (optional)</p>
-        <NoteSearchInput
-          selectedNoteId={noteId}
-          selectedNoteTitle={noteTitle ?? undefined}
-          onSelect={(id, title) => {
-            setNoteId(id);
-            setNoteTitle(title);
-          }}
-        />
-      </div>
+      {mode === "changed" && (
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground" htmlFor="fact-changed-since">
+            Since
+          </Label>
+          <Input
+            id="fact-changed-since"
+            type="date"
+            value={validFrom}
+            onChange={(e) => setValidFrom(e.target.value)}
+            className="h-8 text-sm w-44"
+          />
+        </div>
+      )}
+
+      {mode === "add" && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Link a note (optional)</p>
+          <NoteSearchInput
+            selectedNoteId={noteId}
+            selectedNoteTitle={noteTitle ?? undefined}
+            onSelect={(id, title) => {
+              setNoteId(id);
+              setNoteTitle(title);
+            }}
+          />
+        </div>
+      )}
 
       <div className="flex gap-2 justify-end">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={!resolvedLabel.trim() || !value.trim()}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!resolvedLabel.trim() || !value.trim() || (mode === "changed" && !validFrom)}
+        >
           Save
         </Button>
       </div>

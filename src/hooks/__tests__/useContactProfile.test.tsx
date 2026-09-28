@@ -1,79 +1,46 @@
-import { describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import type { createFakeSupabase } from "@/test/fake-supabase";
 
-vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "user-1" } }),
-}));
+const fake = vi.hoisted(() => ({ current: null as ReturnType<typeof createFakeSupabase> | null }));
 
-vi.mock("@/lib/toast", () => ({
-  showToast: { success: vi.fn(), error: vi.fn() },
-}));
-
-// Minimal chainable supabase mock: list queries resolve empty, mutations
-// succeed. Only the shapes useContactProfile actually calls are implemented.
-// `functions.invoke` is here because a NEW profile entry is written through the
-// normalize-profile edge function, not by a direct insert — the server-side
-// guards can refuse the write and return a `reason`.
-vi.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({
-            order: async () => ({ data: [], error: null }),
-          }),
-        }),
-      }),
-      insert: async () => ({ error: null }),
-      update: () => ({ eq: async () => ({ error: null }) }),
-      delete: () => ({ eq: async () => ({ error: null }) }),
-    }),
-    functions: {
-      invoke: async () => ({ data: { ok: true, reason: null }, error: null }),
-    },
-  },
-}));
+vi.mock("@/integrations/supabase/client", async () => {
+  const { createFakeSupabase } = await import("@/test/fake-supabase");
+  fake.current = createFakeSupabase();
+  return { supabase: fake.current.client };
+});
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: "user-1" } }) }));
+vi.mock("@/lib/toast", () => ({ showToast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/hooks/usePeopleSync", () => ({ usePeopleSync: () => ({ triggerPeopleSync: vi.fn() }) }));
 
 import { useContactProfile } from "../useContactProfile";
 
 function createWrapper(qc: QueryClient) {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
+  return ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-describe("useContactProfile — upsertEntry cache invalidation", () => {
-  it(
-    "invalidates BOTH the entries AND categories caches on success " +
-      "(regression: quick-add into a not-yet-materialized category left the " +
-      "stale categories cache hiding the new section)",
-    async () => {
-      const qc = new QueryClient({
-        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-      });
-      const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+beforeEach(() => fake.current!.reset());
 
-      const { result } = renderHook(() => useContactProfile("contact-1"), {
-        wrapper: createWrapper(qc),
-      });
+describe("useContactProfile: a person's sections only", () => {
+  it("reads the person's sections and nothing else on open: no entries, no adoption, no backfill", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderHook(() => useContactProfile("contact-1"), { wrapper: createWrapper(qc) });
+    await waitFor(() => expect(fake.current!.queries.length).toBeGreaterThan(0));
+    expect(fake.current!.queries.map((q) => q.table)).toEqual(["profile_categories"]);
+    expect(fake.current!.invocations).toEqual([]);
+  });
 
-      await result.current.upsertEntry.mutateAsync({
-        category_id: "cat-new",
-        label: "Karaoke",
-        value: "absolutely loves karaoke nights",
-      });
+  it("refreshes the facts too when a section changes (its name and scope reach them through the view)", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    const { result } = renderHook(() => useContactProfile("contact-1"), { wrapper: createWrapper(qc) });
 
-      const invalidatedKeys = invalidateSpy.mock.calls.map((call) =>
-        JSON.stringify(call[0]?.queryKey),
-      );
-      expect(invalidatedKeys).toContain(
-        JSON.stringify(["contact-profile-entries", "user-1", "contact-1"]),
-      );
-      expect(invalidatedKeys).toContain(
-        JSON.stringify(["contact-profile-categories", "user-1", "contact-1"]),
-      );
-    },
-  );
+    await result.current.deleteCategory.mutateAsync("cat-1");
+
+    const keys = spy.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    expect(keys).toContain(JSON.stringify(["contact-profile-categories", "user-1", "contact-1"]));
+    expect(keys).toContain(JSON.stringify(["profile-facts"]));
+  });
 });

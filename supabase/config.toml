@@ -132,8 +132,6 @@ verify_jwt = false
 [functions.notify-admin]
 verify_jwt = false
 
-[functions.admin-normalize]
-verify_jwt = false
 
 [functions.backfill-markdown]
 verify_jwt = false
@@ -181,8 +179,6 @@ verify_jwt = false
 # x-cron-key header themselves (_shared/cron-auth.ts). Without these entries a
 # redeploy could flip them to verify_jwt = true and the gateway would reject
 # every scheduled run before the function even sees it.
-[functions.profile-audit]
-verify_jwt = false
 
 [functions.wiki-restructure]
 verify_jwt = false
@@ -221,8 +217,6 @@ verify_jwt = false
 [functions.conversation-chat]
 verify_jwt = false
 
-[functions.promote-profile-entries]
-verify_jwt = false
 
 [functions.weekly-review]
 verify_jwt = false
@@ -293,4 +287,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.wiki-cleanup]
+verify_jwt = false
+
+[functions.build-fact-label-map]
+verify_jwt = false
+
+[functions.split-legacy-bags]
 verify_jwt = false

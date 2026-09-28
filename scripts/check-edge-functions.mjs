@@ -81,10 +81,8 @@ const CRON_GATED_FLOOR = [
   "github-sync-scheduled",
   "drain-note-ai-jobs",
   "profile-reconcile",
-  "profile-audit",
   "wiki-restructure",
   "powersync-keepalive",
-  "admin-normalize",
 ];
 
 function scheduledFunctionNames() {
@@ -113,10 +111,15 @@ const NOT_CRON_GATED = new Set(["notify-admin"]);
 // against their own environment secret instead of calling isValidCronRequest().
 // gdrive-sync fires every two minutes; an edit that dropped its check used to
 // leave CI green.
-const ENV_KEY_GATED = new Set(["gdrive-sync", "gdrive-watch-maintenance", "profile-lint", "normalize-profile"]);
+const ENV_KEY_GATED = new Set(["gdrive-sync", "gdrive-watch-maintenance", "profile-lint"]);
+
+// Retired by the one fact store (docs/plans/one-fact-store.md, A2): their cron
+// jobs (4 admin-normalize, 15 normalize-profile explode_bags, 16 profile-audit)
+// are deleted at go-live (B6), so a migration that still schedules them is history.
+const RETIRED = new Set(["admin-normalize", "profile-audit", "promote-profile-entries"]);
 
 const cronGated = new Set([...CRON_GATED_FLOOR, ...ENV_KEY_GATED]);
-for (const fn of scheduledFunctionNames()) if (!NOT_CRON_GATED.has(fn)) cronGated.add(fn);
+for (const fn of scheduledFunctionNames()) if (!NOT_CRON_GATED.has(fn) && !RETIRED.has(fn)) cronGated.add(fn);
 
 for (const fn of [...cronGated].sort()) {
   const file = join(ROOT, fn, "index.ts");

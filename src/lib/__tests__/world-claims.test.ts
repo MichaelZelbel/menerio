@@ -116,6 +116,18 @@ describe("groupClaims", () => {
     expect(groups).toHaveLength(1);
   });
 
+  it("puts a current value on top of a closed one, even a human's closed one", () => {
+    const today = new Date("2026-09-28T12:00:00");
+    const groups = groupClaims([
+      claim({ value: "Berlin", origin: "user_manual", rank: "preferred", valid_to: "2026-01-01", updated_at: "2026-09-01T00:00:00Z" }),
+      claim({ value: "London", origin: "ai_note", updated_at: "2026-01-01T00:00:00Z" }),
+    ], today);
+    expect(groups[0].top.value).toBe("London");
+    expect(groups[0].others.map((o) => o.value)).toEqual(["Berlin"]);
+    // A value that ended is history, not a rival.
+    expect(groups[0].disagreed).toBe(false);
+  });
+
   it("returns nothing for nothing", () => {
     expect(groupClaims([])).toEqual([]);
   });

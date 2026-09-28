@@ -27,6 +27,7 @@ import {
 } from "@/lib/relationship-canonical";
 
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
+import { invokeWriteFact } from "@/hooks/useFacts";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -107,15 +108,17 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     enabled: !!user,
     queryFn: async () => {
       const { data } = await supabase
-        .from("profile_entries")
-        .select("contact_id, label, value")
+        .from("profile_facts")
+        .select("subject_type, subject_id, attribute, value")
         .eq("user_id", user!.id)
-        .in("label", ["Gender", "Pronouns"]);
+        .in("subject_type", ["self", "contact"])
+        .in("attribute", ["gender", "pronouns"])
+        .eq("is_current", true);
       const raw: Record<string, { gender?: string; pronouns?: string }> = {};
-      for (const row of (data || []) as Array<{ contact_id: string | null; label: string; value: string }>) {
-        const key = row.contact_id ?? "self";
+      for (const row of (data || []) as Array<{ subject_type: string; subject_id: string | null; attribute: string; value: string }>) {
+        const key = row.subject_type === "contact" && row.subject_id ? row.subject_id : "self";
         const bucket = raw[key] ?? {};
-        if (row.label === "Gender") bucket.gender = row.value;
+        if (row.attribute === "gender") bucket.gender = row.value;
         else bucket.pronouns = row.value;
         raw[key] = bucket;
       }
@@ -150,22 +153,17 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
     if (!gender) return;
     if (genderOf(otherKey)) return;
     try {
-      await supabase.functions.invoke("normalize-profile", {
-        body: {
-          action: "write_profile_entry",
-          entry: {
-            contact_id: otherKey === "self" ? null : otherKey,
-            category_slug: "identity",
-            label: "Gender",
-            value: gender === "male" ? "Male" : "Female",
-            origin: "user_manual",
-          },
-        },
+      await invokeWriteFact({
+        contact_id: otherKey === "self" ? null : otherKey,
+        category_slug: "identity",
+        label: "Gender",
+        value: gender === "male" ? "Male" : "Female",
       });
     } catch {
       // A missing gender fact only degrades wording, never correctness.
     }
     qc.invalidateQueries({ queryKey: ["relationship-genders", user?.id] });
+    qc.invalidateQueries({ queryKey: ["profile-facts"] });
   };
 
   const handleSave = () => {

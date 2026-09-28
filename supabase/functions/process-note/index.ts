@@ -1,5 +1,5 @@
 import { createNoteAIJobs, NoteAIJobError, classifyNoteAIError, type NoteAILease } from "../_shared/note-ai-jobs.ts";
-import { handleNoteAIRequest, changedProfileSubjects } from "../_shared/note-ai-processing.ts";
+import { handleNoteAIRequest } from "../_shared/note-ai-processing.ts";
 import { createNoteAIExecutionDatabase } from "../_shared/note-ai-db.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -49,10 +49,8 @@ import {
   valueAppearsInSource,
 } from "../_shared/profile-fact-gate.ts";
 
-import {
-  applyNormalization,
-  createNormalizationSuggestions,
-} from "../_shared/profile-normalization.ts";
+import { factWritesPaused, suppressionKey, writeFact } from "../_shared/fact-store.ts";
+import { normalizeAttribute } from "../_shared/claims.ts";
 import {
   buildProfileTokenIndex,
   dedupIncomingProfileValue,
@@ -556,80 +554,50 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       const contactIdRaw = suggestion.payload.contact_id as string | null | undefined;
       const contactId: string | null = contactIdRaw || null;
       const categorySlug = suggestion.payload.category_slug as string | undefined;
-      let categoryId = suggestion.payload.category_id as string | null | undefined;
       const label = String(suggestion.payload.label || "").trim();
       const value = String(suggestion.payload.value || "").trim();
       if (!label || !value || !categorySlug) return { ...suggestion, status: "pending_review" };
       const factDecision = profileValueDecision(categorySlug, label, value);
       if (!factDecision.ok) return { ...suggestion, status: "removed" };
       // The same evidence gate the relationship branch applies, checked here
-      // rather than left to the profile_entries trigger: the trigger refuses an
-      // automated fact whose quote is under ten characters, and under the
-      // durable pipeline a refused insert fails the whole analysis job. An ID
-      // card scan ("DEUTSCH", "181 cm", "47804") lost all nine of its facts
-      // that way. A short quote waits for a human instead.
+      // rather than left to the claim trigger: it refuses an automated fact
+      // whose quote is under ten characters. A short quote waits for a human.
       const factEvidenceQuote = String((suggestion.payload as any)?.evidence_quote || "").trim();
       // Counted in code points, as Postgres `length()` counts them: `.length`
       // counts UTF-16 units, so five emoji passed here and failed the trigger.
-      // Checked before the category is resolved, so a fact bound for review
-      // does not leave an empty category behind.
       if ([...factEvidenceQuote].length < 10) return { ...suggestion, status: "pending_review" };
 
-      // Resolve / create the category. Owner categories have contact_id IS NULL.
-      if (!categoryId) {
-        const baseQuery = supabase
-          .from("profile_categories")
-          .select("id")
-          .eq("user_id", suggestion.user_id)
-          .eq("slug", categorySlug);
-        const { data: existingCat } = contactId
-          ? await baseQuery.eq("contact_id", contactId).maybeSingle()
-          : await baseQuery.is("contact_id", null).maybeSingle();
-        if (existingCat?.id) {
-          categoryId = existingCat.id;
-        } else {
-          const { data: newCat, error: catErr } = await supabase
-            .from("profile_categories")
-            .insert({
-              user_id: suggestion.user_id,
-              contact_id: contactId,
-              slug: categorySlug,
-              name: categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1),
-              icon: "folder",
-              is_default: false,
-              sort_order: 99,
-              visibility_scope: "all",
-            } as any)
-            .select("id")
-            .maybeSingle();
-          if (catErr && (catErr as any).code !== "23505") {
-            return { ...suggestion, status: "pending_review" };
-          }
-          if (newCat?.id) {
-            categoryId = newCat.id;
-          } else {
-            const baseQuery2 = supabase
-              .from("profile_categories")
-              .select("id")
-              .eq("user_id", suggestion.user_id)
-              .eq("slug", categorySlug);
-            const { data: raced } = contactId
-              ? await baseQuery2.eq("contact_id", contactId).maybeSingle()
-              : await baseQuery2.is("contact_id", null).maybeSingle();
-            categoryId = raced?.id || null;
-          }
-        }
+      // The one write path (fact-store.ts): it cleans the label, splits a bag,
+      // refuses a value the user called wrong, files the attribute in its slot
+      // and never closes a value a human typed. The section needs no row of its
+      // own; the slot carries the slug.
+      const result = await writeFact(supabase, suggestion.user_id, {
+        subject: contactId ? { type: "contact", id: contactId } : { type: "self", id: null },
+        label: factDecision.label,
+        value: factDecision.value,
+        origin: "ai_note",
+        categorySlug,
+        evidenceQuote: factEvidenceQuote,
+        sourceType: "note",
+        sourceId: suggestion.source_note_id || null,
+      }, { isHuman: false });
+      const insertedClaims = result.facts.filter((f) => f.outcome === "inserted" && f.claimId).map((f) => f.claimId as string);
+      if (insertedClaims.length > 0) {
+        return {
+          ...suggestion,
+          status: "auto_applied_unreviewed",
+          target_entity_type: "claim",
+          target_entity_id: insertedClaims[0],
+          // A bag becomes several claims; a Revert removes all of them.
+          payload: insertedClaims.length > 1 ? { ...suggestion.payload, claim_ids: insertedClaims } : suggestion.payload,
+          applied_at: new Date().toISOString(),
+        };
       }
-      if (!categoryId) return { ...suggestion, status: "pending_review" };
-
-      const { data, error } = await supabase
-        .from("profile_entries")
-        .insert({ user_id: suggestion.user_id, contact_id: contactId, category_id: categoryId, label: factDecision.label, value: factDecision.value, sort_order: 0, origin: "ai_note", evidence_quote: factEvidenceQuote, linked_note_id: (suggestion as any).source_note_id || null })
-        .select("id")
-        .maybeSingle();
-      if (error && (error as any).code === "23505") return { ...suggestion, status: "removed" };
-      if (error || !data) return { ...suggestion, status: "pending_review" };
-      return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: data.id, applied_at: new Date().toISOString() };
+      // Already known, already history, or called wrong before: nothing to ask.
+      if (result.facts.length > 0 && result.facts.every((f) => f.outcome === "already_recorded" || f.outcome === "history_not_revived" || f.outcome === "suppressed")) {
+        return { ...suggestion, status: "removed" };
+      }
+      return { ...suggestion, status: "pending_review" };
     }
 
     if (suggestion.suggestion_type === "add_relationship") {
@@ -698,16 +666,6 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: insertedMoment.id, applied_at: new Date().toISOString() };
     }
-
-    if (suggestion.suggestion_type === "normalize_profile_entry") {
-      const payload = suggestion.payload as any;
-      const result = await applyNormalization(supabase, payload);
-      if (result.ok && result.entryId) {
-        return { ...suggestion, status: "auto_applied_unreviewed", target_entity_id: result.entryId, applied_at: new Date().toISOString() };
-      }
-      // Stale / failed → let the human decide.
-      return { ...suggestion, status: "pending_review" };
-    }
   } catch (err) {
     console.error("auto-apply suggestion failed:", err);
   }
@@ -771,8 +729,6 @@ const AUTO_APPLY_THRESHOLDS: Record<string, Record<string, number>> = {
   add_profile_entry: { conservative: 0.78, balanced: 0.65, exploratory: 0.5 },
   add_relationship: { conservative: 0.80, balanced: 0.7, exploratory: 0.55 },
   add_moment: { conservative: 0.85, balanced: 0.75, exploratory: 0.6 },
-  // Destructive: stricter so low-confidence merges wait for human review even in auto mode.
-  normalize_profile_entry: { conservative: 0.92, balanced: 0.85, exploratory: 0.75 },
 };
 
 function thresholdFor(suggestionType: string, sensitivity: string): number {
@@ -787,7 +743,6 @@ const DEFAULT_CONFIDENCE: Record<string, number> = {
   add_profile_entry: 0.80,
   add_relationship: 0.72,
   add_moment: 0.78,
-  normalize_profile_entry: 0.8,
 };
 
 const SENSITIVE_TERMS = [
@@ -1432,12 +1387,12 @@ async function generateProfileSuggestions(
       }));
       await noteJobs.assertCurrent(lease);
       const rawContent = result!.content;
-      console.log(`[profile-extract] Raw LLM response for note ${noteId}:`, rawContent);
+      console.log(`[profile-extract] model response for note ${noteId}: ${String(rawContent ?? "").length} chars`);
       const parsed = parseModelJson<any>(rawContent);
       if (parsed === null) {
         // Not the same thing as "no facts in this note". Say which it was.
         console.error(
-          `[profile-extract] model returned no parseable JSON for note ${noteId} — extraction abandoned. First 200 chars: ${JSON.stringify(String(rawContent ?? "").slice(0, 200))}`,
+          `[profile-extract] model returned no parseable JSON for note ${noteId} — extraction abandoned.`,
         );
         throw new NoteAIJobError("permanent", "Invalid profile JSON");
       }
@@ -1544,9 +1499,9 @@ async function generateProfileSuggestions(
     // Per-reason drop counters, logged once per note so a regression in any of
     // the screens below is visible without re-reading every line of the log.
     const factDropCounts: Record<string, number> = {};
-    const countDrop = (reason: string, label: string, value: string) => {
+    const countDrop = (reason: string, _label: string, _value: string) => {
       factDropCounts[reason] = (factDropCounts[reason] || 0) + 1;
-      console.log(`[profile-extract] Dropping fact "${label}: ${value}" (${reason})`);
+      console.log(`[profile-extract] Dropping a fact for note ${noteId} (${reason})`);
     };
     // The note text every extracted value must be found in.
     const factSourceText = `${noteTitle || ""}\n${cleanContent || ""}`;
@@ -1579,13 +1534,13 @@ async function generateProfileSuggestions(
         const buckets = new Map<string, { label: string; slug: string; members: string[] }>();
         for (const r of routes) {
           if (r.action === "drop") {
-            console.log(`[profile-extract] Skill guard dropped "${r.member}" (${r.reason})`);
+            console.log(`[profile-extract] Skill guard dropped a member (${r.reason})`);
             continue;
           }
           const label = r.action === "keep" ? "Skill" : r.label;
           const slug = r.action === "keep" ? f.category_slug : r.categorySlug;
           if (r.action === "rehome") {
-            console.log(`[profile-extract] Skill guard rehomed "${r.member}" → ${label} (${r.reason})`);
+            console.log(`[profile-extract] Skill guard rehomed a member (${r.reason})`);
           }
           const k = `${slug}|${label}`;
           if (!buckets.has(k)) buckets.set(k, { label, slug, members: [] });
@@ -1621,11 +1576,11 @@ async function generateProfileSuggestions(
         for (const member of members) {
           const decision = guardNameValue({ label: f.label, value: member, personName: f.contact_name });
           if (decision.action === "drop") {
-            console.log(`[profile-extract] Name guard dropped "${member}" (${decision.reason})`);
+            console.log(`[profile-extract] Name guard dropped a member (${decision.reason})`);
             continue;
           }
           if (decision.action === "relabel") {
-            console.log(`[profile-extract] Name guard relabelled "${member}" → ${decision.label} (${decision.reason})`);
+            console.log(`[profile-extract] Name guard relabelled a member (${decision.reason})`);
             handles.push(decision.value);
             continue;
           }
@@ -1649,7 +1604,7 @@ async function generateProfileSuggestions(
       // "Alternative name"). Never auto-apply those — force human review so a
       // parallel field can't appear silently.
       if (!profileFieldsRegistry.isKnown(f.category_slug, f.label)) {
-        console.log(`[profile-extract] Unknown label "${f.label}" in ${f.category_slug} — forcing review`);
+        console.log(`[profile-extract] Unknown label in ${f.category_slug} — forcing review`);
         (f as any)._unknownLabel = true;
       }
 
@@ -1667,9 +1622,9 @@ async function generateProfileSuggestions(
              source_quote: "",
              source_context: "",
           });
-          console.log(`[profile-extract] Rerouted blocked label "${f.label}" → relationship ${relLabel}`);
+          console.log(`[profile-extract] Rerouted a blocked label → relationship ${relLabel}`);
         } else {
-          console.log(`[profile-extract] Dropping fact: blocked label "${f.label}"`);
+          console.log(`[profile-extract] Dropping fact: blocked label`);
         }
         continue;
       }
@@ -1677,7 +1632,7 @@ async function generateProfileSuggestions(
       // Personality traits must describe a stable, general characteristic —
       // never a bare adjective distilled from one situational remark.
       if (f.category_slug === "personality" && isOvergeneralizedTrait(f.value, cleanContent)) {
-        console.log(`[profile-extract] Dropping overgeneralized trait "${f.label}: ${f.value}"`);
+        console.log(`[profile-extract] Dropping an overgeneralized trait for note ${noteId}`);
         continue;
       }
 
@@ -1689,7 +1644,7 @@ async function generateProfileSuggestions(
         }
       }
       if (!target) {
-        console.log(`[profile-extract] Dropping fact: unmatched contact_name="${f.contact_name}"`);
+        console.log(`[profile-extract] Dropping fact: unmatched contact_name`);
         continue;
       }
       f.contact_name = target.canonical_name;
@@ -1735,7 +1690,7 @@ async function generateProfileSuggestions(
         }
 
         if (g.label !== f.label || g.categorySlug !== f.category_slug) {
-          console.log(`[profile-extract] Refiled "${f.label}" → "${g.label}" (${g.categorySlug})`);
+          console.log(`[profile-extract] Refiled a fact → ${g.categorySlug}`);
         }
         validFacts.push({
           ...f,
@@ -1756,19 +1711,26 @@ async function generateProfileSuggestions(
       return;
     }
 
-    // Look up existing profile entries (per contact, plus owner with contact_id IS NULL)
+    // What the page already shows: the current facts of each subject
+    // (profile_facts, current rows), plus the values the user called wrong.
     const contactIds = [...new Set(validFacts.map((f) => f._target.contact_id).filter(Boolean))] as string[];
     const hasOwnerFact = validFacts.some((f) => !f._target.contact_id);
 
-    const existingEntries: any[] = [];
+    const existingEntries: Array<{ contact_id: string | null; label: string; value: string }> = [];
     const existingCategories: any[] = [];
-    if (contactIds.length > 0) {
-      const { data: e1 } = await supabase
-        .from("profile_entries")
-        .select("contact_id, label, value, category_id")
+    const currentFacts = (subject: "self" | "contact") => selectAllRows<{ contact_id: string | null; label: string; value: string }>((from, to) => {
+      const q = supabase
+        .from("profile_facts")
+        .select("claim_id, contact_id, label, value")
         .eq("user_id", userId)
-        .in("contact_id", contactIds);
-      existingEntries.push(...(e1 || []));
+        .eq("is_current", true)
+        .eq("subject_type", subject);
+      return (subject === "self" ? q.is("subject_id", null) : q.in("subject_id", contactIds))
+        .order("claim_id", { ascending: true })
+        .range(from, to);
+    });
+    if (contactIds.length > 0) {
+      existingEntries.push(...await currentFacts("contact"));
       const { data: c1 } = await supabase
         .from("profile_categories")
         .select("id, slug, contact_id")
@@ -1777,12 +1739,7 @@ async function generateProfileSuggestions(
       existingCategories.push(...(c1 || []));
     }
     if (hasOwnerFact) {
-      const { data: e2 } = await supabase
-        .from("profile_entries")
-        .select("contact_id, label, value, category_id")
-        .eq("user_id", userId)
-        .is("contact_id", null);
-      existingEntries.push(...(e2 || []));
+      existingEntries.push(...await currentFacts("self"));
       const { data: c2 } = await supabase
         .from("profile_categories")
         .select("id, slug, contact_id")
@@ -1790,6 +1747,16 @@ async function generateProfileSuggestions(
         .is("contact_id", null);
       existingCategories.push(...(c2 || []));
     }
+    // "This was wrong, never suggest it again" (suggestion_type 'claim').
+    const claimSuppressions = new Set<string>(
+      (await selectAllRows<{ suppression_key: string }>((from, to) => supabase
+        .from("ai_suggestion_suppressions")
+        .select("suppression_key")
+        .eq("user_id", userId)
+        .eq("suggestion_type", "claim")
+        .order("suppression_key", { ascending: true })
+        .range(from, to))).map((r) => r.suppression_key),
+    );
 
     // Existing review_queue items — count toward dedup so we don't
     // regenerate a suggestion already waiting in the queue.
@@ -1838,7 +1805,12 @@ async function generateProfileSuggestions(
       });
       if (dd.action === "skip") {
         dropped.deduped++;
-        console.log(`[profile-extract] dedup skip (${dd.reason}) "${fact.label}: ${fact.value}" for ${target.canonical_name}`);
+        console.log(`[profile-extract] dedup skip (${dd.reason}) for note ${noteId}`);
+        continue;
+      }
+      const factSubject = target.contact_id ? { type: "contact" as const, id: target.contact_id } : { type: "self" as const, id: null };
+      if (claimSuppressions.has(suppressionKey(factSubject, normalizeAttribute(fact.label), dd.value))) {
+        dropped.deduped++;
         continue;
       }
       // Use the (possibly narrowed) value returned by the guard — for a
@@ -1848,10 +1820,10 @@ async function generateProfileSuggestions(
       if (!exactQuoteExists(cleanContent, factSourceQuote)) {
         if (!factSourceQuote) {
           dropped.noQuote++;
-          console.log(`[profile-extract] dropped "${fact.label}: ${effectiveValue}" — model returned no source_quote`);
+          console.log(`[profile-extract] dropped a fact for note ${noteId}: the model returned no source_quote`);
         } else {
           dropped.unverifiableQuote++;
-          console.log(`[profile-extract] dropped "${fact.label}: ${effectiveValue}" — source_quote not found verbatim in note: ${JSON.stringify(factSourceQuote.slice(0, 120))}`);
+          console.log(`[profile-extract] dropped a fact for note ${noteId}: source_quote not found verbatim in the note`);
         }
         continue;
       }
@@ -1892,7 +1864,7 @@ async function generateProfileSuggestions(
             evidence_quote: factSourceQuote,
           },
           status: "pending_review",
-          target_entity_type: "profile_entry",
+          target_entity_type: "claim",
           source_title: noteTitle,
           extracted_value: `${fact.label}: ${effectiveValue}`,
           confidence_score: 0.2,
@@ -1917,7 +1889,7 @@ async function generateProfileSuggestions(
             evidence_quote: factSourceQuote,
           },
           status: "pending_review",
-          target_entity_type: "profile_entry",
+          target_entity_type: "claim",
           source_title: noteTitle,
           extracted_value: `${fact.label}: ${effectiveValue}`,
           confidence_score: isSoftSignal
@@ -1930,11 +1902,12 @@ async function generateProfileSuggestions(
     }
 
 
-    const savedProfileSubjects = new Set<string | null>();
     if (suggestions.length > 0) {
       const unsuppressed = await filterSuppressedSuggestions(userId, suggestions);
-      const prepared = await Promise.all(unsuppressed.map((s) => prepareSuggestionForInsert(s, preferences)));
-      for (const subject of changedProfileSubjects(prepared)) savedProfileSubjects.add(subject);
+      // One at a time: two values of one attribute from the same note must see
+      // each other in the fact store (supersede, "two answers"), not race.
+      const prepared: ReviewSuggestion[] = [];
+      for (const s of unsuppressed) prepared.push(await prepareSuggestionForInsert(s, preferences));
       const { error } = await supabase.from("review_queue").insert(prepared);
       if (error) console.error("Profile suggestion insert error:", error);
       else console.log(`Created ${prepared.length} profile suggestions for note ${noteId}`);
@@ -2186,60 +2159,6 @@ async function generateProfileSuggestions(
         );
       }
     }
-
-    // ── Phase B: incremental profile normalization ──
-    // After writing new add_profile_entry suggestions for this note, normalize
-    // each touched subject's now-current SAVED profile. Best-effort: never
-    // throw out of process-note.
-    try {
-      const subjects = [...savedProfileSubjects];
-
-      // One paid plan per subject per day. Every revision of a note used to buy a
-      // fresh normalize-profile.plan for each subject it mentions (12k to 46k
-      // tokens a call, 42 calls for one account on 2026-09-01); the deterministic
-      // pass still runs every time, and the model plan waits for tomorrow unless
-      // someone asks for it by hand.
-      const paidToday = new Set<string>();
-      try {
-        const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const { data: recentPlans } = await supabase
-          .from("profile_normalization_inputs")
-          .select("subject_key")
-          .eq("user_id", userId)
-          .not("result", "is", null)
-          .gte("completed_at", dayAgo);
-        for (const row of (recentPlans || []) as Array<{ subject_key: string }>) paidToday.add(row.subject_key);
-      } catch (e) {
-        console.error("[normalize-profile] could not read today's paid plans; running deterministic only:", e);
-        for (const subj of subjects) paidToday.add(subj ?? "owner");
-      }
-
-      for (const subj of subjects) {
-        try {
-          const res = await createNormalizationSuggestions({
-            supabase,
-            userId,
-            contactId: subj,
-            preferences,
-            sourceNoteId: noteId,
-            deterministicOnly: paidToday.has(subj ?? "owner"),
-            helpers: {
-              filterSuppressedSuggestions,
-              prepareSuggestionForInsert,
-              isSensitiveSuggestion,
-              buildSuppressionKey,
-            },
-          });
-          if (res.created > 0) {
-            console.log(`[normalize-profile] subject=${subj ?? "owner"} created=${res.created} auto=${res.autoApplied}`);
-          }
-        } catch (e) {
-          console.error(`[normalize-profile] subject=${subj ?? "owner"} failed:`, e);
-        }
-      }
-    } catch (e) {
-      console.error("[normalize-profile] incremental pass failed:", e);
-    }
   } catch (err) {
     console.error("generateProfileSuggestions error:", err);
     throw err;
@@ -2463,7 +2382,7 @@ async function generateMomentSuggestions(
    The 2026-08-11 design gave World its own `entities` / `claims` store and a
    note reader that filed every non-person thing it saw into the review queue.
    The 2026-08-16 rewrite replaced that: World is now a view over rows that
-   already exist (contacts, moments, profile_entries, contact_relationships).
+   already exist (contacts, moments, claims, contact_relationships).
    See the header of
    supabase/migrations/20260816120000_9a3f61c2-4d70-4c88-9b21-7e0a5c1d3f84.sql:
    "World is a view over rows that already exist. It is not a new store and it
@@ -2493,6 +2412,14 @@ async function processInBackground(lease: NoteAILease, authHeader: string) {
   }
 }
 async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
+  // While go-live has paused every fact writer (plan B1), the note is not
+  // processed at all: its job is parked and claimed again after the pause.
+  // 'no_credit' is the failure kind that parks a job without spending one of
+  // its three attempts (fail_note_ai_job); 'transient' would mark the note
+  // failed after three quick retries, long before the pause ends.
+  if (await factWritesPaused(supabase)) {
+    throw new NoteAIJobError("no_credit", "fact_writes_paused");
+  }
   const noteId = lease.note_id;
   const note = lease.snapshot;
   const contentHash = lease.fingerprint;
@@ -2843,52 +2770,6 @@ async function processCapturedSnapshot(lease: NoteAILease, authHeader: string) {
 
     // Generate timeline-moment suggestions from past events documented in the note.
     await generateMomentSuggestions(note.user_id, noteId, note.title, fullText, matchedPeople, mergedMetadata, lease);
-
-    // Promote whatever facts this note just produced into dated claims.
-    //
-    // THE LAST HOP, and it was missing until 2026-08-31. Extraction from a note
-    // was never the gap: generateProfileSuggestions above writes a fact into
-    // profile_entries with origin 'ai_note', the sentence it came from, and
-    // linked_note_id pointing back here. But profile_entries stopped being a
-    // fact store in migration 093000 and became a display layer over `claims`,
-    // and nothing carried a row across. So a fact extracted from a note reached
-    // the display layer and stopped there: undated, with no cardinality and no
-    // review date, invisible to search_claims and to Mission Control mirror's dated arm.
-    // That is rot type 3a in SPEC.md — the value exists in a note and was never
-    // promoted — and this call is what closes it for every new fact.
-    //
-    // Idempotent and cheap in the steady state: the promotion skips every entry
-    // that already has a claim, so a note that produced no new fact costs one
-    // scan and zero embeddings. Fire-and-forget, because a claim is a
-    // convenience over rows that already exist and must never fail the note.
-    //
-    // Logged the way compute-connections is, and for the same reason: fetch()
-    // only rejects on a transport error, so a 4xx/5xx would otherwise vanish.
-    await noteJobs.assertCurrent(lease);
-    await fetch(`${SUPABASE_URL}/functions/v1/promote-profile-entries`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        dry_run: false,
-        include_contacts: true,
-        target_user_id: note.user_id,
-        pending_only: true,
-      }),
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          throw new Error(
-            `promote-profile-entries rejected note=${noteId}: ${r.status} ${await r.text().catch(() => "")}`,
-          );
-        }
-      })
-      // Logged, never rethrown: as the note above says, a claim must never fail
-      // the note. Rethrowing failed every note of a user whose promotion kept
-      // erroring, three attempts each, before the finishing write below.
-      .catch((err) => console.error("[process-note] claim promotion failed:", (err as Error)?.message ?? err));
 
     // Await connection computation while the analysis lease is still held.
     //

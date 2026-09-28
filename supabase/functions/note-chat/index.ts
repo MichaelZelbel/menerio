@@ -480,15 +480,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // model having to guess where to look. Appended in code (not via a
       // prompt placeholder) so it works regardless of the DB prompt config.
       if (person_id && typeof person_id === "string") {
-        const p = await loadPersonProfile(db, user.id, person_id);
+        // A failed read leaves the person out rather than failing the chat.
+        const p = await loadPersonProfile(db, user.id, person_id).catch(() => {
+          console.warn("note-chat: person context unavailable");
+          return null;
+        });
         if (p) {
-          const entryLines = p.profile_entries
-            .map((e) => `- [${e.category}] ${e.label}: ${e.value}`)
+          const entryLines = p.facts
+            .map((f) => `- [${f.section}] ${f.label}: ${f.value}${f.two_answers ? " (one of two current answers; report both)" : ""}`)
             .join("\n");
           const relLines = p.relationships
             .map((r) => `- ${r.from} — ${r.label} → ${r.to}`)
             .join("\n");
-          systemContent += `\n\n--- CURRENT PERSON (the user is viewing this profile page) ---\nName: ${p.person.name}${p.person.aliases.length ? `\nAliases: ${p.person.aliases.join(", ")}` : ""}\nProfile entries:\n${entryLines || "(none)"}\nRelationships:\n${relLines || "(none)"}\n--- END CURRENT PERSON ---\nWhen the user says "this person" or refers to the profile they are looking at, they mean ${p.person.name}. Answer from this data directly when it already contains the answer — no tool calls needed for that.`;
+          systemContent += `\n\n--- CURRENT PERSON (the user is viewing this profile page) ---\nName: ${p.person.name}${p.person.aliases.length ? `\nAliases: ${p.person.aliases.join(", ")}` : ""}\nFacts:\n${entryLines || "(none)"}\nRelationships:\n${relLines || "(none)"}\n--- END CURRENT PERSON ---\nWhen the user says "this person" or refers to the profile they are looking at, they mean ${p.person.name}. Answer from this data directly when it already contains the answer — no tool calls needed for that.`;
         }
       }
 

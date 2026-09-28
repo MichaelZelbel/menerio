@@ -1,11 +1,18 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ProfileIcon } from "./ProfileIcon";
-import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
+import type { ProfileCategory } from "@/hooks/useProfile";
+import type { ProfileFact } from "@/hooks/useFacts";
+
+/** The section slugs that hold at least one current fact. */
+export function filledSlugs(facts: Pick<ProfileFact, "category_slug" | "is_current">[]): Set<string> {
+  return new Set(facts.filter((f) => f.is_current && f.category_slug).map((f) => f.category_slug!));
+}
 
 interface ProfileCompletenessProps {
   categories: ProfileCategory[];
-  entries: ProfileEntry[];
+  /** The subject's profile_facts rows (history is ignored). */
+  facts: Pick<ProfileFact, "category_slug" | "is_current">[];
   /**
    * Override the completeness denominator instead of using the number of
    * materialized category rows. The contact profile no longer auto-seeds
@@ -24,17 +31,23 @@ function getCompletenessMessage(pct: number): string {
   return "Impressive! Your agents have excellent context about who you are";
 }
 
-export function ProfileCompleteness({ categories, entries, totalSlots }: ProfileCompletenessProps) {
+export function ProfileCompleteness({ categories, facts, totalSlots }: ProfileCompletenessProps) {
   const navigate = useNavigate();
 
   const { pct, emptyCategories } = useMemo(() => {
     const denominator = totalSlots ?? categories.length;
     if (denominator === 0) return { pct: 0, emptyCategories: [] };
-    const filled = categories.filter((c) => entries.some((e) => e.category_id === c.id));
-    const pct = Math.round((filled.length / denominator) * 100);
-    const emptyCategories = categories.filter((c) => !entries.some((e) => e.category_id === c.id));
+    const filledSet = filledSlugs(facts);
+    // With a fixed slot count (a person's page, whose sections are not seeded)
+    // every filled section counts; otherwise only the seeded rows do.
+    const filledCount =
+      totalSlots !== undefined
+        ? Math.min(filledSet.size, totalSlots)
+        : categories.filter((c) => filledSet.has(c.slug)).length;
+    const pct = Math.round((filledCount / denominator) * 100);
+    const emptyCategories = categories.filter((c) => !filledSet.has(c.slug));
     return { pct, emptyCategories };
-  }, [categories, entries, totalSlots]);
+  }, [categories, facts, totalSlots]);
 
   const radius = 36;
   const stroke = 5;
@@ -102,14 +115,10 @@ export function ProfileCompleteness({ categories, entries, totalSlots }: Profile
 /** Compact version for dashboard widget */
 export function ProfileCompletenessRing({
   categories,
-  entries,
+  facts,
   size = 48,
 }: ProfileCompletenessProps & { size?: number }) {
-  const pct = useMemo(() => {
-    if (categories.length === 0) return 0;
-    const filled = categories.filter((c) => entries.some((e) => e.category_id === c.id));
-    return Math.round((filled.length / categories.length) * 100);
-  }, [categories, entries]);
+  const pct = useProfileCompleteness(categories, facts);
 
   const radius = (size - 6) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -140,10 +149,14 @@ export function ProfileCompletenessRing({
 }
 
 /** Returns completeness percentage */
-export function useProfileCompleteness(categories: ProfileCategory[], entries: ProfileEntry[]) {
+export function useProfileCompleteness(
+  categories: ProfileCategory[],
+  facts: Pick<ProfileFact, "category_slug" | "is_current">[],
+) {
   return useMemo(() => {
     if (categories.length === 0) return 0;
-    const filled = categories.filter((c) => entries.some((e) => e.category_id === c.id));
+    const filledSet = filledSlugs(facts);
+    const filled = categories.filter((c) => filledSet.has(c.slug));
     return Math.round((filled.length / categories.length) * 100);
-  }, [categories, entries]);
+  }, [categories, facts]);
 }

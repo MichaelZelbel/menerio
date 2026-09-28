@@ -19,10 +19,11 @@
 // The reconciler holds no opinion about which relationships a person may have
 // at the same time. Concurrent bonds are valid data, not a conflict.
 //
-// Profile entries:
-//   5. canonical placement — label + category corrected, blocked labels dropped
-//   6. evidence pass       — AI-authored entries need a verbatim quote in their
-//                            source note; manual and legacy entries are kept
+// Facts (docs/plans/one-fact-store.md, A2): the only fact work left here is
+// step 0's fold. A self-duplicate contact's claims, slots and private sections
+// move to self in one transaction (fold_contact_into_self); when both copies of
+// a value were typed by a human, that contact is skipped and reported.
+// Placement and evidence for facts are decided once, on the way in, by writeFact.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -33,11 +34,6 @@ import {
 } from "../_shared/relationship-canonical.ts";
 
 import { relationshipWriteDecision } from "../_shared/profile-integrity.ts";
-import {
-  canonicalProfileLabel,
-  correctProfileCategory,
-  isBlockedProfileLabel,
-} from "../_shared/profile-canonical-schema.ts";
 import {
   adjudicateRelationship,
   exactQuoteExists,
@@ -99,11 +95,7 @@ async function reconcileUser(db: any, userId: string) {
     relationships_deleted_duplicate: 0,
     relationships_deleted_unevidenced: 0,
     relationships_verified: 0,
-    entries_recategorized: 0,
-    entries_deleted_blocked: 0,
-    entries_deleted_unevidenced: 0,
-    entries_marked_human: 0,
-    entries_verified: 0,
+    self_duplicates_skipped: 0,
     llm_calls: 0,
   };
 
@@ -147,6 +139,16 @@ async function reconcileUser(db: any, userId: string) {
     const key = normalizeName(contact.name || "");
     if (key && selfNames.has(key)) selfDuplicateIds.add(contact.id);
   }
+  // Facts first, in one transaction per contact. A contact whose fold would
+  // need to delete a human's copy is left alone, relationships included.
+  for (const id of [...selfDuplicateIds]) {
+    const { data: outcome, error } = await db.rpc("fold_contact_into_self", { p_user_id: userId, p_contact_id: id });
+    if (error) throw new Error(`fold_contact_into_self failed: ${error.message}`);
+    if (outcome !== "folded") {
+      selfDuplicateIds.delete(id);
+      if (outcome === "skipped_two_preferred") stats.self_duplicates_skipped += 1;
+    }
+  }
   if (selfDuplicateIds.size) {
     const ids = [...selfDuplicateIds];
     const dupRels = await selectAllRows<Rel>((from, to) =>
@@ -176,20 +178,6 @@ async function reconcileUser(db: any, userId: string) {
       const { error } = await db.from("contact_relationships").update(patch).eq("id", rel.id);
       // A unique pair collision means the correct row already exists.
       if (error) await db.from("contact_relationships").delete().eq("id", rel.id);
-    }
-    // Facts recorded against the duplicate belong on the owner's own profile.
-    const dupEntries = await selectAllRows<{ id: string; label: string; value: string }>((from, to) =>
-      db
-        .from("profile_entries")
-        .select("id, label, value")
-        .eq("user_id", userId)
-        .in("contact_id", ids)
-        .order("id")
-        .range(from, to)
-    );
-    for (const entry of dupEntries) {
-      const { error } = await db.from("profile_entries").update({ contact_id: null }).eq("id", entry.id);
-      if (error) await db.from("profile_entries").delete().eq("id", entry.id);
     }
     await db.from("contacts").delete().in("id", ids);
     for (const id of ids) contacts.delete(id);
@@ -423,91 +411,6 @@ async function reconcileUser(db: any, userId: string) {
   // The reconciler deliberately holds no opinion about relationship structure.
 
 
-
-  // ---- 5 + 6. profile entries ------------------------------------------
-  const categories = await selectAllRows<{ id: string; slug: string; contact_id: string | null }>((from, to) =>
-    db.from("profile_categories").select("id, slug, contact_id").eq("user_id", userId).order("id").range(from, to)
-  );
-  const categoryById = new Map(categories.map((c) => [c.id, c]));
-  const categoryFor = (slug: string, contactId: string | null) =>
-    categories.find((c) => c.slug === slug && (c.contact_id ?? null) === (contactId ?? null));
-
-  const entries = await selectAllRows<{
-    id: string; category_id: string; contact_id: string | null; label: string; value: string;
-    origin: string | null; evidence_quote: string | null; linked_note_id: string | null;
-  }>((from, to) =>
-    db
-      .from("profile_entries")
-      .select("id, category_id, contact_id, label, value, origin, evidence_quote, linked_note_id")
-      .eq("user_id", userId)
-      .order("id")
-      .range(from, to)
-  );
-
-  const noteCache = new Map<string, string | null>();
-  const loadNote = async (noteId: string): Promise<string | null> => {
-    if (noteCache.has(noteId)) return noteCache.get(noteId)!;
-    const { data, error } = await db.from("notes").select("content").eq("id", noteId).eq("user_id", userId).maybeSingle();
-    if (error) throw new Error(`Could not verify profile-entry evidence: ${error.message}`);
-    const content = data ? String(data.content || "") : null;
-    noteCache.set(noteId, content);
-    return content;
-  };
-
-  const entriesToDelete: string[] = [];
-  for (const entry of entries) {
-    const currentSlug = categoryById.get(entry.category_id)?.slug || "";
-    const label = canonicalProfileLabel(currentSlug, entry.label);
-
-    if (!label || isBlockedProfileLabel(label) || !String(entry.value || "").trim()) {
-      entriesToDelete.push(entry.id);
-      stats.entries_deleted_blocked += 1;
-      continue;
-    }
-
-    const patch: Record<string, unknown> = {};
-
-    // Section placement: a line lives in exactly one canonical section.
-    const targetSlug = correctProfileCategory(label, currentSlug);
-    if (targetSlug && targetSlug !== currentSlug) {
-      const target = categoryFor(targetSlug, entry.contact_id ?? null);
-      if (target) {
-        patch.category_id = target.id;
-        stats.entries_recategorized += 1;
-      }
-    }
-    if (label !== entry.label) patch.label = label;
-
-    // Provenance: manual and legacy entries are the user's own history and are
-    // kept. Only a NEW automated entry has to prove itself against its note.
-    const trustedEntry = entry.origin === "user_manual" || entry.origin === "unverified";
-    if (trustedEntry || !!entry.evidence_quote) {
-      // kept as-is
-    } else if (!entry.linked_note_id) {
-      patch.origin = "unverified";
-    } else {
-      const content = await loadNote(entry.linked_note_id);
-      // A missing source row is not proof that the fact is false.
-      if (content === null) continue;
-      const quote = exactQuoteExists(content, entry.value) ? entry.value : null;
-      if (!quote) {
-        patch.origin = "unverified";
-      } else {
-        patch.origin = "ai_note";
-        patch.evidence_quote = quote;
-        stats.entries_verified += 1;
-      }
-    }
-
-
-    if (Object.keys(patch).length) {
-      await db.from("profile_entries").update(patch).eq("id", entry.id);
-    }
-  }
-
-  for (let i = 0; i < entriesToDelete.length; i += 100) {
-    await db.from("profile_entries").delete().in("id", entriesToDelete.slice(i, i + 100));
-  }
 
   return stats;
 }

@@ -3,6 +3,7 @@
 // draft-event after they materialize a moment from a note.
 
 import { createServiceClient, extractProfileFromMoment } from "../_shared/moment-profile-extraction.ts";
+import { factWritesPaused } from "../_shared/fact-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,6 +45,11 @@ Deno.serve(async (req: Request) => {
         .eq("id", momentId)
         .maybeSingle();
       if (!owned || owned.user_id !== user.id) return json({ error: "Forbidden" }, 403);
+    }
+
+    // Go-live has paused every fact writer: refuse with a retryable answer.
+    if (await factWritesPaused(supabase)) {
+      return json({ error: "fact_writes_paused", retryable: true }, 503);
     }
 
     // @ts-expect-error EdgeRuntime is a Supabase global

@@ -5,6 +5,8 @@ import { json, errorJson, handleOptions, intParam, parsePath } from "../_shared/
 import {
   parseLimit,
   parseUpdatedSince,
+  readWindow,
+  relationshipExclusionFilter,
   toWorldClaim,
   toWorldEntity,
   toWorldEvent,
@@ -28,6 +30,8 @@ const ACCEPTED_SCOPES = ["world", "contacts"];
 interface Gate {
   sensitiveIds: string[];
   hideSensitive: boolean;
+  /** Every contact assistants may not see: sensitive or not 'visible', whatever the setting says. */
+  unshownContactIds: string[];
 }
 
 /**
@@ -37,17 +41,25 @@ interface Gate {
  * repository, so a redacted row is still a row somebody can read forever.
  */
 async function loadGate(supabase: any, userId: string): Promise<Gate> {
-  const [{ data: prefs, error: prefsError }, { data: sensitive, error: sensitiveError }] = await Promise.all([
+  const [
+    { data: prefs, error: prefsError },
+    { data: sensitive, error: sensitiveError },
+    { data: unshown, error: unshownError },
+  ] = await Promise.all([
     supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
     supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null),
+    // The same people agent_facts leaves out (plan 3.3), for the relationship
+    // arm of world_claims, which does not read agent_facts.
+    supabase.from("contacts").select("id").eq("user_id", userId).or("is_sensitive.eq.true,ai_visibility.neq.visible,ai_visibility.is.null"),
   ]);
   // Fail closed. An unread error left the sensitive list empty, and every
   // sensitive person, with the facts and moments about them, went out to be
   // written into a git repository.
-  if (prefsError || sensitiveError) throw (prefsError ?? sensitiveError);
+  if (prefsError || sensitiveError || unshownError) throw (prefsError ?? sensitiveError ?? unshownError);
   return {
     hideSensitive: prefs?.hide_sensitive_from_ai ?? true,
     sensitiveIds: (sensitive ?? []).map((r: any) => r.id),
+    unshownContactIds: (unshown ?? []).map((r: any) => r.id),
   };
 }
 
@@ -99,64 +111,65 @@ Deno.serve(async (req) => {
     // updated_at alone is not a total order: rows touched by one bulk update
     // share it, and PostgREST may return them in a different order on the next
     // page, so a client paging by offset skipped some and saw others twice.
+    // Every read goes through readWindow: limit may be up to 2000 and the
+    // server returns at most 1000 rows per request.
     const fetchEntities = async () => {
-      let q = supabase
-        .from("world_entities")
-        .select("*")
-        .eq("user_id", userId)
-        .neq("ai_visibility", "hidden")
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(offset, offset + limit - 1);
-      if (since.value) q = q.gte("updated_at", since.value);
-      if (hideIds.length > 0) q = q.not("id", "in", notInList(hideIds));
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data || []).map(toWorldEntity);
+      const rows = await readWindow<any>((from, to) => {
+        let q = supabase
+          .from("world_entities")
+          .select("*")
+          .eq("user_id", userId)
+          .neq("ai_visibility", "hidden")
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (since.value) q = q.gte("updated_at", since.value);
+        if (hideIds.length > 0) q = q.not("id", "in", notInList(hideIds));
+        return q;
+      }, offset, limit);
+      return rows.map(toWorldEntity);
     };
 
     const fetchEvents = async () => {
-      let q = supabase
-        .from("world_events")
-        .select("*")
-        .eq("user_id", userId)
-        .neq("ai_visibility", "hidden")
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(offset, offset + limit - 1);
-      if (since.value) q = q.gte("updated_at", since.value);
-      if (hideIds.length > 0) {
-        q = q.or(`person_id.is.null,person_id.not.in.${notInList(hideIds)}`);
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data || []).map(toWorldEvent);
+      const rows = await readWindow<any>((from, to) => {
+        let q = supabase
+          .from("world_events")
+          .select("*")
+          .eq("user_id", userId)
+          .neq("ai_visibility", "hidden")
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (since.value) q = q.gte("updated_at", since.value);
+        if (hideIds.length > 0) {
+          q = q.or(`person_id.is.null,person_id.not.in.${notInList(hideIds)}`);
+        }
+        return q;
+      }, offset, limit);
+      return rows.map(toWorldEvent);
     };
 
+    // world_claims is agent_facts plus relationships (plan 3.4): its claim arm
+    // already leaves out private sections and hidden or sensitive subjects,
+    // whatever hide_sensitive_from_ai says. The relationship arm does not, so
+    // a relationship from or to such a person is filtered here, in the
+    // database: filtering in memory after .range() made short pages, and a
+    // client paging until a short page stopped early.
+    const exclusion = relationshipExclusionFilter([...gate.unshownContactIds, ...hideIds]);
     const fetchClaims = async () => {
-      let q = supabase
-        .from("world_claims")
-        .select("*")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(offset, offset + limit - 1);
-      if (since.value) q = q.gte("updated_at", since.value);
-      if (hideIds.length > 0) {
-        // A claim about a sensitive person, or pointing at one through
-        // `object_id`, is left out. Both conditions go to the database as one
-        // nested filter. The object_id half used to run in memory AFTER
-        // `.range()`, so a page came back shorter than `limit` whenever it held
-        // such a claim, and a client paging until it gets a short page stopped
-        // early and never saw the rest.
-        const list = notInList(hideIds);
-        q = q.or(
-          `and(or(subject_id.is.null,subject_id.not.in.${list}),or(object_id.is.null,object_id.not.in.${list}))`,
-        );
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data || []).map(toWorldClaim);
+      const rows = await readWindow<any>((from, to) => {
+        let q = supabase
+          .from("world_claims")
+          .select("*")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (since.value) q = q.gte("updated_at", since.value);
+        if (exclusion) q = q.or(exclusion);
+        return q;
+      }, offset, limit);
+      return rows.map(toWorldClaim);
     };
 
     if (kind === "entities") return json({ data: await fetchEntities() });

@@ -3,7 +3,7 @@
 // - other Lexicon pages that mention them
 // - timeline moments where they are a participant
 // - notes that mention them
-// - existing profile entries and relationships (for dedup)
+// - the person's current facts and relationships (for dedup)
 //
 // Produces add_profile_entry and add_relationship review_queue suggestions
 // (or auto-applies them when prefs allow), with canonical labels and
@@ -19,11 +19,9 @@ import {
   isSingleValueLabel,
   normalizeProfileValueForDedup,
 } from "../_shared/profile-canonical-schema.ts";
-import {
-  applyNormalization,
-  createNormalizationSuggestions,
-  type NormalizationPayload,
-} from "../_shared/profile-normalization.ts";
+import { factWritesPaused, suppressionKey, writeFact } from "../_shared/fact-store.ts";
+import { normalizeAttribute } from "../_shared/claims.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 import { profileValueDecision, relationshipWriteDecision } from "../_shared/profile-integrity.ts";
 import { adjudicateRelationship } from "../_shared/relationship-adjudicator.ts";
 import { ilikeContains } from "../_shared/postgrest-filters.ts";
@@ -37,6 +35,7 @@ import {
   isSelfName,
   isSymmetricLabel,
   relationshipPairKey,
+  type EntityRef,
 } from "../_shared/relationship-canonical.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -185,12 +184,25 @@ async function loadEvidence(userId: string, contactId: string) {
     mediaTexts = (media || []) as any[];
   }
 
-  // Existing profile entries (dedup) + categories + relationships
-  const { data: existingEntries } = await supabase
-    .from("profile_entries")
-    .select("contact_id, label, value, category_id")
+  // What the page already shows (current facts, for dedup), the values the
+  // user called wrong, categories and relationships.
+  const existingEntries = await selectAllRows<{ label: string; value: string; category_slug: string | null }>((from, to) => supabase
+    .from("profile_facts")
+    .select("claim_id, label, value, category_slug")
     .eq("user_id", userId)
-    .eq("contact_id", contactId);
+    .eq("is_current", true)
+    .eq("subject_type", "contact")
+    .eq("subject_id", contactId)
+    .order("claim_id", { ascending: true })
+    .range(from, to) as any);
+  const suppressions = await selectAllRows<{ suppression_key: string }>((from, to) => supabase
+    .from("ai_suggestion_suppressions")
+    .select("suppression_key")
+    .eq("user_id", userId)
+    .eq("suggestion_type", "claim")
+    .like("suppression_key", `contact:${contactId}:%`)
+    .order("suppression_key", { ascending: true })
+    .range(from, to) as any);
   const { data: existingCategories } = await supabase
     .from("profile_categories")
     .select("id, slug, contact_id")
@@ -216,7 +228,8 @@ async function loadEvidence(userId: string, contactId: string) {
     moments,
     notes,
     mediaTexts,
-    existingEntries: existingEntries || [],
+    existingEntries,
+    suppressedKeys: new Set(suppressions.map((r) => r.suppression_key)),
     existingCategories: existingCategories || [],
     existingRels: existingRels || [],
     selfDisplayName: ((selfProfile as any)?.display_name as string | undefined) || "Me",
@@ -319,65 +332,58 @@ function threshold(type: string, sensitivity: string) {
   return AUTO_APPLY[type]?.[sensitivity] ?? 0.7;
 }
 
-// ── Normalization plumbing (mirrors normalize-profile/index.ts so the
-// suppression keys and auto-apply thresholds stay compatible) ──
-
 const SENSITIVE_TERMS = [
   "medical", "health", "diagnosis", "condition", "therapy", "depression", "anxiety", "mental",
   "pregnant", "pregnancy", "romantic", "sexual", "affair", "secret", "conflict", "legal", "lawsuit",
   "debt", "bankrupt", "financial hardship", "broke", "divorce", "addiction", "trauma",
 ];
 
-function normalizeSuggestionValue(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value.trim().toLowerCase();
-  try { return JSON.stringify(value).toLowerCase(); } catch { return String(value).toLowerCase(); }
-}
-
-function buildSuppressionKey(suggestionType: string, targetEntityType: string | null, targetEntityId: string | null, value: unknown) {
-  return [suggestionType, targetEntityType || "none", targetEntityId || "none", normalizeSuggestionValue(value)].join(":");
-}
-
 function isSensitiveSuggestion(suggestionType: string, payload: Record<string, unknown>, text = "") {
   const haystack = `${suggestionType} ${text} ${Object.values(payload).join(" ")}`.toLowerCase();
   return SENSITIVE_TERMS.some((t) => haystack.includes(t));
 }
 
-async function filterSuppressedSuggestions(userId: string, suggestions: any[]) {
-  if (suggestions.length === 0) return suggestions;
-  const keys = suggestions.map((s) => s.suppression_key).filter(Boolean);
-  if (keys.length === 0) return suggestions;
-  const { data } = await supabase
-    .from("ai_suggestion_suppressions")
-    .select("suppression_key")
-    .eq("user_id", userId)
-    .in("suppression_key", keys);
-  const blocked = new Set(((data || []) as any[]).map((r) => r.suppression_key));
-  return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
-}
-
-const NORMALIZE_AUTO_APPLY: Record<string, number> = { conservative: 0.92, balanced: 0.85, exploratory: 0.75 };
-
-async function prepareNormalizationSuggestion(
-  s: any,
-  prefs: { mode: string; sensitivity: string; autoAddSensitive: boolean },
-) {
-  const t = NORMALIZE_AUTO_APPLY[prefs.sensitivity] ?? 0.85;
-  const confidence = s.confidence_score ?? 0;
-  const canAuto = prefs.mode === "auto" && confidence >= t && (!s.is_sensitive || prefs.autoAddSensitive);
-  if (!canAuto) return { ...s, status: "pending_review" };
-  try {
-    const result = await applyNormalization(supabase, s.payload as NormalizationPayload);
-    if (result.ok && result.entryId) {
-      return { ...s, status: "auto_applied_unreviewed", target_entity_id: result.entryId, applied_at: new Date().toISOString() };
-    }
-  } catch (e) {
-    console.error("[enrich-person] normalize auto-apply failed:", e);
+/**
+ * Write one auto-applied enrichment fact through the one write path
+ * (fact-store.ts), as ai_lexicon with its verbatim quote. The slot carries the
+ * section, so no category row is needed.
+ */
+async function applyLexiconFact(db: any, userId: string, s: any): Promise<any> {
+  const fact = profileValueDecision(String(s.payload.category_slug || ""), String(s.payload.label || ""), String(s.payload.value || ""));
+  if (!fact.ok) return { ...s, status: "removed" };
+  const factEvidenceQuote = String((s.payload as any).evidence_quote || "").trim();
+  if ([...factEvidenceQuote].length < 10) return { ...s, status: "pending_review" };
+  const result = await writeFact(db, userId, {
+    subject: { type: "contact", id: String(s.payload.contact_id) },
+    label: fact.label,
+    value: fact.value,
+    origin: "ai_lexicon",
+    categorySlug: s.payload.category_slug || null,
+    evidenceQuote: factEvidenceQuote,
+    sourceType: "lexicon",
+    sourceId: null,
+  }, { isHuman: false });
+  const insertedClaims = result.facts.filter((f) => f.outcome === "inserted" && f.claimId).map((f) => f.claimId as string);
+  if (insertedClaims.length > 0) {
+    return {
+      ...s,
+      status: "auto_applied_unreviewed",
+      target_entity_type: "claim",
+      target_entity_id: insertedClaims[0],
+      // A bag becomes several claims; a Revert removes all of them.
+      payload: insertedClaims.length > 1 ? { ...s.payload, claim_ids: insertedClaims } : s.payload,
+      applied_at: new Date().toISOString(),
+    };
+  }
+  if (result.facts.length > 0 && result.facts.every((f) => f.outcome === "already_recorded" || f.outcome === "history_not_revived" || f.outcome === "suppressed")) {
+    return { ...s, status: "removed" };
   }
   return { ...s, status: "pending_review" };
 }
 
 async function run(userId: string, contactId: string) {
+  // Go-live has paused every fact writer: nothing is bought or written.
+  if (await factWritesPaused(supabase)) return { ok: false, reason: "fact_writes_paused" };
   const balance = await checkBalance(supabase as any, userId);
   if (!balance.allowed) return { ok: false, reason: "insufficient_credits" };
 
@@ -412,7 +418,7 @@ async function run(userId: string, contactId: string) {
     // here and the run ended as llm_error with nothing to show for it.
     parsed = parseModelJson(result.content);
     if (!parsed || typeof parsed !== "object") {
-      console.error(`[enrich-person] no parseable JSON (truncated=${result.truncated}); first 200 chars: ${JSON.stringify(String(result.content ?? "").slice(0, 200))}`);
+      console.error(`[enrich-person] no parseable JSON (truncated=${result.truncated}); ${String(result.content ?? "").length} chars`);
       return { ok: false, reason: "llm_error" };
     }
   } catch (err: any) {
@@ -450,11 +456,8 @@ async function run(userId: string, contactId: string) {
   // Dedup keys for existing entries — canonical label + normalized value, so
   // "height | 5'4\" (fun sized)" and "Height | 5'4\"" collide instead of both
   // being inserted.
-  const slugByCategoryId = new Map<string, string>(
-    (evidence.existingCategories as any[]).map((c: any) => [c.id, c.slug]),
-  );
   const canonLabelOfRow = (e: any): string => {
-    const slug = slugByCategoryId.get(e.category_id) || "preferences";
+    const slug = e.category_slug || "preferences";
     return canonicalProfileLabel(correctProfileCategory(e.label || "", slug), e.label || "");
   };
   const entrySeen = new Set<string>(
@@ -521,6 +524,8 @@ async function run(userId: string, contactId: string) {
     if (entrySeen.has(key)) continue;
     // One-truth-per-subject labels: never add a second Height / DOB / etc.
     if (isSingleValueLabel(label) && singletonTaken.has(labelLower)) continue;
+    // "This was wrong, never suggest it again."
+    if (evidence.suppressedKeys.has(suppressionKey({ type: "contact", id: evidence.contact.id }, normalizeAttribute(label), value))) continue;
 
     const catRow = evidence.existingCategories.find((c: any) => c.slug === slug);
     suggestions.push({
@@ -540,7 +545,7 @@ async function run(userId: string, contactId: string) {
         source: "lexicon_enrichment",
       },
       status: "pending_review",
-      target_entity_type: "profile_entry",
+      target_entity_type: "claim",
       source_title: "Lexicon & timeline enrichment",
       extracted_value: `${label}: ${value}`,
       confidence_score: 0.82,
@@ -667,20 +672,9 @@ async function run(userId: string, contactId: string) {
     if (!canAuto) { prepared.push({ ...s, status: "pending_review" }); continue; }
     try {
       if (s.suggestion_type === "add_profile_entry") {
-        if (!s.payload.category_id) { prepared.push({ ...s, status: "pending_review" }); continue; }
-        const fact = profileValueDecision(String(s.payload.category_slug || ""), String(s.payload.label || ""), String(s.payload.value || ""));
-        if (!fact.ok) { prepared.push({ ...s, status: "removed" }); continue; }
-        const factEvidenceQuote = String((s.payload as any).evidence_quote || "").trim();
-        if (factEvidenceQuote.length < 10) { prepared.push({ ...s, status: "pending_review" }); continue; }
-        const { data, error } = await supabase
-          .from("profile_entries")
-          .insert({ user_id: userId, contact_id: s.payload.contact_id, category_id: s.payload.category_id, label: fact.label, value: fact.value, sort_order: 0, origin: "ai_lexicon", evidence_quote: factEvidenceQuote })
-          .select("id")
-          .single();
-        if (error && (error as any).code === "23505") { prepared.push({ ...s, status: "removed" }); continue; }
-        if (error || !data) { prepared.push({ ...s, status: "pending_review" }); continue; }
-        prepared.push({ ...s, status: "auto_applied_unreviewed", target_entity_id: (data as any).id, applied_at: new Date().toISOString() });
-        autoApplied++;
+        const applied = await applyLexiconFact(supabase, userId, s);
+        prepared.push(applied);
+        if (applied.status === "auto_applied_unreviewed") autoApplied++;
       } else if (s.suggestion_type === "add_relationship") {
         const p = s.payload;
         const relationshipDecision = relationshipWriteDecision({
@@ -729,40 +723,10 @@ async function run(userId: string, contactId: string) {
     if (insErr) console.error("[enrich-person] review_queue insert error", insErr);
   }
 
-  // Phase B mirror (same as process-note): normalize this contact's saved
-  // profile so near-duplicate entries — same fact, different phrasing — get
-  // merged, or queued for review when uncertain. Runs even when no new facts
-  // were extracted, so enrichment doubles as a cleanup trigger for profiles
-  // that already contain duplicates. Best-effort: never fail the run.
-  let normalizeCreated = 0;
-  let normalizeAuto = 0;
-  try {
-    const res = await createNormalizationSuggestions({
-      supabase,
-      userId,
-      contactId,
-      preferences: prefs,
-      sourceNoteId: null,
-      includeNotesContext: true,
-      helpers: {
-        filterSuppressedSuggestions,
-        prepareSuggestionForInsert: prepareNormalizationSuggestion,
-        isSensitiveSuggestion,
-        buildSuppressionKey,
-      },
-    });
-    normalizeCreated = res.created;
-    normalizeAuto = res.autoApplied;
-  } catch (e) {
-    console.error("[enrich-person] normalization pass failed:", e);
-  }
-
   return {
     ok: true,
     suggestions_created: prepared.length,
     auto_applied: autoApplied,
-    normalization_suggestions: normalizeCreated,
-    normalization_auto_applied: normalizeAuto,
   };
 }
 
@@ -782,6 +746,11 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({} as any));
     const contactId = typeof body?.contact_id === "string" ? body.contact_id : null;
     if (!contactId) return json({ error: "contact_id required" }, 400);
+
+    // Go-live has paused every fact writer: refuse with a retryable answer.
+    if (await factWritesPaused(supabase)) {
+      return json({ error: "fact_writes_paused", retryable: true }, 503);
+    }
 
     // @ts-expect-error EdgeRuntime is a Supabase global
     EdgeRuntime.waitUntil(

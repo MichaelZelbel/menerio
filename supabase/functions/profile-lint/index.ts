@@ -297,8 +297,11 @@ async function lintUser(userId: string, contactId: string | null, repair: boolea
     selectAllRows<RelationshipRow>((from, to) =>
       admin.from("contact_relationships").select("id,user_id,source_type,source_id,target_type,target_id,label,custom_label,pair_key").eq("user_id", userId).order("created_at").order("id").range(from, to)
     ),
-    selectAllRows<{ id: string; contact_id: string | null; category_id: string; label: string; value: string }>((from, to) =>
-      admin.from("profile_entries").select("id,contact_id,category_id,label,value").eq("user_id", userId).order("id").range(from, to)
+    // Current facts, as the owner sees them (docs/plans/one-fact-store.md, A2:
+    // report-only for facts; a machine never deletes one on a lint finding).
+    selectAllRows<{ id: string; contact_id: string | null; label: string; value: string }>((from, to) =>
+      admin.from("profile_facts").select("id:claim_id,contact_id,label,value").eq("user_id", userId).eq("is_current", true)
+        .in("subject_type", ["self", "contact"]).order("claim_id").range(from, to)
     ),
     selectAllRows<ContactRow>((from, to) =>
       admin.from("contacts").select("id,name").eq("user_id", userId).order("id").range(from, to)
@@ -432,6 +435,8 @@ async function lintUser(userId: string, contactId: string | null, repair: boolea
     }
   }
 
+  // Facts are reported, never repaired here: deleting one is the owner's
+  // "This was wrong". The key keeps its old name for the page that reads it.
   const repaired = { relationships: 0, profile_entries: 0 };
   if (repair) {
     const relationshipIds = relationshipViolations
@@ -441,12 +446,6 @@ async function lintUser(userId: string, contactId: string | null, repair: boolea
       const { error } = await admin.from("contact_relationships").delete().eq("user_id", userId).in("id", relationshipIds);
       if (error) throw error;
       repaired.relationships = relationshipIds.length;
-    }
-    const profileIds = profileViolations.map((v) => v.id);
-    if (profileIds.length) {
-      const { error } = await admin.from("profile_entries").delete().eq("user_id", userId).in("id", profileIds);
-      if (error) throw error;
-      repaired.profile_entries = profileIds.length;
     }
   }
 

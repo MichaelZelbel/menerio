@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { User, Sparkles } from "lucide-react";
+import { User } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { SEOHead } from "@/components/SEOHead";
 import { useProfile } from "@/hooks/useProfile";
+import { useFacts } from "@/hooks/useFacts";
 import { ProfileSections } from "@/components/profile/ProfileSections";
 import { AgentInstructionsTab } from "@/components/profile/AgentInstructionsTab";
 import { ExportTab } from "@/components/profile/ExportTab";
@@ -14,28 +15,27 @@ import { SelfRecognitionSection } from "@/components/profile/SelfRecognitionSect
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
+const SELF = { type: "self" } as const;
 
 export default function Profile() {
   const {
     categories,
-    entries,
     instructions,
     views,
-    isLoading,
+    isLoading: sectionsLoading,
     seedDefaults,
     upsertCategory,
     deleteCategory,
-    upsertEntry,
-    deleteEntry,
     upsertInstruction,
     deleteInstruction,
     upsertView,
     deleteView,
   } = useProfile();
+  const { facts, currentFacts, isLoading: factsLoading, actions } = useFacts(SELF);
+  const isLoading = sectionsLoading || factsLoading;
 
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -52,33 +52,6 @@ export default function Profile() {
     () => queryClient.getQueryState(["profile-categories", user?.id])?.status,
   );
   const categoriesFailed = categoriesStatus === "error" && categories.length === 0;
-  const [tidying, setTidying] = useState(false);
-
-  /**
-   * Manual repair for legacy rows: re-files bag values ("Website: …, Phone: …")
-   * into one atomic fact per row so the profile renders as clean bullet lists.
-   */
-  const runTidy = async () => {
-    setTidying(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("normalize-profile", {
-        body: { action: "explode_bags", scope: "owner" },
-      });
-      if (error) throw error;
-      const exploded = (data as any)?.exploded ?? 0;
-      const rerouted = (data as any)?.rerouted ?? 0;
-      await queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
-      toast.success(
-        exploded === 0
-          ? "Profile is already tidy — nothing to split."
-          : `Tidied up: ${exploded} fact(s) separated${rerouted ? `, ${rerouted} moved to the right field` : ""}.`,
-      );
-    } catch (e: any) {
-      toast.error(e?.message || "Could not tidy the profile.");
-    } finally {
-      setTidying(false);
-    }
-  };
 
 
   // Get note count for nudge logic
@@ -142,17 +115,11 @@ export default function Profile() {
     <>
       <SEOHead title="My Profile — Menerio" description="Manage the personal profile AI agents use to understand you — your bio, preferences, goals, and context that powers personalized responses." noIndex />
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">My Profile</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Your personal context layer for AI agents. Fill in what matters — everything is optional.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={runTidy} disabled={tidying} className="shrink-0">
-            <Sparkles className="h-4 w-4 mr-2" />
-            {tidying ? "Tidying…" : "Tidy up profile"}
-          </Button>
+        <div>
+          <h1 className="text-2xl font-semibold">My Profile</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Your personal context layer for AI agents. Fill in what matters — everything is optional.
+          </p>
         </div>
 
 
@@ -166,20 +133,18 @@ export default function Profile() {
           <TabsContent value="profile" className="space-y-3 mt-4">
             <RelationshipsSection contactId={null} contactName="My" />
             <SelfRecognitionSection />
-            <ProfileCompleteness categories={categories} entries={entries} />
+            <ProfileCompleteness categories={categories} facts={facts} />
             <ProfileSuggestions
               categories={categories}
-              entryCount={entries.length}
+              factCount={currentFacts.length}
               noteCount={noteCount}
-              onAccept={(data) => upsertEntry.mutate(data)}
+              onAccept={(data) => actions.add(data)}
             />
             <ProfileSections
               categories={categories}
-              entries={entries}
+              facts={facts}
+              actions={actions}
               showScope
-              onSaveEntry={(data) => upsertEntry.mutate(data)}
-              onDeleteEntry={(id) => deleteEntry.mutate(id)}
-              onTogglePin={() => {}}
               onUpdateCategory={(data) => upsertCategory.mutate(data)}
               onDeleteCategory={(id) => deleteCategory.mutate(id)}
               onAddCategory={(data) => upsertCategory.mutate(data)}
@@ -197,7 +162,7 @@ export default function Profile() {
           <TabsContent value="export" className="mt-4">
             <ExportTab
               categories={categories}
-              entries={entries}
+              facts={facts}
               instructions={instructions}
               views={views}
               onSaveView={(data) => upsertView.mutate(data)}

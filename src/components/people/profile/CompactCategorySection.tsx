@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
+  Bot,
+  Check,
   ChevronDown,
   ChevronRight,
-  Check,
+  FolderInput,
+  History,
   Link as LinkIcon,
   MoreHorizontal,
   Pencil,
@@ -14,12 +18,17 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -32,75 +41,39 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileIcon } from "@/components/profile/ProfileIcon";
 import { ProfileRow } from "@/components/profile/ProfileRow";
 import { ProfileValue } from "@/components/profile/ProfileValue";
 import { ScopeBadge, SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
-
-import { EntryForm } from "@/components/profile/EntryForm";
+import { EntryForm, type EntryFormData } from "@/components/profile/EntryForm";
 import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
-import { displayLabel, splitProfileValues } from "@/lib/profile-list-labels";
-
+import { formatValidityRange } from "@/lib/claims";
+import { cn } from "@/lib/utils";
 import type { ProfileCategory } from "@/hooks/useProfile";
-import type { ContactProfileEntry } from "@/hooks/useContactProfile";
+import { OTHER_SECTION, type FactActions, type FactSection, type FactSlot, type ProfileFact } from "@/hooks/useFacts";
+
+export interface SectionOption {
+  slug: string | null;
+  name: string;
+}
 
 interface CompactCategorySectionProps {
-  category: ProfileCategory;
-  /** All entries in this category (unfiltered) — CompactCategorySection derives the visible subset itself when filtering is active. */
-  entries: ContactProfileEntry[];
+  section: FactSection;
   filterQuery: string;
+  /** Filter matches keyed by claim id. */
   matches: Map<string, FieldMatch>;
-  onSaveEntry: (data: any) => void;
-  onDeleteEntry: (id: string) => void;
-  onTogglePin: (entry: ContactProfileEntry) => void;
-  onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
-  onDeleteCategory: (id: string) => void;
-  /** Pinned highlights only exist on contact profiles. */
+  actions: FactActions;
+  /** Where a slot can be moved to. */
+  sectionOptions?: SectionOption[];
+  onUpdateCategory: (section: FactSection, patch: Partial<ProfileCategory>) => void;
+  onDeleteCategory: (section: FactSection) => void;
   allowPin?: boolean;
-  /** The user's own profile exposes icon + visibility scope editing. */
+  /** Show the section's visibility scope and let it be changed. */
   showScope?: boolean;
 }
-
-type LabelGroup = {
-  key: string;
-  label: string;
-  items: { entry: ContactProfileEntry; value: string }[];
-};
-
-/**
- * Collapse entries that mean the same thing into one row: rows are grouped by
- * their canonical display label ("Name alias" → "Nickname") and comma-packed
- * values are exploded into individual items, deduplicated case-insensitively.
- * This is what makes a multi-value field render as one bulleted list instead
- * of several near-identical rows.
- */
-export function groupEntriesByLabel(entries: ContactProfileEntry[]): LabelGroup[] {
-  const groups = new Map<string, LabelGroup>();
-  const seen = new Map<string, Set<string>>();
-
-  for (const entry of entries) {
-    const label = displayLabel(entry.label);
-    const key = label.trim().toLowerCase();
-    if (!groups.has(key)) {
-      groups.set(key, { key, label, items: [] });
-      seen.set(key, new Set());
-    }
-    const group = groups.get(key)!;
-    const seenValues = seen.get(key)!;
-    for (const value of splitProfileValues(entry.label, entry.value)) {
-      const vKey = value.trim().toLowerCase();
-      if (!vKey || seenValues.has(vKey)) continue;
-      seenValues.add(vKey);
-      group.items.push({ entry, value });
-    }
-  }
-
-  return [...groups.values()].filter((g) => g.items.length > 0);
-}
-
-
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
@@ -120,104 +93,61 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
+type Editing = { fact: ProfileFact; mode: "changed" | "fix" } | null;
+
 /**
- * The single profile section renderer, used by both contact profiles and the
- * user's own profile: default-expanded, one compact `Label: value` row per
- * entry. An empty section shows a "no facts yet" hint with its own Add
- * affordance so a newly created custom category is never a dead end.
+ * One section of facts, used by both the user's own profile and a person's
+ * page. Each attribute (slot) is one row: its current values on one line, a
+ * "History (n)" disclosure, a "two answers" badge when a single-valued
+ * attribute has more than one current value, and menus to change, end or
+ * retract a value and to re-file the slot.
  */
 export function CompactCategorySection({
-  category,
-  entries,
+  section,
   filterQuery,
   matches,
-  onSaveEntry,
-  onDeleteEntry,
-  onTogglePin,
+  actions,
+  sectionOptions = [],
   onUpdateCategory,
   onDeleteCategory,
   allowPin = true,
   showScope = false,
 }: CompactCategorySectionProps) {
   const [expanded, setExpanded] = useState(true);
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [addingEntry, setAddingEntry] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(category.name);
+  const [renameValue, setRenameValue] = useState(section.name);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [pendingEntryDelete, setPendingEntryDelete] = useState<ContactProfileEntry | null>(null);
-  const navigate = useNavigate();
 
+  const isOther = section.key === OTHER_SECTION;
   const isFiltering = filterQuery.trim().length > 0;
-  // Force-expanded while a filter is active, without touching (and losing)
-  // the user's manual `expanded` state — clearing the filter reverts to it.
   const isOpen = isFiltering || expanded;
-  const visibleEntries = isFiltering ? entries.filter((e) => matches.has(e.id)) : entries;
+  const slotMatches = (slot: FactSlot) =>
+    [...slot.current, ...slot.history].some((f) => matches.has(f.claim_id));
+  const visibleSlots = isFiltering ? section.slots.filter(slotMatches) : section.slots;
+  const currentCount = section.slots.filter((s) => s.current.length > 0).length;
 
-  const suggestedLabels = CATEGORY_SUGGESTED_LABELS[category.slug] ?? [];
-  const existingLabels = entries.map((e) => e.label);
+  const suggestedLabels = section.slug ? CATEGORY_SUGGESTED_LABELS[section.slug] ?? [] : [];
+  const existingLabels = section.slots.map((s) => s.label);
 
-  const handleSaveEntry = (data: any) => {
-    onSaveEntry(data);
-    setEditingEntryId(null);
+  const handleAdd = (data: EntryFormData) => {
+    actions.add({
+      label: data.label,
+      value: data.value,
+      category_slug: data.category_slug,
+      linked_note_id: data.linked_note_id,
+    });
     setAddingEntry(false);
   };
 
   const handleRenameSave = () => {
     const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== category.name) {
-      onUpdateCategory({ id: category.id, name: trimmed });
-    }
+    if (trimmed && trimmed !== section.name) onUpdateCategory(section, { name: trimmed });
     setRenaming(false);
   };
 
-  const entryActions = (entry: ContactProfileEntry) => (
-    <>
-      {entry.linked_note_id && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button aria-label="Open linked note"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => navigate(`/dashboard/notes/${entry.linked_note_id}`)}
-            >
-              <LinkIcon className="h-3.5 w-3.5 text-primary" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open linked note</TooltipContent>
-        </Tooltip>
-      )}
-      {allowPin && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button aria-label={entry.is_pinned ? "Unpin" : "Pin"} variant="ghost" size="icon" className="h-7 w-7" onClick={() => onTogglePin(entry)}>
-              {entry.is_pinned ? <PinOff className="h-3.5 w-3.5 text-primary" /> : <Pin className="h-3.5 w-3.5" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{entry.is_pinned ? "Unpin" : "Pin"}</TooltipContent>
-        </Tooltip>
-      )}
-      <Button aria-label="Edit entry" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingEntryId(entry.id)}>
-        <Pencil className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-destructive"
-        aria-label="Delete entry"
-        onClick={() => setPendingEntryDelete(entry)}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
-    </>
-  );
-
-
-
   return (
-    <div id={`cat-${category.slug}`} className="rounded-lg border border-border bg-card">
-      {/* Header */}
+    <div id={`cat-${section.slug ?? "other"}`} className="rounded-lg border border-border bg-card">
       <div className="flex items-center gap-2 px-4 py-2.5 group">
         <button
           type="button"
@@ -227,7 +157,7 @@ export function CompactCategorySection({
         >
           {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
-        <ProfileIcon name={category.icon ?? "circle"} className="h-4 w-4 text-muted-foreground shrink-0" />
+        <ProfileIcon name={section.icon ?? "circle"} className="h-4 w-4 text-muted-foreground shrink-0" />
 
         {renaming ? (
           <div className="flex flex-1 items-center gap-1.5">
@@ -238,7 +168,7 @@ export function CompactCategorySection({
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleRenameSave();
                 if (e.key === "Escape") {
-                  setRenameValue(category.name);
+                  setRenameValue(section.name);
                   setRenaming(false);
                 }
               }}
@@ -247,12 +177,13 @@ export function CompactCategorySection({
             <Button aria-label="Save name" variant="ghost" size="icon" className="h-6 w-6" onClick={handleRenameSave}>
               <Check className="h-3.5 w-3.5" />
             </Button>
-            <Button aria-label="Cancel rename"
+            <Button
+              aria-label="Cancel rename"
               variant="ghost"
               size="icon"
               className="h-6 w-6"
               onClick={() => {
-                setRenameValue(category.name);
+                setRenameValue(section.name);
                 setRenaming(false);
               }}
             >
@@ -260,85 +191,85 @@ export function CompactCategorySection({
             </Button>
           </div>
         ) : (
-          <span className="font-medium text-sm flex-1 truncate">{category.name}</span>
+          <span className="font-medium text-sm flex-1 truncate">{section.name}</span>
         )}
 
-        {showScope && <ScopeBadge scope={category.visibility_scope} />}
-        <span className="text-xs text-muted-foreground shrink-0">{entries.length}</span>
+        {showScope && !isOther && <ScopeBadge scope={section.visibilityScope} />}
+        <span className="text-xs text-muted-foreground shrink-0">{currentCount}</span>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button aria-label="Category actions"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity data-[state=open]:opacity-100"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onSelect={() => {
-                setAddingEntry(true);
-                setExpanded(true);
-              }}
-            >
-              <Plus className="h-3.5 w-3.5 mr-2" /> Add entry
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                setRenameValue(category.name);
-                setRenaming(true);
-              }}
-            >
-              <Pencil className="h-3.5 w-3.5 mr-2" /> Rename category
-            </DropdownMenuItem>
-            {showScope && (
-              <>
-                <DropdownMenuSeparator />
-                {SCOPE_OPTIONS.map((o) => (
+        {!isOther && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label="Category actions"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity data-[state=open]:opacity-100"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => {
+                  setAddingEntry(true);
+                  setExpanded(true);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-2" /> Add entry
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  setRenameValue(section.name);
+                  setRenaming(true);
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5 mr-2" /> Rename category
+              </DropdownMenuItem>
+              {showScope && (
+                <>
+                  <DropdownMenuSeparator />
+                  {SCOPE_OPTIONS.map((o) => (
+                    <DropdownMenuItem key={o.value} onSelect={() => onUpdateCategory(section, { visibility_scope: o.value })}>
+                      {section.visibilityScope === o.value ? (
+                        <Check className="h-3.5 w-3.5 mr-2" />
+                      ) : (
+                        <span className="w-3.5 mr-2" />
+                      )}
+                      Visible to {o.label}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {section.category && (
+                <>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    key={o.value}
-                    onSelect={() => onUpdateCategory({ id: category.id, visibility_scope: o.value })}
+                    className="text-destructive focus:text-destructive"
+                    onSelect={() => setDeleteDialogOpen(true)}
                   >
-                    {category.visibility_scope === o.value ? (
-                      <Check className="h-3.5 w-3.5 mr-2" />
-                    ) : (
-                      <span className="w-3.5 mr-2" />
-                    )}
-                    Visible to {o.label}
+                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete category
                   </DropdownMenuItem>
-                ))}
-              </>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onSelect={() => setDeleteDialogOpen(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete category
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
-      {/* Inline "add entry" form, revealed from the header dropdown */}
       {addingEntry && (
         <div className="px-4 py-3 border-t border-border bg-muted/30">
           <EntryForm
-            categoryId={category.id}
+            categorySlug={section.slug}
             suggestedLabels={suggestedLabels}
             existingLabels={existingLabels}
-            onSave={handleSaveEntry}
+            onSave={handleAdd}
             onCancel={() => setAddingEntry(false)}
           />
         </div>
       )}
 
-      {/* Empty-state hint: shown for a rendered-but-empty section (always a
-          custom category — see isCategorySectionVisible) so there's an
-          obvious path to file its first entry, instead of a silent dead end. */}
-      {isOpen && !addingEntry && visibleEntries.length === 0 && (
+      {isOpen && !addingEntry && visibleSlots.length === 0 && !isFiltering && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-sm text-muted-foreground">No facts yet — add one</span>
           <Button
@@ -355,90 +286,333 @@ export function CompactCategorySection({
         </div>
       )}
 
-      {/* Entries — grouped by canonical display label so that four
-          "Name alias" rows and a comma-packed "Nickname" row collapse into a
-          single bulleted "Nickname" block. */}
-      {isOpen && visibleEntries.length > 0 && (
+      {isOpen && visibleSlots.length > 0 && (
         <div className="border-t border-border">
-          {groupEntriesByLabel(visibleEntries).map((group) => {
-            const editing = group.items.filter((it) => it.entry.id === editingEntryId);
-            const rest = group.items.filter((it) => it.entry.id !== editingEntryId);
-            const editEntry = editing[0]?.entry;
-
-            return (
-              <div key={group.key}>
-                {editEntry && (
-                  <div className="px-4 py-3 border-b border-border">
-                    <EntryForm
-                      initial={editEntry}
-                      categoryId={category.id}
-                      suggestedLabels={suggestedLabels}
-                      existingLabels={existingLabels}
-                      onSave={handleSaveEntry}
-                      onCancel={() => setEditingEntryId(null)}
-                    />
-                  </div>
-                )}
-                {rest.length > 0 && (
-                  <ProfileRow
-                    label={<Highlighted text={group.label} query={filterQuery} />}
-                    actions={rest.length === 1 ? entryActions(rest[0].entry) : undefined}
-                  >
-                    <ProfileValue
-                      label={group.label}
-                      values={rest.map((it) => it.value)}
-                      renderText={(t) => <Highlighted text={t} query={filterQuery} />}
-                      itemActions={
-                        rest.length === 1
-                          ? undefined
-                          : (i) => (
-                              <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                                {entryActions(rest[i].entry)}
-                              </span>
-                            )
-                      }
-                    />
-                  </ProfileRow>
-                )}
-              </div>
-            );
-          })}
+          {visibleSlots.map((slot) => (
+            <SlotRow
+              key={slot.key}
+              slot={slot}
+              filterQuery={filterQuery}
+              actions={actions}
+              sectionOptions={sectionOptions}
+              allowPin={allowPin}
+            />
+          ))}
         </div>
       )}
-
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete "{category.name}"?</AlertDialogTitle>
+            <AlertDialogTitle>Delete "{section.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              {entries.length > 0
-                ? `This will also delete ${entries.length} entr${entries.length === 1 ? "y" : "ies"} in this category.`
-                : "This category has no entries."}{" "}
-              This action cannot be undone.
+              {section.slots.length > 0
+                ? `Its ${section.slots.length} fact${section.slots.length === 1 ? "" : "s"} move to "Other". No fact is deleted.`
+                : "This category has no facts."}{" "}
+              {section.visibilityScope === "private" && section.slots.length > 0
+                ? "A private section with facts in it cannot be deleted: move or remove its facts first."
+                : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDeleteCategory(category.id)}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => onDeleteCategory(section)}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
 
-      <AlertDialog open={!!pendingEntryDelete} onOpenChange={(open) => !open && setPendingEntryDelete(null)}>
+function SlotRow({
+  slot,
+  filterQuery,
+  actions,
+  sectionOptions,
+  allowPin,
+}: {
+  slot: FactSlot;
+  filterQuery: string;
+  actions: FactActions;
+  sectionOptions: SectionOption[];
+  allowPin: boolean;
+}) {
+  const navigate = useNavigate();
+  const [editing, setEditing] = useState<Editing>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [labelValue, setLabelValue] = useState(slot.label);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [pendingRetract, setPendingRetract] = useState<ProfileFact | null>(null);
+
+  const saveLabel = () => {
+    const trimmed = labelValue.trim();
+    if (trimmed && trimmed !== slot.label) actions.updateSlot(slot, { label: trimmed });
+    setRenaming(false);
+  };
+
+  const valueActions = (fact: ProfileFact) => (
+    <>
+      {slot.hasConflict && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-[11px]"
+          onClick={() => actions.keepOnly(slot, fact)}
+          aria-label={`Keep this one: ${fact.value}`}
+        >
+          Keep this one
+        </Button>
+      )}
+      {fact.source_type === "note" && fact.source_id && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label="Open linked note"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => navigate(`/dashboard/notes/${fact.source_id}`)}
+            >
+              <LinkIcon className="h-3.5 w-3.5 text-primary" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open the note this came from</TooltipContent>
+        </Tooltip>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label="Edit entry" variant="ghost" size="icon" className="h-7 w-7">
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "changed" })}>
+            It changed
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "fix" })}>
+            Fix a mistake
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label="Remove entry" variant="ghost" size="icon" className="h-7 w-7 text-destructive">
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => actions.end(fact)}>
+            No longer true
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() => setPendingRetract(fact)}
+          >
+            Was wrong
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
+  const slotActions = (
+    <>
+      {allowPin && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={slot.isPinned ? "Unpin" : "Pin"}
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => actions.updateSlot(slot, { is_pinned: !slot.isPinned })}
+            >
+              {slot.isPinned ? <PinOff className="h-3.5 w-3.5 text-primary" /> : <Pin className="h-3.5 w-3.5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{slot.isPinned ? "Unpin" : "Pin"}</TooltipContent>
+        </Tooltip>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label="Fact options" variant="ghost" size="icon" className="h-7 w-7">
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() => {
+              setLabelValue(slot.label);
+              setRenaming(true);
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5 mr-2" /> Rename label
+          </DropdownMenuItem>
+          {sectionOptions.length > 0 && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FolderInput className="h-3.5 w-3.5 mr-2" /> Move to section
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+                {sectionOptions.map((option) => (
+                  <DropdownMenuItem
+                    key={option.slug ?? OTHER_SECTION}
+                    disabled={option.slug === slot.categorySlug}
+                    onSelect={() => actions.updateSlot(slot, { category_slug: option.slug })}
+                  >
+                    {option.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+          <DropdownMenuItem onSelect={() => actions.updateSlot(slot, { show_to_agent: !slot.showToAgent })}>
+            {slot.showToAgent ? <Check className="h-3.5 w-3.5 mr-2" /> : <Bot className="h-3.5 w-3.5 mr-2" />}
+            Always show to assistants
+          </DropdownMenuItem>
+          {slot.hasConflict && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Two answers</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => actions.updateSlot(slot, { cardinality: "many" })}>
+                Both are true
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
+  const label = renaming ? (
+    <span className="inline-flex items-center gap-1">
+      <Input
+        autoFocus
+        aria-label="Label"
+        value={labelValue}
+        onChange={(e) => setLabelValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") saveLabel();
+          if (e.key === "Escape") setRenaming(false);
+        }}
+        className="h-6 w-40 text-xs"
+      />
+      <Button aria-label="Save label" variant="ghost" size="icon" className="h-6 w-6" onClick={saveLabel}>
+        <Check className="h-3 w-3" />
+      </Button>
+    </span>
+  ) : (
+    <Highlighted text={slot.label} query={filterQuery} />
+  );
+
+  const single = slot.current.length === 1;
+
+  return (
+    <div className="border-b border-border last:border-b-0">
+      {editing && (
+        <div className="px-4 py-3 border-b border-border">
+          <EntryForm
+            mode={editing.mode}
+            initial={{ label: slot.label, value: editing.fact.value }}
+            categorySlug={slot.categorySlug}
+            onSave={(data) => {
+              if (editing.mode === "changed") actions.changed(editing.fact, data.value, data.valid_from!);
+              else actions.fix(editing.fact, data.value);
+              setEditing(null);
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        </div>
+      )}
+      <ProfileRow
+        className="!border-b-0"
+        label={label}
+        actions={
+          <>
+            {single && valueActions(slot.current[0])}
+            {slotActions}
+          </>
+        }
+      >
+        {slot.hasConflict && (
+          <Badge
+            variant="outline"
+            className="gap-1 border-amber-500/60 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
+          >
+            <AlertTriangle className="h-3 w-3" /> Two answers
+          </Badge>
+        )}
+        {slot.current.length === 0 ? (
+          <span className="text-sm text-muted-foreground">Nothing current</span>
+        ) : (
+          <ProfileValue
+            label={slot.label}
+            values={slot.current.map((f) => f.value)}
+            renderText={(t) => <Highlighted text={t} query={filterQuery} />}
+            itemActions={
+              single
+                ? undefined
+                : (i) => (
+                    <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                      {valueActions(slot.current[i])}
+                    </span>
+                  )
+            }
+          />
+        )}
+        {slot.hasConflict && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => actions.updateSlot(slot, { cardinality: "many" })}
+          >
+            Both are true
+          </Button>
+        )}
+      </ProfileRow>
+      {slot.history.length > 0 && (
+        <Collapsible open={historyOpen} onOpenChange={setHistoryOpen} className="px-4 pb-1.5">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground">
+              <History className="h-3 w-3" />
+              History ({slot.history.length})
+              <ChevronDown className={cn("h-3 w-3 transition-transform", historyOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="mt-1 space-y-0.5 pl-6 text-xs text-muted-foreground">
+              {slot.history.map((fact) => {
+                const range = formatValidityRange(fact);
+                return (
+                  <li key={fact.claim_id}>
+                    <span className="text-foreground/80">{fact.value}</span>
+                    {range ? `, ${range}` : ""}
+                  </li>
+                );
+              })}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      <AlertDialog open={!!pendingRetract} onOpenChange={(open) => !open && setPendingRetract(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete "{pendingEntryDelete?.label}"?</AlertDialogTitle>
+            <AlertDialogTitle>
+              "{slot.label}: {pendingRetract?.value}" was wrong?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This entry will be removed from "{category.name}". This action cannot be undone.
+              It is deleted with no history kept, and Menerio will not suggest it again. If it was true once and has
+              changed, use "No longer true" instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (pendingEntryDelete) onDeleteEntry(pendingEntryDelete.id);
-                setPendingEntryDelete(null);
+                if (pendingRetract) actions.retract(pendingRetract);
+                setPendingRetract(null);
               }}
             >
               Delete

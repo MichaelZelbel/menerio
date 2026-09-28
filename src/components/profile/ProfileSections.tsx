@@ -12,49 +12,66 @@ import {
 import { SCOPE_OPTIONS } from "@/components/profile/ScopeBadge";
 import { PinnedHighlights } from "@/components/people/profile/PinnedHighlights";
 import { ProfileFieldFilter } from "@/components/people/profile/ProfileFieldFilter";
-import { CompactCategorySection } from "@/components/people/profile/CompactCategorySection";
-import { compareCategoriesForDisplay, isCategorySectionVisible } from "@/lib/profile-taxonomy";
+import { CompactCategorySection, type SectionOption } from "@/components/people/profile/CompactCategorySection";
+import { PROFILE_TAXONOMY, taxonomyBySlug, taxonomyOrder } from "@/lib/profile-taxonomy";
 import { filterEntries } from "@/lib/profile-field-filter";
-import type { ProfileCategory, ProfileEntry } from "@/hooks/useProfile";
-import type { ContactProfileEntry } from "@/hooks/useContactProfile";
-
-export type ProfileSectionsEntry = ContactProfileEntry | ProfileCategory;
+import type { ProfileCategory } from "@/hooks/useProfile";
+import { groupFacts, groupSlots, type FactActions, type FactSection, type ProfileFact } from "@/hooks/useFacts";
 
 interface ProfileSectionsProps {
   categories: ProfileCategory[];
-  entries: ProfileEntry[];
-  onSaveEntry: (data: any) => void;
-  onDeleteEntry: (id: string) => void;
-  onTogglePin: (entry: ProfileEntry) => void;
+  /** Every profile_facts row of the subject: current values and history. */
+  facts: ProfileFact[];
+  actions: FactActions;
   onUpdateCategory: (data: Partial<ProfileCategory> & { id: string }) => void;
   onDeleteCategory: (id: string) => void;
   onAddCategory: (data: Partial<ProfileCategory>) => void;
-  /** Render the user's own profile scope editing UI. */
+  /** Show each section's visibility scope and let it be changed. */
   showScope?: boolean;
-  /** Render the pinned-highlights strip (contact profiles only). */
+  /** Render the pinned-highlights strip. */
   showPinned?: boolean;
   /** Optional extra content rendered between pinned highlights and the filter. */
   children?: ReactNode;
+  /** Sections this page renders elsewhere, so a line is never moved into them. */
+  excludeSlugs?: string[];
+}
+
+/**
+ * Every section a line can be moved to: the taxonomy, the subject's own custom
+ * sections, and "Other", minus the ones this page does not list. A person's
+ * page shows "Relationships & Family" inside the relationships card, current
+ * values only and read-only, so a fact moved there could no longer be edited,
+ * ended or removed (eleventh review).
+ */
+const NO_EXCLUDED_SECTIONS: string[] = [];
+
+export function moveTargets(categories: Pick<ProfileCategory, "slug" | "name">[], excludeSlugs: string[] = []): SectionOption[] {
+  const options = new Map<string, SectionOption>();
+  for (const t of PROFILE_TAXONOMY) options.set(t.slug, { slug: t.slug, name: t.name });
+  for (const c of categories) options.set(c.slug, { slug: c.slug, name: c.name });
+  for (const s of excludeSlugs) options.delete(s);
+  const sorted = [...options.values()].sort(
+    (a, b) => taxonomyOrder(a.slug!) - taxonomyOrder(b.slug!) || a.name.localeCompare(b.name),
+  );
+  return [...sorted, { slug: null, name: "Other" }];
 }
 
 /**
  * The single, shared profile facts surface used by both the user's own profile
- * and contact detail pages. It owns category sorting, filtering, pinned
- * highlights, and the compact per-category sections so both pages behave and
- * render identically.
+ * and a person's page. It owns section order, filtering, pinned highlights and
+ * the per-section lists, so both pages behave and render identically.
  */
 export function ProfileSections({
   categories,
-  entries,
-  onSaveEntry,
-  onDeleteEntry,
-  onTogglePin,
+  facts,
+  actions,
   onUpdateCategory,
   onDeleteCategory,
   onAddCategory,
   showScope = false,
-  showPinned = false,
+  showPinned = true,
   children,
+  excludeSlugs = NO_EXCLUDED_SECTIONS,
 }: ProfileSectionsProps) {
   const [filterQuery, setFilterQuery] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
@@ -62,21 +79,41 @@ export function ProfileSections({
   const [newCatIcon, setNewCatIcon] = useState("folder");
   const [newCatScope, setNewCatScope] = useState("all");
 
-  const sectionCategories = useMemo(
-    () =>
-      categories
-        .filter((c) => isCategorySectionVisible(c, entries.some((e) => e.category_id === c.id)))
-        .slice()
-        .sort(compareCategoriesForDisplay),
-    [categories, entries],
-  );
+  const sections = useMemo(() => groupFacts(facts, categories), [facts, categories]);
+  const slots = useMemo(() => groupSlots(facts), [facts]);
 
-  const matches = useMemo(() => filterEntries(entries, filterQuery), [entries, filterQuery]);
+  const matches = useMemo(
+    () => filterEntries(facts.map((f) => ({ id: f.claim_id, label: f.label, value: f.value })), filterQuery),
+    [facts, filterQuery],
+  );
   const isFiltering = filterQuery.trim().length > 0;
 
-  const visibleCategories = isFiltering
-    ? sectionCategories.filter((c) => entries.some((e) => e.category_id === c.id && matches.has(e.id)))
-    : sectionCategories;
+  const visibleSections = isFiltering
+    ? sections.filter((s) =>
+        s.slots.some((slot) => [...slot.current, ...slot.history].some((f) => matches.has(f.claim_id))),
+      )
+    : sections;
+
+  const sectionOptions = useMemo(() => moveTargets(categories, excludeSlugs), [categories, excludeSlugs]);
+
+  // A section shown from the taxonomy may have no row yet; changing it creates one.
+  const updateSection = (section: FactSection, patch: Partial<ProfileCategory>) => {
+    if (section.category) {
+      onUpdateCategory({ id: section.category.id, ...patch });
+      return;
+    }
+    if (!section.slug) return;
+    const order = taxonomyOrder(section.slug);
+    onAddCategory({
+      name: section.name,
+      slug: section.slug,
+      icon: taxonomyBySlug[section.slug]?.icon ?? section.icon,
+      visibility_scope: section.visibilityScope,
+      sort_order: order === Number.MAX_SAFE_INTEGER ? 99 : order,
+      is_default: false,
+      ...patch,
+    });
+  };
 
   const handleAddCategory = () => {
     if (!newCatName.trim()) return;
@@ -153,30 +190,32 @@ export function ProfileSections({
       )}
 
       {showPinned && (
-        <PinnedHighlights entries={entries as ContactProfileEntry[]} onTogglePin={onTogglePin as (e: ContactProfileEntry) => void} />
+        <PinnedHighlights
+          slots={slots}
+          onTogglePin={(slot) => actions.updateSlot(slot, { is_pinned: !slot.isPinned })}
+        />
       )}
 
       {children}
 
       <ProfileFieldFilter value={filterQuery} onChange={setFilterQuery} />
 
-      {isFiltering && visibleCategories.length === 0 && (
+      {isFiltering && visibleSections.length === 0 && (
         <p className="text-sm text-muted-foreground text-center py-4">No facts match "{filterQuery.trim()}".</p>
       )}
 
-      {visibleCategories.map((cat) => (
+      {visibleSections.map((section) => (
         <CompactCategorySection
-          key={cat.id}
-          category={cat}
-          entries={entries.filter((e) => e.category_id === cat.id) as ContactProfileEntry[]}
+          key={section.key}
+          section={section}
           filterQuery={filterQuery}
           matches={matches}
-          onSaveEntry={onSaveEntry}
-          onDeleteEntry={onDeleteEntry}
-          onTogglePin={onTogglePin as (e: ContactProfileEntry) => void}
-          onUpdateCategory={onUpdateCategory}
-          onDeleteCategory={onDeleteCategory}
-          allowPin={showPinned}
+          actions={actions}
+          sectionOptions={sectionOptions}
+          onUpdateCategory={updateSection}
+          onDeleteCategory={(sec) => {
+            if (sec.category) onDeleteCategory(sec.category.id);
+          }}
           showScope={showScope}
         />
       ))}

@@ -23,6 +23,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { canonicalLabel, isSymmetricLabel, relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
 import { useAddClaim } from "@/hooks/useClaims";
+import { invalidateFactViews } from "@/hooks/useFacts";
+import { factRevertBlockReason, revertFactItem } from "@/lib/review-fact-revert";
 import { normalizeAttribute, isReservedAttribute } from "@/lib/claims";
 import {
   UserPlus,
@@ -141,33 +143,25 @@ export default function ReviewQueue() {
   };
 
   const invalidateProfileQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
+    invalidateFactViews(queryClient);
     queryClient.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-    queryClient.invalidateQueries({ queryKey: ["profile-entries"] });
     queryClient.invalidateQueries({ queryKey: ["profile-categories"] });
   };
 
   const revertAppliedChange = async (item: ReviewItem) => {
     if (!item.target_entity_id && item.status !== "auto_applied_unreviewed") return;
 
-    if (item.suggestion_type === "normalize_profile_entry") {
-      const { data, error } = await supabase.functions.invoke("normalize-profile", {
-        body: { action: "rollback", review_id: item.id },
-      });
-      // A 409 "stale" means the underlying profile already changed — treat
-      // as a no-op so bulk Keep/Reject flows don't crash into a blank screen.
-      const stale = (data && data.ok === false && data.reason === "stale") || (error as any)?.context?.status === 409;
-      if (stale) {
-        invalidateProfileQueries();
-        return;
-      }
-      if (error || !data?.ok) {
-        throw new Error(error?.message || data?.reason || "Rollback failed");
-      }
+    // Profile cleanup suggestions came from the retired normalizer; they are
+    // superseded and have nothing left to undo.
+    if (item.suggestion_type === "normalize_profile_entry") return;
+
+    // A profile fact: delete the claim(s) it wrote, each with a "never
+    // suggest again" row. Refused for facts that were merged or since edited.
+    if (item.suggestion_type === "add_profile_entry" || item.suggestion_type === "unknown_profile_field") {
+      await revertFactItem(item);
       invalidateProfileQueries();
       return;
     }
-
 
     if (item.suggestion_type === "add_contact" && item.target_entity_id) {
       // Each revert throws on failure: handleRemove/handleBlock would otherwise
@@ -175,13 +169,6 @@ export default function ReviewQueue() {
       const { error } = await supabase.from("contacts").delete().eq("id", item.target_entity_id);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      return;
-    }
-
-    if (item.suggestion_type === "add_profile_entry" && item.target_entity_id) {
-      const { error } = await supabase.from("profile_entries").delete().eq("id", item.target_entity_id);
-      if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       return;
     }
 
@@ -246,69 +233,27 @@ export default function ReviewQueue() {
     }
   };
 
+  // A new profile field: review-queue-bulk registers the field and adds the
+  // value through writeFact as an accepted machine fact (origin review_queue),
+  // like "Keep all" does, so Roll Back can still remove it later. A fact the
+  // browser wrote itself would be the user's own words and never revertible.
   const handleAcceptUnknownProfileField = async (item: ReviewItem) => {
     const p = item.payload as any;
     const categorySlug = String(p?.category_slug || "").trim();
     const canonicalLabel = String(p?.canonical_label || p?.label || "").trim();
     const value = String(p?.value || "").trim();
-    const categoryId = p?.category_id;
-    const contactId = p?.contact_id || null;
-
-    if (!categorySlug || !canonicalLabel || !value || !categoryId) {
+    if (!categorySlug || !canonicalLabel || !value) {
       showToast.error("Incomplete profile field suggestion");
       return;
     }
-
-    try {
-      // 1. Register the new field so future writes are accepted.
-      const { data: field, error: fieldErr } = await supabase
-        .from("profile_fields")
-        .insert({
-          user_id: user!.id,
-          category_slug: categorySlug,
-          canonical_label: canonicalLabel,
-          cardinality: "list",
-          value_type: "text",
-          aliases: [],
-          is_system: false,
-          is_active: true,
-        })
-        .select("id")
-        .single();
-      if (fieldErr) throw fieldErr;
-
-      // 2. Write the actual profile entry. The canonicalize trigger will now
-      //    recognize the label and allow the insert.
-      const { data: entry, error: entryErr } = await supabase
-        .from("profile_entries")
-        .insert({
-          user_id: user!.id,
-          contact_id: contactId,
-          category_id: categoryId,
-          label: canonicalLabel,
-          value,
-          origin: item.source_note_id ? "review_queue" : "user_manual",
-          evidence_quote: p?.evidence_quote || null,
-          linked_note_id: p?.linked_note_id || item.source_note_id || null,
-        })
-        .select("id")
-        .single();
-      if (entryErr) throw entryErr;
-
-      invalidateProfileQueries();
-      updateStatus.mutate({
-        id: item.id,
-        status: "kept",
-        extra: {
-          target_entity_type: "profile_entry",
-          target_entity_id: entry?.id,
-          applied_at: new Date().toISOString(),
-        },
-      });
-      showToast.success(`Created field "${canonicalLabel}" and added the value`);
-    } catch (err: any) {
-      showToast.error("Error: " + (err.message || "Unknown error"));
+    const { data, error } = await supabase.functions.invoke("review-queue-bulk", {
+      body: { action: "keep", scope: { ids: [item.id] } },
+    });
+    if (error || !data?.job_id) {
+      showToast.error("Could not add the field: " + (error?.message || "Unknown error"));
+      return;
     }
+    setBulkJobId(data.job_id);
   };
 
   const handleAcceptMoment = async (item: ReviewItem) => {
@@ -496,38 +441,6 @@ export default function ReviewQueue() {
     }
   };
 
-  const handleAcceptNormalize = async (item: ReviewItem) => {
-    const payload = item.payload as any;
-    try {
-      const { data, error } = await supabase.functions.invoke("normalize-profile", {
-        body: { action: "apply", review_id: item.id },
-      });
-      if (data && data.ok === false && data.reason === "stale") {
-        showToast.info("This profile changed since the suggestion was made — skipping");
-        refreshReviewQueues();
-        invalidateProfileQueries();
-        return;
-      }
-      if (error || !data?.ok) {
-        const reason = data?.reason || error?.message || "Unknown error";
-        if (data?.resolved) {
-          showToast.info(`Suggestion closed — it could not be applied (${reason})`);
-        } else {
-          showToast.error(`Could not clean up profile — it stays in the queue: ${reason}`);
-        }
-        refreshReviewQueues();
-        invalidateProfileQueries();
-        return;
-      }
-      invalidateProfileQueries();
-      refreshReviewQueues();
-      showToast.success(`Cleaned up: ${payload?.canonical_label || "profile entry"}`);
-    } catch (err: any) {
-      showToast.error("Error: " + (err.message || "Unknown error"));
-      refreshReviewQueues();
-    }
-  };
-
   // Merge duplicate people: keep one record, fold the others into it via the
   // existing merge-contacts path (notes, facts and relationships move over).
   const handleAcceptMergeDuplicate = async (item: ReviewItem) => {
@@ -651,23 +564,25 @@ export default function ReviewQueue() {
       return;
     }
     try {
+      // write_fact (useAddClaim): the one add path, as the user.
       const result = await addClaim.mutateAsync({
         subject_type: subjectType,
         subject_id: subjectId,
         attribute,
         value,
         valid_from: p?.valid_from || null,
-        confidence: (p?.confidence as any) || "likely",
         source_type: item.source_note_id ? "note" : "manual",
         source_id: item.source_note_id || null,
       });
       updateStatus.mutate({
         id: item.id,
         status: "kept",
-        extra: { target_entity_type: "claim", target_entity_id: result.claim.id, applied_at: new Date().toISOString() },
+        extra: result.claim.id
+          ? { target_entity_type: "claim", target_entity_id: result.claim.id, applied_at: new Date().toISOString() }
+          : { applied_at: new Date().toISOString() },
       });
-    } catch (err: any) {
-      showToast.error("Error: " + (err.message || "Unknown error"));
+    } catch {
+      // useAddClaim already said why.
     }
   };
 
@@ -675,7 +590,9 @@ export default function ReviewQueue() {
     const type = item.suggestion_type;
 
     if (type === "normalize_profile_entry") {
-      return handleAcceptNormalize(item);
+      // The normalizer is retired: facts are cleaned up when they are added.
+      showToast.info("Profile cleanup suggestions are no longer needed");
+      return;
     }
 
     if (type === "merge_duplicate_person") {
@@ -1190,6 +1107,12 @@ export default function ReviewQueue() {
             const config = typeConfig[item.suggestion_type] || typeConfig.link_note;
             const Icon = config.icon;
             const payload = item.payload as any;
+            // An applied profile fact that can no longer be rolled back (merged, or edited since).
+            const revertBlocked =
+              (item.suggestion_type === "add_profile_entry" || item.suggestion_type === "unknown_profile_field") &&
+              item.applied_at
+                ? factRevertBlockReason(item)
+                : null;
 
             return (
               <Card key={item.id} className="transition-all hover:shadow-lg">
@@ -1342,13 +1265,18 @@ export default function ReviewQueue() {
                       <span />
                     )}
 
+                    {item.suggestion_type === "normalize_profile_entry" ? (
+                      // The normalizer is retired; its suggestions are superseded.
+                      <span className="text-xs text-muted-foreground">No longer needed</span>
+                    ) : (
                     <div className="flex gap-2">
                       <Button
                         size="sm"
                         variant="ghost"
                         className="text-destructive hover:text-destructive"
                         onClick={() => handleBlock(item)}
-                        disabled={updateStatus.isPending || inFlight.has(item.id)}
+                        disabled={updateStatus.isPending || inFlight.has(item.id) || !!revertBlocked}
+                        title={revertBlocked || undefined}
                       >
                         <X className="h-4 w-4 mr-1" />
                         Never Again
@@ -1357,7 +1285,8 @@ export default function ReviewQueue() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleRemove(item)}
-                        disabled={updateStatus.isPending || inFlight.has(item.id)}
+                        disabled={updateStatus.isPending || inFlight.has(item.id) || !!revertBlocked}
+                        title={revertBlocked || undefined}
                       >
                         <RotateCcw className="h-4 w-4 mr-1" />
                         Roll Back
@@ -1371,6 +1300,7 @@ export default function ReviewQueue() {
                         Keep
                       </Button>
                     </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

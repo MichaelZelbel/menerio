@@ -2,15 +2,14 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { normalizeAttribute, todayISO, type Claim, type ClaimConfidence, type ClaimSubjectType } from "@/lib/claims";
 import {
-  claimsToSupersede,
-  normalizeAttribute,
-  supersedeDate,
-  todayISO,
-  type Claim,
-  type ClaimConfidence,
-  type ClaimSubjectType,
-} from "@/lib/claims";
+  attributeLabel,
+  describeWriteResult,
+  invalidateFactViews,
+  invokeWriteFact,
+  retractFact,
+} from "@/hooks/useFacts";
 
 export type { Claim } from "@/lib/claims";
 
@@ -59,77 +58,48 @@ export interface AddClaimInput {
   attribute: string;
   value: string;
   valid_from?: string | null;
-  confidence?: ClaimConfidence;
   source_type?: "manual" | "note" | "moment" | "ai";
   source_id?: string | null;
 }
 
 /**
- * Adds a claim and ends any overlapping open claim on the same
- * subject + attribute. Superseded claims are closed with a `valid_to`,
- * never deleted.
+ * Adds a fact through the one add path (normalize-profile `write_fact`, with
+ * the user's JWT). writeFact decides cardinality, closes the older value of a
+ * single-valued attribute (it becomes history), creates the slot and refuses
+ * a value the user marked as wrong.
  */
 export function useAddClaim() {
   const qc = useQueryClient();
-  const { user } = useAuth();
 
   return useMutation({
     mutationFn: async (input: AddClaimInput) => {
       const attribute = normalizeAttribute(input.attribute);
       if (!attribute) throw new Error("An attribute is required");
       if (!input.value.trim()) throw new Error("A value is required");
+      if (input.subject_type !== "self" && !input.subject_id) throw new Error("Nothing to add the fact to");
 
-      let q = db
-        .from("claims")
-        .select(CLAIM_COLUMNS)
-        .eq("user_id", user!.id)
-        .eq("subject_type", input.subject_type)
-        .eq("attribute", attribute);
-      q = input.subject_type === "self" ? q.is("subject_id", null) : q.eq("subject_id", input.subject_id);
-      // A failed lookup used to read as "nothing to close", and the new claim
-      // was inserted beside the old one: two open values for a single-valued
-      // attribute. Same for a failed close, which the toast still counted.
-      const { data: existing, error: existingError } = await q;
-      if (existingError) throw existingError;
-
-      const toClose = claimsToSupersede((existing || []) as Claim[], {
+      const result = await invokeWriteFact({
+        contact_id: input.subject_type === "contact" ? input.subject_id : null,
+        entity_id: input.subject_type === "entity" ? input.subject_id : null,
+        label: attributeLabel(attribute),
         attribute,
-        valid_from: input.valid_from ?? null,
+        value: input.value.trim(),
+        valid_from: input.valid_from || null,
+        source_type: input.source_type && input.source_type !== "manual" ? input.source_type : undefined,
+        source_id: input.source_id || undefined,
       });
-      const endDate = supersedeDate({ valid_from: input.valid_from ?? null });
-
-      // Insert first, close afterwards: if the insert is refused nothing has
-      // been closed, and the fact the user typed is never the one that is lost.
-      const { data, error } = await db
-        .from("claims")
-        .insert({
-          user_id: user!.id,
-          subject_type: input.subject_type,
-          subject_id: input.subject_type === "self" ? null : input.subject_id,
-          attribute,
-          value: input.value.trim(),
-          valid_from: input.valid_from || null,
-          confidence: input.confidence || "likely",
-          source_type: input.source_type || "manual",
-          source_id: input.source_id || null,
-        })
-        .select(CLAIM_COLUMNS)
-        .single();
-      if (error) throw error;
-
-      let superseded = 0;
-      for (const claim of toClose) {
-        const { error: closeError } = await db.from("claims").update({ valid_to: endDate }).eq("id", claim.id);
-        if (closeError) throw closeError;
-        superseded += 1;
-      }
-      return { claim: data as Claim, superseded };
+      const recorded = result.facts.find((f) => f.claimId && (f.outcome === "inserted" || f.outcome === "already_recorded"));
+      return {
+        claim: { id: recorded?.claimId ?? null } as { id: string | null },
+        superseded: result.facts.reduce((n, f) => n + (f.closed ?? 0), 0),
+        facts: result.facts,
+      };
     },
     onSuccess: (result) => {
-      invalidateClaimViews(qc);
-      showToast.success(
-        result.superseded > 0 ? "Fact added — the previous one moved to history" : "Fact added",
-      );
+      invalidateFactViews(qc);
+      const told = describeWriteResult(result.facts);
+      if (told.kind === "success") showToast.success(told.message);
+      else showToast.info(told.message);
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not add the fact"),
   });
@@ -173,18 +143,28 @@ export function useEndClaim() {
   });
 }
 
-/** Hard delete, only for facts the user says never happened. */
+/**
+ * "Was wrong": hard delete, only for facts the user says never happened. The
+ * value is remembered so it is not suggested again.
+ */
 export function useDeleteClaim() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await db.from("claims").delete().eq("id", id);
-      if (error) throw error;
+    mutationFn: async (claim: Pick<Claim, "id" | "subject_type" | "subject_id" | "attribute" | "value">) => {
+      await retractFact({
+        claim_id: claim.id,
+        subject_type: claim.subject_type,
+        subject_id: claim.subject_id,
+        attribute: claim.attribute,
+        category_slug: null,
+        value: claim.value,
+      });
     },
     onSuccess: () => {
       invalidateClaimViews(qc);
-      showToast.success("Fact removed");
+      invalidateFactViews(qc);
+      showToast.success("Fact removed. It will not be suggested again.");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not remove the fact"),
   });

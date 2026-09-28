@@ -18,7 +18,7 @@ export function createAccountPersister(accountId: string | null) {
       removeItem: (key: string) => del(prefix + key),
     },
     maxAge: 1000 * 60 * 60 * 24 * 7,
-    buster: "account-v3",
+    buster: "account-v4",
   });
   return { ...persister, retire: async () => { active = false; await Promise.allSettled([...writes]); } };
 }
