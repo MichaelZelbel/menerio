@@ -21,7 +21,7 @@ How to read the markers:
 6. Relationships between people stay in their own table. They link two people, and that works well already.
 7. Cost: about eight small stages over roughly two to three weeks of work. Each stage ships alone with a backup, a count check and a way back. No fact is deleted until the last stage, and even then it is archived first.
 8. Godspeed: the pull becomes a straight copy of the facts, and existing files keep their ids. Its hourly pull needs to learn paging first (see Risk R1).
-9. You decide (section 7): what "edit" and "remove" mean by default, whether private sections may leave Menerio for the Godspeed git repo, whether assistants must always quote you, and whether a machine may ever end a fact you typed.
+9. Decided (section 7): changing a fact keeps the old value as history; removing offers "not true any more" and "this was wrong"; private sections stay out of the Godspeed repo.
 10. Separately, I found a bug that can lose facts today: the tidy-up job deletes rows it then cannot re-insert (Risk R2). It is worth fixing first, whatever you decide here.
 
 ---
@@ -989,22 +989,28 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
 
   Worth separate small fixes.
 
-### Questions for Michael (each answerable in one sentence)
+### Decisions (settled 2026-09-28)
 
-| # | Question | My recommendation |
+**Michael answered three of the questions himself**, all as recommended:
+- **Q1.** Changing a value keeps the old one as history ("Berlin, until today"). "Fix a typo" is the second button.
+- **Q2.** Removing offers two buttons:
+  - "Not true any more" moves the fact to history.
+  - "This was wrong" deletes it, and Menerio does not suggest it again.
+- **Q4.** Facts in sections marked private are **not** copied to the Godspeed repo. Existing copies are removed at the next pull; old git history keeps them.
+
+**The other nine follow from rules Michael already set**, so they were decided without asking:
+
+| # | Decision | Follows from |
 |---|---|---|
-| Q1 | When you change a fact's value on the page, should the old value be kept as history by default ("It changed"), with "Fix a typo" as the second button? | Yes. |
-| Q2 | Should "remove" offer "No longer true" (kept as history, the default) and "Was wrong" (deleted, and never suggested again)? | Yes. |
-| Q3 | Is it fine that pinning applies to a whole line (all your languages), not to one value? | Yes. |
-| Q4 | Should facts in sections you marked private stop being copied into the Godspeed git repo? (Today they are copied; the files would be removed at the next pull, and git history keeps old copies.) | Yes, exclude them. |
-| Q5 | Should facts about people you hid from AI live in the same fact list, but never be embedded, searched or mirrored? | Yes. |
-| Q6 | For facts that never had a date, should "valid from" stay empty instead of being stamped with the day they were entered? | Yes, leave it empty. Nothing invented. |
-| Q7 | Should assistants be refused when they add a fact without quoting the words it came from? | Yes. |
-| Q8 | If a machine learns a different value for something you typed, should both stay visible as "two answers" for you to settle, rather than the machine ending yours? | Yes. |
-| Q9 | May the duplicate-audit job be retired once the database makes exact duplicates impossible, keeping the nightly lint as a report? | Yes. |
-| Q10 | How long should the archived old table be kept before it is dropped? | 60 days. |
-| Q11 | Should text facts in "Relationships & Family" stay text facts, rather than being turned into links between people automatically? | Yes. |
-| Q12 | Where a profile row and its claim say different things today (count B3), should both be kept as "two answers" for you to settle? | Yes. |
+| Q3 | Pinning applies to a whole line ("Languages"), not to one value. | Pins are display settings, and display lives on the slot. |
+| Q5 | Facts about people hidden from AI live in claims but are never embedded, searched or mirrored. | The hide-from-AI setting he already uses. |
+| Q6 | Facts that never had a date keep an empty `valid_from`. | "Never invent a fact." |
+| Q7 | `add_claim` refuses a fact without a verbatim quote. | "Automated facts need a verbatim evidence quote." |
+| Q8 | A machine never ends or changes a fact he typed. A different machine value shows as "two answers". | `world_preferred_wins` and `world/menerio-bridge.md`. |
+| Q9 | The duplicate-audit job is retired; the nightly lint stays, report-only. | The unique live-value index makes exact duplicates impossible. |
+| Q10 | The archived table is kept 60 days, exported to CSV, then dropped. | "No step may lose a fact": the claims hold every fact, and the archive is a safety copy. |
+| Q11 | Text in "Relationships & Family" stays as facts; nothing becomes a link to another person automatically. | Linking a name to a contact is a judgment. |
+| Q12 | Where a profile row and its claim disagree today, both are kept as "two answers" for him to settle. | "Never rewrite words a human typed." |
 
 ---
 
