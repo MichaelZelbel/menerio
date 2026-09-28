@@ -23,6 +23,9 @@ BEGIN
     SELECT to_jsonb(c) - 'embedding'
       FROM public.claims c
      WHERE NOT EXISTS (SELECT 1 FROM fact_backup.profile_entries e WHERE e.id = c.id)   -- made by the switch
+       AND NOT (to_regclass('fact_retired.switch_closed_claims') IS NOT NULL               -- closed by the switch
+                AND c.id IN (SELECT claim_id FROM fact_retired.switch_closed_claims)
+                AND c.value = (SELECT b.value FROM fact_backup.claims b WHERE b.id = c.id))
        AND NOT EXISTS (SELECT 1 FROM fact_backup.claims b
                         WHERE b.id = c.id AND b.value = c.value AND b.attribute = c.attribute
                           AND b.subject_type = c.subject_type AND b.subject_id IS NOT DISTINCT FROM c.subject_id
@@ -55,6 +58,7 @@ BEGIN
   ALTER VIEW fact_retired.world_claims SET SCHEMA public;
 
   DROP INDEX IF EXISTS public.claims_one_live_value;
+  DROP TABLE IF EXISTS fact_retired.switch_closed_claims;
   ALTER TABLE public.profile_entries_archive RENAME TO profile_entries;
   GRANT ALL ON public.profile_entries TO anon, authenticated, service_role;
 

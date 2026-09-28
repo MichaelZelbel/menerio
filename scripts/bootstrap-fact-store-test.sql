@@ -81,6 +81,10 @@ INSERT INTO public.claims (id, user_id, subject_type, subject_id, attribute, val
   -- merge pair sharing a value (the human's copy is on Merge Two)
   ('c0000000-0000-0000-0000-000000000016', '10000000-0000-0000-0000-000000000001', 'contact', 'a0000000-0000-0000-0000-000000000005', 'color', 'Blue', NULL, NULL, 'ai_note', 'Merge One loves the colour blue.', 'ai', '2026-01-16'),
   ('c0000000-0000-0000-0000-000000000017', '10000000-0000-0000-0000-000000000001', 'contact', 'a0000000-0000-0000-0000-000000000006', 'color', 'blue', NULL, NULL, 'user_manual', NULL, 'manual', '2026-01-17'),
+  -- unshown, deleted by the rules: a placeholder, a value already shown under another label, a machine fact without a source
+  ('c0000000-0000-0000-0000-000000000021', '10000000-0000-0000-0000-000000000001', 'self', NULL, 'mood', 'none', NULL, NULL, 'ai_note', 'I have no mood today.', 'ai', '2026-01-21'),
+  ('c0000000-0000-0000-0000-000000000022', '10000000-0000-0000-0000-000000000001', 'contact', 'a0000000-0000-0000-0000-000000000001', 'town', 'Paris', NULL, NULL, 'ai_note', 'Alex lives in Paris now.', 'ai', '2026-01-22'),
+  ('c0000000-0000-0000-0000-000000000023', '10000000-0000-0000-0000-000000000001', 'self', NULL, 'sport', 'Tennis', NULL, NULL, 'unverified', NULL, 'ai', '2026-01-23'),
   -- a preferred unverified legacy entry's claim
   ('c0000000-0000-0000-0000-000000000020', '10000000-0000-0000-0000-000000000001', 'self', NULL, 'shoe-size', '44', NULL, NULL, 'unverified', NULL, 'ai', '2026-01-20');
 

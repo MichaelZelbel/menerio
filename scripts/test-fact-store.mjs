@@ -144,11 +144,18 @@ if (!report) {
 
 await test('report counts', async () => {
   assert.equal(report.step4_folded_duplicates, 1);
-  assert.equal(report.step7_unshown_dropped, 1);
+  assert.equal(report.step7_unshown_dropped, 4);
+  assert.equal(report.step7_dropped_listed, 1);
+  assert.equal(report.step7_dropped_placeholder, 1);
+  assert.equal(report.step7_dropped_already_shown, 1);
+  assert.equal(report.step7_dropped_no_source, 1);
+  assert.equal(report.step7b_two_answers_older_made_history, 1);
+  assert.equal(report.step7b_two_answers_kept_as_several, 1);
+  assert.equal(report.after_two_answers_slots, 0);
   assert.equal(report.step5_entries_closed, 1);
   assert.equal(report.step5_inserted_differs, 2);   // Hometown (typo) and Employer (other subject)
   assert.equal(report.step5_folded_into_existing, 3); // City→Hometown's claim, Hobby, Pet
-  assert.equal(report.after_claims, report.before_claims - 1 - 1 + report.step5_inserted_differs + report.step5_inserted_unlinked);
+  assert.equal(report.after_claims, report.before_claims - 1 - report.step7_unshown_dropped + report.step5_inserted_differs + report.step5_inserted_unlinked);
 });
 
 await test('linked, equal: kept and made preferred', async () => {
@@ -156,11 +163,13 @@ await test('linked, equal: kept and made preferred', async () => {
   assert.deepEqual(r, { rank: 'preferred', value: 'German' });
   assert.equal(await val(db, 'SELECT derived_from_claim_id FROM profile_entries_archive WHERE id=$1', [b(1)]), c(1));
 });
-await test('linked, words differ: a second claim, both current, two answers', async () => {
+await test('linked, words differ: the page\'s words win, the claim\'s other wording becomes history', async () => {
   const r = await one(db, 'SELECT value, attribute, subject_type FROM claims WHERE id=$1', [b(2)]);
   assert.deepEqual(r, { value: 'Berlin', attribute: 'city', subject_type: 'self' });
   assert.equal(await val(db, 'SELECT derived_from_claim_id FROM profile_entries_archive WHERE id=$1', [b(3)]), b(2));
-  assert.equal(await num(db, `SELECT count(*) FROM profile_facts WHERE user_id=$1 AND subject_type='self' AND attribute='city' AND has_conflict AND is_current`, [U]), 2);
+  assert.equal(await num(db, `SELECT count(*) FROM profile_facts WHERE user_id=$1 AND subject_type='self' AND attribute='city' AND is_current`, [U]), 1);
+  assert.equal(await val(db, 'SELECT is_current FROM profile_facts WHERE claim_id=$1', [c(2)]), false);
+  assert.equal(await num(db, 'SELECT count(*) FROM profile_facts WHERE has_conflict AND is_current'), 0);
 });
 await test('linked to another subject: a self claim, the contact claim stays', async () => {
   const r = await one(db, 'SELECT subject_type, rank, origin FROM claims WHERE id=$1', [b(4)]);
@@ -194,6 +203,8 @@ await test('an attribute split across a private and a public section becomes pri
   assert.equal(await val(db, `SELECT category_slug FROM fact_slots WHERE subject_id=$1 AND attribute='diagnosis'`, [P]), 'health');
   assert.equal(await num(db, `SELECT count(*) FROM profile_facts WHERE subject_id=$1 AND attribute='diagnosis' AND visibility_scope='private'`, [P]), 2);
   assert.equal(await num(db, `SELECT count(*) FROM agent_facts WHERE subject_id=$1`, [P]), 0);
+  // The page listed both values, so the attribute keeps both instead of showing two answers.
+  assert.equal(await val(db, `SELECT cardinality FROM fact_slots WHERE subject_id=$1 AND attribute='diagnosis'`, [P]), 'many');
 });
 await test('duplicate group folded to the human copy, its entry re-pointed', async () => {
   assert.equal(await num(db, 'SELECT count(*) FROM claims WHERE id=$1', [c(8)]), 0);
@@ -205,6 +216,8 @@ await test('unshown claims: one kept with a slot, one dropped with a suppression
   assert.equal(await num(db, 'SELECT count(*) FROM claims WHERE id=$1', [c(10)]), 0);
   assert.equal(await num(db, `SELECT count(*) FROM ai_suggestion_suppressions WHERE suppression_key='self::tea:green'`), 1);
   assert.equal(await val(db, 'SELECT rank FROM claims WHERE id=$1', [c(11)]), 'preferred');
+  assert.equal(await num(db, 'SELECT count(*) FROM claims WHERE id IN ($1,$2,$3)', [c(21), c(22), c(23)]), 0);
+  assert.equal(await num(db, `SELECT count(*) FROM ai_suggestion_suppressions WHERE suggestion_type='claim' AND target_entity_id IN ($1,$2,$3)`, [c(21), c(22), c(23)]), 3);
 });
 await test('entities: no slot; the hidden one is not seen by assistants', async () => {
   assert.equal(await num(db, `SELECT count(*) FROM fact_slots WHERE subject_type='entity'`), 0);

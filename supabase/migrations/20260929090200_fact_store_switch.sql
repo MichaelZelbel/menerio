@@ -214,15 +214,42 @@ INSERT INTO fact_switch_report VALUES
     SELECT count(*) FROM (SELECT 1 FROM _fs_placed GROUP BY user_id, subject_type, subject_id, attribute
                            HAVING bool_or(private) AND bool_or(NOT private)) x));
 
--- 7. Live claims no page showed (B6). Dropped ones go, each with a suppression
--- row; the rest get a slot from the map and appear on the page.
+-- 7. Live claims no page showed (B6). Michael's rule (2026-09-28): a solid fact
+-- is shown, garbage is deleted, nobody reviews a list. Deleted, each with a
+-- suppression row so it is not suggested again (the B1 snapshot keeps them):
+--   * the ids in fact_unshown_drop;
+--   * placeholders ("none", "unknown", …) and values that repeat the attribute;
+--   * a value the page already shows for the same subject under another label;
+--   * a machine's fact without a source quote (not typed by a human, not
+--     accepted from the review queue, no 10-character quote).
+-- Everything else gets a slot from the map and appears on the page.
+CREATE TEMP TABLE _fs_drop ON COMMIT DROP AS
+SELECT c.id,
+       CASE
+         WHEN EXISTS (SELECT 1 FROM public.fact_unshown_drop d WHERE d.claim_id = c.id) THEN 'listed'
+         WHEN lower(btrim(c.value)) IN ('', 'none', 'n/a', 'na', 'unknown', 'unspecified', '-', '—', 'null')
+           OR lower(btrim(c.value)) ~ '^(none|n/?a|unknown|unspecified)\s*[.!]?$'
+           OR lower(btrim(c.value)) IN (lower(btrim(c.attribute)), replace(lower(btrim(c.attribute)), '-', ' ')) THEN 'placeholder'
+         WHEN EXISTS (SELECT 1 FROM public.profile_entries p JOIN public.claims s ON s.id = p.derived_from_claim_id
+                       WHERE s.user_id = c.user_id AND s.subject_type = c.subject_type
+                         AND s.subject_id IS NOT DISTINCT FROM c.subject_id
+                         AND lower(btrim(s.value)) = lower(btrim(c.value))) THEN 'already_shown'
+         WHEN c.origin NOT IN ('user_manual', 'review_queue') AND c.rank <> 'preferred'
+          AND length(btrim(coalesce(c.evidence_quote, ''))) < 10 THEN 'no_source'
+       END AS reason
+  FROM public.claims c
+ WHERE c.valid_to IS NULL AND c.subject_type <> 'entity'
+   AND NOT EXISTS (SELECT 1 FROM public.profile_entries p WHERE p.derived_from_claim_id = c.id);
+DELETE FROM _fs_drop WHERE reason IS NULL;
+
 INSERT INTO public.ai_suggestion_suppressions (user_id, suggestion_type, target_entity_type, target_entity_id,
                                                normalized_value, suppression_key)
 SELECT c.user_id, 'claim', 'claim', c.id, lower(btrim(c.value)),
        c.subject_type || ':' || coalesce(c.subject_id::text, '') || ':' || c.attribute || ':' || lower(btrim(c.value))
-  FROM public.claims c JOIN public.fact_unshown_drop d ON d.claim_id = c.id
+  FROM public.claims c JOIN _fs_drop d ON d.id = c.id
 ON CONFLICT (user_id, suppression_key) DO NOTHING;
-WITH dropped AS (DELETE FROM public.claims c USING public.fact_unshown_drop d WHERE c.id = d.claim_id RETURNING 1)
+INSERT INTO fact_switch_report SELECT 'step7_dropped_' || reason, count(*) FROM _fs_drop GROUP BY reason;
+WITH dropped AS (DELETE FROM public.claims c USING _fs_drop d WHERE c.id = d.id RETURNING 1)
 INSERT INTO fact_switch_report SELECT 'step7_unshown_dropped', count(*) FROM dropped;
 
 INSERT INTO fact_switch_report
@@ -249,6 +276,48 @@ SELECT 'step7_slots_added_into_private_section', count(*) FROM added a
  WHERE EXISTS (SELECT 1 FROM public.profile_categories k
                 WHERE k.user_id = a.user_id AND k.slug = a.category_slug AND k.visibility_scope = 'private'
                   AND k.contact_id IS NOT DISTINCT FROM a.subject_id);
+
+-- 7b. No "two answers" left (Michael's rule, 2026-09-28). For each subject and
+-- single-valued attribute with more than one current value:
+--   * if the page already listed two or more of those values, the attribute
+--     keeps all of them (slot cardinality 'many');
+--   * if a value a human typed would lose, the same, so no human fact is closed;
+--   * otherwise the value the page showed wins, else the newest, and the others
+--     become history (valid_to = the user's today). Nothing is deleted.
+CREATE TEMP TABLE _fs_conflict ON COMMIT DROP AS
+SELECT c.id, c.user_id, c.subject_type, c.subject_id, c.attribute, c.rank,
+       EXISTS (SELECT 1 FROM public.profile_entries p WHERE p.derived_from_claim_id = c.id) AS shown,
+       row_number() OVER (PARTITION BY c.user_id, c.subject_type, c.subject_id, c.attribute
+         ORDER BY EXISTS (SELECT 1 FROM public.profile_entries p WHERE p.derived_from_claim_id = c.id) DESC,
+                  (c.rank = 'preferred') DESC, c.valid_from DESC NULLS LAST, c.created_at DESC, c.id) AS place
+  FROM public.profile_facts f JOIN public.claims c ON c.id = f.claim_id
+ WHERE f.has_conflict AND f.is_current;
+
+CREATE TEMP TABLE _fs_conflict_groups ON COMMIT DROP AS
+SELECT user_id, subject_type, subject_id, attribute,
+       (count(*) FILTER (WHERE shown) >= 2 OR bool_or(rank = 'preferred' AND place > 1)) AS keep_all
+  FROM _fs_conflict GROUP BY 1, 2, 3, 4;
+
+WITH made_many AS (
+  UPDATE public.fact_slots s SET cardinality = 'many'
+    FROM _fs_conflict_groups g
+   WHERE g.keep_all AND s.user_id = g.user_id AND s.subject_type = g.subject_type
+     AND s.subject_id IS NOT DISTINCT FROM g.subject_id AND s.attribute = g.attribute
+  RETURNING 1)
+INSERT INTO fact_switch_report SELECT 'step7b_two_answers_kept_as_several', count(*) FROM made_many;
+
+-- The ids are kept (in fact_retired, with the archive) so the rollback can tell
+-- the switch's own changes from facts changed after go-live.
+CREATE TABLE fact_retired.switch_closed_claims (claim_id uuid PRIMARY KEY);
+WITH closed AS (
+  UPDATE public.claims c SET valid_to = public.fact_today(c.user_id)
+    FROM _fs_conflict x JOIN _fs_conflict_groups g
+      ON g.user_id = x.user_id AND g.subject_type = x.subject_type
+     AND g.subject_id IS NOT DISTINCT FROM x.subject_id AND g.attribute = x.attribute
+   WHERE c.id = x.id AND x.place > 1 AND NOT g.keep_all
+  RETURNING c.id)
+INSERT INTO fact_retired.switch_closed_claims SELECT id FROM closed;
+INSERT INTO fact_switch_report SELECT 'step7b_two_answers_older_made_history', count(*) FROM fact_retired.switch_closed_claims;
 
 -- 8. One live copy of a value per subject and attribute.
 CREATE UNIQUE INDEX claims_one_live_value ON public.claims
@@ -595,6 +664,9 @@ BEGIN
     SELECT 1 FROM public.fact_slots s WHERE s.user_id = c.user_id AND s.subject_type = c.subject_type
        AND s.subject_id IS NOT DISTINCT FROM c.subject_id AND s.attribute = c.attribute);
   IF cnt > 0 THEN RAISE EXCEPTION 'fact_switch_assert: % claims have no slot', cnt; END IF;
+
+  SELECT count(*) INTO cnt FROM public.profile_facts WHERE has_conflict AND is_current;
+  IF cnt > 0 THEN RAISE EXCEPTION 'fact_switch_assert: % facts still show two answers', cnt; END IF;
 
   SELECT count(*) INTO cnt FROM public.world_claims WHERE source_table = 'profile_entry';
   IF cnt > 0 THEN RAISE EXCEPTION 'fact_switch_assert: world_claims still has profile_entry rows'; END IF;
