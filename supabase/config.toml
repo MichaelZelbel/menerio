@@ -294,3 +294,6 @@ verify_jwt = false
 
 [functions.wiki-cleanup]
 verify_jwt = false
+
+[functions.build-fact-label-map]
+verify_jwt = false

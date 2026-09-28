@@ -5,10 +5,13 @@
 # function bodies, so it is written only to the directory given (the session
 # scratchpad) and never committed (plan rule 5.1).
 # Needs: postgresql-16 and postgresql-16-pgvector.
-# Usage: bash scripts/rehearsal/build-local-db.sh <scratch-dir>
-# Then:  psql -h <scratch-dir>/pg -p 55432 -U postgres -d live
+# Usage: bash scripts/rehearsal/build-local-db.sh <scratch-dir> [--template]
+# The server's data and socket live in $FACT_PG_DIR (default /var/tmp/menerio-fact-pg),
+# owned by the postgres user: the session scratchpad's permissions can change under
+# a running server. --template renames the result to live_tpl for scripts/test-fact-store.mjs.
+# Then:  psql -h /var/tmp/menerio-fact-pg -p 55432 -U postgres -d live
 set -euo pipefail
-S=${1:?scratch dir}; HERE=$(cd "$(dirname "$0")" && pwd); PG=/usr/lib/postgresql/16/bin
+S=${1:?scratch dir}; TEMPLATE=${2:-}; PGDIR=${FACT_PG_DIR:-/var/tmp/menerio-fact-pg}; HERE=$(cd "$(dirname "$0")" && pwd); PG=/usr/lib/postgresql/16/bin
 mkdir -p "$S/schema" "$S/pg"
 q(){ bash "$HERE/prod-read.sh" "$2" > "$S/schema/$1.json"; jq -e 'type=="array"' "$S/schema/$1.json" >/dev/null || { echo "query $1 failed"; exit 1; }; }
 q enums "select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text labels from pg_type t join pg_enum e on e.enumtypid=t.oid where t.typnamespace='public'::regnamespace group by 1"
@@ -24,22 +27,21 @@ q pol "select pol.polrelid::regclass::text rel, pol.polname, pg_get_expr(pol.pol
 python3 "$HERE/build-local-db.py" "$S"
 
 id postgres >/dev/null 2>&1 || useradd -m postgres
-d="$S"; while [ "$d" != / ]; do chmod o+x "$d" 2>/dev/null || true; d=$(dirname "$d"); done
-if ! su postgres -c "$PG/pg_isready -h $S/pg -p 55432" >/dev/null 2>&1; then
-  rm -rf "$S/pg/data"; chown postgres "$S/pg"
-  su postgres -c "$PG/initdb -D $S/pg/data -U postgres -A trust >/dev/null && $PG/pg_ctl -D $S/pg/data -o '-p 55432 -k $S/pg' -l $S/pg/log start >/dev/null"
+if ! su postgres -c "$PG/pg_isready -h $PGDIR -p 55432" >/dev/null 2>&1; then
+  rm -rf "$PGDIR"; mkdir -p "$PGDIR"; chown postgres "$PGDIR"; chmod 700 "$PGDIR"
+  su postgres -c "$PG/initdb -D $PGDIR/data -U postgres -A trust >/dev/null && $PG/pg_ctl -D $PGDIR/data -o '-p 55432 -k $PGDIR -c listen_addresses=' -l $PGDIR/log start >/dev/null"
   sleep 2
 fi
-P="psql -h $S/pg -p 55432 -U postgres -X -q"
+P="psql -h $PGDIR -p 55432 -U postgres -X -q"
 $P -c "drop database if exists live" -c "create database live" >/dev/null
 fail=0
 run(){ out=$($P -d live -f "$1" 2>&1 | grep -i "error" || true); [ -z "$out" ] || { echo "$(basename "$1"):"; echo "$out" | head -5; fail=1; }; }
 run "$S/pg/01_tables.sql"; run "$S/pg/02_funcs.sql"
-python3 - "$S" <<'PY'
+python3 - "$S" "$PGDIR" <<'PY'
 import json,subprocess,sys
 S=sys.argv[1]; vs=json.load(open(f"{S}/pg/03_views.json"))
 for _ in range(5):
-    left=[v for v in vs if "ERROR" in subprocess.run(["psql","-h",f"{S}/pg","-p","55432","-U","postgres","-X","-q","-d","live","-c","set search_path=public,extensions; "+v],capture_output=True,text=True).stderr]
+    left=[v for v in vs if "ERROR" in subprocess.run(["psql","-h",sys.argv[2],"-p","55432","-U","postgres","-X","-q","-d","live","-c","set search_path=public,extensions; "+v],capture_output=True,text=True).stderr]
     if not left: break
     vs=left
 else: sys.exit(f"{len(left)} views not created")
@@ -48,4 +50,7 @@ for f in 04_cons 05_idx 06_trig 07_rls; do run "$S/pg/$f.sql"; done
 $P -d live -tA -c "select 'tables='||count(*) filter (where relkind='r')||' views='||count(*) filter (where relkind='v') from pg_class where relnamespace='public'::regnamespace" \
   -c "select 'functions='||count(*) from pg_proc where pronamespace='public'::regnamespace" \
   -c "select 'triggers='||count(*) from pg_trigger where not tgisinternal" -c "select 'policies='||count(*) from pg_policy"
+if [ "$TEMPLATE" = "--template" ] && [ $fail = 0 ]; then
+  $P -c "drop database if exists live_tpl" -c "alter database live rename to live_tpl"
+fi
 exit $fail

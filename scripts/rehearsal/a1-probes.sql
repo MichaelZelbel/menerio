@@ -1,6 +1,6 @@
 -- A1 probes for docs/plans/one-fact-store.md (section 8, "A1 run"). Invented fixture only.
 -- Applies the plan's draft DDL (3.2, 3.3) to the local live-schema DB, then reproduces findings 1 and 2.
--- Usage: psql -h <scratch>/pg -p 55432 -U postgres -d live -f scripts/rehearsal/a1-probes.sql   (on a fresh build)
+-- Usage: psql -h /var/tmp/menerio-fact-pg -p 55432 -U postgres -d live -f scripts/rehearsal/a1-probes.sql   (on a fresh build)
 \set ON_ERROR_STOP 1
 set search_path = public, extensions;
 -- 3.2
