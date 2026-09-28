@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-edge-functions.mjs && vitest run",
+    "test": "node scripts/check-edge-functions.mjs && node scripts/check-no-profile-entry-writes.mjs && node scripts/check-no-prod-data.mjs && vitest run",
     "check:functions": "node scripts/check-edge-functions.mjs",
     "test:watch": "vitest"
   },

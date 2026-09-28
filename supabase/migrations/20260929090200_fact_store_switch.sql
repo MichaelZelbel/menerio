@@ -591,6 +591,73 @@ end $function$;
 REVOKE ALL ON FUNCTION public.merge_contacts_atomic(uuid, uuid, uuid, boolean) FROM public, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.merge_contacts_atomic(uuid, uuid, uuid, boolean) TO authenticated;
 
+-- profile-reconcile folds a contact that is really the account owner into
+-- self (plan 2.3). It runs as the service role, so it cannot delete a human's
+-- copy: when both copies of one value are preferred it skips that contact and
+-- says so, instead of failing on the unique index every two hours (ninth review).
+CREATE FUNCTION public.fold_contact_into_self(p_user_id uuid, p_contact_id uuid) RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
+DECLARE
+  e record; k record; sl record; c record;
+BEGIN
+  PERFORM 1 FROM public.contacts WHERE id = p_contact_id AND user_id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN 'not_found'; END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.claims a JOIN public.claims b
+      ON b.user_id = a.user_id AND b.subject_type = 'self' AND b.attribute = a.attribute
+     AND lower(btrim(b.value)) = lower(btrim(a.value)) AND b.valid_to IS NULL
+     WHERE a.user_id = p_user_id AND a.subject_type = 'contact' AND a.subject_id = p_contact_id
+       AND a.valid_to IS NULL AND a.rank = 'preferred' AND b.rank = 'preferred') THEN
+    RETURN 'skipped_two_preferred';
+  END IF;
+
+  -- Identical live values: keep the human's copy, else self's.
+  FOR e IN SELECT * FROM public.claims WHERE user_id = p_user_id AND subject_type = 'contact' AND subject_id = p_contact_id AND valid_to IS NULL ORDER BY id FOR UPDATE LOOP
+    SELECT * INTO k FROM public.claims WHERE user_id = p_user_id AND subject_type = 'self' AND attribute = e.attribute
+       AND lower(btrim(value)) = lower(btrim(e.value)) AND valid_to IS NULL FOR UPDATE;
+    IF FOUND THEN
+      IF e.rank = 'preferred' THEN DELETE FROM public.claims WHERE id = k.id;
+      ELSE DELETE FROM public.claims WHERE id = e.id; END IF;
+    END IF;
+  END LOOP;
+  UPDATE public.claims SET subject_type = 'self', subject_id = NULL
+   WHERE user_id = p_user_id AND subject_type = 'contact' AND subject_id = p_contact_id;
+
+  -- Slots: self's wins, pins combined, the most private placement wins.
+  FOR e IN SELECT * FROM public.fact_slots WHERE user_id = p_user_id AND subject_type = 'contact' AND subject_id = p_contact_id ORDER BY id FOR UPDATE LOOP
+    SELECT * INTO sl FROM public.fact_slots WHERE user_id = p_user_id AND subject_type = 'self' AND attribute = e.attribute FOR UPDATE;
+    IF FOUND THEN
+      UPDATE public.fact_slots SET is_pinned = sl.is_pinned OR e.is_pinned, show_to_agent = sl.show_to_agent OR e.show_to_agent,
+        category_slug = CASE
+          WHEN EXISTS (SELECT 1 FROM public.profile_categories WHERE user_id = p_user_id AND contact_id = p_contact_id AND slug = e.category_slug AND visibility_scope = 'private')
+           AND NOT EXISTS (SELECT 1 FROM public.profile_categories WHERE user_id = p_user_id AND contact_id IS NULL AND slug = sl.category_slug AND visibility_scope = 'private')
+          THEN e.category_slug ELSE sl.category_slug END
+       WHERE id = sl.id;
+      DELETE FROM public.fact_slots WHERE id = e.id;
+    ELSE
+      UPDATE public.fact_slots SET subject_type = 'self', subject_id = NULL WHERE id = e.id;
+    END IF;
+  END LOOP;
+
+  -- Sections: move, or fold into self's, the most private scope winning.
+  FOR c IN SELECT * FROM public.profile_categories WHERE user_id = p_user_id AND contact_id = p_contact_id ORDER BY id FOR UPDATE LOOP
+    SELECT * INTO k FROM public.profile_categories WHERE user_id = p_user_id AND contact_id IS NULL AND slug = c.slug ORDER BY id LIMIT 1 FOR UPDATE;
+    IF NOT FOUND THEN
+      UPDATE public.profile_categories SET contact_id = NULL WHERE id = c.id;
+    ELSE
+      IF c.visibility_scope = 'private' AND coalesce(k.visibility_scope, 'all') <> 'private' THEN
+        UPDATE public.profile_categories SET visibility_scope = 'private' WHERE id = k.id;
+      END IF;
+      DELETE FROM public.profile_categories WHERE id = c.id;
+    END IF;
+  END LOOP;
+  RETURN 'folded';
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.fold_contact_into_self(uuid, uuid) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fold_contact_into_self(uuid, uuid) TO service_role;
+
 -- 12. Review queue: items that point at an entry now point at its claim. Items
 -- whose entry was folded into another claim are not revertible (a revert would
 -- delete a different, possibly human, fact). Items whose entry no longer exists

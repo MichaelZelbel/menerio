@@ -372,6 +372,26 @@ await test('merge into self: claims move to self, identical values fold to the p
   assert.deepEqual(r, { employer: b(4), leftovers: '0', aka: '1' });
 });
 
+await test('reconcile fold: a self-duplicate contact\'s facts move to self, the human copy kept', async () => {
+  const r = await as(db, MACHINE, async () => {
+    const outcome = await val(db, 'SELECT fold_contact_into_self($1, $2)', [U, SC]);
+    return { outcome, ...(await one(db, `SELECT
+      (SELECT string_agg(id::text, ',') FROM claims WHERE user_id=$1 AND subject_type='self' AND attribute='employer' AND valid_to IS NULL) employer,
+      (SELECT count(*) FROM claims WHERE subject_id=$2) + (SELECT count(*) FROM fact_slots WHERE subject_id=$2) leftovers`, [U, SC])) };
+  });
+  assert.deepEqual(r, { outcome: 'folded', employer: b(4), leftovers: '0' });
+});
+await test('reconcile fold: two human copies of one value → the contact is skipped, nothing moves', async () => {
+  const r = await as(db, MACHINE, async () => {
+    await db.query(`RESET ROLE`);
+    await db.query(`INSERT INTO claims (user_id, subject_type, attribute, value, origin) VALUES ($1,'self','pet','Rex','user_manual')`, [U]);
+    await db.query(`SET LOCAL ROLE service_role`);
+    const outcome = await val(db, 'SELECT fold_contact_into_self($1, $2)', [U, A]);
+    return { outcome, left: await num(db, 'SELECT count(*) FROM claims WHERE subject_id=$1', [A]) > 0 };
+  });
+  assert.deepEqual(r, { outcome: 'skipped_two_preferred', left: true });
+});
+
 // ------------------------------------------------------------------ rollback
 await test('rollback restores the snapshot, keeps a post-switch fact aside, and the old triggers work', async () => {
   await as(db, HUMAN, () => db.query(`INSERT INTO claims (user_id, subject_type, attribute, value, origin) VALUES ($1,'self','hobby','Running','user_manual')`, [U]), { keep: true });
