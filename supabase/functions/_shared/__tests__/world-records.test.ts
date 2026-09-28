@@ -3,6 +3,8 @@ import {
   dateOnly,
   parseLimit,
   parseUpdatedSince,
+  readWindow,
+  relationshipExclusionFilter,
   slugWithFallback,
   slugify,
   toWorldClaim,
@@ -195,5 +197,53 @@ describe("parseLimit", () => {
     expect(parseLimit("0")).toBe(500);
     expect(parseLimit("-5")).toBe(500);
     expect(parseLimit("many")).toBe(500);
+  });
+});
+
+describe("readWindow", () => {
+  // A server that answers at most `cap` rows per request, like PostgREST.
+  const server = (total: number, cap = 1000) => {
+    const calls: Array<[number, number]> = [];
+    const rows = Array.from({ length: total }, (_, i) => ({ n: i }));
+    const fetch = (from: number, to: number) => {
+      calls.push([from, to]);
+      return Promise.resolve({ data: rows.slice(from, Math.min(to + 1, from + cap)), error: null });
+    };
+    return { calls, fetch };
+  };
+
+  it("returns the whole window of 2000 rows, past the server's 1000-row cap", async () => {
+    const s = server(2500);
+    const out = await readWindow(s.fetch, 0, 2000);
+    expect(out).toHaveLength(2000);
+    expect(out[1999]).toEqual({ n: 1999 });
+    expect(s.calls).toEqual([[0, 999], [1000, 1999]]);
+  });
+
+  it("starts at the offset and stops at the end of the data", async () => {
+    const s = server(1500);
+    const out = await readWindow(s.fetch, 1200, 2000);
+    expect(out.map((r) => r.n)).toEqual(Array.from({ length: 300 }, (_, i) => 1200 + i));
+  });
+
+  it("keeps paging when the server caps below the page size", async () => {
+    const s = server(700, 250);
+    expect(await readWindow(s.fetch, 0, 600)).toHaveLength(600);
+  });
+
+  it("fails loudly instead of returning a short page", async () => {
+    await expect(readWindow(() => Promise.resolve({ data: null, error: { message: "boom" } }), 0, 10)).rejects.toEqual({ message: "boom" });
+  });
+});
+
+describe("relationshipExclusionFilter", () => {
+  it("leaves out a row from or to a hidden or sensitive person, in one database filter", () => {
+    expect(relationshipExclusionFilter(["a", "b", "a", ""])).toBe(
+      "and(or(subject_id.is.null,subject_id.not.in.(a,b)),or(object_id.is.null,object_id.not.in.(a,b)))",
+    );
+  });
+
+  it("filters nothing when nobody is hidden", () => {
+    expect(relationshipExclusionFilter([])).toBeNull();
   });
 });

@@ -6,11 +6,13 @@
  * (note-chat, conversation-chat) can inject the user's own profile and their
  * explicit agent instructions without duplicating the query logic.
  *
- * Deliberately compact: returns the user's profile categories + entries and
- * their active agent_instructions. Skips linked-note bodies and the heavy
+ * Deliberately compact: returns the user's current facts, by section (from
+ * agent_facts), and their active agent_instructions. Skips linked-note bodies and the heavy
  * note-scanning relationship derivation — those are high-token and the chat
  * agents have dedicated person tools for relationship lookups.
  */
+
+import { groupFactsBySection, labelOf, readFacts, type FactRow } from "./agent-facts.ts";
 
 export interface UserProfileEntry {
   label: string;
@@ -29,8 +31,8 @@ export interface UserProfile {
 }
 
 /**
- * Fetch the current user's own profile (never contacts', never `private`
- * scope) plus their active agent instructions. Returns empty arrays when the
+ * Fetch the current user's own current facts (never contacts', never a
+ * `private` section) plus their active agent instructions. Returns empty arrays when the
  * user hasn't populated a profile yet.
  */
 export async function getUserProfile(
@@ -39,62 +41,20 @@ export async function getUserProfile(
 ): Promise<UserProfile> {
   const empty: UserProfile = { categories: [], agent_instructions: [] };
 
-  // Categories: the user's own profile (contact_id IS NULL), excluding private.
-  const { data: cats, error: catErr } = await db
-    .from("profile_categories")
-    .select("id, name, slug, visibility_scope, sort_order")
-    .eq("user_id", userId)
-    .is("contact_id", null)
-    .neq("visibility_scope", "private")
-    .order("sort_order");
-  if (catErr) {
-    console.warn("[user-profile] category load failed:", catErr.message);
+  // The user's own current facts, from agent_facts: never a private section,
+  // never a contact's fact, never history. This goes into a chat prompt, so
+  // it follows the assistants' rule. Grouped by section, each fact once.
+  let rows: FactRow[] = [];
+  try {
+    rows = await readFacts(db, userId, { subjectType: "self" });
+  } catch (err) {
+    console.warn("[user-profile] fact load failed:", (err as Error).message);
   }
-
-  const filteredCats = (cats || []) as any[];
-  const catIds = filteredCats.map((c) => c.id);
-
-  let entries: any[] = [];
-  if (catIds.length > 0) {
-    const { data: entryRows } = await db
-      .from("profile_entries")
-      .select("category_id, label, value, sort_order")
-      .eq("user_id", userId)
-      .is("contact_id", null)
-      .in("category_id", catIds)
-      .order("sort_order");
-    entries = (entryRows || []) as any[];
-  }
-
-  // Collapse categories that share a slug; dedupe entries by (label, value).
-  const slugOrder: string[] = [];
-  const slugBuckets = new Map<string, { name: string; slug: string; catIds: Set<string> }>();
-  for (const cat of filteredCats) {
-    const slug = cat.slug || cat.id;
-    if (!slugBuckets.has(slug)) {
-      slugBuckets.set(slug, { name: cat.name, slug, catIds: new Set([cat.id]) });
-      slugOrder.push(slug);
-    } else {
-      slugBuckets.get(slug)!.catIds.add(cat.id);
-    }
-  }
-
-  const categories: UserProfileCategory[] = [];
-  for (const slug of slugOrder) {
-    const bucket = slugBuckets.get(slug)!;
-    const seen = new Set<string>();
-    const catEntries: UserProfileEntry[] = [];
-    for (const e of entries) {
-      if (!bucket.catIds.has(e.category_id)) continue;
-      const key = `${String(e.label ?? "").trim().toLowerCase()}\u0000${String(e.value ?? "").trim().toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      catEntries.push({ label: e.label, value: e.value });
-    }
-    if (catEntries.length > 0) {
-      categories.push({ name: bucket.name, slug: bucket.slug, entries: catEntries });
-    }
-  }
+  const categories: UserProfileCategory[] = groupFactsBySection(rows).map((section) => ({
+    name: section.name,
+    slug: section.slug,
+    entries: section.facts.map((f) => ({ label: labelOf(f), value: f.value })),
+  }));
 
   // Active agent instructions (never `private`).
   const { data: insts } = await db

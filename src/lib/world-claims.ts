@@ -60,11 +60,11 @@ export interface ClaimGroup {
   subject_id: string | null;
   attribute: string;
   category: string | null;
-  /** What the screen shows first. A human's value when there is one. */
+  /** What the screen shows first. A current value, a human's when there is one. */
   top: ClaimRow;
-  /** Everything else believed about the same thing, newest first. */
+  /** Everything else believed about the same thing: current values first, then history, newest first. */
   others: ClaimRow[];
-  /** True when a machine holds a different value from the one on top. */
+  /** True when another CURRENT value differs from the one on top. History is not a disagreement. */
   disagreed: boolean;
 }
 
@@ -88,7 +88,7 @@ function sortKey(row: ClaimRow): number {
   return row.updated_at ? new Date(row.updated_at).getTime() : 0;
 }
 
-export function groupClaims(rows: ClaimRow[]): ClaimGroup[] {
+export function groupClaims(rows: ClaimRow[], today = new Date()): ClaimGroup[] {
   const buckets = new Map<string, ClaimRow[]>();
 
   for (const row of rows) {
@@ -104,7 +104,11 @@ export function groupClaims(rows: ClaimRow[]): ClaimGroup[] {
 
   const groups: ClaimGroup[] = [];
   for (const [key, bucket] of buckets) {
+    // A value that has stopped being true is history: it never goes on top
+    // while a current value exists, and it never counts as a disagreement.
     const ordered = [...bucket].sort((a, b) => {
+      const currentDiff = Number(isCurrent(b, today)) - Number(isCurrent(a, today));
+      if (currentDiff !== 0) return currentDiff;
       const humanDiff = Number(isHumanWritten(b)) - Number(isHumanWritten(a));
       if (humanDiff !== 0) return humanDiff;
       return sortKey(b) - sortKey(a);
@@ -118,8 +122,8 @@ export function groupClaims(rows: ClaimRow[]): ClaimGroup[] {
       category: top.category,
       top,
       others,
-      disagreed: others.some(
-        (o) => o.value.trim().toLowerCase() !== top.value.trim().toLowerCase(),
+      disagreed: isCurrent(top, today) && others.some(
+        (o) => isCurrent(o, today) && o.value.trim().toLowerCase() !== top.value.trim().toLowerCase(),
       ),
     });
   }

@@ -4,6 +4,7 @@ import { insufficientCreditsResponse } from "../_shared/llm-credits.ts";
 import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { GENERATE_PROFILE_SUGGESTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
+import { labelOf, readFacts } from "../_shared/agent-facts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -150,22 +151,15 @@ serve(async (req) => {
       return `Title: ${n.title}\nSnippet: ${content}`;
     });
 
-    // 4. Get existing entries to avoid duplicates
+    // 4. Get existing facts to avoid duplicates
     // Paged: past 1,000 rows the model was told "do not duplicate" about only
     // part of the profile, and suggested what the rest already holds. Owner rows
     // only: these suggestions are for the owner's own profile, and every
     // contact's facts listed here too would grow the prompt with each person.
-    const existingEntries = await selectAllRows<{ label: string; value: string }>((from, to) =>
-      db
-        .from("profile_entries")
-        .select("label, value, category_id")
-        .eq("user_id", userId)
-        .is("contact_id", null)
-        .order("id")
-        .range(from, to)
-    );
-
-    const existingLabels = existingEntries.map((e) => `${e.label}: ${e.value}`);
+    // From agent_facts, current rows only: this list is sent to the LLM, so it
+    // follows the assistants' rule (no private section, no history).
+    const existingFacts = await readFacts(db, userId, { subjectType: "self" });
+    const existingLabels = existingFacts.map((f) => `${labelOf(f)}: ${f.value}`);
 
     const prompt = `You are analyzing a user's personal notes to suggest profile entries for the OWNER'S OWN personal profile.
 
