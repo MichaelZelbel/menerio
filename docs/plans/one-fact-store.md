@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: proposal, 2026-09-28, reviewed nine times (section 8). Nothing in this document has been built. Part A1 ran on 2026-09-28 and a local live-schema database was built; its findings (section 8, "A1 run") are folded into the steps below.
+Status: 2026-09-28. A1 ran; A3 (both migrations, the rollback, the label map) and the A5 SQL harness are built on branch `claude/wonderful-keller-sashcq` and pass on a database built from the live schema (section 8, "A3 built"). A6 is waiting for write access to production. A2 (the application code) is not started.
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -669,7 +669,7 @@ Why this is safe without staged holds:
   8. `CREATE UNIQUE INDEX claims_one_live_value` (section 3.2).
   9. `world_claims` becomes its final form (section 3.4).
   10. Retire the old table:
-      - drop every trigger on `profile_entries`, including the bridge triggers;
+      - keep every trigger on `profile_entries`, disabled since step 1, and move the functions this step and step 11 replace into schema `fact_retired` instead of dropping them, so the rollback restores them exactly ("A3 built", decision 1);
       - drop the foreign keys `derived_from_claim_id → claims` and **`category_id → profile_categories`** (the second cascades deletes into the archive otherwise). The columns stay as the permanent lookup;
       - `ALTER TABLE profile_entries RENAME TO profile_entries_archive`;
       - revoke all on it from `authenticated` and `anon`. RLS and its policies stay on.
@@ -978,7 +978,46 @@ Not a prose review. A1 ran read-only against production (counts and catalog only
 
 **Minor:** the archive keeps `contact_id → contacts ON DELETE CASCADE`, so deleting a contact also deletes its archived entries. The "permanent lookup" is permanent only for contacts that still exist. That is acceptable, since `fact_backup` covers the go-live window, but it should be a stated choice.
 
-**Verdict.** The shape holds. Nothing found touches options (A)–(F) or the one-sitting go-live. Five steps were wrong in ways only the live schema shows, as R11 predicted, and are corrected above. The rehearsal proper (A5) still has to run once A2/A3 exist: the local database is ready for it.
+**Verdict (A1).** The shape holds. Nothing found touches options (A)–(F) or the one-sitting go-live. Five steps were wrong in ways only the live schema shows, as R11 predicted, and are corrected above. The rehearsal proper (A5) still has to run once A2/A3 exist: the local database is ready for it.
+
+### A3 built and rehearsed on the live schema (2026-09-28)
+
+Built on `claude/wonderful-keller-sashcq` (code stays off `main` until the one pull request):
+
+- `supabase/migrations/20260929090000_fact_store_inputs.sql` (the two input tables), `…090100_fact_store_schema.sql`, `…090200_fact_store_switch.sql`;
+- `supabase/rollback/fact_store_backup.sql` (B1 snapshot) and `supabase/rollback/fact_store_rollback.sql` (5.4). The per-migration rollback files point to it;
+- `supabase/functions/build-fact-label-map/` and `_shared/fact-label-map.ts` (with a unit test);
+- `scripts/test-fact-store.mjs` + `scripts/bootstrap-fact-store-test.sql` (invented fixture), run on a copy of the live schema built by `scripts/rehearsal/build-local-db.sh`;
+- `scripts/rehearsal/dress-rehearsal-sql.sh` (A6), `prod-apply.sh` (write-mode runner), `predict-switch-counts.sql` (read-only).
+
+**Result: 39 of 39.** Every switch case in A5, the guards, the views as `authenticated` and `anon`, `match_claims`, contact and account deletes, both merges, the private-section guard, both pre-checks, a corrupted fixture that trips the privacy assertion, and the full rollback: after it the five tables equal the snapshot row for row, every function, trigger, view and grant equals the live schema, and schema plus switch apply again with the same counts.
+
+**Decisions made while building (Michael may overrule any):**
+1. **Nothing is dropped, it is retired.** The old entry triggers stay on the archive, disabled. Every function the switch replaces (the ten dead ones, the nine entry trigger functions, `merge_contacts_atomic`, `contact_merge_move_references`, `match_claims`) and the old `world_claims` view move into schema `fact_retired`, closed to the API roles. The rollback moves them back, which is why it restores the live catalog exactly without copying any function text. `fact_retired` is dropped together with the archive (Q10).
+2. **The inputs are their own migration**, because A6 needs `fact_label_map` to exist before the rolled-back rehearsal. Dropped in B6.
+3. **Review items keep their old target and status in `payload.fact_store_switch`.** `review_queue` has no "revertible" column, so that flag lives there too. The rollback reads it back.
+4. **Slot `cardinality` is always NULL after the switch.** The "unless" clause in step 6 comes to the same thing, since a NULL on a single-valued attribute is exactly what shows two answers. The prediction below puts this at **25 attributes with a "two answers" badge** on go-live. Alternative: set `'many'` on slots whose entries already listed several values. That would hide real contradictions, so it is not done without Michael's word.
+5. **`anon` is refused on the views** (permission denied) instead of getting no rows.
+6. **The A6 rehearsal is one `DO` block** that runs both migrations and then always raises, with the counts as the message. One statement is atomic whatever transaction mode the management API uses, so it cannot leave anything behind.
+7. `merge_contacts_atomic`'s receipt now snapshots the source's claims and slots instead of its entries.
+8. The archive keeps `contact_id → contacts ON DELETE CASCADE` (A1 "Minor"): accepted.
+
+**A6 is blocked.** Its first write-mode call (creating the two empty input tables) was refused by Claude Code's auto mode ("Production Deploy"). A6 needs three writes that Michael allows: the inputs migration, deploying `build-fact-label-map` and running it once (`select internal.call_edge('build-fact-label-map', '{}')`), and the rehearsal statement from `dress-rehearsal-sql.sh`. Either approve each when asked, or add a rule for `bash scripts/rehearsal/prod-apply.sh *` and the function deploy.
+
+**Predicted counts (read-only, 2026-09-28, `predict-switch-counts.sql`).** On the fixture this query matches the switch's own report. Production:
+
+| | |
+|---|---|
+| claims before → after | 519 → 454 |
+| duplicates folded (step 4) | 96 |
+| made preferred (step 3) | 17 |
+| entries equal / words differ / closed / unlinked | 238 / 12 / 1 / 22 |
+| new claims from entries / entries folded into an existing value | 31 / 3 |
+| live claims no page showed, now shown (all kept) | 159 |
+| attributes showing "two answers" | 25 |
+| attributes placed private by "most private wins" | 0 |
+
+A6 replaces these with the real numbers and adds the Godspeed removals.
 
 ## 9. Running this plan
 
@@ -987,7 +1026,7 @@ Not a prose review. A1 ran read-only against production (counts and catalog only
 - **Sessions.** Part A can take one or several sessions; each continues from this file and the implementation branch, and none of them waits for anything in production. Parts B and C run in **one** session, back to back, with Michael available for about three hours: one approval before B, pausing and resuming the Godspeed runner on his machine, and the 10-minute page walk-through in C. Before that, in A6, he goes through the list of unshown facts (or keeps them all).
 - **Credentials.**
   - The cloud environment carries `SUPABASE_ACCESS_TOKEN`, and its network allows `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` (confirmed working on 2026-09-28). Only sessions started after that change see it.
-  - **Status 2026-09-28 (later):** `.claude/settings.json` on `main` allows `bash scripts/rehearsal/prod-read.sh`, which runs with `read_only: true` as `supabase_read_only_user`. A1 ran with it (section 8, "A1 run"). The live-schema database is built by `scripts/rehearsal/build-local-db.sh` on the implementation branch; the schema stays in the session scratchpad.
+  - **Status 2026-09-28 (later):** `.claude/settings.json` on `main` allows `bash scripts/rehearsal/prod-read.sh`, which runs with `read_only: true` as `supabase_read_only_user`. A1 ran with it (section 8, "A1 run"). Write-mode calls (`scripts/rehearsal/prod-apply.sh`) are refused by auto mode, which blocks A6 (section 8, "A3 built"). The live-schema database is built by `scripts/rehearsal/build-local-db.sh` on the implementation branch; the schema stays in the session scratchpad.
   - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
   - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
 - **One pull request** holds all code, both migrations, the `build-fact-label-map` function, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.

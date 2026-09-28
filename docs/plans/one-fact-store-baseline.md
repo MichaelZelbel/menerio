@@ -28,3 +28,19 @@ Counts only (plan rule 5.1). Queries are section 5.2 A1 of `docs/plans/one-fact-
 | Claims with `valid_from` / `valid_to` set | 509 / 14 |
 | Distinct entry labels / claim attributes / `attribute_rules` rows | 207 / 318 / 38 |
 | Accounts with claims | 3 |
+
+## Predicted switch counts (read-only, 2026-09-28)
+
+From `scripts/rehearsal/predict-switch-counts.sql` (branch `claude/wonderful-keller-sashcq`). Live at the time: 273 entries, 519 claims, 496 live.
+
+| Step | Predicted |
+|---|---|
+| claims after | 454 |
+| step 3 made preferred | 17 |
+| step 4 folded duplicates | 96 |
+| step 5 entries equal / differs / closed / unlinked | 238 / 12 / 1 / 22 |
+| step 5 new claims / folded into existing | 31 / 3 |
+| step 6 placed private by "most private wins" | 0 |
+| step 7 unshown claims kept (drop list empty) | 159 |
+| attributes with two answers after the switch | 25 |
+| entries in private sections | 2 |
