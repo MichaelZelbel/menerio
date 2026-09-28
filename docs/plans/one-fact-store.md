@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: 2026-09-28. A1 ran; A3 (both migrations, the rollback, the label map) and the A5 SQL harness are built on branch `claude/wonderful-keller-sashcq` and pass on a database built from the live schema (section 8, "A3 built"). A6 ran on production on 2026-09-28 and passed: every predicted count matched (section 8, "A3 built"). A2 (the application code) is not started.
+Status: 2026-09-28. The data half is built and proven: both migrations, the rollback and the label map pass 39/39 on a copy of the live schema, and the A6 trial run on production matched every prediction. Michael's two open decisions are now automatic rules in the switch (section 7, "Decisions, second round"), and the whole plan runs without him (section 10). Remaining: A2 (the application code), then one unattended go-live.
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -893,6 +893,23 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
 
 ---
 
+### Decisions, second round (2026-09-28): nobody sorts anything by hand
+
+Michael does not review lists. Both questions are now rules inside the switch (branch `claude/wonderful-keller-sashcq`, commit "Switch: Michael's rules"), and the harness tests them:
+
+- **Facts no page showed (B6).** Solid ones are shown. Garbage is deleted, with a "do not suggest again" row; the B1 snapshot keeps a copy. Garbage means:
+  - a placeholder ("none", "unknown", …) or a value that repeats its attribute;
+  - a value the page already shows for the same person under another label;
+  - a machine's fact with no source quote. A fact typed by a human, or accepted from the review queue, is never garbage.
+
+  `fact_unshown_drop` is no longer needed and stays empty. A read-only count on 2026-09-28 put roughly 40 % of these facts as solid, 20 % as repeats and 35 % as unsourced. A6 gives the exact numbers.
+- **"Two answers" (Q12).** None are left after go-live, and nothing is deleted:
+  - if the page already listed two or more of the values, the attribute keeps them all (slot cardinality `'many'`);
+  - if a value a human typed would lose, the same, so no human fact is ever closed;
+  - otherwise the value the page showed wins, else the newest, and the other becomes history ("until today").
+
+  The switch asserts that no current fact shows two answers.
+
 ## 8. Review history
 
 The earlier reviews described a staged rollout (mirror triggers, holds, a generator) that no longer exists. They are kept here as a short changelog only; sections 3 and 5 are the plan.
@@ -1030,3 +1047,27 @@ Built on `claude/wonderful-keller-sashcq` (code stays off `main` until the one p
   - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
   - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
 - **One pull request** holds all code, both migrations, the `build-fact-label-map` function, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.
+
+## 10. Running it without Michael (2026-09-28)
+
+Michael does not sit with anyone and does not do steps. This section overrides 5.3, 5.5 and 9 wherever they ask him for something.
+
+**Who does what.**
+- **Building (A2, A4, tests):** the cloud session on `claude/wonderful-keller-sashcq`. It needs no production access.
+- **Everything that touches production** (the A6 re-run, Parts B and C): a Claude Code session on Michael's machine (X30) or the VPS. Those have production access; cloud sessions are blocked from production writes by Claude Code's auto mode. That session is started once, with one prompt that the cloud session writes into `docs/plans/one-fact-store-golive-prompt.md` when A2 is done.
+- **Michael's only action:** paste that one prompt. His go-ahead of 2026-09-28 is the approval 5.1 asks for, valid only while every automatic gate below passes.
+
+**Changes to Part B, so nobody needs to be present:**
+- **Timing.** Run it at night, Michael's time. Nobody uses the app then.
+- **Order.** B5 (the data switch) runs *before* B4 (publishing the frontend). The old page then never meets the new data, and the new page never meets the old data. Between B2 and B4 the old page can fail to save for a minute; nothing is lost, since nothing is written.
+- **Pausing writers (B1).** The database pause flag covers every server path. The hourly Godspeed runner is paused by the go-live session itself if it runs on the machine that hosts the runner. Otherwise the pause flag makes its note uploads wait, and its pull only reads.
+- **Re-running A6 first.** The rules above changed the switch, so the go-live session re-runs the trial and continues only if every assertion holds and the counts are within 5 % of the last A6 run (data changes daily).
+
+**Changes to Part C:**
+- **The page walk-through (C4)** becomes a Playwright script. It uses a throwaway test account that the session creates through the admin API and deletes afterwards, and it performs every action C4 lists, checking the rows after each one.
+- **Godspeed (C6).** The kit's mass-removal guard accepts the removal count that A6 reported (A4 adds this allowance). The session runs the pull itself if it is on the runner's machine; otherwise the next hourly run does it.
+
+**If anything fails:** any failed gate in B or C runs the rollback (5.4) automatically, re-checks it, resumes the jobs and writes a report. Nobody is asked anything. In both outcomes Michael gets one short message: done, or rolled back and why.
+
+**What is still unproven** is only A2: the application code that reads and writes the new tables. Its tests (A5 Vitest, grep checks, build, type-check) must pass before the go-live prompt is written.
+
