@@ -41,10 +41,6 @@ export function todayISO(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
-export function isCurrentClaim(claim: Pick<Claim, "valid_to">, today: string = todayISO()): boolean {
-  return !claim.valid_to || claim.valid_to > today;
-}
-
 /**
  * Attributes owned by another surface, never stored as claims.
  * Relationships live in `contact_relationships` with their own canonical
@@ -66,41 +62,6 @@ export function isReservedAttribute(attribute: string): boolean {
 export function humanizeAttribute(attribute: string): string {
   const words = String(attribute || "").replace(/[-_]+/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/**
- * Attributes that legitimately hold several live values at once.
- *
- * Everything not listed holds exactly one, which is the safe default: a
- * wrongly-single attribute produces a question for the user, while a
- * wrongly-many one hides a real contradiction and nobody ever finds out.
- *
- * Keys are the output of normalizeAttribute, so they are hyphenated.
- * Measured on Mission Control mirror 2026-08-30: of 8 subject+attribute collisions,
- * at least two were legitimate multi-value attributes rather than
- * contradictions, which is why this list exists before any conflict check.
- */
-export const MANY_VALUED_ATTRIBUTES = new Set([
-  "favorite-restaurants",
-  "favorite-colors",
-  "favorite-animals",
-  "favorite-pokemon",
-  "favorite-pokémon",
-  "favorite-games",
-  "investments",
-  "pets",
-  "hobbies",
-  "languages",
-  "symptoms",
-  "life-events",
-  "health-conditions",
-  "skills",
-  "email",
-  "social-handle",
-]);
-
-export function cardinalityFor(attribute: string): ClaimCardinality {
-  return MANY_VALUED_ATTRIBUTES.has(normalizeAttribute(attribute)) ? "many" : "one";
 }
 
 /**
@@ -173,21 +134,6 @@ export function isStale(
   if (!claim.review_by) return false;
   if (claim.valid_to && claim.valid_to <= today) return false; // already closed
   return claim.review_by <= today;
-}
-
-/** Claims whose validity started or ended within the last `days` days. */
-export function changedSince(claims: Claim[], sinceISO: string): Claim[] {
-  return claims.filter(
-    (c) => (c.valid_from && c.valid_from >= sinceISO) || (c.valid_to && c.valid_to >= sinceISO),
-  );
-}
-
-export function sortClaims(claims: Claim[]): Claim[] {
-  return [...claims].sort((a, b) => {
-    const attr = a.attribute.localeCompare(b.attribute);
-    if (attr !== 0) return attr;
-    return (b.valid_from || b.created_at).localeCompare(a.valid_from || a.created_at);
-  });
 }
 
 // Adding a claim is writeFact (fact-store.ts), the one write path

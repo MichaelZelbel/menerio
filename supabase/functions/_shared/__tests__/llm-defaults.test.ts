@@ -4,7 +4,6 @@ import {
   CLASSIFY_PROFILE_FACT_PROMPT,
   ENRICH_PERSON_FROM_LEXICON_PROMPT,
   EXTRACT_MOMENT_PROFILE_PROMPT,
-  NORMALIZE_PROFILE_PLAN_PROMPT,
   PROCESS_NOTE_FICTION_GUARD_PROMPT,
   getCallSiteDefault,
 } from "../llm-defaults.ts";
@@ -52,7 +51,6 @@ describe("call sites that used to run on inline defaults only", () => {
   const expected: Record<string, { prompt: string; maxTokens: number; temperature: number | null }> = {
     "process-note.fiction_guard": { prompt: PROCESS_NOTE_FICTION_GUARD_PROMPT, maxTokens: 800, temperature: null },
     "classify-profile-fact": { prompt: CLASSIFY_PROFILE_FACT_PROMPT, maxTokens: 600, temperature: 0.1 },
-    "normalize-profile.plan": { prompt: NORMALIZE_PROFILE_PLAN_PROMPT, maxTokens: 4000, temperature: null },
     "enrich-person-from-lexicon": { prompt: ENRICH_PERSON_FROM_LEXICON_PROMPT, maxTokens: 2500, temperature: null },
     "extract-moment-profile": { prompt: EXTRACT_MOMENT_PROFILE_PROMPT, maxTokens: 2500, temperature: null },
   };
@@ -84,9 +82,4 @@ describe("call sites that used to run on inline defaults only", () => {
     expect(EXTRACT_MOMENT_PROFILE_PROMPT).toContain(INLINE_SLUG_ORDER);
   });
 
-  it("normalize-profile.plan carries the canonical schema description", () => {
-    expect(NORMALIZE_PROFILE_PLAN_PROMPT).toContain("- identity:");
-    expect(NORMALIZE_PROFILE_PLAN_PROMPT).toContain("(OPEN): keep user labels as-is");
-    expect(NORMALIZE_PROFILE_PLAN_PROMPT).toContain("[single]");
-  });
 });
