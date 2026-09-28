@@ -1,0 +1,161 @@
+From e708301ea8f01f00a2d3e054d2f8b1b571124875 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 21:44:33 +0000
+Subject: [PATCH] world-pull: page through Menerio's World, write category when
+ sent
+
+One request stopped at the server's row cap without saying so, and a
+pull that saw a truncated list treated everything past it as deleted.
+Fetch pages of 1000 until a short page. Write the optional category:
+line (display filing) when Menerio sends it. Tests: tools/test-world-pull.sh.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tools/test-world-pull.sh |  3 +++
+ tools/test_world_pull.py | 56 ++++++++++++++++++++++++++++++++++++++++
+ tools/world-pull.py      | 30 ++++++++++++++++++---
+ 3 files changed, 86 insertions(+), 3 deletions(-)
+ create mode 100755 tools/test-world-pull.sh
+ create mode 100644 tools/test_world_pull.py
+
+diff --git a/tools/test-world-pull.sh b/tools/test-world-pull.sh
+new file mode 100755
+index 0000000..59470dd
+--- /dev/null
++++ b/tools/test-world-pull.sh
+@@ -0,0 +1,3 @@
++#!/bin/sh
++# Paging and claim-format tests for tools/world-pull.py.
++exec python3 "$(dirname "$0")/test_world_pull.py" "$@"
+diff --git a/tools/test_world_pull.py b/tools/test_world_pull.py
+new file mode 100644
+index 0000000..6a699be
+--- /dev/null
++++ b/tools/test_world_pull.py
+@@ -0,0 +1,56 @@
++"""Tests for tools/world-pull.py: paging and the claim file format.
++
++Run: python3 tools/test_world_pull.py (or tools/test-world-pull.sh).
++Fixtures are invented.
++"""
++import importlib.util
++import pathlib
++import unittest
++
++HERE = pathlib.Path(__file__).resolve().parent
++spec = importlib.util.spec_from_file_location("world_pull", HERE / "world-pull.py")
++world_pull = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(world_pull)
++
++
++class FakeClient(world_pull.WorldClient):
++    def __init__(self, claims):
++        super().__init__("https://example.invalid", "key")
++        self.claims = claims
++        self.calls = []
++
++    def fetch_page(self, updated_since, limit, offset):
++        self.calls.append((limit, offset))
++        return {"entities": [], "events": [], "claims": self.claims[offset:offset + limit]}
++
++
++class PagingTest(unittest.TestCase):
++    def test_reads_past_the_first_page(self):
++        claims = [{"id": str(i)} for i in range(2500)]
++        client = FakeClient(claims)
++        data = client.fetch(limit=1000)
++        self.assertEqual(len(data["claims"]), 2500)
++        self.assertEqual(client.calls, [(1000, 0), (1000, 1000), (1000, 2000)])
++
++    def test_an_exact_multiple_ends_on_an_empty_page(self):
++        client = FakeClient([{"id": str(i)} for i in range(2000)])
++        self.assertEqual(len(client.fetch(limit=1000)["claims"]), 2000)
++        self.assertEqual(len(client.calls), 3)
++
++
++class ClaimFileTest(unittest.TestCase):
++    def test_category_and_rank_are_written_when_sent(self):
++        text = world_pull.render_claim(
++            {"id": "c1", "attribute": "city", "value": "Testville", "category": "location",
++             "rank": "preferred", "written_by": "human", "origin": "user_manual"}, "me")
++        self.assertIn("category: location", text)
++        self.assertIn("rank: preferred", text)
++
++    def test_undated_claim_has_no_date_lines(self):
++        text = world_pull.render_claim({"id": "c2", "attribute": "city", "value": "Testville"}, "me")
++        self.assertNotIn("valid_from", text)
++        self.assertNotIn("category:", text)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tools/world-pull.py b/tools/world-pull.py
+index adb00f3..4783afb 100644
+--- a/tools/world-pull.py
++++ b/tools/world-pull.py
+@@ -176,7 +176,6 @@ def render_claim(record, subject_slug, object_slug=None):
+     if record.get("valid_to"):
+         lines.append("valid_to: {}".format(record["valid_to"]))
+     # When to DOUBT this fact, as opposed to when it stopped being true.
+-    # Absent on rows the view cannot date (a profile entry has no dates at all).
+     if record.get("review_by"):
+         lines.append("review_by: {}".format(record["review_by"]))
+     lines.append(
+@@ -191,6 +190,9 @@ def render_claim(record, subject_slug, object_slug=None):
+     # contradiction. An absent field means "not known, use the fallback".
+     if record.get("cardinality") in ("one", "many"):
+         lines.append("cardinality: {}".format(record["cardinality"]))
++    # The profile section the fact is filed under. Display only, optional.
++    if record.get("category"):
++        lines.append("category: {}".format(record["category"]))
+     lines += [
+         "source: menerio {}".format(record.get("origin", "unknown")),
+         "written_by: {}".format(author),
+@@ -383,13 +385,18 @@ def plan_pull(world, root, self_slug="me"):
+ # --- talking to Menerio -----------------------------------------------------
+ 
+ 
++WORLD_KINDS = ("entities", "events", "claims")
++PAGE_SIZE = 1000
++MAX_RECORDS = 200000
++
++
+ class WorldClient:
+     def __init__(self, base_url, api_key):
+         self.base_url = base_url.rstrip("/")
+         self.api_key = api_key
+ 
+-    def fetch(self, updated_since=None, limit=2000):
+-        query = "?limit={}".format(limit)
++    def fetch_page(self, updated_since, limit, offset):
++        query = "?limit={}&offset={}".format(limit, offset)
+         if updated_since:
+             query += "&updated_since={}".format(updated_since)
+         request = urllib.request.Request(
+@@ -401,6 +408,23 @@ class WorldClient:
+             payload = json.loads(response.read().decode("utf-8"))
+         return payload.get("data") or {}
+ 
++    def fetch(self, updated_since=None, limit=PAGE_SIZE):
++        """Every record, page by page. One request used to stop at the server's
++        row cap without saying so, and a pull that saw a truncated list would
++        treat everything past it as deleted."""
++        merged = {kind: [] for kind in WORLD_KINDS}
++        offset = 0
++        while True:
++            page = self.fetch_page(updated_since, limit, offset)
++            for kind in WORLD_KINDS:
++                merged[kind].extend(page.get(kind) or [])
++            if all(len(page.get(kind) or []) < limit for kind in WORLD_KINDS):
++                return merged
++            offset += limit
++            if offset >= MAX_RECORDS:
++                raise RuntimeError("Menerio returned more than {} records per kind; "
++                                   "refusing to guess where the list ends".format(MAX_RECORDS))
++
+ 
+ # THE REMOVAL GUARD, because this pull runs unattended. A record deleted in
+ # Menerio rightly takes its mirror copy with it. But an API that answers with a
+-- 
+2.43.0
+
