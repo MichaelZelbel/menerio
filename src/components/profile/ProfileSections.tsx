@@ -32,6 +32,28 @@ interface ProfileSectionsProps {
   showPinned?: boolean;
   /** Optional extra content rendered between pinned highlights and the filter. */
   children?: ReactNode;
+  /** Sections this page renders elsewhere, so a line is never moved into them. */
+  excludeSlugs?: string[];
+}
+
+/**
+ * Every section a line can be moved to: the taxonomy, the subject's own custom
+ * sections, and "Other", minus the ones this page does not list. A person's
+ * page shows "Relationships & Family" inside the relationships card, current
+ * values only and read-only, so a fact moved there could no longer be edited,
+ * ended or removed (eleventh review).
+ */
+const NO_EXCLUDED_SECTIONS: string[] = [];
+
+export function moveTargets(categories: Pick<ProfileCategory, "slug" | "name">[], excludeSlugs: string[] = []): SectionOption[] {
+  const options = new Map<string, SectionOption>();
+  for (const t of PROFILE_TAXONOMY) options.set(t.slug, { slug: t.slug, name: t.name });
+  for (const c of categories) options.set(c.slug, { slug: c.slug, name: c.name });
+  for (const s of excludeSlugs) options.delete(s);
+  const sorted = [...options.values()].sort(
+    (a, b) => taxonomyOrder(a.slug!) - taxonomyOrder(b.slug!) || a.name.localeCompare(b.name),
+  );
+  return [...sorted, { slug: null, name: "Other" }];
 }
 
 /**
@@ -49,6 +71,7 @@ export function ProfileSections({
   showScope = false,
   showPinned = true,
   children,
+  excludeSlugs = NO_EXCLUDED_SECTIONS,
 }: ProfileSectionsProps) {
   const [filterQuery, setFilterQuery] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
@@ -71,17 +94,7 @@ export function ProfileSections({
       )
     : sections;
 
-  // Every section a line can be moved to: the taxonomy, the subject's own
-  // custom sections, and "Other".
-  const sectionOptions = useMemo<SectionOption[]>(() => {
-    const options = new Map<string, SectionOption>();
-    for (const t of PROFILE_TAXONOMY) options.set(t.slug, { slug: t.slug, name: t.name });
-    for (const c of categories) options.set(c.slug, { slug: c.slug, name: c.name });
-    const sorted = [...options.values()].sort(
-      (a, b) => taxonomyOrder(a.slug!) - taxonomyOrder(b.slug!) || a.name.localeCompare(b.name),
-    );
-    return [...sorted, { slug: null, name: "Other" }];
-  }, [categories]);
+  const sectionOptions = useMemo(() => moveTargets(categories, excludeSlugs), [categories, excludeSlugs]);
 
   // A section shown from the taxonomy may have no row yet; changing it creates one.
   const updateSection = (section: FactSection, patch: Partial<ProfileCategory>) => {

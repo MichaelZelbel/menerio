@@ -321,6 +321,14 @@ WITH closed AS (
 INSERT INTO fact_retired.switch_closed_claims SELECT id FROM closed;
 INSERT INTO fact_switch_report SELECT 'step7b_two_answers_older_made_history', count(*) FROM fact_retired.switch_closed_claims;
 
+-- Every claim as the switch leaves it (made from an entry, or ended above), so
+-- the rollback can keep a later change to one of them. Stays in the database.
+CREATE TABLE fact_retired.switch_made_claims AS
+SELECT c.id, c.attribute, c.value, c.subject_type, c.subject_id, c.valid_from, c.valid_to
+  FROM public.claims c
+ WHERE c.id IN (SELECT id FROM public.profile_entries)
+    OR c.id IN (SELECT claim_id FROM fact_retired.switch_closed_claims);
+
 -- 8. One live copy of a value per subject and attribute.
 CREATE UNIQUE INDEX claims_one_live_value ON public.claims
   (user_id, subject_type, coalesce(subject_id, '00000000-0000-0000-0000-000000000000'::uuid),
@@ -731,7 +739,8 @@ INSERT INTO fact_switch_report SELECT 'step12_review_items_repointed', count(*) 
 
 WITH missing AS (
   UPDATE public.review_queue r
-     SET payload = r.payload || jsonb_build_object('fact_store_switch', jsonb_build_object('entry_missing', true, 'revertible', false))
+     SET payload = r.payload || jsonb_build_object('fact_store_switch', coalesce(r.payload->'fact_store_switch', '{}'::jsonb)
+                                                   || jsonb_build_object('entry_missing', true, 'revertible', false))
    WHERE r.target_entity_type = 'profile_entry' AND r.target_entity_id IS NOT NULL
   RETURNING 1)
 INSERT INTO fact_switch_report SELECT 'step12_review_items_entry_missing', count(*) FROM missing;
@@ -739,7 +748,10 @@ INSERT INTO fact_switch_report SELECT 'step12_review_items_entry_missing', count
 WITH superseded AS (
   UPDATE public.review_queue r
      SET status = 'superseded',
-         payload = r.payload || jsonb_build_object('fact_store_switch', jsonb_build_object('prior_status', r.status))
+         -- Merged into what the re-pointing wrote, never over it: an item can be
+         -- both, and the rollback needs its entry_id (eleventh review).
+         payload = r.payload || jsonb_build_object('fact_store_switch', coalesce(r.payload->'fact_store_switch', '{}'::jsonb)
+                                                   || jsonb_build_object('prior_status', r.status))
    WHERE r.suggestion_type = 'normalize_profile_entry' AND r.status IN ('pending', 'pending_review')
   RETURNING 1)
 INSERT INTO fact_switch_report SELECT 'step12_normalize_superseded', count(*) FROM superseded;

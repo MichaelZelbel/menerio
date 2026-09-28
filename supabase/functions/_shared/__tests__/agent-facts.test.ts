@@ -423,7 +423,31 @@ describe("add_claim", () => {
     const d = db();
     expect((await addClaim(d, ME, { ...base, attribute: "relationship" })).error).toMatch(/not claims/);
     expect((await addClaim(d, ME, { ...base, validTo: "2020-01-01" })).error).toMatch(/already ended/);
-    expect((await addClaim(d, OTHER_USER, base)).error).toMatch(/contact_not_found/);
+    expect((await addClaim(d, OTHER_USER, base)).error).toMatch(/No person or entity with that id/);
+  });
+
+  // Eleventh review: add_claim by id reached subjects agent_facts hides. Its
+  // answer ("already recorded" / closed_previous) told the assistant whether a
+  // guess was right, and a wrong guess ended the owner's fact.
+  it("refuses hidden and sensitive people and entities with one answer, and writes nothing", async () => {
+    const d = db();
+    const before = JSON.stringify(d.tables.claims);
+    const answers = new Set<string>();
+    for (const subject of [
+      { type: "contact" as const, id: HIDDEN },
+      { type: "contact" as const, id: SENSITIVE },
+      { type: "entity" as const, id: HIDDEN_ENTITY },
+      { type: "entity" as const, id: SECRET_ENTITY },
+      { type: "contact" as const, id: "00000000-0000-4000-8000-0000000000ff" },
+    ]) {
+      for (const value of ["SECRET-hidden-birthday", "SECRET-sensitive-birthday", "SECRET-hidden-entity", "a guess"]) {
+        const out = await addClaim(d, ME, { ...base, subject, attribute: subject.type === "entity" ? "owner" : "birthday", value });
+        answers.add(JSON.stringify(out));
+      }
+    }
+    expect([...answers]).toEqual([JSON.stringify({ error: "No person or entity with that id is available to assistants. Nothing was written." })]);
+    expect(JSON.stringify(d.tables.claims)).toBe(before);
+    expectEveryQueryNamesItsUser(d);
   });
 
   it("says the store is paused instead of writing", async () => {

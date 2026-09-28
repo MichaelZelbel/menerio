@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { usePeople, usePerson } from "@/hooks/usePeople";
 import { usePeopleSync } from "@/hooks/usePeopleSync";
+import { invalidateFactViews } from "@/hooks/useFacts";
 import { broadcastInvalidation } from "@/lib/query-sync";
 import { topicSelectClass } from "./ContactTopicRow";
 import { Button } from "@/components/ui/button";
@@ -125,9 +126,9 @@ export function MergePersonDialog({
       broadcastInvalidation(topicKeys);
       qc.invalidateQueries({ queryKey: ["contacts"] });
       qc.invalidateQueries({ queryKey: ["contact-profile-categories"] });
-      qc.invalidateQueries({ queryKey: ["contact-profile-entries"] });
       qc.invalidateQueries({ queryKey: ["profile-categories"] });
-      qc.invalidateQueries({ queryKey: ["profile-entries"] });
+      // The merge moved the source's facts and slots.
+      invalidateFactViews(qc);
       // merge-contacts doesn't touch contact_group_memberships rows for the
       // merged-away source person — invalidate the aggregate membership
       // query (and the source's own group list) so the People tree's group

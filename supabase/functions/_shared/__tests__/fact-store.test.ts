@@ -28,6 +28,19 @@ describe("planFacts", () => {
     expect(p.conflict).toBe(false);
   });
 
+  it("a second change on the same day closes the value that started that day (eleventh review)", () => {
+    const london = claim({ id: "london", value: "London", valid_from: today, rank: "preferred" });
+    const [p] = inserts(planFacts(human({ value: "Paris", validFrom: today }), ctx({ isHuman: true, claims: [london] })));
+    expect(p.close).toEqual(["london"]);
+    expect(p.conflict).toBe(false);
+  });
+
+  it("a value that starts after the new one is left alone", () => {
+    const later = claim({ id: "later", value: "Rome", valid_from: "2026-12-01" });
+    const [p] = inserts(planFacts(machine({ validFrom: "2026-10-01" }), ctx({ claims: [later] })));
+    expect(p.close).toEqual([]);
+  });
+
   it("a machine never closes a human's value: it adds alongside, as two answers", () => {
     const [p] = inserts(planFacts(machine(), ctx({ claims: [claim({ rank: "preferred" })] })));
     expect(p.close).toEqual([]);
@@ -116,6 +129,21 @@ describe("planFacts", () => {
 
 describe("writeFact against the database (review 2026-09-29)", () => {
   const U = "u1";
+
+  // Eleventh review: the pieces of a list were stored as 'many' but the slot
+  // was not, so the next single value (cardinality from the slot, then the
+  // rules, then 'one') ended every piece.
+  it("a list it splits marks the slot as holding several, so the next single value adds", async () => {
+    const d = factDb({ tables: {} });
+    await writeFact(d, U, machine({ label: "Email", value: "a@example.invalid, b@example.invalid", categorySlug: "communication",
+      evidenceQuote: "Write to a@example.invalid or b@example.invalid." }), { isHuman: false });
+    expect(d.tables.fact_slots.map((s) => [s.attribute, s.cardinality])).toEqual([["email", "many"]]);
+    const [p] = inserts(planFacts(machine({ label: "Email", value: "c@example.invalid" }), ctx({
+      slots: d.tables.fact_slots.map((s) => ({ attribute: s.attribute, cardinality: s.cardinality, category_slug: s.category_slug })),
+      claims: [claim({ id: "a", attribute: "email", value: "a@example.invalid" }), claim({ id: "b", attribute: "email", value: "b@example.invalid" })],
+    })));
+    expect(p.close).toEqual([]);
+  });
   const cityFact = (over: Record<string, unknown> = {}) => ({
     claim_id: "c-old", user_id: U, subject_type: "self" as const, subject_id: null,
     attribute: "current-city", value: "Berlin", origin: "ai_note", ...over,

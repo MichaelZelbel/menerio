@@ -483,7 +483,7 @@ export function useFacts(subject: FactSubject | null) {
       // my languages changed") the old value is ended here, so it becomes
       // history in both cases.
       const inserted = result.facts.some((f) => f.outcome === "inserted");
-      if (inserted && norm(value) !== norm(fact.value) && (!fact.valid_from || fact.valid_from < validFrom)) {
+      if (inserted && norm(value) !== norm(fact.value) && (!fact.valid_from || fact.valid_from <= validFrom)) {
         const { error } = await supabase
           .from("claims")
           .update({ valid_to: validFrom })

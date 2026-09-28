@@ -78,6 +78,9 @@ describe("MergePersonDialog — cache invalidation (regression: ghost membership
       expect(invalidatedKeys).toContain(JSON.stringify(["contacts"]));
       expect(invalidatedKeys).toContain(JSON.stringify(["contact_group_memberships"]));
       expect(invalidatedKeys).toContain(JSON.stringify(["person_groups"]));
+      // The facts moved: the page must re-read them, not show the pre-merge list (eleventh review).
+      expect(invalidatedKeys).toContain(JSON.stringify(["profile-facts"]));
+      expect(invalidatedKeys).not.toContain(JSON.stringify(["profile-entries"]));
     });
   });
 });

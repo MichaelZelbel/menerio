@@ -10,8 +10,12 @@
 
 SET LOCAL menerio.fact_migration = 'on';
 
--- 1. Keep what the restore will drop, inside the database: every claim created
--- or changed since B1 that the switch did not make. Only its count is shown.
+-- 1. Keep what the restore will drop, inside the database: every claim that is
+-- neither as B1 left it nor as the switch left it (added, corrected, ended or
+-- moved since). Only its count is shown. The switch's own rows are read with
+-- EXECUTE: fact_retired.switch_made_claims exists only once the switch has
+-- committed, and a static reference would fail the rollback before that
+-- (eleventh review: a raised switch left nothing that could be rolled back).
 DO $$
 BEGIN
   IF to_regclass('public.profile_entries_archive') IS NOT NULL AND to_regclass('fact_backup.claims') IS NULL THEN
@@ -19,17 +23,20 @@ BEGIN
   END IF;
   IF to_regclass('fact_backup.claims') IS NOT NULL THEN
     CREATE TABLE IF NOT EXISTS fact_backup.dropped_by_rollback (claim jsonb NOT NULL, kept_at timestamptz NOT NULL DEFAULT now());
+    CREATE TEMP TABLE _rb_known (id uuid, attribute text, value text, subject_type text, subject_id uuid,
+                                 valid_from date, valid_to date) ON COMMIT DROP;
+    INSERT INTO _rb_known SELECT id, attribute, value, subject_type, subject_id, valid_from, valid_to FROM fact_backup.claims;
+    IF to_regclass('fact_retired.switch_made_claims') IS NOT NULL THEN
+      EXECUTE 'INSERT INTO _rb_known SELECT id, attribute, value, subject_type, subject_id, valid_from, valid_to
+                 FROM fact_retired.switch_made_claims';
+    END IF;
     INSERT INTO fact_backup.dropped_by_rollback (claim)
     SELECT to_jsonb(c) - 'embedding'
       FROM public.claims c
-     WHERE NOT EXISTS (SELECT 1 FROM fact_backup.profile_entries e WHERE e.id = c.id)   -- made by the switch
-       AND NOT (to_regclass('fact_retired.switch_closed_claims') IS NOT NULL               -- closed by the switch
-                AND c.id IN (SELECT claim_id FROM fact_retired.switch_closed_claims)
-                AND c.value = (SELECT b.value FROM fact_backup.claims b WHERE b.id = c.id))
-       AND NOT EXISTS (SELECT 1 FROM fact_backup.claims b
-                        WHERE b.id = c.id AND b.value = c.value AND b.attribute = c.attribute
-                          AND b.subject_type = c.subject_type AND b.subject_id IS NOT DISTINCT FROM c.subject_id
-                          AND b.valid_from IS NOT DISTINCT FROM c.valid_from AND b.valid_to IS NOT DISTINCT FROM c.valid_to);
+     WHERE NOT EXISTS (SELECT 1 FROM _rb_known k
+                        WHERE k.id = c.id AND k.value = c.value AND k.attribute = c.attribute
+                          AND k.subject_type = c.subject_type AND k.subject_id IS NOT DISTINCT FROM c.subject_id
+                          AND k.valid_from IS NOT DISTINCT FROM c.valid_from AND k.valid_to IS NOT DISTINCT FROM c.valid_to);
   END IF;
 END $$;
 
@@ -59,6 +66,7 @@ BEGIN
 
   DROP INDEX IF EXISTS public.claims_one_live_value;
   DROP TABLE IF EXISTS fact_retired.switch_closed_claims;
+  DROP TABLE IF EXISTS fact_retired.switch_made_claims;
   ALTER TABLE public.profile_entries_archive RENAME TO profile_entries;
   GRANT ALL ON public.profile_entries TO anon, authenticated, service_role;
 

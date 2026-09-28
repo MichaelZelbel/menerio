@@ -236,6 +236,15 @@ describe("useFacts", () => {
     expect(end.filters).toContainEqual(["is", "valid_to", null]);
   });
 
+  it("It changed twice on one day: the value that started today is ended too (eleventh review)", async () => {
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    const today = fact({ claim_id: "fr", value: "French", valid_from: "2026-09-29" });
+    await result.current.changeFact.mutateAsync({ fact: today, value: "Spanish", validFrom: "2026-09-29" });
+    const [end] = fake.current!.on("claims", "update");
+    expect(end?.payload).toEqual({ valid_to: "2026-09-29" });
+    expect(filterValue(end, "eq", "id")).toBe("fr");
+  });
+
   it("Fix a mistake on a machine's value corrects it and suppresses the old words", async () => {
     const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
     await result.current.fixFact.mutateAsync({ fact: fact({ origin: "ai_note", value: "Germn" }), value: "German" });

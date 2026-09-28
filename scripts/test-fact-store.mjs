@@ -522,6 +522,47 @@ await test('rollback after B6 (jobs 4, 15, 16 deleted, embedding job added) succ
   await x.end();
 });
 
+await test('a pending normalize item on a folded entry keeps its old target for the rollback, and stays not revertible', async () => {
+  const x = await prepared('fs_review_both');
+  // Pending normalize item that points at b07, an entry the switch folds into c05.
+  await x.query(`INSERT INTO review_queue (id, user_id, suggestion_type, title, status, target_entity_type, target_entity_id)
+                 VALUES ($1,$2,'normalize_profile_entry','r7','pending_review','profile_entry',$3)`, [d(7), U, b(7)]);
+  await applyTx(x, SQL.backup);
+  await applyTx(x, SQL.schema);
+  await runSwitch(x);
+  const s = (await val(x, 'SELECT payload FROM review_queue WHERE id=$1', [d(7)])).fact_store_switch;
+  assert.deepEqual({ entry_id: s.entry_id, revertible: s.revertible, prior_status: s.prior_status },
+    { entry_id: b(7), revertible: false, prior_status: 'pending_review' });
+  await applyTx(x, SQL.rollback);
+  assert.deepEqual(await one(x, 'SELECT target_entity_type t, target_entity_id id, status, payload FROM review_queue WHERE id=$1', [d(7)]),
+    { t: 'profile_entry', id: b(7), status: 'pending_review', payload: {} });
+  await x.end();
+});
+
+for (const [name, steps] of [['after B1 and B2 (the switch raised)', ['backup', 'schema']], ['after B1 only', ['backup']]]) {
+  await test(`rollback ${name} restores the live schema`, async () => {
+    const x = await prepared(`fs_rollback_${steps.length}`);
+    for (const s of steps) await applyTx(x, SQL[s]);
+    await applyTx(x, SQL.rollback);
+    assert.equal(await val(x, `SELECT to_regclass('public.fact_slots')`), null);
+    assert.equal(await val(x, `SELECT to_regnamespace('fact_retired')`), null);
+    assert.equal(await num(x, `SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='claims' AND column_name='rank'`), 0);
+    await x.end();
+  });
+}
+
+await test('rollback keeps a post-switch change to a fact the switch created', async () => {
+  const x = await prepared('fs_rollback_edit');
+  await applyTx(x, SQL.backup);
+  await applyTx(x, SQL.schema);
+  await runSwitch(x);
+  // b06 (Pasta) became a claim in the switch. After go-live the owner corrects it.
+  await as(x, HUMAN, () => x.query(`UPDATE claims SET value='Lasagne' WHERE id=$1`, [b(6)]), { keep: true });
+  await applyTx(x, SQL.rollback);
+  assert.equal(await num(x, `SELECT count(*) FROM fact_backup.dropped_by_rollback WHERE claim->>'id'=$1 AND claim->>'value'='Lasagne'`, [b(6)]), 1);
+  await x.end();
+});
+
 await admin.end();
 const failed = results.filter((r) => r[1] !== 'ok');
 for (const r of results) console.log(`${r[1] === 'ok' ? 'ok  ' : 'FAIL'}  ${r[0]}${r[2] ? `\n      ${r[2]}` : ''}`);

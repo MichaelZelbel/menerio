@@ -30,6 +30,9 @@ interface ContactProfileTabProps {
   relatedNotes?: Array<{ id: string; title: string | null }>;
 }
 
+// Shown in the relationships card, not in the facts list, so never a move target.
+const RELATIONSHIP_SLUGS = ["relationships"];
+
 export function ContactProfileTab({
   contactId,
   contactName,
@@ -88,7 +91,7 @@ export function ContactProfileTab({
   // Relationship-adjacent facts (Wedding date, Anniversary, How we met…) are
   // rendered INSIDE the Relationships card, so a profile has exactly one
   // relationship surface. They are removed from the facts panel here.
-  const isRelationshipSection = (slug: string | null) => slug === "relationships";
+  const isRelationshipSection = (slug: string | null) => slug === RELATIONSHIP_SLUGS[0];
   const factCategories = categories.filter((c) => !isRelationshipSection(c.slug));
   const sectionFacts = facts.filter((f) => !isRelationshipSection(f.category_slug));
   const milestones = facts
@@ -123,6 +126,7 @@ export function ContactProfileTab({
         categories={factCategories}
         facts={sectionFacts}
         actions={actions}
+        excludeSlugs={RELATIONSHIP_SLUGS}
         showScope
         onUpdateCategory={(data) => upsertCategory.mutate(data)}
         onDeleteCategory={(id) => deleteCategory.mutate(id)}

@@ -267,6 +267,21 @@ export function addClaimRefusal(args: Pick<AddClaimArgs, "attribute" | "value" |
 export async function addClaim(db: any, userId: string, args: AddClaimArgs): Promise<Record<string, unknown>> {
   const refusal = addClaimRefusal(args);
   if (refusal) return { error: refusal };
+  // Only subjects agent_facts shows (eleventh review). Otherwise the answer
+  // ("already recorded", closed_previous) confirms a guessed value about a
+  // hidden or sensitive subject, and a wrong guess ends the owner's fact. One
+  // answer for hidden, sensitive, merged away and missing, so it says nothing.
+  if (args.subject.type !== "self") {
+    const table = args.subject.type === "contact" ? "contacts" : "entities";
+    const columns = args.subject.type === "contact" ? "id, merged_into, ai_visibility, is_sensitive" : "id, ai_visibility, is_sensitive";
+    const { data: s, error } = ID_SHAPE.test(String(args.subject.id ?? ""))
+      ? await db.from(table).select(columns).eq("user_id", userId).eq("id", args.subject.id).maybeSingle()
+      : { data: null, error: null };
+    if (error) return { error: "Could not check the subject. Nothing was written." };
+    if (!s || s.merged_into || s.ai_visibility !== "visible" || s.is_sensitive === true) {
+      return { error: "No person or entity with that id is available to assistants. Nothing was written." };
+    }
+  }
   if (args.sourceNoteId) {
     if (!ID_SHAPE.test(args.sourceNoteId)) return { error: "source_note_id is not a note id." };
     const { data: note, error } = await db.from("notes").select("id").eq("user_id", userId).eq("id", args.sourceNoteId).maybeSingle();

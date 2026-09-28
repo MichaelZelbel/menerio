@@ -173,8 +173,10 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
     let close: string[] = [];
     let conflict = false;
     if (cardinality === "one") {
-      // The live values that started before the new one (a future-dated change is left alone).
-      const current = mine.filter((c) => c.valid_to === null && (c.valid_from === null || c.valid_from < closeOn));
+      // The live values that started on or before the new one's day (a value that
+      // starts later is left alone). "On": a second change the same day replaces
+      // the first, which otherwise stayed current beside it (eleventh review).
+      const current = mine.filter((c) => c.valid_to === null && (c.valid_from === null || c.valid_from <= closeOn));
       const closable = current.filter((c) => ctx.isHuman || c.rank !== "preferred");
       close = closable.map((c) => c.id);
       conflict = closable.length < current.length || alsoPlanned.length > 0;
@@ -282,6 +284,14 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
       if (error) throw new Error(`fact-store slot: ${error.message}`);
       existing.category_slug = intoPrivate;
     }
+    // A list the splitter found holds several values: the slot says so, or the
+    // next single value (slot, then rules, then 'one') would end every piece
+    // (eleventh review). A slot the owner set to 'one' is never changed here.
+    if (existing && step.cardinality === "many" && !existing.cardinality) {
+      const { error } = await subjectFilter(db.from("fact_slots").update({ cardinality: "many" })).eq("attribute", step.attribute).is("cardinality", null);
+      if (error) throw new Error(`fact-store slot: ${error.message}`);
+      existing.cardinality = "many";
+    }
     if (!existing) {
       const placed = intoPrivate ? { label: step.label, categorySlug: intoPrivate }
         : input.categorySlug ? { label: step.label, categorySlug: step.categorySlug } : placeClaim(step.attribute);
@@ -292,10 +302,11 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
         attribute: step.attribute,
         label: step.label || placed.label,
         category_slug: input.subject.type === "entity" ? null : placed.categorySlug,
+        cardinality: step.cardinality === "many" ? "many" : null,
         is_pinned: input.isPinned ?? false,
       });
       if (error && error.code !== "23505") throw new Error(`fact-store slot: ${error.message}`);
-      slots.push({ attribute: step.attribute, cardinality: null, category_slug: placed.categorySlug });
+      slots.push({ attribute: step.attribute, cardinality: step.cardinality === "many" ? "many" : null, category_slug: placed.categorySlug });
     }
 
     // Insert first, close after: if the database refuses the new value (quality
