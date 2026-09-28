@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: proposal, 2026-09-28, reviewed nine times (section 8). Nothing in this document has been built.
+Status: proposal, 2026-09-28, reviewed nine times (section 8). Nothing in this document has been built. Part A1 ran on 2026-09-28 and a local live-schema database was built; its findings (section 8, "A1 run") are folded into the steps below.
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -232,7 +232,8 @@ SELECT
   CASE WHEN c.subject_type = 'contact' THEN c.subject_id END AS contact_id,
   c.attribute, c.value, c.valid_from, c.valid_to,
   -- Started (a future-dated change is not current yet) and not ended.
-  -- fact_today() is user_today() for the service role or the row's own user, else NULL;
+  -- fact_today() is user_today() for the row's own user and for any caller without a user JWT
+  -- (service role, postgres, cron, the management API), else NULL (A1 run, finding 1);
   -- user_today itself stays revoked from authenticated (20260923150000:377).
   ((c.valid_from IS NULL OR c.valid_from <= public.fact_today(c.user_id))
    AND (c.valid_to IS NULL OR c.valid_to > public.fact_today(c.user_id))) AS is_current,
@@ -537,7 +538,7 @@ Why this is safe without staged holds:
 - **Nothing writes facts during the switch.** Every job and queue that writes facts is paused from B1 to B6, and Michael does not use the app. So the new code never runs against old data, and the switch never meets rows it did not expect.
 - **Nothing half-migrated ever runs.** The data switch (B5) is one transaction, and it checks its own counts. If a count is wrong, the transaction raises and nothing changes.
 - **It was rehearsed twice.** First on a local database built from the live schema dump, with the live triggers, where every failure is cheap. Then the exact B5 SQL runs against production data and is rolled back, so its counts are known before go-live.
-- **Scale.** 281 profile rows, 519 claims and 3 accounts (live counts, 2026-09-28). Every step takes seconds.
+- **Scale.** 282 profile rows, 519 claims and 3 accounts (live counts, A1, 2026-09-28). Every step takes seconds.
 
 ### 5.1 Ground rules
 
@@ -636,7 +637,7 @@ Why this is safe without staged holds:
 - `…_fact_store_schema.sql` (applied in B2, while every fact writer is paused):
   - `claims.rank`, the `source_type` CHECK, and the `origin` CHECK `NOT VALID`;
   - `fact_slots` with RLS;
-  - `fact_today(uuid)`: returns `user_today(uid)` only to the service role or to that user, else NULL. The views use it; `user_today` itself stays revoked from `authenticated` (`20260923150000:377`);
+  - `fact_today(uuid)`: returns `user_today(uid)` to that user, and to every caller that is not `anon` or `authenticated` (`auth.uid() = uid OR coalesce(auth.role(), '') NOT IN ('anon','authenticated')`), else NULL. "Service role only" is not enough: the switch, the A6 counts, the C1 checks and cron run as `postgres` with no JWT, and there `auth.role()` is NULL, so `is_current` would be NULL for every dated claim (509 of 519; A1 run, finding 1). The views use it; `user_today` itself stays revoked from `authenticated` (`20260923150000:377`);
   - the views `profile_facts` and `agent_facts`;
   - the claim guards and `claim_clear_embedding` (section 3.6);
   - `match_claims`, from its live text (`20260923150000:221-340`), keeping its caller check and its REVOKE/GRANT block, and reading visibility from `agent_facts`;
@@ -672,8 +673,9 @@ Why this is safe without staged holds:
       - drop the foreign keys `derived_from_claim_id → claims` and **`category_id → profile_categories`** (the second cascades deletes into the archive otherwise). The columns stay as the permanent lookup;
       - `ALTER TABLE profile_entries RENAME TO profile_entries_archive`;
       - revoke all on it from `authenticated` and `anon`. RLS and its policies stay on.
-  11. Attach `claim_require_origin`, and replace `merge_contacts_atomic` with the version that moves claims, slots and private sections and no longer touches entries.
-  12. Review queue, only rows with `target_entity_type = 'profile_entry'`: rewrite `target_entity_id` to the claim id and the type to `'claim'`. Items whose entry was folded into another claim are marked not revertible, because a revert would delete a different, possibly human, fact. Pending `normalize_profile_entry` items become `superseded`.
+      - drop the SQL functions that still read `profile_entries` and have no caller left (A1 run, finding 5): `backfill_accumulator_profile_entries`, `cleanup_profile_duplicates`, `cleanup_profile_token_duplicates`, `profile_dedup_sweep`, `profile_subset_label_sweep`, `profile_existing_token_keys`, `profile_resolve_label`, `profile_entries_dedup_before_insert`, `profile_audit_apply_merge`, `profile_audit_rollback_merge`, and the trigger functions of the dropped triggers. `world_preferred_wins` and `world_preferred_survives_delete` stay (they branch on `TG_TABLE_NAME` and still guard `contact_relationships`). The grep test cannot see SQL, so the harness asserts that no function body in `public` names `profile_entries` after the switch.
+  11. Attach `claim_require_origin`, and replace `merge_contacts_atomic` with the version that moves claims, slots and private sections and no longer touches entries. **Also redefine `contact_merge_move_references`** without its `UPDATE public.claims` (A1 run, finding 2): that trigger fires when `merged_into` is set and moves claims with a plain UPDATE, which violates `claims_one_live_value` whenever both contacts hold the same live value (reproduced on the live schema), and it does not move slots. The merge function folds and moves claims and slots itself, before it sets `merged_into`.
+  12. Review queue, only rows with `target_entity_type = 'profile_entry'`: rewrite `target_entity_id` to the claim id and the type to `'claim'`. Items whose entry was folded into another claim are marked not revertible, because a revert would delete a different, possibly human, fact. Pending `normalize_profile_entry` items become `superseded`. **Items whose entry no longer exists** (A1: about 1,500 historic items, and every pending item has a NULL target) are left as they are and marked not revertible; only items with an existing entry (about 250) are re-pointed, and the rollback re-points only those (A1 run, finding 4).
   13. **Assertions** (each one `RAISE`s on failure, which undoes the whole transaction):
       - every archived entry has a `derived_from_claim_id` that exists in `claims`, or that is in the folded list;
       - `claims_after = claims_before − folded_duplicates − dropped_unshown + inserted`, with `inserted` counted per case;
@@ -726,7 +728,7 @@ Michael does not use Menerio during Parts B and C, except for the walk-through i
 
 | Step | Action | Check before the next step |
 |---|---|---|
-| B1 | **Pause every fact writer.** Pause crons 4, 9, 11, 12, 15, 16 and 18 (`cron.alter_job(id, active := false)`), and every non-cron path found in A1. Michael pauses the hourly Godspeed runner on his machine (it also pushes notes up). **Snapshot** `profile_entries`, `profile_categories`, `claims`, `review_queue` and `ai_suggestion_suppressions` into schema `fact_backup`: `REVOKE ALL ON SCHEMA fact_backup FROM public, anon, authenticated`, and it is not in the API's exposed schemas. No CSV export. | Snapshot row counts equal the live counts. No fact-writing job is active. |
+| B1 | **Pause every fact writer.** Pause crons 4, 9, 11, 12, 15, 16 and 18 (`cron.alter_job(id, active := false)`), and every non-cron path found in A1. **Set the fact-writer pause flag** (A1 run, finding 3): about nine functions call `process-note` directly and fire-and-forget (`receive-note`, `telegram-capture`, `discord-capture`, `singlefile-capture`, `mc-api-notes`, `menerio-mcp` capture, `note-chat`, `conversation-chat`, the editor's manual run), and webhooks can arrive at any time, so they cannot be paused one by one. `process-note` and every other fact writer (`extract-moment-profile`, `enrich-person-from-lexicon`, `normalize-profile`, `add_claim`) read one flag row in the database; while it is set, a note is left in `note_ai_jobs` for cron 18 instead of being processed, and the others refuse with a retryable error. The flag is added in Part A and deployed before B1; B6 clears it. Michael pauses the hourly Godspeed runner on his machine (it also pushes notes up). **Snapshot** `profile_entries`, `profile_categories`, `claims`, `review_queue` and `ai_suggestion_suppressions` into schema `fact_backup`: `REVOKE ALL ON SCHEMA fact_backup FROM public, anon, authenticated`, and it is not in the API's exposed schemas. No CSV export. | Snapshot row counts equal the live counts. No fact-writing job is active. The pause flag is set. |
 | B2 | Apply `…_fact_store_schema.sql`. | It applied. The views answer as the `authenticated` role. |
 | B3 | Deploy every changed edge function (script, in dependency order: `_shared` users first, `menerio-mcp` last). | Every deploy succeeded; if one fails, stop and roll back (5.4). |
 | B4 | Publish the production frontend. | The new bundle is served (its asset hash changed). |
@@ -952,6 +954,32 @@ A short check of this version against the code, asked for by Michael. Most findi
 
 R11 still stands: the next step is the live-schema rehearsal, not a tenth prose review.
 
+### A1 run and first live-schema checks (2026-09-28)
+
+Not a prose review. A1 ran read-only against production (counts and catalog only), and the live `public` schema (98 tables, 158 functions, 7 views, 77 triggers, 212 policies) was loaded into a local Postgres 16 with pgvector. The switch migration and the rollback do not exist yet, so **they were not rehearsed**. What was run: the draft DDL of sections 3.2 to 3.4 on the live schema, and probes of the switch's riskiest steps on an invented fixture. Counts are in `docs/plans/one-fact-store-baseline.md`.
+
+**Confirmed (was UNVERIFIED or assumed):**
+- The twelve `profile_entries` triggers in section 2.2 are exactly the live set, all enabled. `claims` has only `claims_updated_at`.
+- `profile_entries.contact_id → contacts` is `ON DELETE CASCADE`; `category_id` is `CASCADE`; `derived_from_claim_id` is `SET NULL`. `profile_categories_user_contact_slug_idx` is unique on `(user_id, coalesce(contact_id), slug)`, so the view join cannot multiply rows.
+- Both tables are owned by `postgres`; RLS is on, with the policy counts in the baseline.
+- `user_today` is revoked from `anon` and `authenticated`; `match_claims` from `anon`.
+- `claims_origin_known` has 0 violations, so B6's `VALIDATE` is safe. The longest value is 1,396 bytes.
+- Sections 3.2, 3.3 and 3.4 apply cleanly to the live schema, and `CREATE OR REPLACE VIEW world_claims` accepts the new definition. As `authenticated`, the views return the owner's rows; as `anon`, none.
+- Cron jobs 4, 9, 11, 12, 15, 16 and 18 exist and are active. Jobs 6 (`wiki-restructure-sweep`), 10 (`gdrive-watch-maintenance`) and 19 (`delete-job-run-details`) do not write facts; 14 is inactive. Notes reach `process-note` through the `note_ai_note_changed` trigger → `note_ai_jobs` → cron 18.
+
+**Findings (each is now fixed in the step named):**
+1. **`fact_today` as drafted breaks every check that runs without a user JWT.** The switch, the A6 counts, the C1 checks and cron run as `postgres`, where `auth.role()` and `auth.uid()` are NULL. `is_current` is then NULL for every claim with a `valid_from` or `valid_to` (509 of 519 live claims), so an assertion either raises on good data or, written as a `WHERE`, passes without checking anything. Reproduced locally. Fixed in A3 (`fact_today`) and the section 3.3 comment.
+2. **The live merge trigger breaks under the unique index.** `contact_merge_move_references` (AFTER UPDATE OF `merged_into`) moves claims with a plain `UPDATE`; with `claims_one_live_value` in place, merging two contacts that share a live value fails with a unique violation. Reproduced locally. Fixed in switch step 11.
+3. **B1 could not pause the non-cron writers.** About nine functions call `process-note` directly, fire-and-forget, several from webhooks. Fixed in B1 with one pause flag in the database, added in Part A.
+4. **Review queue step 12 assumed every item resolves to an entry.** Of the items targeting `profile_entry`, every pending one has a NULL target, and about 1,500 historic ones point at entries that no longer exist; about 250 resolve. Fixed in switch step 12.
+5. **Ten SQL functions still read `profile_entries`** and would fail after the rename; the grep test only covers application code. Fixed in switch step 10, with a harness assertion.
+
+**For Michael to decide before A6 (not a defect):** B6 is **248** live claims that no page shows today (218 self, 30 contact), not a handful. 35 of them repeat a value a page already shows and fold away. So about 210 facts would newly appear on pages, about 180 of them on his own profile. A6 as written asks him to name the ones to drop. The alternative is to keep them all; they are what `search_brain` and `get_claims` already see.
+
+**Minor:** the archive keeps `contact_id → contacts ON DELETE CASCADE`, so deleting a contact also deletes its archived entries. The "permanent lookup" is permanent only for contacts that still exist. That is acceptable, since `fact_backup` covers the go-live window, but it should be a stated choice.
+
+**Verdict.** The shape holds. Nothing found touches options (A)–(F) or the one-sitting go-live. Five steps were wrong in ways only the live schema shows, as R11 predicted, and are corrected above. The rehearsal proper (A5) still has to run once A2/A3 exist: the local database is ready for it.
+
 ## 9. Running this plan
 
 - **One copy of this plan.** It is `docs/plans/one-fact-store.md` on `main`, and nowhere else. A session that changes it commits the change to `main` and pushes it before the session ends, even if the session was started on its own branch. It never leaves plan changes on another branch. `CLAUDE.md` at the repo root says the same, so every session reads it. Code for Part A lives on the implementation branch; the plan does not.
@@ -959,7 +987,7 @@ R11 still stands: the next step is the live-schema rehearsal, not a tenth prose 
 - **Sessions.** Part A can take one or several sessions; each continues from this file and the implementation branch, and none of them waits for anything in production. Parts B and C run in **one** session, back to back, with Michael available for about three hours: one approval before B, pausing and resuming the Godspeed runner on his machine, and the 10-minute page walk-through in C. Before that, in A6, he goes through the list of unshown facts (or keeps them all).
 - **Credentials.**
   - The cloud environment carries `SUPABASE_ACCESS_TOKEN`, and its network allows `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` (confirmed working on 2026-09-28). Only sessions started after that change see it.
-  - **Status 2026-09-28:** the session had the token and network, but auto mode refused the first read-only schema query ("Production Reads"). Part A1, and with it the rehearsal, is blocked until Michael allows it.
+  - **Status 2026-09-28 (later):** `.claude/settings.json` on `main` allows `bash scripts/rehearsal/prod-read.sh`, which runs with `read_only: true` as `supabase_read_only_user`. A1 ran with it (section 8, "A1 run"). The live-schema database is built by `scripts/rehearsal/build-local-db.sh` on the implementation branch; the schema stays in the session scratchpad.
   - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
   - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
 - **One pull request** holds all code, both migrations, the `build-fact-label-map` function, the rollback and the tests. It is merged at the end of Part C, with the counts (numbers only) from `docs/plans/one-fact-store-baseline.md` pasted into it.
